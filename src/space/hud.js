@@ -167,7 +167,7 @@ export class SpaceHud {
     if (live && !live.hidden && this.selected && tgt) {
       const w = sim.paused ? 'paused' : `${WARP_LABEL[sim.warp] || sim.warp + '×'}`;
       const day = Math.floor(sim.t / 86400);
-      live.textContent = `${TARGET_INFO[this.selected].name} · ${fmtKm(dist)} away · time ${w}${day > 0 ? ` · day ${day + 1}` : ''}`;
+      live.textContent = `${(TARGET_INFO[this.selected] || { name: this.selected }).name} · ${fmtKm(dist)} away · time ${w}${day > 0 ? ` · day ${day + 1}` : ''}`;
     }
     // labels
     const camPos = cam.position;

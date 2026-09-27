@@ -3,7 +3,8 @@ import { U } from '../core/uniforms.js';
 import { Fleet, fleetTargets, NAURU_LON } from './fleet.js';
 import { CRAFT_FRAME } from './craftMesh.js';
 import { LAMP_UNIFORMS } from './lamps.js';
-import { stationFrame } from './stations.js';
+import { stationFrame, HaloPorts } from './stations.js';
+import { HALO_PORTS } from './earthData.js';
 import { FullscreenPass, FS_VERT } from '../core/fullscreen.js';
 import { SpaceSim, R_EARTH, R_MOON, GEO_ALT, COUNTERWEIGHT_ALT, MERIDIAN_LON, bodyDir, cityToBody } from './sim.js';
 import { EarthBake, maskReady } from './earthBake.js';
@@ -103,6 +104,16 @@ export class SpaceMode {
     T('moon', { position: (o) => o.copy(sim.moonPos), frame: (q) => q.copy(sim.moonQuat), minDist: R_MOON + 250, maxDist: 400000, defaultDist: 7400, view: { az: 1.05, el: 0.22 } });
     T('sun', { position: (o) => o.copy(sim.sunPos), frame: identity, minDist: 3e6, maxDist: 1.2e8, defaultDist: 3.2e7, view: { az: 2.2, el: 0.55 } });
     for (const [k, o] of Object.entries(fleetTargets(this))) T(k, o);
+    // unlisted targets (no key): the junction on the Halo and the counterweight
+    const meridQ = stationFrame(merid);
+    T('junction', {
+      position: (o) => o.copy(merid).multiplyScalar(R_EARTH + 620).applyQuaternion(sim.earthQuat),
+      frame: (q) => q.copy(sim.earthQuat).multiply(meridQ), minDist: 3, maxDist: 60000, defaultDist: 70, view: { az: 0.9, el: 0.3 },
+    });
+    T('counter', {
+      position: (o) => o.copy(merid).multiplyScalar(R_EARTH + COUNTERWEIGHT_ALT + 10).applyQuaternion(sim.earthQuat),
+      frame: (q) => q.copy(sim.earthQuat).multiply(meridQ), minDist: 20, maxDist: 400000, defaultDist: 90, view: { az: 0.8, el: -0.25 },
+    });
     T('hearth', {
       position: (o) => o.copy(sim.hearthPos),
       frame: (q) => q.copy(self.hearth ? self.hearth.quat : q.identity()),
@@ -130,9 +141,9 @@ export class SpaceMode {
     const el = this.elevator;
     this.addBody('earth', [this.earth.mesh], () => _v.set(0, 0, 0), R_TOP + 4, { solid: true });
     this.addBody('rings', [this.rings.group], () => _v.set(0, 0, 0), R_EARTH + 2140);
-    this.addBody('junction', [el.junction], () => el.junction.getWorldPosition(_v), 8, { solid: true, hint: 0.7 });
+    this.addBody('junction', [el.junction], () => el.junction.getWorldPosition(_v), 24, { solid: true, hint: 0.7 });
     const segA = new THREE.Vector3(), segB = new THREE.Vector3(), segP = new THREE.Vector3();
-    this.addBody('tether', [el.tether, el.climbers], null, 0, {
+    this.addBody('tether', [el.tether, el.climbers, el.cars.group], null, 0, {
       interval: (cam) => {
         segA.copy(el.up).multiplyScalar(R_EARTH).applyQuaternion(this.sim.earthQuat);
         segB.copy(el.up).multiplyScalar(R_EARTH + COUNTERWEIGHT_ALT + 20).applyQuaternion(this.sim.earthQuat);
@@ -166,6 +177,9 @@ export class SpaceMode {
         return [Math.max(d - reach, 0.01), Math.max(d + reach, cam.distanceTo(this.sim.moonPos) + 6000)];
       },
     });
+    // the Halo's port stations at the ground ports
+    this.ports = new HaloPorts(this, HALO_PORTS);
+    this.modules.push(this.ports);
     // lane guidance beacons along the corridors
     this.lanes = new Lanes(this);
     // ships: liners at the Harbour, tenders over the Halo, Selene Works above the Moon

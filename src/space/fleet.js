@@ -311,25 +311,30 @@ export class Fleet {
       lookQuat(r.fwd, _v.set(0, 1, 0), r.mesh.quaternion);
       for (const e of r.engines) e.setThrottle(thr);
     }
-    // port shuttles: up the east column (x = -12 km), dock, down the west column (x = +12 km)
+    // port shuttles: up the east column (x = -12 km) to the station's arrival gate, a pause,
+    // across beneath the keel to the departure gate, and down the west column (x = +12 km)
     for (const p of this.portShuttles) {
       const T = 940;
       const u = (((realTime + p.offset) / T) % 1 + 1) % 1;
       let x, alt, fwd, thr = 0;
-      if (u < 0.44) {
-        const s = u / 0.44;
-        alt = 612 * (1 - (1 - s) * (1 - s));
-        x = -12 + 10.5 * smooth(0.8, 1, s);
-        fwd = _v2.set(0.12 * smooth(0.8, 1, s), 1, 0).normalize();
-        thr = 0.95 * smooth(0, 0.04, s) * (1 - smooth(0.55, 0.9, s)) + 0.2;
-        thr *= 1 - smooth(0.93, 1, s);
-      } else if (u < 0.6) {
-        alt = 612; x = -1.5 + 3 * smooth(0, 1, (u - 0.44) / 0.16);
+      if (u < 0.42) {
+        const s = u / 0.42;
+        alt = 611.4 * (1 - (1 - s) * (1 - s));
+        x = -12;
         fwd = _v2.set(0, 1, 0);
+        thr = (0.95 * smooth(0, 0.04, s) * (1 - smooth(0.55, 0.9, s)) + 0.15) * (1 - smooth(0.93, 1, s));
+      } else if (u < 0.5) {
+        alt = 611.4 + 0.6 * smooth(0, 1, (u - 0.42) / 0.08); x = -12;
+        fwd = _v2.set(0, 1, 0);
+      } else if (u < 0.6) {
+        const s = smooth(0, 1, (u - 0.5) / 0.1);
+        alt = 612; x = -12 + 24 * s;
+        fwd = _v2.set(1, 0.02, 0).normalize();
+        thr = 0.3 * smooth(0, 0.15, s) * (1 - smooth(0.4, 0.6, s));
       } else {
         const s = (u - 0.6) / 0.4;
         alt = 612 * (1 - s * s);
-        x = 1.5 + 10.5 * smooth(0, 0.2, s);
+        x = 12;
         fwd = _v2.set(0, -1, 0);
         thr = 0.5 * smooth(0, 0.04, s) * (1 - smooth(0.1, 0.25, s));          // de-orbit burn, then glide
       }
