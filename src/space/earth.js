@@ -3,7 +3,7 @@ import { ATMO_CONSTANTS, ATMO_SAMPLING } from '../shaders/atmosphere.glsl.js';
 import { NOISE_GLSL } from '../shaders/noise.glsl.js';
 import { U } from '../core/uniforms.js';
 import { SNOISE_GLSL, SPACE_UTIL_GLSL } from './glsl.js';
-import { R_EARTH } from './sim.js';
+import { R_EARTH, MERIDIAN_LON, bodyDir } from './sim.js';
 
 // The planet, rendered in one pass on a proxy sphere at the top of the
 // atmosphere. Each fragment ray-traces the ground and the cloud shell and
@@ -27,6 +27,7 @@ uniform mat4 projectionMatrix;
 uniform samplerCube uSurfA;
 uniform samplerCube uSurfB;
 uniform samplerCube uClouds;
+uniform samplerCube uLights;
 uniform sampler2D uTransmittanceLUT;
 uniform sampler2D uMultiScatLUT;
 uniform mat3 uToBody;
@@ -161,12 +162,17 @@ vec3 integrateAtmo(vec3 ro, vec3 rd, float t0, float t1, bool ground, vec3 sun, 
 // district islands of the lagoon (km east, km north, radius) from src/world/layout.js
 const vec3 ISLANDS[8] = vec3[8](vec3(2.5, 2.0, 0.56), vec3(3.75, -0.25, 0.7), vec3(2.35, -2.65, 0.52), vec3(-0.25, -3.65, 0.62),
   vec3(-2.65, -2.3, 0.64), vec3(-3.8, 0.15, 0.74), vec3(-2.35, 2.7, 0.58), vec3(0.35, 3.7, 0.66));
+// Greater Meridian (km east, km north of the Axis): the seven Outer Wards on their platforms
+// (src/world/layout.js WARDS), the island towns out toward the horizon, the massif terraces
+const vec2 WARDS[7] = vec2[7](vec2(10.2, 5.4), vec2(12.2, -2.4), vec2(16.5, 1.5), vec2(8.2, -9.4), vec2(0.0, -13.8), vec2(-7.8, -9.6), vec2(-12.0, -3.0));
+const vec3 ISLES[7] = vec3[7](vec3(24.0, 9.0, 0.9), vec3(29.0, -6.0, 0.7), vec3(18.0, -24.0, 0.8), vec3(-6.0, -30.0, 0.7), vec3(-25.0, -15.0, 0.9), vec3(-31.0, 6.0, 0.6), vec3(-19.0, 21.0, 0.7));
+
 // Meridian's atoll, drawn procedurally at its true size (km, local east/north)
 vec4 meridianSite(vec3 b, float fp, out float lightsOut) {
   lightsOut = 0.0;
   vec3 dv = b - uMeridian;
   float dk = length(dv) * 6371.0;
-  if (dk > 40.0) return vec4(0.0);
+  if (dk > 48.0) return vec4(0.0);
   vec3 e = normalize(vec3(uMeridian.z, 0.0, -uMeridian.x));   // east
   vec3 nn = vec3(0.0, 1.0, 0.0);
   float x = dot(dv, e) * 6371.0, y = dot(dv, nn) * 6371.0;
@@ -194,10 +200,100 @@ vec4 meridianSite(vec3 b, float fp, out float lightsOut) {
   float anchor = smoothstep(4.5, 2.5, length(vec2(x + 18.8, y - 6.8)));
   land = max(land, max(massif, anchor));
   lightsOut = city * (1.2 + 0.8 * step(r, 1.2)) + smoothstep(0.35, 0.0, r) * 6.0;
+  // the Outer Wards on their platforms and the island towns (day: pale decks and green roofs)
+  vec2 P = vec2(x, y);
+  float ward = 0.0;
+  for (int i = 0; i < 7; i++) ward = max(ward, smoothstep(1.7, 1.2, length(P - WARDS[i])));
+  float isle = 0.0;
+  for (int i = 0; i < 7; i++) isle = max(isle, smoothstep(ISLES[i].z * 1.6, ISLES[i].z, length(P - ISLES[i].xy)));
   vec3 col = mix(vec3(0.02, 0.2, 0.2), vec3(0.03, 0.05, 0.02), land);
   col = mix(col, vec3(0.16, 0.15, 0.13), city * 0.6);
-  float cover = max(lagoon, land) * smoothstep(40.0, 30.0, dk) * smoothstep(9.0, 2.0, fp);
+  col = mix(col, vec3(0.22, 0.22, 0.2), ward * 0.8);
+  col = mix(col, vec3(0.05, 0.08, 0.035), isle);
+  float cover = max(max(lagoon, land), max(ward, isle)) * smoothstep(48.0, 40.0, dk) * smoothstep(9.0, 2.0, fp);
   return vec4(col, cover);
+}
+
+// City lattice where districts (14 km) and blocks (2.6 km) are resolved; each scale falls to
+// its mean (1) while its cells still span a few pixels, so nothing sparkles as the planet turns.
+float cityLattice(vec3 b, float fp) {
+  float lat = asin(clamp(b.y, -1.0, 1.0));
+  float lon = atan(-b.z, b.x);
+  vec2 q = vec2(lon * cos(lat), lat) * 6371.0;
+  float fD = 1.0 - smoothstep(12.0 / 7.0, 12.0 / 3.0, fp);
+  float fB = 1.0 - smoothstep(2.4 / 7.0, 2.4 / 3.0, fp);
+  float m = 1.0;
+  if (fD > 0.0) {
+    // districts: irregular cells ~12 km across, bright arterials along their borders,
+    // each district a little brighter or dimmer than the next
+    vec2 g = q / 12.0;
+    vec2 gi = floor(g);
+    float f1 = 9.0, f2 = 9.0; vec2 id = vec2(0.0);
+    for (int y = -1; y <= 1; y++) for (int x = -1; x <= 1; x++) {
+      vec2 c = gi + vec2(float(x), float(y));
+      vec2 o = vec2(hash12(c + 1.7), hash12(c + 9.3));
+      float dd = length(g - c - o);
+      if (dd < f1) { f2 = f1; f1 = dd; id = c; } else if (dd < f2) f2 = dd;
+    }
+    float edge = 1.0 - smoothstep(0.0, 0.12, f2 - f1);
+    float dist = 0.6 + 0.8 * hash12(id + 17.0);
+    m *= mix(1.0, (0.55 + 1.9 * edge) * dist / 0.93, fD);
+  }
+  if (fB > 0.0) {
+    vec2 g = q / 2.4;
+    vec2 fr = abs(fract(g) - 0.5);
+    float street = smoothstep(0.42, 0.5, max(fr.x, fr.y));
+    float lit = 0.5 + hash12(floor(g) + 3.0);
+    m *= mix(1.0, (0.45 + 2.2 * street) * lit / 0.78, fB);
+  }
+  return m;
+}
+
+// A light element of radius r0 (km) drawn no smaller than w: its peak falls as its drawn
+// area grows, so its energy is kept as it shrinks below a pixel (nothing pops).
+float mDot(vec2 p, vec2 c, float r0, float w) { float r = max(r0, w); vec2 d = p - c; return exp(-dot(d, d) / (r * r)) * (r0 * r0) / (r * r); }
+float mLine(vec2 p, vec2 a, vec2 b, float h0, float w) {
+  vec2 ab = b - a; float t = clamp(dot(p - a, ab) / max(dot(ab, ab), 1e-6), 0.0, 1.0);
+  float h = max(h0, w); vec2 d = p - a - ab * t;
+  return exp(-dot(d, d) / (h * h)) * h0 / h;
+}
+
+// Meridian at night: the brightest point on the planet. Resolved, a gold rim round the
+// turquoise lagoon, a white-gold Axis, a necklace of ward lights on bridges, island towns
+// and the terraces; unresolved, the same lights merged into one glow that dims gently with
+// range (a smooth function of the pixel footprint, so it never twinkles).
+vec3 meridianNight(vec3 b, float fp) {
+  vec3 dv = b - uMeridian;
+  float dk = length(dv) * 6371.0;
+  float reach = 50.0 + 3.0 * fp;
+  if (dk > reach) return vec3(0.0);
+  vec3 e = normalize(vec3(uMeridian.z, 0.0, -uMeridian.x));
+  vec2 P = vec2(dot(dv, e), dv.y) * 6371.0;
+  float w = max(fp * 0.7, 0.2);
+  vec3 gold = vec3(1.0, 0.78, 0.46), white = vec3(1.0, 0.94, 0.84), teal = vec3(0.3, 1.0, 0.9);
+  float r = length(P);
+  vec3 col = vec3(0.0);
+  // the atoll rim and its lagoon
+  float rimW = max(0.45, w);
+  float rq = (r - 5.9) / rimW;
+  col += gold * exp(-rq * rq) * (0.45 / rimW) * 9.0;
+  col += teal * (1.0 - smoothstep(4.6, 5.9 + w, r)) * 0.9 * min(1.0, 5.0 / max(w, 1e-3));
+  col += white * mDot(P, vec2(0.0), 0.9, w) * 60.0;                      // the Axis and the Crown
+  for (int i = 0; i < 8; i++) col += gold * mDot(P, ISLANDS[i].xy, ISLANDS[i].z, w) * 7.0;
+  // the Outer Wards and their bridges to the rim
+  for (int i = 0; i < 7; i++) {
+    vec2 c = WARDS[i];
+    col += mix(white, gold, 0.4) * mDot(P, c, 1.9, w) * 26.0;
+    col += teal * mLine(P, normalize(c) * 6.2, c - normalize(c) * 1.4, 0.15, w) * 14.0;
+  }
+  // tower towns on the far islands, terraces on the massif's lower slopes
+  for (int i = 0; i < 7; i++) col += gold * mDot(P, ISLES[i].xy, ISLES[i].z, w) * 10.0;
+  col += gold * mLine(P, vec2(-7.0, 8.2), vec2(6.5, 8.6), 0.9, w) * 3.0;
+  // far off, keep it the brightest point: a glow that shrinks its peak more slowly than area
+  float rg = max(8.0, fp * 1.3);
+  float I = 140.0 * pow(8.0 / rg, 0.95);
+  col += mix(white, teal, smoothstep(0.1 * rg, 0.9 * rg, dk)) * exp(-dk * dk / (rg * rg)) * I * smoothstep(5.0, 16.0, fp);
+  return col;
 }
 
 void main() {
@@ -292,23 +388,20 @@ void main() {
     col = mix(col, sc, site.a);
   }
 
-  // night lights
-  float night = 1.0 - smoothstep(-0.10, 0.06, mu);
-  float dens = B.r * landF;
-  float sparkle = 1.0;
+  // night lights of the Concord: warm old cores, cool new districts, transit filaments
+  // (baked), with district and block lattices where they are resolved, and Meridian
+  float night = 1.0 - smoothstep(-0.12, 0.05, mu);
+  vec4 LT = texture(uLights, b);
+  float lw = LT.r, lc = LT.g, ln = LT.b;
+  float micro = 1.0;
 #if QUALITY > 0
-  {
-    float fade = smoothstep(9.0, 1.5, fp);
-    vec3 q = b * 6371.0 / 2.2;
-    float h = hash13(floor(q));
-    float grid = smoothstep(0.55, 0.95, h);
-    float n2 = snoise(b * 700.0) * 0.5 + 0.5;
-    sparkle = mix(0.6 + 0.8 * n2, 0.25 + 2.2 * grid * n2, fade);
-  }
+  micro = cityLattice(b, fp);
 #endif
-  float cityL = pow(dens, 1.25) * sparkle;
-  vec3 lightCol = mix(vec3(1.0, 0.55, 0.26), vec3(1.0, 0.82, 0.62), smoothstep(0.2, 0.8, dens));
-  vec3 emis = lightCol * cityL * 0.9 + vec3(1.0, 0.86, 0.66) * mLights * 1.5;
+  // brighter from afar, where a city is a pixel's mean, calmer close up so districts keep their
+  // structure (a smooth function of range: nothing pops)
+  float rangeK = mix(0.6, 1.7, smoothstep(3.0, 30.0, fp));
+  vec3 emis = ((vec3(1.0, 0.58, 0.26) * lw * 7.0 + vec3(0.62, 0.88, 1.0) * lc * 6.5) * micro + vec3(0.72, 0.86, 1.0) * ln * 0.95) * rangeK;
+  emis += meridianNight(b, fp);
 
   // clouds
   vec2 tC = sphereHits(ro, rd, RC);
@@ -331,8 +424,10 @@ void main() {
     cloudCol = vec3(0.92) / S_PI * (uSunE * sunTc * wrap * (0.35 + 0.65 * shade) * rs + amb * (0.7 + 0.3 * shade));
     // city glow on cloud undersides, lightning in the deep convection
     float nightC = 1.0 - smoothstep(-0.10, 0.06, muC);
-    float under = texture(uSurfB, bC).r;
-    cloudCol += vec3(1.0, 0.6, 0.32) * under * 0.22 * nightC;
+    // lights below glow through the deck and light it from beneath, softened by scattering
+    vec4 LU = textureLod(uLights, bC, 3.0);
+    float under = LU.r * 1.2 + LU.g * 0.8 + LU.b * 0.3;
+    cloudCol += mix(vec3(1.0, 0.62, 0.34), vec3(0.8, 0.85, 0.95), 0.3) * under * 1.1 * nightC;
     vec3 cell = floor(bC * 260.0);
     float hsh = hash13(cell + floor(uTime * 1.7));
     float flash = step(0.9975, hsh) * smoothstep(0.55, 0.9, cA) * nightC;
@@ -376,6 +471,7 @@ export class Earth {
       uSurfA: { value: bake.surfA.texture },
       uSurfB: { value: bake.surfB.texture },
       uClouds: { value: bake.clouds.texture },
+      uLights: { value: bake.lights.texture },
       uTransmittanceLUT: U.uTransmittanceLUT,
       uMultiScatLUT: U.uMultiScatLUT,
       uToBody: { value: new THREE.Matrix3() },
@@ -387,7 +483,7 @@ export class Earth {
       uSimDay: { value: 0 },
       uRingN: { value: [0, 1, 2, 3].map(() => new THREE.Vector4(0, 1, 0, 1)) },
       uRingW: { value: [0, 1, 2, 3].map(() => new THREE.Vector4(0, 0, 0, 0)) },
-      uMeridian: { value: new THREE.Vector3(1, 0, 0) },
+      uMeridian: { value: bodyDir(0, MERIDIAN_LON, new THREE.Vector3()) },   // body frame
       uMoonDir: { value: new THREE.Vector3(0, 0, 1) },
       uLightGain: { value: 1 },
       uPixAng: { value: 0.001 },

@@ -1,6 +1,10 @@
 import * as THREE from 'three';
 import { U } from '../core/uniforms.js';
-import { Fleet, fleetTargets } from './fleet.js';
+import { Fleet, fleetTargets, NAURU_LON } from './fleet.js';
+import { CRAFT_FRAME } from './craftMesh.js';
+import { LAMP_UNIFORMS } from './lamps.js';
+import { stationFrame, HaloPorts } from './stations.js';
+import { HALO_PORTS } from './earthData.js';
 import { FullscreenPass, FS_VERT } from '../core/fullscreen.js';
 import { SpaceSim, R_EARTH, R_MOON, GEO_ALT, COUNTERWEIGHT_ALT, MERIDIAN_LON, bodyDir, cityToBody } from './sim.js';
 import { EarthBake, maskReady } from './earthBake.js';
@@ -16,6 +20,7 @@ import { Moon } from './moon.js';
 import { SunSwarm } from './sun.js';
 import { Hearth, RS } from './hearth.js';
 import { Traffic } from './traffic.js';
+import { Lanes } from './lanes.js';
 
 const smooth = (a, b, x) => { const t = Math.min(Math.max((x - a) / (b - a), 0), 1); return t * t * (3 - 2 * t); };
 const easeInOut = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
@@ -84,18 +89,31 @@ export class SpaceMode {
       minDist: 800, maxDist: 60000, defaultDist: 3400, view: { az: 2.6, el: 0.62 },
       lookOffset: (rig, o) => o.copy(merid).applyQuaternion(sim.earthQuat).multiplyScalar(Math.min(rig.distance * 0.35, 3000)),
     });
+    // the Halo at the Nauru port, in the port's local frame (x west, y up, z north)
+    const nauru = bodyDir(0, NAURU_LON);
+    const nauruQ = stationFrame(nauru);
     T('halo', {
-      position: (o) => o.copy(bodyDir(0, MERIDIAN_LON + 0.5)).multiplyScalar(R_EARTH + 620).applyQuaternion(sim.earthQuat),
-      frame: earthFrame, minDist: 150, maxDist: 60000, defaultDist: 2600, view: { az: 1.2, el: 0.35 },
+      position: (o) => o.copy(nauru).multiplyScalar(R_EARTH + 620).applyQuaternion(sim.earthQuat),
+      frame: (q) => q.copy(sim.earthQuat).multiply(nauruQ), minDist: 40, maxDist: 60000, defaultDist: 260, view: { az: 2.2, el: 0.28 },
     });
     T('geo', {
       position: (o) => o.copy(merid).multiplyScalar(R_EARTH + GEO_ALT).applyQuaternion(sim.earthQuat),
       frame: (q) => q.setFromUnitVectors(_v2.set(0, 1, 0), _v.copy(merid).applyQuaternion(sim.earthQuat)).multiply(_q.setFromAxisAngle(_v2.set(1, 0, 0), 0)),
-      minDist: 25, maxDist: 200000, defaultDist: 80, view: { az: 0.7, el: 0.32 },
+      minDist: 8, maxDist: 200000, defaultDist: 36, view: { az: 0.7, el: 0.32 },
     });
     T('moon', { position: (o) => o.copy(sim.moonPos), frame: (q) => q.copy(sim.moonQuat), minDist: R_MOON + 250, maxDist: 400000, defaultDist: 7400, view: { az: 1.05, el: 0.22 } });
     T('sun', { position: (o) => o.copy(sim.sunPos), frame: identity, minDist: 3e6, maxDist: 1.2e8, defaultDist: 3.2e7, view: { az: 2.2, el: 0.55 } });
     for (const [k, o] of Object.entries(fleetTargets(this))) T(k, o);
+    // unlisted targets (no key): the junction on the Halo and the counterweight
+    const meridQ = stationFrame(merid);
+    T('junction', {
+      position: (o) => o.copy(merid).multiplyScalar(R_EARTH + 620).applyQuaternion(sim.earthQuat),
+      frame: (q) => q.copy(sim.earthQuat).multiply(meridQ), minDist: 3, maxDist: 60000, defaultDist: 70, view: { az: 0.9, el: 0.3 },
+    });
+    T('counter', {
+      position: (o) => o.copy(merid).multiplyScalar(R_EARTH + COUNTERWEIGHT_ALT + 10).applyQuaternion(sim.earthQuat),
+      frame: (q) => q.copy(sim.earthQuat).multiply(meridQ), minDist: 20, maxDist: 400000, defaultDist: 90, view: { az: 0.8, el: -0.25 },
+    });
     T('hearth', {
       position: (o) => o.copy(sim.hearthPos),
       frame: (q) => q.copy(self.hearth ? self.hearth.quat : q.identity()),
@@ -123,9 +141,9 @@ export class SpaceMode {
     const el = this.elevator;
     this.addBody('earth', [this.earth.mesh], () => _v.set(0, 0, 0), R_TOP + 4, { solid: true });
     this.addBody('rings', [this.rings.group], () => _v.set(0, 0, 0), R_EARTH + 2140);
-    this.addBody('junction', [el.junction], () => el.junction.getWorldPosition(_v), 8, { solid: true, hint: 0.3 });
+    this.addBody('junction', [el.junction], () => el.junction.getWorldPosition(_v), 24, { solid: true, hint: 0.7 });
     const segA = new THREE.Vector3(), segB = new THREE.Vector3(), segP = new THREE.Vector3();
-    this.addBody('tether', [el.tether, el.climbers], null, 0, {
+    this.addBody('tether', [el.tether, el.climbers, el.cars.group], null, 0, {
       interval: (cam) => {
         segA.copy(el.up).multiplyScalar(R_EARTH).applyQuaternion(this.sim.earthQuat);
         segB.copy(el.up).multiplyScalar(R_EARTH + COUNTERWEIGHT_ALT + 20).applyQuaternion(this.sim.earthQuat);
@@ -134,8 +152,8 @@ export class SpaceMode {
         return [segP.distanceTo(cam), Math.max(segA.distanceTo(cam), segB.distanceTo(cam))];
       },
     });
-    this.addBody('harbour', [el.harbour], () => el.harbour.getWorldPosition(_v), 40, { solid: true, hint: 0.4 });
-    this.addBody('counter', [el.counter], () => el.counter.getWorldPosition(_v), 20, { solid: true, hint: 0.3 });
+    this.addBody('harbour', [el.harbour], () => el.harbour.getWorldPosition(_v), 17, { solid: true, hint: 0.95 });
+    this.addBody('counter', [el.counter], () => el.counter.getWorldPosition(_v), 20, { solid: true, hint: 0.6 });
     // Moon, Sun and swarm, the Hearth
     this.moon = new Moon(this);
     this.scene.add(this.moon.group);
@@ -155,10 +173,15 @@ export class SpaceMode {
     this.addBody('traffic', [this.traffic.mesh], null, 0, {
       interval: (cam) => {
         const d = cam.length();
-        const reach = R_EARTH + GEO_ALT + 600;
+        const reach = R_EARTH + GEO_ALT + 21000;     // the departure corridor runs out 20,000 km
         return [Math.max(d - reach, 0.01), Math.max(d + reach, cam.distanceTo(this.sim.moonPos) + 6000)];
       },
     });
+    // the Halo's port stations at the ground ports
+    this.ports = new HaloPorts(this, HALO_PORTS);
+    this.modules.push(this.ports);
+    // lane guidance beacons along the corridors
+    this.lanes = new Lanes(this);
     // ships: liners at the Harbour, tenders over the Halo, Selene Works above the Moon
     this.fleet = new Fleet(this);
     this.modules.push(this.fleet);
@@ -199,6 +222,7 @@ export class SpaceMode {
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
     if (this.fadeRT) this.fadeRT.setSize(w, h);
+    LAMP_UNIFORMS.uRes.value.set(w, h);
     if (this.modules) for (const m of this.modules) if (m.setSize) m.setSize(w, h);
   }
 
@@ -327,6 +351,9 @@ export class SpaceMode {
     SKY_UNIFORMS.uSwarmT.value = this.realTime;
     SKY_UNIFORMS.uSkyTime.value = this.realTime;
     SKY_UNIFORMS.uSkyStars.value = THREE.MathUtils.lerp(0.55, 0.2, this.litEstimate || 0);
+    CRAFT_FRAME.sunDir.copy(sim.sunDir);
+    CRAFT_FRAME.time = this.realTime;
+    LAMP_UNIFORMS.uTime.value = this.realTime;
     for (const m of this.modules) if (m.update) m.update(sim, this.realTime, dt, this);
   }
 
@@ -553,7 +580,10 @@ export class SpaceMode {
       const ang = Math.asin(Math.min(1, b.radius / d));
       const off = Math.acos(THREE.MathUtils.clamp(rel.dot(fwd) / d, -1, 1));
       if (off > ang + halfFov * 1.2) continue;
-      const cov = THREE.MathUtils.clamp((ang * ang) / (halfFov * halfFov), 0, 1) * smooth(ang + halfFov * 1.2, Math.max(ang - halfFov, 0), off);
+      // expose for any sunlit hull that is more than a speck on screen: pearl plating in full
+      // sun must stay below the shoulder whether it fills the frame or a tenth of it
+      const pxR = (Math.tan(ang) / Math.tan(halfFov)) * this.size.y * 0.5;
+      const cov = smooth(2, 26, pxR) * smooth(ang + halfFov * 1.2, Math.max(ang - halfFov, 0), off);
       // in the Earth's shadow?
       const along = c.dot(this.sim.sunDir);
       const sunlit = along > 0 ? 1 : smooth(R_EARTH - 50, R_EARTH + 150, _v4.copy(c).addScaledVector(this.sim.sunDir, -along).length());
@@ -561,7 +591,7 @@ export class SpaceMode {
     }
     lit = THREE.MathUtils.clamp(lit, 0, 1);
     this.litEstimate = lit;
-    return THREE.MathUtils.lerp(2.4, 0.46, Math.pow(lit, 0.7));
+    return THREE.MathUtils.lerp(2.4, 0.4, Math.pow(lit, 0.7));
   }
 
   renderToScreen(dt) { this.renderScene(dt, null); }

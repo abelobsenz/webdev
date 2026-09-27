@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { FullscreenPass, FS_VERT } from '../core/fullscreen.js';
 import { SNOISE_GLSL } from './glsl.js';
 import { LAND_MASK_PNG } from './landmask.js';
-import { CITIES, RANGES, DESERTS } from './earthData.js';
+import { CITIES, RANGES, DESERTS, HALO_PORTS, WILDS } from './earthData.js';
 import { bodyDir } from './sim.js';
 
 // GPU bake of the planet's surface and weather into cube maps (body frame).
@@ -24,6 +24,10 @@ uniform int uOut;
 uniform vec4 uDeserts[10];
 uniform vec4 uCyc[28];
 uniform int uNumCyc;
+uniform int uNumArc;
+uniform vec4 uPorts[7];
+uniform vec4 uWild[10];
+uniform float uTexelKm;
 varying vec2 vUv;
 ${SNOISE_GLSL}
 #define PI 3.14159265359
@@ -134,6 +138,104 @@ void main() {
   float subtrop = exp(-pow(abs(alat - 24.0) / 8.0, 2.0)) * smoothstep(0.5, 0.95, mC);
   float arid = clamp(max(desert * (0.75 + 0.35 * n1), subtrop * 0.55) + n2 * 0.12, 0.0, 1.0);
   arid *= smoothstep(0.1, 0.6, mc + 0.2);
+
+  if (uOut == 3) {
+    // ---- night lights of the Terran Concord (r: warm cores, g: cool new districts,
+    // b: transit filaments; each stored as sqrt for range in 8 bits) ----
+    float wild = 0.0;
+    for (int i = 0; i < 10; i++) wild = max(wild, boxMask(latD, lonD, uWild[i], 3.0));
+    float habit = land * (1.0 - arid * 0.93) * (1.0 - smoothstep(58.0, 68.0, alat)) * (1.0 - step(latD, -50.0)) * (1.0 - 0.92 * wild);
+    float coastNear = smoothstep(0.98, 0.55, mc);                 // within ~a hundred km of the sea
+    float warm = 0.0, cool = 0.0, net = 0.0;
+    // metros from the atlas: a bright old core, lattice-textured districts spreading out
+    float grain = sfbm(d * 210.0 + 3.0, 3) * 0.5 + 0.5;
+    float arter = pow(max(sridged(d * 140.0 + 11.0, 3), 0.0), 3.0);
+    for (int i = 0; i < 160; i++) {
+      if (i >= uNumCity) break;
+      vec4 c = texelFetch(uData, ivec2(i, 2), 0);
+      vec3 dv = d - c.xyz;
+      float dk2 = dot(dv, dv) * 40589641.0;                         // km^2
+      float w = c.w;
+      float rc = 9.0 + 16.0 * w, rm = 34.0 + 90.0 * w;
+      if (dk2 > rm * rm * 9.0) continue;
+      float core = exp(-dk2 / (rc * rc));
+      float metro = exp(-dk2 / (rm * rm));
+      float modern = fract(sin(float(i) * 12.9898) * 43758.5453);
+      float dist = (0.55 + 0.45 * grain) * (0.7 + 0.6 * arter);
+      warm += w * (core * 0.75 + metro * 0.22 * dist * (1.0 - 0.5 * modern));
+      cool += w * metro * (0.14 + 0.45 * modern) * dist + w * core * 0.3 * modern;
+    }
+    // coastal and river towns everywhere people can live: cellular points ~95 km apart
+    {
+      vec3 q = d * 67.0;
+      vec3 cq = floor(q);
+      float towns = 0.0, tcool = 0.0;
+      for (int x = -1; x <= 1; x++) for (int y = -1; y <= 1; y++) for (int z = -1; z <= 1; z++) {
+        vec3 cell = cq + vec3(float(x), float(y), float(z));
+        vec3 h = vec3(fract(sin(dot(cell, vec3(127.1, 311.7, 74.7))) * 43758.5453), fract(sin(dot(cell, vec3(269.5, 183.3, 246.1))) * 43758.5453), fract(sin(dot(cell, vec3(113.5, 271.9, 124.6))) * 43758.5453));
+        vec3 pt = cell + h;
+        float r2 = dot(q - pt, q - pt);                              // in cell units (~95 km)
+        float size = 0.04 + 0.13 * h.x * h.x;
+        float t = exp(-r2 / (size * size));
+        towns += t * (0.35 + 0.65 * h.y);
+        tcool += t * h.z;
+      }
+      float valley = pow(max(sridged(d * 16.0 + 5.0, 3), 0.0), 5.0);     // river valleys inland
+      float place = habit * max(coastNear, valley * 0.8 + 0.12);
+      warm += towns * place * 0.15 * (1.0 - 0.4 * clamp(tcool, 0.0, 1.0));
+      cool += tcool * place * 0.1;
+    }
+    // sea-steads and floating cities on the continental shelves
+    {
+      float shelfT = (1.0 - land) * smoothstep(0.35, 0.95, mc + 0.25 * coastBand + n1 * 0.1) * (1.0 - smoothstep(48.0, 60.0, alat));
+      vec3 q = d * 38.0;
+      vec3 cq = floor(q);
+      float sea = 0.0;
+      for (int x = 0; x <= 1; x++) for (int y = 0; y <= 1; y++) for (int z = 0; z <= 1; z++) {
+        vec3 cell = cq + vec3(float(x), float(y), float(z));
+        vec3 h = vec3(fract(sin(dot(cell, vec3(41.3, 289.1, 97.7))) * 43758.5453), fract(sin(dot(cell, vec3(157.9, 23.3, 311.1))) * 43758.5453), fract(sin(dot(cell, vec3(71.1, 131.7, 207.3))) * 43758.5453));
+        if (h.z < 0.55) continue;
+        float r2 = dot(q - cell - h, q - cell - h);
+        sea += exp(-r2 / 0.004) * (0.5 + h.y);
+      }
+      cool += sea * shelfT * 0.5;
+      warm += sea * shelfT * 0.2;
+    }
+    // settled countryside: a faint even glow; the coast road
+    warm += habit * 0.0012 * (0.4 + 1.2 * grain);
+    net += habit * coastBand * 0.05;
+    // maglev corridors between the metros: great-circle filaments, dim where they run under the sea
+    for (int i = 0; i < 400; i++) {
+      if (i >= uNumArc) break;
+      vec4 N = texelFetch(uData, ivec2(i, 3), 0);
+      float off = dot(d, N.xyz);
+      float wk = max(N.w, uTexelKm * 0.75);
+      if (abs(off) * 6371.0 > wk * 4.0) continue;
+      vec4 A = texelFetch(uData, ivec2(i, 4), 0);
+      vec4 Bq = texelFetch(uData, ivec2(i, 5), 0);
+      vec3 pp = d - N.xyz * off;
+      if (dot(cross(A.xyz, pp), N.xyz) < 0.0 || dot(cross(pp, Bq.xyz), N.xyz) < 0.0) continue;
+      float dk = abs(off) * 6371.0;
+      // stations and towns strung along the line every ~45 km
+      float along = acos(clamp(dot(normalize(pp), A.xyz), -1.0, 1.0)) * 6371.0;
+      float bq = fract(along / 45.0 + float(i) * 0.37) - 0.5;
+      float beads = 0.3 + 0.7 * exp(-bq * bq * 30.0);
+      net += A.w * 0.45 * beads * exp(-dk * dk / (wk * wk)) * (0.25 + 0.75 * land) * (1.0 - 0.8 * wild) * (N.w / wk);
+    }
+    // the Halo's ground ports: tether stations, the brightest nodes after Meridian
+    for (int i = 0; i < 7; i++) {
+      vec3 dv = d - uPorts[i].xyz;
+      float dk2 = dot(dv, dv) * 40589641.0;
+      warm += uPorts[i].w * exp(-dk2 / 110.0) * 1.2;
+      cool += uPorts[i].w * exp(-dk2 / 900.0) * 0.5;
+      net += uPorts[i].w * exp(-dk2 / 5000.0) * 0.25;
+    }
+    warm *= 1.0 - 0.85 * wild;
+    cool *= 1.0 - 0.85 * wild;
+    // linear, in a half-float target: mip averages stay true means, so a far planet keeps its lights
+    gl_FragColor = vec4(min(warm, 8.0), min(cool, 8.0), min(net, 8.0), 1.0);
+    return;
+  }
 
   if (uOut == 1) {
     // night lights
@@ -247,13 +349,41 @@ export function maskReady() { return !!maskTex; }
 
 function mulberry(a) { return () => { a |= 0; a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
 
+/**
+ * Maglev corridors: each metro joins its nearest neighbours (great-circle arcs, a few
+ * thousand km at most), so the network follows the settled coasts and river plains.
+ */
+function buildArcs() {
+  const pts = CITIES.map(([lat, lon, w]) => ({ v: bodyDir(lat * D2R, lon * D2R, new THREE.Vector3()), w }));
+  const pairs = new Set();
+  const arcs = [];
+  pts.forEach((p, i) => {
+    if (p.w < 0.3) return;
+    const near = pts.map((q, j) => ({ j, d: Math.acos(Math.min(1, p.v.dot(q.v))) * 6371 }))
+      .filter((o) => o.j !== i && pts[o.j].w >= 0.3 && o.d < 2600 && o.d > 60)
+      .sort((a, b) => a.d - b.d).slice(0, p.w > 0.75 ? 4 : 3);
+    for (const o of near) {
+      const key = i < o.j ? `${i}-${o.j}` : `${o.j}-${i}`;
+      if (pairs.has(key)) continue;
+      pairs.add(key);
+      const q = pts[o.j];
+      const n = new THREE.Vector3().crossVectors(p.v, q.v).normalize();
+      const s = 0.18 + 0.32 * Math.min(p.w, q.w);
+      arcs.push({ a: p.v.clone(), b: q.v.clone(), n, w: 5.5, s });
+    }
+  });
+  return arcs.slice(0, 400);
+}
+
 function buildDataTexture() {
   const segs = [];
   for (const r of RANGES) {
     for (let i = 0; i < r.pts.length - 1; i++) segs.push([r.pts[i], r.pts[i + 1], r.w, r.h]);
   }
-  const W = Math.max(segs.length, CITIES.length + 2, 8);
-  const data = new Float32Array(W * 3 * 4);
+  const arcs = buildArcs();
+  const W = Math.max(segs.length, CITIES.length + 2, arcs.length, 8);
+  const ROWS = 6;
+  const data = new Float32Array(W * ROWS * 4);
   const v = new THREE.Vector3();
   segs.forEach(([a, b, w, h], i) => {
     bodyDir(a[0] * D2R, a[1] * D2R, v); data.set([v.x, v.y, v.z, w * D2R], i * 4);
@@ -263,10 +393,15 @@ function buildDataTexture() {
   cities.forEach(([lat, lon, w], i) => {
     bodyDir(lat * D2R, lon * D2R, v); data.set([v.x, v.y, v.z, w], (2 * W + i) * 4);
   });
-  const tex = new THREE.DataTexture(data, W, 3, THREE.RGBAFormat, THREE.FloatType);
+  arcs.forEach((a, i) => {
+    data.set([a.n.x, a.n.y, a.n.z, a.w], (3 * W + i) * 4);
+    data.set([a.a.x, a.a.y, a.a.z, a.s], (4 * W + i) * 4);
+    data.set([a.b.x, a.b.y, a.b.z, 0], (5 * W + i) * 4);
+  });
+  const tex = new THREE.DataTexture(data, W, ROWS, THREE.RGBAFormat, THREE.FloatType);
   tex.minFilter = tex.magFilter = THREE.NearestFilter;
   tex.needsUpdate = true;
-  return { tex, numSeg: segs.length, numCity: cities.length };
+  return { tex, numSeg: segs.length, numCity: cities.length, numArc: arcs.length };
 }
 
 function cyclones() {
@@ -304,6 +439,9 @@ export class EarthBake {
     this.surfA = mk(size);
     this.surfB = mk(size);
     this.clouds = mk(cloudSize);
+    // night lights: linear half floats, so mip levels average true light, not its square root
+    this.lights = new THREE.WebGLCubeRenderTarget(size, { type: THREE.HalfFloatType, format: THREE.RGBAFormat, generateMipmaps: true, minFilter: THREE.LinearMipmapLinearFilter, magFilter: THREE.LinearFilter, depthBuffer: false });
+    this.lights.texture.colorSpace = THREE.NoColorSpace;
     this.data = buildDataTexture();
     const cyc = cyclones();
     while (cyc.length < 28) cyc.push(new THREE.Vector4(0, 1, 0, 0));
@@ -320,12 +458,16 @@ export class EarthBake {
         uDeserts: { value: DESERTS.map((b) => new THREE.Vector4(b[0], b[1], b[2], b[3])) },
         uCyc: { value: cyc },
         uNumCyc: { value: 28 },
+        uNumArc: { value: this.data.numArc },
+        uPorts: { value: HALO_PORTS.map((p) => { const v = bodyDir(0, p.lon * D2R, new THREE.Vector3()); return new THREE.Vector4(v.x, v.y, v.z, p.name === 'Meridian' ? 0 : 1); }) },
+        uWild: { value: WILDS.map((b) => new THREE.Vector4(b[0], b[1], b[2], b[3])) },
+        uTexelKm: { value: (Math.PI / 2 / size) * 6371 },
       },
       depthTest: false, depthWrite: false,
     });
     this.pass = new FullscreenPass(this.mat);
     this.jobs = [];
-    for (const [out, rt] of [[0, this.surfA], [1, this.surfB], [2, this.clouds]]) for (let f = 0; f < 6; f++) this.jobs.push({ out, rt, f });
+    for (const [out, rt] of [[0, this.surfA], [1, this.surfB], [2, this.clouds], [3, this.lights]]) for (let f = 0; f < 6; f++) this.jobs.push({ out, rt, f });
     this.done = false;
   }
 
@@ -356,5 +498,5 @@ export class EarthBake {
     return this.done;
   }
 
-  dispose() { this.surfA.dispose(); this.surfB.dispose(); this.clouds.dispose(); this.mat.dispose(); }
+  dispose() { this.surfA.dispose(); this.surfB.dispose(); this.clouds.dispose(); this.lights.dispose(); this.mat.dispose(); }
 }

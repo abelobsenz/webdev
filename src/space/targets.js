@@ -7,7 +7,7 @@ export const TARGET_INFO = {
   },
   meridian: {
     key: '2', name: 'Meridian', district: 'Equator · 157° W',
-    lore: 'From orbit the capital is a turquoise ring in an empty ocean, and at night the brightest point on Earth. The tether rises straight out of its centre. It is the only city on the planet you can find from the Moon with the naked eye.',
+    lore: 'From orbit the capital is a turquoise ring in an empty ocean, and at night the brightest point on a planet strung with light. The tether rises straight out of its centre. Of all the cities on the night side, it is the one you find first from the Moon with the naked eye.',
     facts: [['Lagoon', '11.8 km'], ['Tether', '100,000 km'], ['Climbers', '1 every 6 min']],
   },
   halo: {
