@@ -124,25 +124,33 @@ uniform float uSunE;
 uniform vec3 uCenter;
 varying vec3 vWorld;
 void main() {
+  const float R = ${R_MOON.toFixed(1)};
+  const float H = 11.0;
   vec3 ro = cameraPosition - uCenter;
   vec3 rd = normalize(vWorld - cameraPosition);
   float b = dot(ro, rd);
-  float t = max(-b, 0.0);
-  vec3 cp = ro + rd * t;
-  float r = length(cp);
-  float h = r - ${R_MOON.toFixed(1)};
-  float surf = step(h, 0.0);
-  float H = 11.0;
-  float dens = exp(-max(h, 0.0) / H) * (1.0 - surf * 0.55);
-  float chord = sqrt(max(2.0 * ${R_MOON.toFixed(1)} * H, 1.0));
-  vec3 up = cp / max(r, 1e-3);
+  float disc = b * b - dot(ro, ro) + R * R;
+  float tHit = -b - sqrt(max(disc, 0.0));
+  float chord = sqrt(6.2831853 * R * H);   // Chapman: grazing column through the shell
+  vec3 up;
+  float path;
+  if (disc > 0.0 && tHit > 0.0) {
+    // looking down onto the surface: the column above the hit point
+    up = normalize(ro + rd * tHit);
+    path = min(H / max(dot(up, -rd), 1e-3), chord);
+  } else {
+    vec3 cp = ro + rd * max(-b, 0.0);
+    float r = length(cp);
+    up = cp / max(r, 1e-3);
+    path = chord * exp(-max(r - R, 0.0) / H);
+  }
   float mu = dot(up, uSunDir);
   float lit = smoothstep(-0.25, 0.2, mu);
   float cosT = dot(rd, uSunDir);
   vec3 ray = vec3(0.25, 0.5, 1.0) * (0.75 + 0.25 * cosT * cosT);
   vec3 sunset = vec3(1.0, 0.55, 0.3) * smoothstep(0.25, -0.05, mu) * lit;
-  vec3 col = (ray * lit + sunset) * dens * uSunE * 0.0036 * chord / 100.0;
-  col += vec3(1.0, 0.9, 0.8) * pow(max(cosT, 0.0), 12.0) * dens * uSunE * 0.01 * lit;
+  vec3 col = (ray * lit + sunset) * path * uSunE * 2.4e-5;
+  col += vec3(1.0, 0.9, 0.8) * pow(max(cosT, 0.0), 12.0) * (path / chord) * uSunE * 0.01 * lit;
   gl_FragColor = vec4(col, 0.0);
 }
 `;

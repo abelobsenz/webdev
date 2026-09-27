@@ -52,8 +52,11 @@ function islandGeometry(r, seed) {
         y = -0.1 - depth * (0.42 * Math.sin(s * Math.PI * 0.5) * (0.8 + 0.4 * drip) + keel * s * s * 0.9 + 0.12 * ribs * s);
         const strata = 0.5 + 0.5 * Math.sin(y * 16 + n2(ca * 2, sa * 2) * 2);
         const moss = Math.max(0, n2(ca * 4 + seed, y * 3)) * (1 - s);
-        c = [0.55 - 0.2 * s + 0.05 * strata, 0.51 - 0.18 * s + 0.04 * strata, 0.46 - 0.16 * s + 0.03 * strata];
-        c = [c[0] * (1 - moss * 0.6) + 0.12 * moss, c[1] * (1 - moss * 0.45) + 0.2 * moss, c[2] * (1 - moss * 0.7) + 0.06 * moss];
+        // weathered volcanic tuff: warm ochre bands over dark basalt, moss in the damp upper reaches
+        const ochre = 0.5 + 0.5 * Math.sin(y * 7 + n2(ca * 3, sa * 3) * 3);
+        c = [0.34 - 0.14 * s + 0.07 * strata * ochre, 0.29 - 0.12 * s + 0.045 * strata * ochre, 0.24 - 0.1 * s + 0.02 * strata];
+        const mossy = Math.min(1, moss * 1.6);
+        c = [c[0] * (1 - mossy * 0.65) + 0.09 * mossy, c[1] * (1 - mossy * 0.5) + 0.16 * mossy, c[2] * (1 - mossy * 0.75) + 0.05 * mossy];
         g = Math.pow(Math.max(0, 1 - Math.abs(n3(ca * 3 + 11, y * 2.2 + sa * 3)) * 4.5), 3) * Math.min(1, s * 3);
       }
       pos.push(ca * rr * r, y * r, sa * rr * r);
@@ -76,7 +79,7 @@ function islandGeometry(r, seed) {
 }
 
 function rockMaterial() {
-  return patchedMaterial({ vertexColors: true, roughness: 0.9, metalness: 0, envMapIntensity: 0.5 }, {
+  return patchedMaterial({ vertexColors: true, roughness: 0.92, metalness: 0, envMapIntensity: 0.38 }, {
     key: 'floatrock',
     vertex: { pars: 'attribute float aGlow; varying float vGlow;', transform: 'vGlow = aGlow;' },
     fragment: {

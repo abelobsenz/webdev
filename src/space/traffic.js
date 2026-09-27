@@ -122,7 +122,7 @@ varying vec3 vCol;
 varying float vFade;
 void main() {
   float a = exp(-vAcross * vAcross * 3.0) * (0.2 + 0.8 * vAlong * vAlong);
-  gl_FragColor = vec4(vCol * a * vFade * 3.2, 0.0);
+  gl_FragColor = vec4(vCol * a * vFade * 1.5, 0.0);
 }
 `;
 

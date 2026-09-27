@@ -93,7 +93,7 @@ export class SpaceMode {
     T('hearth', {
       position: (o) => o.copy(sim.hearthPos),
       frame: (q) => q.copy(self.hearth ? self.hearth.quat : q.identity()),
-      minDist: 190, maxDist: 1.4e6, defaultDist: 1700, view: { az: 0.45, el: 0.12 },
+      minDist: 190, maxDist: 1.4e6, defaultDist: 640, view: { az: 0.45, el: 0.09 },
     });
   }
 
@@ -160,6 +160,11 @@ export class SpaceMode {
       vertexShader: FS_VERT, fragmentShader: FADE_FRAG, uniforms: { tSrc: { value: this.fadeRT.texture }, uAlpha: { value: 0 } },
       transparent: true, depthTest: false, depthWrite: false,
     }));
+    // The additive shaders here write light with alpha 0 so they never touch coverage;
+    // blend them ONE, ONE (three's straight-alpha additive mode would scale them by that 0).
+    for (const sc of [this.scene, this.skyScene]) sc.traverse((o) => {
+      for (const m of [].concat(o.material || [])) if (m.blending === THREE.AdditiveBlending) m.premultipliedAlpha = true;
+    });
     this.setSize(this.size.x, this.size.y);
     try { if (this.renderer.compileAsync) this.renderer.compileAsync(this.scene, this.camera).catch(() => {}); } catch (e) { /* optional */ }
   }
