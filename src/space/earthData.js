@@ -90,3 +90,18 @@ export const HALO_PORTS = [
   { name: 'Pontianak', lon: 109.3 },
   { name: 'Nauru', lon: 166.9 },
 ];
+
+// Rewilded regions kept dark at night (a thousand years of restoration): the deep
+// rainforests, the boreal north, the high plateaus. [latMin, latMax, lonMin, lonMax]
+export const WILDS = [
+  [-11, 3, -73, -53],          // Amazon core
+  [-5, 4, 14, 28],             // Congo core
+  [56, 73, 62, 172],           // Siberian taiga and tundra
+  [56, 75, -142, -64],         // Canadian boreal and tundra
+  [30, 38, 79, 98],            // Tibetan plateau
+  [-56, -45, -76, -65],        // Patagonian south
+  [-8, 2, 112, 118],           // Borneo interior
+  [-7, -3, 137, 146],          // New Guinea highlands
+  [62, 71, 20, 45],            // Lapland and Karelia
+  [-30, -18, 122, 138],        // Australian interior
+];
