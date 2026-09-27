@@ -128,7 +128,7 @@ export class World {
     this.infra = buildInfrastructure(this.scene, gh, (x, z) => this.sampler.get(x, z));
     this.colliders.push(...this.infra.colliders);
     // City life
-    this.traffic = new Traffic(this.scene, this.settings);
+    this.traffic = new Traffic(this.scene, this.settings, this);   // citylife: world passed for lane clearance + docks
     this.updaters.push(this.traffic);
     this.chorus = new Chorus(this.scene, this.settings);
     this.updaters.push(this.chorus);
