@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { U } from '../core/uniforms.js';
 import { AERIAL_GLSL } from '../shaders/atmosphere.glsl.js';
 import { NOISE_GLSL } from '../shaders/noise.glsl.js';
+import { CLOUD_SHADOW_LOOKUP } from '../shaders/clouds.glsl.js';
 
 /**
  * Creates a MeshStandardMaterial (PBR, shadows, IBL) extended with hooks:
@@ -71,12 +72,12 @@ uniform float uCloudCoverage;
 uniform float uCloudShadow;
 ${NOISE_GLSL}
 ${AERIAL_GLSL}
+${CLOUD_SHADOW_LOOKUP}
 float cloudShadowAt(vec3 wp) {
-  // project along the sun onto the cloud deck at 2.4 km
-  vec2 p = wp.xz + uSunDir.xz / max(uSunDir.y, 0.08) * (2400.0 - wp.y);
-  float n = fbm2_3((p + uCloudOffset) * 0.00022);
-  float c = smoothstep(1.0 - uCloudCoverage, 1.0 - uCloudCoverage + 0.22, n);
-  return mix(1.0, 1.0 - 0.72 * c, uCloudShadow);
+  // rendering agent: sample the volumetric clouds' top-down optical-depth map
+  // (same density field as the visible clouds, see src/life/clouds.js)
+  float T = exp(-cloudShadowOD(wp));
+  return mix(1.0, mix(0.08, 1.0, T), uCloudShadow);
 }
 ${f.pars || ''}`);
     fs = fs.replace('#include <color_fragment>', `#include <color_fragment>
