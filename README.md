@@ -101,6 +101,11 @@ press `Space` to pause the clock. The number keys pick a target:
   lanes. Plots are laid along the street frontages and built as terraces, cloisters, ribbons, mews,
   pavilions and small towers, each with real window bays. Kerbs, setts, verges, street trees, benches,
   fountains and lamps come from one shared street field, so paving, planting and light all agree.
+- **Greater Meridian.** The capital is a metropolis about 35 km across.
+  - **The atoll rim:** a ring of arcologies and towns around the lagoon.
+  - **Seven Outer Wards:** sea districts 11–17 km out, on terraced platforms (a quay at +3 m, an arcaded terrace wall, streets at +9 m). Each has its own street plan, thousands of buildings, street trees and lamps, and a crown of arcologies up to 2.1 km tall.
+  - **Bridges:** bridges up to 7 km long carry a road deck and a maglev back to the rim.
+  - **The horizon:** tower towns on the far islands and terraces on the northern massif close it in every direction. There, lightweight faceted towers keep the full facade shading, so their windows light up at night.
 - **Promenades.** Maglev tubes and deck roadways link the central plaza to the islands. Each lands on
   ground at both ends, at a glass station with a light column.
 - **City life.** Thousands of GPU-animated vehicles fly banked lanes with light trails. Starships climb
@@ -129,6 +134,7 @@ src/
   core/                shared uniforms, sun & sky ephemeris, controls, lighting, presets
   sky/                 atmosphere LUTs, sky dome, rings / moon / tether (km-scale sky scene)
   world/               terrain, water, Axis, towers, town plan (urban.js), buildings, streetscape,
+                       Outer Wards (metro.js), metropolitan horizon (skyline.js),
                        vegetation, floating islands, promenades and stations
   life/                traffic, skiffs, the Chorus, clouds, people
   craft/               ship hulls, craft material, engine plumes and trails

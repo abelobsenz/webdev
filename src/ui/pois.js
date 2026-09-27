@@ -13,7 +13,7 @@ export const POIS = [
     id: 'approach', key: '1', name: 'The Southern Approach', district: 'Arrival',
     view: V(-1650, 230, 5650), target: V(0, 1150, 0), time: 17.45,
     lore: 'Most visitors first see Meridian from the sea lane through the atoll. The lagoon was a drowned caldera when the city was founded; eleven centuries of reef restoration turned it into the clearest water on Earth, and the capital was built into it rather than over it.',
-    facts: [['Lagoon', '11.8 km across'], ['Population', '9.4 million'], ['Founded', '2911 CE']],
+    facts: [['Lagoon', '11.8 km across'], ['Greater Meridian', '61 million'], ['Founded', '2911 CE']],
   },
   {
     id: 'axis', key: '2', name: 'The Axis', district: 'Central Island',
@@ -74,7 +74,14 @@ export const POIS = [
     view: V(0, 110, 8600), target: V(0, 950, 0), time: 18.4,
     lore: 'Two catenary arches lean together over the sea entrance to the lagoon, and they frame the Axis for every arriving ship. They commemorate the Accord of 2911, when the last national governments merged into the Concord without a shot being fired.',
     facts: [['Span', `${GATE.span.toLocaleString('en-US')} m`], ['Height', `${GATE.height.toLocaleString('en-US')} m`], ['Accord', '2911 CE']],
+  },  {
+    id: 'wards', name: 'The Outer Wards', district: 'Greater Meridian',
+    view: V(6400, 900, -2400), target: V(10200, 260, -5400), time: 17.2,
+    orbit: { center: V(10200, 400, -5400), radius: 3200, height: 500, speed: 0.03 },
+    lore: 'Meridian outgrew its lagoon eight centuries ago. Seven sea wards now ring the atoll, each a whole city on a terraced platform: quays at the waterline, arcaded terrace walls, and streets nine metres above the tide, gathered under its own crown of arcologies. Bridges carrying road and maglev leap five kilometres of open sea to the rim. Beyond them the towns of the far islands and the massif terraces close the horizon in every direction.',
+    facts: [['Wards', '7'], ['Metropolis', '≈ 35 km across'], ['Tallest crown', 'Southmarch, 2,100 m']],
   },
+
   {
     id: 'skyport', name: 'Skyport Meridian', district: 'Hovering Harbour',
     view: V(SKYPORT.x + 900, SKYPORT.y + 280, SKYPORT.z + 900), target: V(SKYPORT.x, SKYPORT.y, SKYPORT.z), time: 11.2,

@@ -171,14 +171,14 @@ export function terrainHeight(x, z) {
   return h;
 }
 
-const MASSIF = [
+export const MASSIF = [
   { x: -2500, z: -16500, r: 4300, h: 1950, sx: 0.85 },
   { x: 4800, z: -15000, r: 3300, h: 1500, sx: 0.9 },
   { x: -8800, z: -14200, r: 3000, h: 1300, sx: 1.0 },
   { x: 9800, z: -19000, r: 3800, h: 1150, sx: 1.0 },
 ];
 
-const FAR_ISLANDS = [
+export const FAR_ISLANDS = [
   [21000, 24000, 3200, 420],
   [-26000, 19000, 4200, 640],
   [31000, -4000, 2600, 380],

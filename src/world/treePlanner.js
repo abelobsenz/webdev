@@ -4,6 +4,7 @@ import { coreRadius, latticeRadius } from './axis.js';
 import { INNER } from './terrain.js';
 import { PLAZA_R, PLAZA_Y } from './layout.js';
 import { SPECIES, SP } from './treeGeometry.js';
+import { wardHeight, WARD_TOP } from './metro.js';
 
 // Where every tree in MERIDIAN grows, and why:
 //  - lagoon shores: mangrove stands in the shallows, coconut palms leaning seaward on the strand
@@ -213,6 +214,44 @@ export function planTrees(world) {
             if (C && (C.groundAt(x, z) < Math.min(cr, 3.2) + 0.8 || C.overAt(x, z) < cr + 1.0)) continue;
             if (!clear(x, z, 2.5, 6)) continue;
             push(x, z, sp, s, { layer: 6, spacing: 2.5, lean: sp === SP.palm ? rnd() * 0.04 : 0, rot: rnd() * Math.PI * 2 });
+          }
+        }
+      }
+    });
+  }
+
+  // ------------------------------------------------ the Outer Wards --
+  // the same street planting on the ward platforms (their street level is built, not terrain)
+  const mp = world.metro && world.metro.plan;
+  if (mp) {
+    for (const l of mp.lamps) occupy(l.x, l.z, 2.2, 6);
+    const verge = [SP.rainTree, SP.flowering, SP.araucaria, SP.flowering];
+    mp.streets.forEach((st, si) => {
+      if (st.cls === 1) return;
+      const P = st.pts;
+      const avenue = st.cls === 3, esplanade = st.cls === 4;
+      const sp = avenue || esplanade ? SP.palm : verge[si % verge.length];
+      const spacing = avenue ? 13 : sp === SP.rainTree ? 18 : sp === SP.araucaria ? 16 : 14;
+      const offs = avenue ? [0] : [-(st.hw + 2.7), st.hw + 2.7];
+      const baseS = sp === SP.palm ? 12 : sp === SP.rainTree ? 9.5 : sp === SP.araucaria ? 16 : 8;
+      let acc = spacing * 0.5;
+      for (let i2 = 1; i2 < P.length; i2++) {
+        const dx = P[i2][0] - P[i2 - 1][0], dz = P[i2][1] - P[i2 - 1][1];
+        const L = Math.hypot(dx, dz);
+        acc += L;
+        while (acc >= spacing) {
+          acc -= spacing;
+          const t = 1 - acc / L;
+          const x0 = P[i2 - 1][0] + dx * t, z0 = P[i2 - 1][1] + dz * t;
+          const nx = -dz / L, nz = dx / L;
+          for (const o of offs) {
+            const x = x0 + nx * o, z = z0 + nz * o;
+            if (wardHeight(x, z) < WARD_TOP - 0.5) continue;               // street level only
+            if (mp.field.squareAt(x, z) > 0.05) continue;
+            if (!avenue && mp.field.edge(x, z) < 2.0) continue;
+            if (!clear(x, z, 2.5, 6)) continue;
+            const s = baseS * (0.92 + rnd() * 0.16);
+            push(x, z, sp, s, { y: WARD_TOP - 0.15, layer: 6, spacing: 2.5, lean: sp === SP.palm ? rnd() * 0.04 : 0, rot: rnd() * Math.PI * 2 });
           }
         }
       }
