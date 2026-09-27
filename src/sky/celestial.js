@@ -90,12 +90,12 @@ void main() {
   float hub = smoothstep(0.02, 0.0, abs(hubPhase - 0.5) - 0.01);
   alb = mix(alb, uAlbedo * 1.12, hub * 0.6);
   // --- lighting ---
-  // (the eye adapts locally to a sunlit ring in a dark sky; emulate it)
-  vec3 sunL = sunlightAt(pPlanet) * uSunIlluminance * mix(1.0, 0.1, uNight);
+  // physically lit (Lambert, E/pi); the post highlight knee keeps it detailed at night
+  vec3 sunL = sunlightAt(pPlanet) * uSunIlluminance;
   float ndl = max(dot(N, uSunDir), 0.0);
   float dayBelow = max(dot(rhat, uSunDir), 0.0);
   vec3 earthshine = vec3(0.45, 0.62, 0.95) * dayBelow * uSunIlluminance * 0.12 * max(dot(N, -rhat), 0.0);
-  vec3 col = alb * (sunL * ndl * 0.6 + earthshine);
+  vec3 col = alb * (sunL * ndl * 0.3183 + earthshine * 0.5);
   // specular glint from the sun on the outer skin
   vec3 V = normalize(cameraPosition - vWorld);
   vec3 H = normalize(V + uSunDir);
@@ -300,7 +300,7 @@ void main() {
   alb = mix(alb, vec3(0.9), clouds);
   float ndl = dot(n, uSunDir);
   float day = smoothstep(-0.08, 0.25, ndl);
-  vec3 col = alb * max(ndl, 0.0) * uSunIlluminance * 0.9 * mix(1.0, 0.14, uNight);
+  vec3 col = alb * max(ndl, 0.0) * uSunIlluminance * 0.3183;
   // city lights on the night side: coastal settlements
   float coast = smoothstep(0.08, 0.0, abs(h - 0.48));
   float cells = step(0.72, hash13(floor(p * 90.0)));
@@ -312,7 +312,7 @@ void main() {
   // atmosphere rim
   vec3 V = normalize(cameraPosition - vWorld);
   float rim = pow(1.0 - max(dot(n, V), 0.0), 3.0);
-  col += vec3(0.25, 0.5, 1.0) * rim * smoothstep(-0.3, 0.4, ndl) * uSunIlluminance * 0.25;
+  col += vec3(0.25, 0.5, 1.0) * rim * smoothstep(-0.3, 0.4, ndl) * uSunIlluminance * 0.08;
   float a = smoothstep(0.0, 1.0, uNight) * 0.98;
   gl_FragColor = vec4(col * T, a);
 }

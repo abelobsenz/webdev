@@ -22,6 +22,10 @@ export const U = {
   uCloudCoverage: { value: 0.42 },
   uCameraAltitude: { value: 0 },
   uWind: { value: new THREE.Vector2(0.8, 0.3) },
+  // --- rendering agent: volumetric cloud shadow map (see src/life/clouds.js) ---
+  uCloudShadowMap: { value: null },          // RGBA optical depth toward the light at 4 levels through the deck
+  uCloudShadowRect: { value: new THREE.Vector4(0, 0, 1 / 24000, 0) }, // origin.xy (m), 1/size, valid
+  uCloudLightDir: { value: new THREE.Vector3(0, 1, 0) },   // sun, or the moon once the deck is in earth shadow
 };
 
 /** Collect a subset of the shared uniforms plus material-specific ones. */

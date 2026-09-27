@@ -62,6 +62,8 @@ class App {
   async init(progress) {
     this.world = new World(this);
     await this.world.build(progress);
+    // rendering agent: hook volumetric clouds / mid-frame depth capture into the main pass
+    this.pipeline.attach(this.world, this.scene, this.camera, this.lighting.sun);
     this.controls = new FlyControls(this.camera, this.canvas, {
       groundHeight: (x, z) => this.world.groundHeight(x, z),
       colliders: this.world.colliders,
@@ -97,6 +99,7 @@ class App {
     this.settings = { ...PRESETS[key] };
     try { localStorage.setItem('meridian.quality', key); } catch (e) { /* ignore */ }
     this.pipeline.setMSAA(this.settings.msaa);
+    this.pipeline.applySettings(this.settings);   // rendering agent: cloud / post quality keys
     this.lighting.setShadowQuality(this.settings.shadows, this.settings.shadowSize);
     this.world.applyQuality(this.settings);
     this.dynScale = 1;
@@ -187,12 +190,18 @@ class App {
     const p = this.pipeline;
     r.info.reset();
     // 1. planar reflections (uses last frame's shadow map, so skip until it exists)
+    p.timer.begin('reflections');   // rendering agent: optional GPU timings (?gpuprof)
     if (!this.settings.shadows || this.lighting.sun.shadow.map) this.world.renderReflections(r, this.camera, this.skyScene, this.skyCamera);
     // 2. sky (km scale)
+    p.timer.begin('sky');
     r.setRenderTarget(p.skyRT);
     r.clear();
     r.render(this.skyScene, this.skyCamera);
-    // 3. world (metres) into the MSAA HDR target
+    // 3. world (metres) into the MSAA HDR target. beginFrame (rendering agent) updates
+    //    the cloud shadow map; clouds are marched + composited mid-pass (see Pipeline).
+    p.timer.begin('cloudShadowMap');
+    p.beginFrame(this.camera, this.skyState.sunDir, this.skyState.moonDir);
+    p.timer.begin('scene:shadows+opaque');
     r.shadowMap.needsUpdate = this.settings.shadows;
     r.setRenderTarget(p.hdrRT);
     r.clear();
@@ -204,6 +213,14 @@ class App {
     p.downMat.uniforms.uKnee.value = 0.7 / exposure;
     p.finalMat.uniforms.uTime.value = this.elapsed;
     p.renderBloom();
+    // rendering agent: auto exposure adapts around the designed time-of-day curve
+    // (snaps after teleports / time jumps so captures and the tour never pump)
+    {
+      const lp = this._lastExpPose || (this._lastExpPose = { pos: this.camera.position.clone(), h: this.hours });
+      const jump = lp.pos.distanceTo(this.camera.position) > 300 || Math.abs(lp.h - this.hours) > 0.2;
+      lp.pos.copy(this.camera.position); lp.h = this.hours;
+      p.renderExposure(dt, (0.2 / exposure) * (1 - 0.45 * U.uNight.value), jump);
+    }
     this.updateGrade();
     // sun rays
     const sunW = this.skyState.sunDir.clone().multiplyScalar(1e5).add(this.camera.position);
@@ -215,6 +232,17 @@ class App {
     p.finalMat.uniforms.uRaysColor.value.copy(U.uSunColor.value).multiplyScalar(1.0);
     p.renderRays(sunUV, raysStrength);
     p.finalMat.uniforms.uFlare.value = this.settings.bloom ? 0.012 * onScreen : 0;
+    // rendering agent: volumetric shafts (shadowed / lit air), anamorphic streaks, lens dirt
+    {
+      const sunUp = smooth(-0.04, 0.02, this.skyState.sunDir.y);
+      const rad = this._shaftRad || (this._shaftRad = new THREE.Color());
+      rad.copy(U.uSunColor.value).multiplyScalar(U.uSunIlluminance.value);
+      p.renderShafts(this.camera, this.lighting.sun, rad, this.settings.rays ? sunUp : 0);
+      p.renderAO(this.camera, 0.85);
+      const sunVis = inFront ? smooth(0.95, 0.6, Math.max(Math.abs(sp.x), Math.abs(sp.y))) * sunUp : 0;
+      p.renderStreaks(this.settings.bloom ? 0.05 * sunVis + 0.03 * U.uNight.value : 0, 6.0 / exposure);
+      p.finalMat.uniforms.uDirt.value = this.settings.bloom ? 0.3 * sunVis + 0.03 * U.uNight.value : 0;
+    }
     p.composite();
   }
 
@@ -228,7 +256,10 @@ class App {
     f.uLift.value.set(0.0, 0.0015 * night, 0.004 * night);
     f.uSaturation.value = 1.12 + golden * 0.08 - night * 0.1;
     f.uContrast.value = 1.06;
-    f.uBloom.value = this.settings.bloom ? 0.035 + night * 0.025 : 0;
+    f.uBloom.value = this.settings.bloom ? 0.035 + night * 0.012 : 0;
+    // rendering agent: highlight knee (log domain) replaces the old sky-object night dimming
+    f.uHLKnee.value = THREE.MathUtils.lerp(1.4, 0.9, night);
+    f.uHLSlope.value = THREE.MathUtils.lerp(0.9, 0.22, smooth(0.0, 0.8, night));
   }
 
   adaptResolution(dt) {
