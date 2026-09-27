@@ -28,6 +28,8 @@ export const PALETTES = {
   silver: { glass: [0.62, 0.66, 0.72], rib: [0.96, 0.96, 0.97], light: [0.92, 0.9, 1.0], vein: [0.7, 0.75, 1.0] },
   rose: { glass: [0.66, 0.52, 0.52], rib: [0.95, 0.91, 0.88], light: [1.0, 0.76, 0.62], vein: [1.0, 0.6, 0.75] },
   sand: { glass: [0.50, 0.56, 0.60], rib: [0.88, 0.82, 0.72], light: [1.0, 0.70, 0.44], vein: [1.0, 0.78, 0.5] },
+  // Westmere: warm white marble with dark bronze glass
+  marble: { glass: [0.44, 0.46, 0.48], rib: [0.97, 0.95, 0.91], light: [1.0, 0.82, 0.6], vein: [1.0, 0.85, 0.6] },
 };
 
 const FACADE_PARS = /* glsl */ `
@@ -46,6 +48,7 @@ uniform float uFloorH;
 uniform float uBandPeriod;
 uniform float uWarmth;
 uniform float uUplight;
+uniform vec3 uLampTint;
 ${FACADE_GLSL}
 float fGlass; float fRib; float fBand; float fKind; float fVein; vec2 fCell; float fPx;
 float fRough; float fMetal; float fAO; float fDetail; float fSeam; float fFres; float fVert;
@@ -362,14 +365,14 @@ const FACADE_COLOR = /* glsl */ `
     meanFrac = mix(meanFrac, 0.8, shop);
     float frac = mix(meanFrac * (0.3 + 1.4 * clusterP), meanFrac, smoothstep(1.2, 4.0, fPx));
     float lit = step(1.0 - frac, rs.x) * step(0.02, lights + shop);
-    vec3 lampC = fLampColor(rs.y, uWarmth) * (0.5 + 0.9 * rs.z);
+    vec3 lampC = fLampColor(rs.y, uWarmth) * (0.5 + 0.9 * rs.z) * uLampTint;
     float shopLamp = mix(0.25, 1.0, lights);
     lampC = mix(lampC, vec3(1.0, 0.9, 0.78) * 1.4 * shopLamp, shop);
     // a few rooms are lit by a screen
     float tv = step(0.93, fract(rs.y * 7.7)) * (1.0 - shop);
     float flick = 0.65 + 0.35 * sin(uTime * 9.0 + rs.x * 60.0) * sin(uTime * 2.3 + rs.z * 20.0);
     lampC = mix(lampC, vec3(0.45, 0.62, 1.0) * flick, tv * 0.85);
-    vec3 avgLamp = mix(vec3(1.0, 0.82, 0.62), vec3(1.0, 0.7, 0.45), uWarmth);
+    vec3 avgLamp = mix(vec3(1.0, 0.82, 0.62), vec3(1.0, 0.7, 0.45), uWarmth) * uLampTint;
     vec3 interiorFar = avgLamp * 0.11 * frac * step(0.02, lights + shop) * mix(1.0, 1.6 * shopLamp, shop) + vec3(0.42, 0.4, 0.38) * dayL * (1.0 + frac);
     vec3 interior = interiorFar;
     if (fDetail > 0.01 && wC > 0.01) {
@@ -930,7 +933,7 @@ export const FACADE_HOOKS = {
   },
 };
 
-function facadeUniforms(p, seed, { litFrac, colW, floorH, band, warmth, uplight }) {
+function facadeUniforms(p, seed, { litFrac, colW, floorH, band, warmth, uplight, lampTint = [1, 1, 1] }) {
   return {
     uSeed: { value: seed },
     uGlass: { value: new THREE.Color(...p.glass) },
@@ -943,6 +946,7 @@ function facadeUniforms(p, seed, { litFrac, colW, floorH, band, warmth, uplight 
     uBandPeriod: { value: band },
     uWarmth: { value: warmth },
     uUplight: { value: uplight },
+    uLampTint: { value: new THREE.Color(...lampTint) },
   };
 }
 
@@ -951,9 +955,9 @@ function facadeUniforms(p, seed, { litFrac, colW, floorH, band, warmth, uplight 
  * line up with real floors); each instance carries aInst = (seed, variant).
  * `lod`: 0 none, 1 far set (collapsed near the viewer), -1 near set (collapsed far away).
  */
-export function createLowriseMaterial(palette = 'pearl', { litFrac = 0.42, lod = 0, nearR = null, warmth = 0.7 } = {}) {
+export function createLowriseMaterial(palette = 'pearl', { litFrac = 0.42, lod = 0, nearR = null, warmth = 0.7, lampTint } = {}) {
   const p = PALETTES[palette] || PALETTES.pearl;
-  const uniforms = facadeUniforms(p, 0, { litFrac, colW: 3.3, floorH: 3.6, band: 1e5, warmth, uplight: 0 });
+  const uniforms = facadeUniforms(p, 0, { litFrac, colW: 3.3, floorH: 3.6, band: 1e5, warmth, uplight: 0, lampTint });
   if (nearR) uniforms.uNearR = nearR;
   const hooks = {
     key: `lowrise3_${lod}`,
@@ -983,9 +987,9 @@ vSeed = aInst.x;
   return m;
 }
 
-export function createFacadeMaterial(palette = 'pearl', seed = 1, { litFrac = 0.55, colW = 3.2, floorH = 4.2, band = 112, side = THREE.FrontSide, warmth = 0.55, uplight = 1 } = {}) {
+export function createFacadeMaterial(palette = 'pearl', seed = 1, { litFrac = 0.55, colW = 3.2, floorH = 4.2, band = 112, side = THREE.FrontSide, warmth = 0.55, uplight = 1, lampTint } = {}) {
   const p = PALETTES[palette] || PALETTES.pearl;
-  const uniforms = facadeUniforms(p, seed, { litFrac, colW, floorH, band, warmth, uplight });
+  const uniforms = facadeUniforms(p, seed, { litFrac, colW, floorH, band, warmth, uplight, lampTint });
   const m = patchedMaterial({ color: 0xffffff, roughness: 0.4, metalness: 0.0, envMapIntensity: 1.0, side }, { ...FACADE_HOOKS, uniforms });
   m.userData.facadeUniforms = uniforms;
   return m;

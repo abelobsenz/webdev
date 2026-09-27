@@ -68,19 +68,19 @@ export const TOWERS = [
 //   towers: [type, angle (rad, ward frame), distance (fraction of r), height, radius, extras]
 export const WARDS = [
   { id: 'aurora', name: 'Aurora', x: 10200, z: -5400, r: 1350, seed: 3, palette: 'silver',
-    towers: [['lattice', 0, 0, 1880, 150], ['helix', 0.6, 0.5, 1180, 70, { petals: 5, twist: 1.1 }], ['lens', 2.4, 0.52, 960, 110], ['canopy', 4.1, 0.48, 640, 44], ['shell', 5.3, 0.55, 880, 80]] },
+    towers: [['crystal', 0, 0, 1880, 150], ['helix', 0.6, 0.5, 1180, 70, { petals: 5, twist: 1.1 }], ['lens', 2.4, 0.52, 960, 110], ['canopy', 4.1, 0.48, 640, 44], ['shell', 5.3, 0.55, 880, 80]] },
   { id: 'tidewater', name: 'Tidewater', x: 12200, z: 2400, r: 1150, seed: 5, palette: 'jade',
-    towers: [['helix', 0, 0, 1620, 92, { petals: 6, twist: 0.9 }], ['canopy', 1.2, 0.5, 700, 48], ['lattice', 3.3, 0.52, 980, 90], ['helix', 5.0, 0.5, 820, 56, { petals: 4, twist: -1.3 }]] },
+    towers: [['twin', 0, 0, 1620, 92, { at: [0, -30] }], ['canopy', 0, 0, 700, 48, { at: [-370, -330] }], ['lattice', 0, 0, 980, 90, { at: [390, -380] }], ['helix', 0, 0, 820, 56, { petals: 4, twist: -1.3, at: [-575, 725] }]] },
   { id: 'sunward', name: 'Sunward', x: 16500, z: -1500, r: 1000, seed: 7, palette: 'bronze',
-    towers: [['shell', 0, 0, 1420, 120], ['lens', 1.9, 0.5, 780, 90], ['helix', 4.2, 0.5, 700, 50, { petals: 5, twist: 1.4 }]] },
+    towers: [['receiver', 0, 0, 1420, 120], ['lens', 1.9, 0.5, 780, 90], ['helix', 4.2, 0.5, 700, 50, { petals: 5, twist: 1.4 }]] },
   { id: 'seraph', name: 'Seraph', x: 8200, z: 9400, r: 1050, seed: 11, palette: 'rose',
-    towers: [['lens', 0, 0, 1500, 150], ['helix', 0.9, 0.52, 900, 60, { petals: 6, twist: 1.0 }], ['canopy', 3.0, 0.5, 620, 42], ['lattice', 4.9, 0.5, 760, 74]] },
+    towers: [['seraph', 0, 0, 1500, 150], ['lens', 2.426, 0.565, 900, 70], ['canopy', 0.332, 0.565, 620, 42], ['lens', 4.520, 0.565, 760, 74]] },
   { id: 'southmarch', name: 'Southmarch', x: 0, z: 13800, r: 1250, seed: 13, palette: 'pearl',
-    towers: [['helix', 0, 0, 2100, 100, { petals: 6, twist: 1.2 }], ['lattice', 1.6, 0.52, 1100, 100], ['shell', 3.4, 0.5, 940, 86], ['lens', 5.0, 0.52, 820, 100], ['canopy', 2.5, 0.72, 560, 40]] },
+    towers: [['mast', 0, 0, 2100, 100, { at: [0, -170] }], ['lattice', 0, 0, 1100, 100, { at: [-650, 40] }], ['shell', 0, 0, 940, 86, { at: [-600, -560] }], ['lens', 0, 0, 820, 100, { at: [600, -440] }], ['canopy', 0, 0, 560, 40, { at: [560, 830] }]] },
   { id: 'coral', name: 'Coral Reach', x: -7800, z: 9600, r: 1100, seed: 17, palette: 'sand',
-    towers: [['canopy', 0, 0, 1180, 70], ['helix', 1.4, 0.5, 1020, 64, { petals: 5, twist: -0.9 }], ['lens', 3.6, 0.5, 860, 96], ['helix', 5.2, 0.55, 680, 48, { petals: 3, twist: 1.5 }]] },
-  { id: 'westmere', name: 'Westmere', x: -12000, z: 3000, r: 1300, seed: 19, palette: 'silver',
-    towers: [['lattice', 0, 0, 1720, 140], ['shell', 0.8, 0.52, 1060, 90], ['helix', 2.6, 0.5, 1240, 72, { petals: 6, twist: 0.7 }], ['canopy', 4.2, 0.5, 660, 46], ['lens', 5.4, 0.52, 900, 104]] },
+    towers: [['coral', 0, 0, 1180, 70], ['helix', 0, 0, 1020, 64, { petals: 5, twist: -0.9, at: [305, 525] }], ['lens', 0, 0, 860, 96, { at: [-530, -265] }], ['helix', 0, 0, 680, 48, { petals: 3, twist: 1.5, at: [285, -530] }]] },
+  { id: 'westmere', name: 'Westmere', x: -12000, z: 3000, r: 1300, seed: 19, palette: 'marble',
+    towers: [['deco', 0, 0, 1720, 140], ['shell', 0.8, 0.52, 1060, 90], ['helix', 2.6, 0.5, 1240, 72, { petals: 6, twist: 0.7 }], ['canopy', 4.2, 0.5, 660, 46], ['lens', 5.4, 0.52, 900, 104]] },
 ];
 
 export const FLOATING_ISLANDS = [

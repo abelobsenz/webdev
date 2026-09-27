@@ -131,17 +131,19 @@ export class World {
     const raw = (x, z) => this.sampler.get(x, z);
     // bridges to the Outer Wards leave from the rim: the rim towns keep clear of them
     this.wardBridgePaths = wardBridgePaths(gh);
-    this.plan = planCity({ ground: raw, towers: this.towers, promenades: [...this.infra.promenades, ...this.wardBridgePaths.map((b) => b.path)], urbanMask, stations: this.infra.stations });
+    // the rim bridgeheads (podium, deck start and maglev station) keep the rim towns clear
+    const heads = this.wardBridgePaths.filter((b) => b.head).map((b) => ({ x: b.head.x, z: b.head.z, r: Math.hypot(b.head.hw, b.head.hd) + 6, end: 'rim' }));
+    this.plan = planCity({ ground: raw, towers: this.towers, promenades: [...this.infra.promenades, ...this.wardBridgePaths.map((b) => b.path)], urbanMask, stations: [...this.infra.stations, ...heads] });
     NATURE_U.uStreets.value = this.plan.field.texture();
     NATURE_U.uStreetFrame.value = this.plan.field.frameTexture();
     progress(0.55); await tick();
     this.lowrise = buildBuildings(this.scene, this.plan, raw, this.settings);
     this.updaters.push({ applyQuality: (s) => this.lowrise.applyQuality(s), update: (dt, t) => this.lowrise.update(dt, t, this.app.camera) });
     this.streetscape = buildStreetscape(this.scene, this.plan, raw, this.infra.promLamps);
-    // Greater Meridian: the Outer Wards (platforms, bridges, their towns and streets)
-    this.metro = buildMetro(this.scene, this.wardTowers, this.wardBridgePaths, gh);
-    this.wardTowns = buildBuildings(this.scene, this.metro.plan, gh, this.settings);
-    this.updaters.push({ applyQuality: (s) => this.wardTowns.applyQuality(s), update: (dt, t) => this.wardTowns.update(dt, t, this.app.camera) });
+    // Greater Meridian: the Outer Wards (platforms, their towns, landmarks, bridges, stations)
+    this.metro = buildMetro(this.scene, this.wardTowers, this.wardBridgePaths.map((b) => b), gh, this);
+    this.wardTowns = { placements: this.metro.towns.flatMap((t) => t.placements), isFree: (x, z, r) => this.metro.towns.every((t) => t.isFree(x, z, r)) };
+    this.updaters.push({ applyQuality: (s) => this.metro.applyQuality(s), update: (dt, t) => this.metro.update(dt, t, this.app.camera) });
     this.wardStreets = buildStreetscape(this.scene, this.metro.plan, gh);
     // and the metropolitan horizon beyond: towns of towers on the far islands and massif
     this.skyline = buildSkyline(this.scene);

@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { loftSections, latheFacade, sweepTube, mergeClean } from './geom.js';
 import { createFacadeMaterial } from './facade.js';
 import { mulberry32 } from './noise.js';
+import { CROWN_BUILDERS } from './crowns.js';
 
 const TAU = Math.PI * 2;
 
@@ -193,7 +194,7 @@ function shellTower(t, rnd) {
   return { geo: mergeClean([body, spire]), top: H * 1.08, collide: (y) => R * (1 - 0.72 * Math.pow(y / H, 1.3)) };
 }
 
-const BUILDERS = { helix: helixTower, canopy: canopyTower, lens: lensTower, lattice: latticeTower, shell: shellTower };
+const BUILDERS = { helix: helixTower, canopy: canopyTower, lens: lensTower, lattice: latticeTower, shell: shellTower, ...CROWN_BUILDERS };
 const PAL_CYCLE = ['pearl', 'jade', 'bronze', 'silver', 'rose', 'pearl', 'silver', 'jade'];
 
 export function buildTowers(list, groundHeight, scene) {
@@ -212,7 +213,7 @@ export function buildTowers(list, groundHeight, scene) {
     mesh.receiveShadow = true;
     mesh.name = t.name || `tower-${t.seed}`;
     scene.add(mesh);
-    out.push({ def: t, mesh, baseY, top: baseY + res.top, discs: res.discs, plates: res.plates, collide: res.collide });
+    out.push({ def: t, mesh, baseY, top: baseY + res.top, discs: res.discs, plates: res.plates, collide: res.collide, berths: res.berths, receiver: res.receiver, tips: res.tips });
   }
   return out;
 }

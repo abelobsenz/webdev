@@ -541,3 +541,6 @@ export function buildInfrastructure(scene, groundHeight, rawHeight) {
   for (let s = 0; s < 12; s++) { const a = (s / 12) * TAU; beacons.push(SKYPORT.x + Math.cos(a) * SKYPORT.r, SKYPORT.y + 14, SKYPORT.z + Math.sin(a) * SKYPORT.r); }
   return { promenades: prom.paths, promLamps: prom.lamps, stations: prom.stations, pads: lotus.pads, colliders, beacons, berths: sp.berths };
 }
+
+// the seed-pod maglev terminal, reused by the Outer Wards and the transit network
+export { station as maglevStation, portal as deckPortal };
