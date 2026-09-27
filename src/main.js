@@ -241,7 +241,9 @@ class App {
       const lp = this._lastExpPose || (this._lastExpPose = { pos: this.camera.position.clone(), h: this.hours });
       const jump = lp.pos.distanceTo(this.camera.position) > 300 || Math.abs(lp.h - this.hours) > 0.2;
       lp.pos.copy(this.camera.position); lp.h = this.hours;
-      p.renderExposure(dt, (0.2 / exposure) * (1 - 0.45 * U.uNight.value), jump);
+      p.adaptMat.uniforms.uRange.value = 1.2;
+      p.renderExposure(dt, (0.2 / exposure) * (1 - 0.45 * U.uNight.value), jump || !!(this.space && this.space._cityReset));
+      if (this.space) this.space._cityReset = false;
     }
     this.updateGrade();
     // sun rays

@@ -38,7 +38,7 @@ void main() {
   vec4 w = modelMatrix * vec4(position, 1.0);
   vWorld = w.xyz;
   vN = normalize(mat3(modelMatrix) * normal);
-  gl_Position = projectionMatrix * viewMatrix * w;
+  gl_Position = projectionMatrix * (modelViewMatrix * vec4(position, 1.0));
 }
 `;
 
@@ -63,6 +63,13 @@ ${SUNLIGHT_GLSL}
 ${NOISE_GLSL}
 
 float aaStep(float e, float x, float w) { return smoothstep(e - w, e + w, x); }
+// lamps every P km, w km long, filtered so a sub-pixel lamp keeps its energy spread over
+// the pixel instead of popping on and off as the view moves
+float aaLamp(float x, float P, float w) {
+  float d = abs(fract(x / P + 0.5) - 0.5) * P;
+  float fw = max(fwidth(x), 1e-5);
+  return clamp(1.0 - d / max(w, fw), 0.0, 1.0) * min(1.0, w / fw);
+}
 
 void main() {
   float u = vRing.x, v = vRing.y, part = vRing.z;
@@ -79,7 +86,7 @@ void main() {
   float dayBelow = max(dot(rhat, uSunDir), 0.0);
   vec3 earthshine = vec3(0.35, 0.5, 0.8) * dayBelow * uSunE * 0.09 * max(dot(N, -rhat), 0.0);
   float fu = max(fwidth(u), 1e-4);                 // km per pixel along the ring
-  float detail = 1.0 - smoothstep(0.15, 1.2, fu);  // fade fine patterns with distance
+  float detail = 1.0 - smoothstep(0.06, 0.35, fu);  // fade fine patterns well before they alias
   float hubPh = fract(u / uHub);
   float hub = 1.0 - smoothstep(0.012, 0.03, abs(hubPh - 0.5));
   float nightSide = 1.0 - smoothstep(-0.05, 0.1, dot(rhat, uSunDir));
@@ -110,9 +117,11 @@ void main() {
       vec3 diff = alb / 3.14159 * sunL * ndl;
       // glass roof: glints
       vec3 H = normalize(V + uSunDir);
-      float spec = pow(max(dot(N, H), 0.0), 700.0) * 5.0 + pow(max(dot(N, H), 0.0), 60.0) * 0.25;
+      // a broad sheen, not a razor glint: a pinpoint 700-power highlight on the curved
+      // roof slid across pixels and twinkled
+      float spec = pow(max(dot(N, H), 0.0), 220.0) * 1.1 + pow(max(dot(N, H), 0.0), 40.0) * 0.18;
       float F = 0.04 + 0.96 * pow(clamp(1.0 - dot(N, V), 0.0, 1.0), 5.0);
-      col = diff + min(sunL * spec * F * (0.4 + 0.6 * river), vec3(8.0));
+      col = diff + min(sunL * spec * F * (0.4 + 0.6 * river), vec3(2.5));
       col += vec3(0.02, 0.03, 0.05) * F * uSunE * 0.05;
       // lights
       float cell = hash12(floor(vec2(u / 0.35, v * uWidth / 0.35)));
@@ -129,7 +138,7 @@ void main() {
       alb *= 1.0 - 0.25 * trus;
       col = alb / 3.14159 * (sunL * ndl + earthshine * 3.0);
       vec3 H = normalize(V + uSunDir);
-      col += sunL * pow(max(dot(N, H), 0.0), 120.0) * 0.4;
+      col += sunL * pow(max(dot(N, H), 0.0), 70.0) * 0.25;
       float cell = hash12(floor(vec2(u / 0.8, v * 24.0)));
       float lit = mix(0.3, step(0.62, cell) * (0.6 + cell), detail);
       float band = smoothstep(0.34, 0.3, abs(v));
@@ -137,7 +146,8 @@ void main() {
       em += uHabitatColor * hub * 0.5;
       // travelling light pulses along the keel
       float keel = 1.0 - smoothstep(0.004, 0.012, abs(v));
-      em += uStreamColor * keel * (0.08 + 1.6 * pow(fract(u / 90.0 - uTime * 0.12 * uSpeed), 18.0));
+      float kp = fract(u / 90.0 - uTime * 0.12 * uSpeed) - 0.5;
+      em += uStreamColor * keel * (0.08 + 0.9 * exp(-kp * kp * 160.0));
     }
   } else if (part < 1.5) {
     // ---- retaining walls ----
@@ -146,19 +156,21 @@ void main() {
     alb *= 1.0 - 0.3 * rib * detail;
     col = alb / 3.14159 * (sunL * ndl + earthshine * 2.0);
     vec3 H = normalize(V + uSunDir);
-    col += sunL * pow(max(dot(N, H), 0.0), 200.0) * 0.8;
+    col += sunL * pow(max(dot(N, H), 0.0), 90.0) * 0.3;
     float stripe = 1.0 - smoothstep(0.0, 0.06, abs(v - 0.9));
     em += uHabitatColor * stripe * 0.25;
     // small soft-pulsing marker lamps (not long strips switching on and off)
-    float beacon = step(0.9985, fract(u / 25.0)) * stripe * (0.5 + 0.5 * sin(uTime * 2.2 + floor(u / 25.0) * 1.7));
-    em += vec3(1.0, 0.45, 0.3) * beacon * 1.4;
+    float beacon = aaLamp(u, 25.0, 0.04) * stripe * (0.6 + 0.4 * sin(uTime * 1.2 + floor(u / 25.0) * 1.7));
+    em += vec3(1.0, 0.45, 0.3) * beacon * 0.9;
   } else {
     // ---- rotor tubes: the mass stream that holds the ring up ----
     vec3 alb = uAlbedo * 0.6;
     col = alb / 3.14159 * (sunL * ndl + earthshine * 2.0);
-    float pulse = pow(fract(u / 37.0 - uTime * 0.9 * uSpeed * sign(v)), 14.0);
+    // soft travelling packets (a hard-edged sawtooth crawled and shimmered)
+    float pp = fract(u / 37.0 - uTime * 0.9 * uSpeed * sign(v)) - 0.5;
+    float pulse = exp(-pp * pp * 120.0);
     float rim = pow(max(1.0 - abs(dot(N, V)), 0.0), 2.0);
-    em += uStreamColor * (0.12 + 1.6 * pulse * detail + 0.3 * rim);
+    em += uStreamColor * (0.12 + 0.7 * pulse * detail + 0.3 * rim);
   }
   gl_FragColor = vec4(col + em, 1.0);
 }
@@ -250,13 +262,25 @@ void main() {
 
 const TETHER_FRAG = /* glsl */ `
 uniform vec3 uColor;
+float aaBand(float x, float P, float w) {
+  // lamps every P km, w km long: a filtered band whose energy stays constant once it is
+  // thinner than a pixel, so beacons never pop in and out as the view moves
+  float d = abs(fract(x / P + 0.5) - 0.5) * P;
+  float fw = max(fwidth(x), 1e-5);
+  float W = max(w, fw);
+  return clamp(1.0 - d / W, 0.0, 1.0) * min(1.0, w / fw);
+}
 void main() {
   vec3 sunL = spaceSunlight(uTransmittanceLUT, vWorld, uSunDir) * uSunE;
   float alt = vData.x;
-  vec3 col = vec3(0.55, 0.58, 0.62) * sunL * 0.05 + vec3(0.02, 0.03, 0.05);
-  float beacon = step(0.93, fract(alt / 40.0)) * (0.6 + 0.4 * sin(uTime * 3.0 + alt));
-  float climb = pow(fract(alt / 90.0 - uSimT * 0.0067 + vData.y * 0.31), 50.0);
-  col += uColor * beacon * 1.2 + vec3(0.8, 0.9, 1.0) * climb * 6.0;
+  float x = clamp(vAcross, -1.0, 1.0);
+  float cyl = sqrt(max(1.0 - x * x, 0.0));
+  float spec = exp(-((x - 0.35) * 5.0) * ((x - 0.35) * 5.0));
+  vec3 col = vec3(0.55, 0.58, 0.62) * sunL * (0.03 + 0.04 * cyl + 0.035 * spec) + vec3(0.02, 0.03, 0.05) * (0.5 + 0.5 * cyl);
+  float beacon = aaBand(alt, 40.0, 0.12) * (0.75 + 0.25 * sin(uTime * 1.5 + alt));
+  // climber pulses run on real time (in sim time they raced up the cable at warp)
+  float climb = aaBand(alt + uTime * 0.6 - vData.y * 28.0, 90.0, 0.4);
+  col += uColor * beacon * 1.2 + vec3(0.8, 0.9, 1.0) * climb * 3.0 * cyl;
   float fade = smoothstep(0.0, 12.0, alt) * (1.0 - smoothstep(560.0, 618.0, alt) * 0.5);
   gl_FragColor = vec4(col * vCoverage * fade, 0.0);
 }

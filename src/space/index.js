@@ -22,6 +22,8 @@ const easeInOut = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) 
 const _v = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
 const _v3 = new THREE.Vector3();
+const _v4 = new THREE.Vector3();
+const _fwd = new THREE.Vector3();
 const _qg = new THREE.Quaternion();
 const _q = new THREE.Quaternion();
 
@@ -121,7 +123,7 @@ export class SpaceMode {
     const el = this.elevator;
     this.addBody('earth', [this.earth.mesh], () => _v.set(0, 0, 0), R_TOP + 4, { solid: true });
     this.addBody('rings', [this.rings.group], () => _v.set(0, 0, 0), R_EARTH + 2140);
-    this.addBody('junction', [el.junction], () => el.junction.getWorldPosition(_v), 8, { solid: true });
+    this.addBody('junction', [el.junction], () => el.junction.getWorldPosition(_v), 8, { solid: true, hint: 0.3 });
     const segA = new THREE.Vector3(), segB = new THREE.Vector3(), segP = new THREE.Vector3();
     this.addBody('tether', [el.tether, el.climbers], null, 0, {
       interval: (cam) => {
@@ -132,8 +134,8 @@ export class SpaceMode {
         return [segP.distanceTo(cam), Math.max(segA.distanceTo(cam), segB.distanceTo(cam))];
       },
     });
-    this.addBody('harbour', [el.harbour], () => el.harbour.getWorldPosition(_v), 40, { solid: true });
-    this.addBody('counter', [el.counter], () => el.counter.getWorldPosition(_v), 20, { solid: true });
+    this.addBody('harbour', [el.harbour], () => el.harbour.getWorldPosition(_v), 40, { solid: true, hint: 0.4 });
+    this.addBody('counter', [el.counter], () => el.counter.getWorldPosition(_v), 20, { solid: true, hint: 0.3 });
     // Moon, Sun and swarm, the Hearth
     this.moon = new Moon(this);
     this.scene.add(this.moon.group);
@@ -210,6 +212,7 @@ export class SpaceMode {
   toggle() { if (this.mode === 'off') this.enter(); else if (this.mode === 'space') this.exit(); }
 
   enter(immediate = false) {
+    this._expReset = true;
     if (this.mode !== 'off' && !(immediate && this.mode === 'ascend')) return;
     this.build();
     const app = this.app;
@@ -238,6 +241,7 @@ export class SpaceMode {
   }
 
   exit(immediate = false) {
+    this._cityReset = true;
     if (this.mode === 'off') return;
     const app = this.app;
     this.rig.enabled = false;
@@ -425,13 +429,21 @@ export class SpaceMode {
     if (!isFinite(this.exposure)) this.exposure = want;
     const f = p.finalMat.uniforms;
     f.uExposure.value = this.exposure;
-    p.downMat.uniforms.uThreshold.value = 1.0 / this.exposure;
-    p.downMat.uniforms.uKnee.value = 0.6 / this.exposure;
+    // small bright specks (glints, window lights) should not each bloom into a flash
+    p.downMat.uniforms.uThreshold.value = 1.8 / this.exposure;
+    p.downMat.uniforms.uKnee.value = 0.9 / this.exposure;
     // the Sun is handled analytically (glare below): keep its disc out of the bloom chain,
     // or the screen-space halo would switch on and off as the disc crosses the frame edge
     p.downMat.uniforms.uClamp.value = 40 / this.exposure;
     f.uTime.value = this.realTime;
     p.renderBloom();
+    // measured exposure on top of the analytic estimate: sunlit megastructures filling
+    // the frame (the Halo deck below you at an orbital sunrise) no longer white it out
+    p.adaptMat.uniforms.uRange.value = 2.6;
+    // in orbit the meter only ever pulls exposure down (sunrise over the limb, a sunlit
+    // hull filling the view); a mostly black frame must not lift a white station into glare
+    p.renderExposure(dt || 0.016, 0.16 / this.exposure, this._expReset !== false, 0.0);
+    this._expReset = false;
     f.uGain.value.set(1.0, 1.0, 1.0);
     f.uLift.value.set(0.0, 0.0005, 0.0012);
     f.uSaturation.value = 1.1;
@@ -514,7 +526,7 @@ export class SpaceMode {
   _autoExposure() {
     const cam = this.camera;
     const camPos = cam.position;
-    const fwd = _v.set(0, 0, -1).applyQuaternion(cam.quaternion);
+    const fwd = _fwd.set(0, 0, -1).applyQuaternion(cam.quaternion);
     const halfFov = THREE.MathUtils.degToRad(cam.fov) * 0.5;
     let lit = 0;
     // Earth: screen coverage x sunlit fraction of the visible disc
@@ -525,6 +537,22 @@ export class SpaceMode {
     const phase = 0.5 + 0.5 * camPos.dot(this.sim.sunDir) / dE;
     lit += cover * phase * 1.5;
     for (const m of this.modules) if (m.exposureHint) lit += m.exposureHint(cam, this);
+    // sunlit stations and ships: without this a white hull filling the frame was exposed
+    // for empty space and clipped
+    for (const b of this.bodies) {
+      if (!b.hint || !b.center) continue;
+      const c = _v2.copy(b.center());
+      const rel = _v3.copy(c).sub(camPos);
+      const d = Math.max(rel.length(), 1e-3);
+      const ang = Math.asin(Math.min(1, b.radius / d));
+      const off = Math.acos(THREE.MathUtils.clamp(rel.dot(fwd) / d, -1, 1));
+      if (off > ang + halfFov * 1.2) continue;
+      const cov = THREE.MathUtils.clamp((ang * ang) / (halfFov * halfFov), 0, 1) * smooth(ang + halfFov * 1.2, Math.max(ang - halfFov, 0), off);
+      // in the Earth's shadow?
+      const along = c.dot(this.sim.sunDir);
+      const sunlit = along > 0 ? 1 : smooth(R_EARTH - 50, R_EARTH + 150, _v4.copy(c).addScaledVector(this.sim.sunDir, -along).length());
+      lit += cov * b.hint * sunlit;
+    }
     lit = THREE.MathUtils.clamp(lit, 0, 1);
     this.litEstimate = lit;
     return THREE.MathUtils.lerp(2.4, 0.46, Math.pow(lit, 0.7));

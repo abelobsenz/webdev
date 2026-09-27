@@ -22,7 +22,10 @@ void main() {
   vec4 w = modelMatrix * vec4(position, 1.0);
   vWorld = w.xyz;
   vN = normalize(mat3(modelMatrix) * normal);
-  gl_Position = projectionMatrix * viewMatrix * w;
+  // camera-relative projection (modelViewMatrix is composed in double precision on the
+  // CPU): world coordinates 42,000 km out, in float32, jittered vertices by metres each
+  // frame and made coincident parts z-fight as the Harbour turned
+  gl_Position = projectionMatrix * (modelViewMatrix * vec4(position, 1.0));
 }
 `;
 
@@ -63,7 +66,9 @@ void main() {
   vec3 pointL = uPointColor * max(dot(N, pDir), 0.0);
   vec3 cellP = vLocal / uPattern;
   float fw = max(max(fwidth(cellP.x), fwidth(cellP.y)), fwidth(cellP.z));
-  float detail = 1.0 - smoothstep(0.3, 1.2, fw);
+  // fine cell patterns fade to their average well before they reach a pixel, so lit
+  // windows on moving or spinning hulls never sparkle frame to frame
+  float detail = 1.0 - smoothstep(0.07, 0.3, fw * 4.0);
   float n = hash13(floor(cellP * vec3(1.0, 1.0, 1.0)));
   vec3 alb = vec3(0.55, 0.56, 0.58);
   float rough = 0.35, metal = 0.4;
@@ -71,7 +76,7 @@ void main() {
   if (k == 1.0) {
     alb = vec3(0.62, 0.62, 0.6) * (0.85 + 0.15 * mix(0.5, n, detail));
     float lit = step(0.45, hash13(floor(cellP * vec3(2.0, 4.0, 2.0))));
-    em = vec3(1.0, 0.8, 0.55) * mix(0.25, lit, detail) * 0.35;
+    em = vec3(1.0, 0.8, 0.55) * mix(0.55, lit, detail) * 0.26;
   } else if (k == 2.0) {
     alb = vec3(0.03, 0.05, 0.1);
     rough = 0.08; metal = 0.9;
@@ -95,12 +100,12 @@ void main() {
   vec3 H = normalize(V + uSunDir);
   // glints stay physically shaped but bounded: flat kilometre-scale panels used to flare
   // the whole screen white for an instant as the view swept through the mirror angle
-  float sp = pow(max(dot(N, H), 0.0), mix(160.0, 12.0, rough)) * mix(1.6, 0.35, rough);
+  float sp = pow(max(dot(N, H), 0.0), mix(70.0, 10.0, rough)) * mix(0.55, 0.25, rough);
   vec3 spec = mix(vec3(0.04), alb, metal) * sp;
   vec3 Hp = normalize(V + pDir);
-  float spp = pow(max(dot(N, Hp), 0.0), mix(160.0, 12.0, rough)) * mix(1.6, 0.35, rough);
+  float spp = pow(max(dot(N, Hp), 0.0), mix(70.0, 10.0, rough)) * mix(0.55, 0.25, rough);
   float diffK = k == 6.0 ? 0.03 : (1.0 - metal * 0.7);
-  vec3 col = alb * diffK / 3.14159 * (sunL * ndl + earthshine + pointL) + min(spec * sunL * ndl, vec3(6.0)) + min(mix(vec3(0.04), alb, metal) * spp * pointL, vec3(6.0));
+  vec3 col = alb * diffK / 3.14159 * (sunL * ndl + earthshine + pointL) + min(spec * sunL * ndl, sunL * 0.6) + min(mix(vec3(0.04), alb, metal) * spp * pointL, pointL * 0.6);
   col += alb * 0.004;
   col += em;
   // (no random blinking hull cells: they read as flashing white quads once bloomed;

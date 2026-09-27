@@ -8,14 +8,28 @@ import { R_EARTH, GEO_ALT, COUNTERWEIGHT_ALT, MERIDIAN_LON, bodyDir } from './si
 
 const CLIMB_PERIOD = 53400;         // s: surface to GEO at ~2,400 km/h
 const TETHER_FRAG = /* glsl */ `
+float aaBand(float x, float P, float w) {
+  // lamps every P km, w km long: a filtered band whose energy stays constant once it is
+  // thinner than a pixel, so beacons never pop in and out as the view moves
+  float d = abs(fract(x / P + 0.5) - 0.5) * P;
+  float fw = max(fwidth(x), 1e-5);
+  float W = max(w, fw);
+  return clamp(1.0 - d / W, 0.0, 1.0) * min(1.0, w / fw);
+}
 void main() {
   vec3 sunL = spaceSunlight(uTransmittanceLUT, vWorld, uSunDir) * uSunE;
   float alt = vData.x;
-  vec3 col = vec3(0.6, 0.62, 0.66) * sunL * 0.06 + vec3(0.03, 0.045, 0.07);
-  float beacon = step(0.96, fract(alt / 250.0)) * (0.6 + 0.4 * sin(uTime * 3.0 + alt));
+  // a round cable, not a flat strip: limb darkening across the ribbon and a specular
+  // line where the sunlit side faces the viewer
+  float x = clamp(vAcross, -1.0, 1.0);
+  float cyl = sqrt(max(1.0 - x * x, 0.0));
+  float spec = exp(-((x - 0.35) * 5.0) * ((x - 0.35) * 5.0));
+  vec3 col = vec3(0.6, 0.62, 0.66) * sunL * (0.035 + 0.05 * cyl + 0.04 * spec) + vec3(0.03, 0.045, 0.07) * (0.5 + 0.5 * cyl);
+  // sparse marker lights, not dashes
+  float beacon = aaBand(alt, 250.0, 0.18) * (0.75 + 0.25 * sin(uTime * 1.5 + alt));
   col += vec3(1.0, 0.72, 0.4) * beacon * 1.5;
   // faint glow sheath where the tether carries power
-  col += vec3(0.35, 0.6, 1.0) * 0.08;
+  col += vec3(0.35, 0.6, 1.0) * 0.06 * cyl;
   float fade = smoothstep(0.0, 3.0, alt);
   gl_FragColor = vec4(col * vCoverage * fade, 0.0);
 }
@@ -224,6 +238,8 @@ export class Elevator {
       m.uniforms.uTime.value = realTime;
       m.uniforms.uEarthPos.value.set(0, 0, 0);
     }
-    for (const r of this.harbourRings) r.rotation.y = r.userData.dir * r.userData.omega * (sim.t % 1e6);
+    // habitat rings turn at their real 1 g rate in real time: driven by warped sim time
+    // they spun many times per second and strobed
+    for (const r of this.harbourRings) r.rotation.y = r.userData.dir * r.userData.omega * (realTime % 1e5);
   }
 }

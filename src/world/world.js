@@ -153,7 +153,7 @@ export class World {
     this.updaters.push(this.chorus);
     this.clouds = new Clouds(this.scene);
     this.updaters.push({ update: (dt) => this.clouds.update(dt, this.app.camera) });
-    this.people = new People(this.scene, this.settings);
+    this.people = new People(this.scene, this.settings, this);
     this.updaters.push({ applyQuality: (s) => this.people.applyQuality(s), update: (dt, t) => this.people.update(dt, t, this.app.camera) });
     // aircraft beacons on every summit
     const beacons = [...this.axis.beacons, ...this.infra.beacons];

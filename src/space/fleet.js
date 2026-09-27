@@ -76,7 +76,7 @@ export class Fleet {
       space.scene.add(this.approach);
       this.approachShip = m;
       this.crafts.push(m);
-      space.addBody('liner', [this.approach], () => this.approach.getWorldPosition(_v), 2.2, { solid: true });
+      space.addBody('liner', [this.approach], () => this.approach.getWorldPosition(_v), 2.2, { solid: true, hint: 0.45 });
     }
     // ---- tenders near the Halo
     const tender = buildTender(620);
@@ -103,7 +103,7 @@ export class Fleet {
       this.crafts.push(m);
     }
     space.scene.add(this.tenderGroup);
-    space.addBody('tenders', [this.tenderGroup], () => this.tenderGroup.getWorldPosition(_v), 6, { solid: true });
+    space.addBody('tenders', [this.tenderGroup], () => this.tenderGroup.getWorldPosition(_v), 6, { solid: true, hint: 0.25 });
     // ---- Selene Works over the Moon's near side
     const ref = buildRefinery(1);
     this.refinery = new THREE.Group();
@@ -120,7 +120,7 @@ export class Fleet {
     this.refineryMesh = rm;
     this.crafts.push(rm);
     space.scene.add(this.refinery);
-    space.addBody('selene', [this.refinery], () => this.refinery.getWorldPosition(_v), 6, { solid: true });
+    space.addBody('selene', [this.refinery], () => this.refinery.getWorldPosition(_v), 6, { solid: true, hint: 0.35 });
     this.moonAlt = 2600;
   }
 

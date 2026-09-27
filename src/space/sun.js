@@ -106,13 +106,15 @@ void main() {
   vec3 w = uSunPos + p;
   vec4 mv = viewMatrix * vec4(w, 1.0);
   gl_Position = projectionMatrix * mv;
-  // glint: each collector tilts a little differently, so it flashes as it orbits
+  // glint: each collector tilts a little differently, so it brightens as it orbits
   vec3 toSun = normalize(-p);
   vec3 toCam = normalize(cameraPosition - w);
   float h = hash11(aS.y * 91.7 + aS.x * 13.1);
-  float gl = pow(max(dot(normalize(toSun + toCam), normalize(-p + vec3(h - 0.5, fract(h * 7.0) - 0.5, fract(h * 13.0) - 0.5) * 0.9 * length(p))), 0.0), 60.0);
-  vB = (0.18 + 6.0 * gl + 0.6 * step(0.985, fract(h * 31.0 + uTime * 0.07))) * uFade;
-  gl_PointSize = uPx * (1.0 + gl * 1.5);
+  float gl = pow(max(dot(normalize(toSun + toCam), normalize(-p + vec3(h - 0.5, fract(h * 7.0) - 0.5, fract(h * 13.0) - 0.5) * 0.9 * length(p))), 0.0), 16.0);
+  // a soft, slow shimmer as collectors turn toward us; no random on/off twinkles, which
+  // read as flashing lights
+  vB = (0.18 + 1.4 * gl) * uFade;
+  gl_PointSize = uPx;
 }
 `;
 const SWARM_FRAG = /* glsl */ `

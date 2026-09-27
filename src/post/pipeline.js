@@ -887,7 +887,7 @@ export class Pipeline {
    * (1x1 float texture read by the composite). expectedLum = the average scene
    * luminance the designed exposure curve expects at this time of day.
    */
-  renderExposure(dt, expectedLum, reset = false) {
+  renderExposure(dt, expectedLum, reset = false, rangeUp = null) {
     this.timer.begin('exposure');
     const r = this.renderer;
     const fs = this.fs;
@@ -901,7 +901,7 @@ export class Pipeline {
     a.uDt.value = dt;
     a.uReset.value = (reset || this.expReset) ? 1 : 0;
     a.uStrength.value = this.settings.autoExposure === false ? 0 : 0.65;
-    a.uRangeUp.value = 0.7 - 0.5 * U.uNight.value;
+    a.uRangeUp.value = rangeUp ?? (0.7 - 0.5 * U.uNight.value);
     fs.material = this.adaptMat;
     fs.render(r, next);
     this.expIdx = 1 - this.expIdx;
