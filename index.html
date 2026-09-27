@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#05080e" />
 <title>Meridian</title>
 <meta name="description" content="An explorable real-time vision of humanity's capital city in the year 5026." />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -12,26 +13,46 @@
 <body>
 <canvas id="scene" aria-label="Real-time 3D view of Meridian"></canvas>
 
+<!-- cinematic layers: letterbox bars, fades, subtitles (shared by the intro and the tour) -->
+<div id="cinema" aria-hidden="true"><div class="bar top"></div><div class="bar bottom"></div></div>
+<div id="chapter" aria-live="polite"><p class="eyebrow" id="chapter-eyebrow"></p><p class="chapter-title" id="chapter-title"></p></div>
+<div id="fade" aria-hidden="true"></div>
+
 <div id="loader" role="status" aria-live="polite">
   <div class="loader-inner">
+    <div class="emblem" aria-hidden="true">
+      <div class="emb-halo"></div>
+      <div class="emb-ring r1"><i></i></div>
+      <div class="emb-ring r2"><i></i></div>
+      <div class="emb-planet"></div>
+      <div class="emb-axis"></div>
+      <div class="emb-climber"></div>
+    </div>
     <p class="eyebrow">Terran Concord · 5026 CE</p>
     <div class="wordmark">Meridian</div>
     <div class="loader-track"><div id="loader-bar"></div></div>
-    <div id="loader-status">Preparing the atmosphere</div>
+    <div class="loader-meta"><span id="loader-status">Preparing the atmosphere</span><span id="loader-pct">0%</span></div>
+    <ol class="loader-stages" id="loader-stages">
+      <li data-at="0">Sky</li><li data-at="0.02">Terrain</li><li data-at="0.56">Architecture</li><li data-at="0.82">Life</li><li data-at="0.94">Light</li>
+    </ol>
   </div>
 </div>
 
 <div id="intro" hidden>
   <div class="intro-inner">
-    <p class="eyebrow">The year 5026 · Equatorial Pacific · 0° latitude</p>
-    <h1 class="wordmark big">Meridian</h1>
+    <p class="eyebrow intro-eyebrow">The year 5026 · Equatorial Pacific · 0° latitude</p>
+    <h1 class="wordmark big" id="intro-title">Meridian</h1>
+    <div class="intro-rule" aria-hidden="true"></div>
     <p class="intro-lede">This is the capital of a united humanity. It is built into a restored caldera lagoon on the equator, beneath the orbital rings, around the anchor of the space elevator. You can fly anywhere you like, or take the guided tour.</p>
     <div class="intro-actions">
       <button id="btn-tour" class="primary" type="button">Take the guided tour</button>
       <button id="btn-explore" type="button">Explore freely</button>
     </div>
-    <label class="check"><input type="checkbox" id="opt-audio-intro" checked /> <span>Ambient sound</span></label>
-    <p class="intro-keys"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> fly · drag to look · <kbd>Shift</kbd> boost · scroll to change speed · <kbd>Z</kbd> zoom · <kbd>H</kbd> hide interface</p>
+    <p class="intro-keys"><span class="keys-desktop"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> fly · drag to look · <kbd>M</kbd> atlas · <kbd>K</kbd> photo mode · <kbd>H</kbd> hide interface</span><span class="keys-touch">Drag to look · use the stick to fly</span></p>
+  </div>
+  <div class="intro-corner">
+    <button id="intro-sound" class="chip" type="button" aria-pressed="false"><span class="snd-ico" aria-hidden="true"></span><span class="snd-label">Sound off</span></button>
+    <button id="intro-skip" class="chip" type="button">Skip intro <kbd>Esc</kbd></button>
   </div>
 </div>
 
@@ -45,12 +66,16 @@
       <div class="compass-tape" id="compass-tape"></div>
       <div class="compass-caret"></div>
     </div>
-    <dl class="readouts">
-      <div><dt>Local</dt><dd id="ro-time">17:30</dd></div>
-      <div><dt>Alt</dt><dd id="ro-alt">230 m</dd></div>
-      <div><dt>Speed</dt><dd id="ro-speed">0 m/s</dd></div>
-      <div id="ro-fps-wrap" hidden><dt>FPS</dt><dd id="ro-fps">60</dd></div>
-    </dl>
+    <div class="hud-right">
+      <dl class="readouts">
+        <div><dt>Local</dt><dd id="ro-time">17:30</dd></div>
+        <div><dt>Alt</dt><dd id="ro-alt">230 m</dd></div>
+        <div class="ro-speed"><dt>Speed</dt><dd id="ro-speed">0 m/s</dd></div>
+        <div id="ro-fps-wrap" hidden><dt>FPS</dt><dd id="ro-fps">60</dd></div>
+      </dl>
+      <!-- slot for other HUD panels (e.g. the orbital / space readout) -->
+      <div id="hud-slot" class="hud-slot"></div>
+    </div>
   </header>
 
   <aside class="landmarks" id="landmarks">
@@ -67,11 +92,26 @@
     <button class="close" id="lore-close" type="button" aria-label="Close">×</button>
   </section>
 
-  <div class="tourbar" id="tourbar" hidden>
-    <span id="tour-step">Tour · 1 / 15</span>
-    <button id="tour-next" type="button">Next</button>
-    <button id="tour-exit" type="button">End tour</button>
+  <!-- guided tour: progress, transport controls, lower-third caption and narration -->
+  <div class="tour" id="tour" hidden>
+    <div class="tour-head">
+      <span class="tour-count" id="tour-count">01 / 15</span>
+      <span class="tour-title" id="tour-title"></span>
+    </div>
+    <div class="tour-progress" id="tour-progress" role="progressbar" aria-label="Tour progress" aria-valuemin="0" aria-valuemax="100"></div>
+    <div class="tour-controls">
+      <button id="tour-prev" class="ic" type="button" aria-label="Previous stop" title="Previous stop (←)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3h2v10H3zM13 3v10L6 8z" fill="currentColor"/></svg></button>
+      <button id="tour-pause" class="ic" type="button" aria-label="Pause tour" title="Pause (Space)"><svg viewBox="0 0 16 16" aria-hidden="true"><path id="tour-pause-glyph" d="M4 3h3v10H4zM9 3h3v10H9z" fill="currentColor"/></svg></button>
+      <button id="tour-next" class="ic" type="button" aria-label="Next stop" title="Next stop (→)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M11 3h2v10h-2zM3 3v10l7-5z" fill="currentColor"/></svg></button>
+      <button id="tour-exit" type="button">End tour</button>
+    </div>
   </div>
+  <div class="caption" id="caption" aria-live="polite">
+    <p class="eyebrow" id="cap-district"></p>
+    <h2 id="cap-name"></h2>
+    <dl id="cap-facts"></dl>
+  </div>
+  <p class="subtitle" id="subtitle" aria-live="polite"></p>
 
   <footer class="timebar">
     <button id="btn-play" class="icon" type="button" title="Let time flow (P)" aria-label="Let time flow">
@@ -90,7 +130,11 @@
       <button type="button" data-t="22.4">Night</button>
     </div>
     <div class="actions">
-      <button type="button" id="btn-tour2">Tour</button>
+      <button type="button" id="btn-tour2" title="Guided tour (T)">Tour</button>
+      <button type="button" id="btn-atlas" title="Atlas (M)" aria-controls="atlas">Atlas</button>
+      <button type="button" id="btn-photo" title="Photo mode (K)">Photo</button>
+      <!-- slot for other actions (e.g. Ascend / Orbit) -->
+      <span id="actions-slot" class="actions-slot"></span>
       <button type="button" id="btn-settings" aria-expanded="false" aria-controls="settings">Settings</button>
       <button type="button" id="btn-help" aria-expanded="false" aria-controls="help">Keys</button>
     </div>
@@ -98,26 +142,56 @@
 
   <div class="panel settings" id="settings" hidden>
     <h3>Settings</h3>
-    <label class="row"><span>Quality</span>
-      <select id="opt-quality">
-        <option value="low">Low</option>
-        <option value="medium">Medium</option>
-        <option value="high">High</option>
-        <option value="ultra">Ultra (Apple Pro/Max, desktop GPUs)</option>
-      </select>
-    </label>
-    <label class="row"><span>Time flow</span>
-      <select id="opt-speed">
-        <option value="0.0166">1 hour per minute</option>
-        <option value="0.0833">5 hours per minute</option>
-        <option value="0.2">1 day per 2 minutes</option>
-        <option value="0.8">1 day per 30 s</option>
-      </select>
-    </label>
-    <label class="row check"><input type="checkbox" id="opt-clouds" checked /> <span>Clouds</span></label>
-    <label class="row check"><input type="checkbox" id="opt-audio" /> <span>Ambient sound</span></label>
-    <label class="row check"><input type="checkbox" id="opt-fps" /> <span>Show frame rate</span></label>
-    <label class="row check"><input type="checkbox" id="opt-lock" /> <span>Capture mouse while flying</span></label>
+    <div class="set-group">
+      <p class="set-h">Display</p>
+      <label class="row"><span>Quality</span>
+        <select id="opt-quality">
+          <option value="low">Low</option>
+          <option value="medium">Medium</option>
+          <option value="high">High</option>
+          <option value="ultra">Ultra</option>
+          <option value="cinematic">Cinematic (supersampled)</option>
+        </select>
+      </label>
+      <label class="row"><span>Motion</span>
+        <select id="opt-motion">
+          <option value="auto">Follow system</option>
+          <option value="full">Full cinematic</option>
+          <option value="reduce">Reduced</option>
+        </select>
+      </label>
+      <label class="row check"><input type="checkbox" id="opt-letterbox" /> <span>Cinematic bars in the tour</span></label>
+      <label class="row check"><input type="checkbox" id="opt-subtitles" /> <span>Tour narration</span></label>
+      <label class="row check"><input type="checkbox" id="opt-clouds" checked /> <span>Clouds</span></label>
+      <label class="row check"><input type="checkbox" id="opt-fps" /> <span>Performance overlay <kbd>`</kbd></span></label>
+    </div>
+    <div class="set-group">
+      <p class="set-h">Controls</p>
+      <label class="row slider"><span>Look sensitivity</span><input type="range" id="opt-sens" min="0.3" max="2.5" step="0.05" /><output id="opt-sens-o">1.0×</output></label>
+      <label class="row check"><input type="checkbox" id="opt-invert" /> <span>Invert vertical look</span></label>
+      <label class="row check"><input type="checkbox" id="opt-lock" /> <span>Capture mouse while flying</span></label>
+      <label class="row"><span>Touch controls</span>
+        <select id="opt-touch">
+          <option value="auto">Automatic</option>
+          <option value="on">Always</option>
+          <option value="off">Off</option>
+        </select>
+      </label>
+    </div>
+    <div class="set-group">
+      <p class="set-h">Sound and time</p>
+      <label class="row check"><input type="checkbox" id="opt-audio" /> <span>Ambient sound</span></label>
+      <label class="row slider"><span>Volume</span><input type="range" id="opt-volume" min="0" max="1" step="0.01" /><output id="opt-volume-o">80%</output></label>
+      <label class="row slider"><span>Music</span><input type="range" id="opt-music" min="0" max="1" step="0.01" /><output id="opt-music-o">70%</output></label>
+      <label class="row"><span>Time flow</span>
+        <select id="opt-speed">
+          <option value="0.0166">1 hour per minute</option>
+          <option value="0.0833">5 hours per minute</option>
+          <option value="0.2">1 day per 2 minutes</option>
+          <option value="0.8">1 day per 30 s</option>
+        </select>
+      </label>
+    </div>
     <p class="note" id="opt-note"></p>
   </div>
 
@@ -131,14 +205,87 @@
       <div><dt>Scroll</dt><dd>Cruise speed</dd></div>
       <div><dt><kbd>Z</kbd></dt><dd>Zoom lens (hold)</dd></div>
       <div><dt><kbd>1</kbd>–<kbd>0</kbd></dt><dd>Fly to landmark</dd></div>
+      <div><dt><kbd>M</kbd></dt><dd>Atlas</dd></div>
       <div><dt><kbd>T</kbd></dt><dd>Guided tour</dd></div>
+      <div><dt><kbd>Space</kbd> · <kbd>←</kbd> <kbd>→</kbd></dt><dd>Tour: pause · previous, next</dd></div>
+      <div><dt><kbd>K</kbd></dt><dd>Photo mode</dd></div>
       <div><dt><kbd>P</kbd> · <kbd>[</kbd> <kbd>]</kbd></dt><dd>Time flow · scrub time</dd></div>
       <div><dt><kbd>H</kbd> · <kbd>F</kbd></dt><dd>Hide interface · fullscreen</dd></div>
+      <div><dt>Gamepad</dt><dd>Sticks fly and look, triggers height</dd></div>
     </dl>
   </div>
 
-  <div class="hint" id="hint">Drag to look · <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> to fly · <kbd>1</kbd>–<kbd>0</kbd> landmarks</div>
+  <div class="hint" id="hint">Drag to look · <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> to fly · <kbd>M</kbd> atlas</div>
 </div>
+
+<!-- atlas: top-down map of the caldera -->
+<div id="atlas" class="atlas" hidden role="dialog" aria-modal="true" aria-labelledby="atlas-title">
+  <div class="atlas-frame">
+    <header class="atlas-head">
+      <div><p class="eyebrow">Atlas · 0° 00′ N</p><h2 id="atlas-title">The Caldera of Meridian</h2></div>
+      <div class="atlas-tools">
+        <button type="button" id="atlas-reset" class="chip">Recenter</button>
+        <button type="button" id="atlas-close" class="chip" aria-label="Close atlas">Close <kbd>M</kbd></button>
+      </div>
+    </header>
+    <div class="atlas-body">
+      <div class="atlas-map" id="atlas-map">
+        <canvas id="atlas-canvas" aria-label="Map of Meridian. Choose a landmark from the list to fly there."></canvas>
+        <div class="atlas-tip" id="atlas-tip" hidden></div>
+      </div>
+      <aside class="atlas-side">
+        <ol id="atlas-list"></ol>
+        <p class="atlas-help">Click a landmark, or anywhere on the map, to fly there. Scroll to zoom and drag to pan.</p>
+      </aside>
+    </div>
+  </div>
+</div>
+
+<!-- photo mode -->
+<div id="photo" class="photo" hidden>
+  <div class="photo-mask" id="photo-mask" aria-hidden="true"><div class="photo-window" id="photo-window"><div class="thirds"></div></div></div>
+  <div class="photo-flash" id="photo-flash" aria-hidden="true"></div>
+  <aside class="photo-panel" id="photo-panel" aria-label="Photo mode">
+    <header class="photo-head">
+      <p class="eyebrow">Photo mode</p>
+      <button type="button" id="photo-exit" class="chip">Exit <kbd>K</kbd></button>
+    </header>
+    <label class="slider"><span>Field of view</span><output id="ph-fov-o">60°</output><input type="range" id="ph-fov" min="8" max="100" step="0.5" value="60" /></label>
+    <label class="slider"><span>Time of day</span><output id="ph-time-o">17:30</output><input type="range" id="ph-time" min="0" max="24" step="0.01" value="17.5" /></label>
+    <label class="slider"><span>Exposure</span><output id="ph-ev-o">0.0 EV</output><input type="range" id="ph-ev" min="-2.5" max="2.5" step="0.05" value="0" /></label>
+    <label class="slider"><span>Roll</span><output id="ph-roll-o">0°</output><input type="range" id="ph-roll" min="-30" max="30" step="0.5" value="0" /></label>
+    <div class="chips" role="group" aria-label="Frame">
+      <button type="button" data-aspect="0" aria-pressed="true">Full</button>
+      <button type="button" data-aspect="1.7778" aria-pressed="false">16:9</button>
+      <button type="button" data-aspect="2.39" aria-pressed="false">2.39:1</button>
+      <button type="button" data-aspect="0.8" aria-pressed="false">4:5</button>
+      <button type="button" data-aspect="1" aria-pressed="false">1:1</button>
+    </div>
+    <div class="photo-row">
+      <label class="check"><input type="checkbox" id="ph-grid" /> <span>Thirds</span></label>
+      <label class="check"><input type="checkbox" id="ph-freeze" checked /> <span>Hold time</span></label>
+      <button type="button" id="ph-reset" class="chip">Reset</button>
+    </div>
+    <button type="button" class="shutter" id="ph-capture"><span class="shutter-ring" aria-hidden="true"></span><span>Capture</span></button>
+    <p class="photo-note" id="ph-note">Fly with <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> at a gentle pace. <kbd>H</kbd> hides this panel. <kbd>Enter</kbd> captures.</p>
+    <div class="photo-last" id="ph-last" hidden>
+      <img id="ph-img" alt="Your last capture" />
+      <div><p id="ph-saved"></p><a id="ph-link" href="#" download="meridian.png">Save again</a></div>
+    </div>
+  </aside>
+</div>
+
+<!-- touch controls -->
+<div id="touch" class="touch" hidden>
+  <div class="stick" id="stick" aria-hidden="true"><div class="stick-ring"></div><div class="stick-knob" id="stick-knob"></div></div>
+  <div class="lift">
+    <button type="button" id="t-up" aria-label="Rise"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 4l5 7H3z" fill="currentColor"/></svg></button>
+    <button type="button" id="t-down" aria-label="Descend"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 12L3 5h10z" fill="currentColor"/></svg></button>
+  </div>
+</div>
+
+<div id="stats" class="stats" hidden aria-hidden="true"></div>
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
 
 <script type="module" src="/src/main.js"></script>
 </body>
