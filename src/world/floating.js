@@ -231,7 +231,7 @@ export function buildFloatingIslands(defs, scene, treeField) {
       const rr = Math.sqrt(rnd()) * d.r * 0.82, aa = rnd() * Math.PI * 2;
       const x = Math.cos(aa) * rr, z = Math.sin(aa) * rr;
       if (Math.hypot(x - pav.position.x, z - pav.position.z) < pr * 2.2) continue;
-      trees.push({ x, y: d.r * 0.02, z, s: 9 + rnd() * 13, type: rnd() < 0.8 ? 0 : 2, rot: rnd() * 6.28, tint: [0.9 + rnd() * 0.2, 0.9 + rnd() * 0.25, 0.85 + rnd() * 0.2] });
+      trees.push({ x, y: d.r * 0.02, z, s: 9 + rnd() * 9, sp: rnd() < 0.5 ? 2 : rnd() < 0.5 ? 3 : 1, rot: rnd() * 6.28, tint: [0.9 + rnd() * 0.2, 0.9 + rnd() * 0.25, 0.85 + rnd() * 0.2] });
     }
     treeLists.push({ group, trees });
     islands.push({ group, def: d, base: group.position.clone(), phase: rnd() * 10, depth });

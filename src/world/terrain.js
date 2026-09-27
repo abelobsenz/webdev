@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { createNoise2D, fbm, ridged, smoothstep, smax, mulberry32 } from './noise.js';
 import { CENTRAL_ISLAND, ISLANDS, RIM } from './layout.js';
-import { patchedMaterial } from './materials.js';
+import { createTerrainShaderMaterial } from './terrainShading.js';
 
 const nA = createNoise2D(11);
 const nB = createNoise2D(23);
@@ -35,6 +35,16 @@ function bump(dx, dz, r, h, wobble) {
   return h * (1 - Math.pow(d, 2.6));
 }
 
+/** Fringing reef around an island: a shallow coral flat (~ -1.5 m) that drops to the lagoon floor. */
+function reefShelf(dx, dz, r, wobble, x, z, width) {
+  const dm = Math.hypot(dx, dz) / wobble;              // metres from the island centre (wobbled)
+  const w = width * (0.7 + 0.6 * (0.5 + 0.5 * nC(x * 0.0023 + 7, z * 0.0023)));
+  const t = (dm - r * 0.985) / w;
+  if (t > 1.6) return -1e9;
+  if (t < 0) return -1.3;
+  return -1.3 - 1.1 * t - 30 * smoothstep(0.7, 1.5, t);
+}
+
 /** Terrain height (metres above sea level) — the single source of truth. */
 export function terrainHeight(x, z) {
   // domain warp for organic coastlines
@@ -57,10 +67,28 @@ export function terrainHeight(x, z) {
   const rimNoise = fbm(nB, x * 0.0011, z * 0.0011, 4);
   const rimH = (14 + 46 * Math.max(0, rimNoise + 0.35)) * (1 - dr * dr) - 6;
   let land = rimH * chan + (1 - chan) * Math.min(rimH, -40);
+  // reef platforms (always below sea level, so land heights are untouched):
+  // a shallow outer reef flat on the ocean side of the rim that ends in a steep
+  // wall where the surf breaks, and a sandy apron shelving into the lagoon.
+  let shelf = -1e9;
+  if (chan > 0.01 && dr > -2.6 && dr < 2.4) {
+    const ca = Math.cos(th), sa = Math.sin(th);
+    if (dr > 0) {
+      const wOut = 0.32 + 0.34 * (0.5 + 0.5 * nC(ca * 9 + 4, sa * 9));
+      const t = Math.max(0, (dr - 0.9) / wOut);
+      shelf = -1.1 - 1.3 * t - 200 * smoothstep(0.82, 1.5, t);
+    } else {
+      const wIn = 0.5 + 0.6 * (0.5 + 0.5 * nC(ca * 7 - 3, sa * 7 + 1));
+      const t = Math.max(0, (-dr - 0.9) / wIn);
+      shelf = -1.4 - 2.4 * t - 30 * smoothstep(0.6, 1.6, t);
+    }
+    shelf = shelf * chan + (1 - chan) * -40;
+  }
 
   // --- central island (Axis foundation) ---
   const cw = 1 + 0.08 * nD(x * 0.002, z * 0.002);
   land = smax(land, bump(wx - CENTRAL_ISLAND.x, wz - CENTRAL_ISLAND.z, CENTRAL_ISLAND.r, CENTRAL_ISLAND.h, cw), 8);
+  shelf = Math.max(shelf, reefShelf(wx - CENTRAL_ISLAND.x, wz - CENTRAL_ISLAND.z, CENTRAL_ISLAND.r, cw, x, z, 120));
 
   // --- district islands & islets ---
   for (const i of ISLANDS) {
@@ -69,13 +97,16 @@ export function terrainHeight(x, z) {
     const wob = 1 + 0.14 * nD(x * 0.0017 + i.x, z * 0.0017);
     const hh = i.h * (0.85 + 0.35 * fbm(nC, x * 0.003, z * 0.003, 3));
     land = smax(land, bump(dx, dz, i.r, hh, wob), 10);
+    shelf = Math.max(shelf, reefShelf(dx, dz, i.r, wob, x, z, 150));
   }
   for (const i of ISLETS) {
     const dx = wx - i.x, dz = wz - i.z;
     if (Math.abs(dx) > i.r * 2.4 || Math.abs(dz) > i.r * 2.4) continue;
     const wob = 1 + 0.2 * nD(x * 0.004 + i.x, z * 0.004);
     land = smax(land, bump(dx, dz, i.r, i.h, wob), 6);
+    shelf = Math.max(shelf, reefShelf(dx, dz, i.r, wob, x, z, 70));
   }
+  land = Math.max(land, shelf);
 
   // --- northern volcanic massif: broad eroded domes carved by radial ridges ---
   let mountain = -1e9;
@@ -256,25 +287,84 @@ export async function buildOuterGeometry(progress) {
   return g;
 }
 
-/** Info texture over the inner grid: R height, G urban, B forest, A shoreline district glow. */
-export function buildInfoTexture(heights, urbanFn, forestFn) {
-  const { half, n } = INNER;
+
+// ------------------------------------------------------------ shared data --
+/**
+ * Terrain data shared with other nature systems (ground cover, fauna, surf) and
+ * available to any other module that needs it once the world is built:
+ *  heights    Float32Array (n+1)^2 inner grid heights (row-major, z rows)
+ *  heightTex  R32F (n+1)^2 texture of the same heights (NearestFilter, use texelFetch)
+ *  natureTex  RGBA16F 1024^2 over the inner grid (same layout as the info texture):
+ *             R signed distance to the shoreline in metres (+ land, - water, clamped +-400)
+ *             G ocean exposure 0..1 (1 = seaward side of the atoll)
+ *             B outer-reef crest 0..1 (where ocean swell breaks)
+ *             A surface curvature (+ valleys / gullies, - ridges), roughly -1..1
+ *  shore      Float32Array 1024^2 of R, exposure and crest as CPU copies
+ */
+export const TERRAIN_DATA = { heights: null, heightTex: null, natureTex: null, info: null, shore: null, exposure: null, crest: null, N: 1024 };
+
+function bilinearGrid(heights, u, v) {
+  const { n } = INNER;
   const s = n + 1;
+  const x = Math.min(Math.max(u * n, 0), n - 1e-4), y = Math.min(Math.max(v * n, 0), n - 1e-4);
+  const i = Math.floor(x), j = Math.floor(y), fu = x - i, fv = y - j;
+  const h00 = heights[j * s + i], h10 = heights[j * s + i + 1], h01 = heights[(j + 1) * s + i], h11 = heights[(j + 1) * s + i + 1];
+  return (h00 * (1 - fu) + h10 * fu) * (1 - fv) + (h01 * (1 - fu) + h11 * fu) * fv;
+}
+
+// exact Euclidean distance transform (Felzenszwalb & Huttenlocher), squared distances in cells
+export function edt2d(sites, N) {
+  const INF = 1e20;
+  const f = new Float64Array(N), d = new Float64Array(N), zz = new Float64Array(N + 1);
+  const v = new Int32Array(N);
+  const out = new Float64Array(N * N);
+  for (let k = 0; k < N * N; k++) out[k] = sites[k] ? 0 : INF;
+  const pass = (get, set) => {
+    for (let q = 0; q < N; q++) f[q] = get(q);
+    let k = 0; v[0] = 0; zz[0] = -INF; zz[1] = INF;
+    for (let q = 1; q < N; q++) {
+      let s = ((f[q] + q * q) - (f[v[k]] + v[k] * v[k])) / (2 * q - 2 * v[k]);
+      while (s <= zz[k]) { k--; s = ((f[q] + q * q) - (f[v[k]] + v[k] * v[k])) / (2 * q - 2 * v[k]); }
+      k++; v[k] = q; zz[k] = s; zz[k + 1] = INF;
+    }
+    k = 0;
+    for (let q = 0; q < N; q++) { while (zz[k + 1] < q) k++; d[q] = (q - v[k]) * (q - v[k]) + f[v[k]]; }
+    for (let q = 0; q < N; q++) set(q, d[q]);
+  };
+  for (let j = 0; j < N; j++) pass((q) => out[j * N + q], (q, val) => { out[j * N + q] = val; });
+  for (let i = 0; i < N; i++) pass((q) => out[q * N + i], (q, val) => { out[q * N + i] = val; });
+  return out;
+}
+
+export function buildHeightTexture(heights) {
+  const s = INNER.n + 1;
+  const tex = new THREE.DataTexture(heights, s, s, THREE.RedFormat, THREE.FloatType);
+  tex.magFilter = tex.minFilter = THREE.NearestFilter;
+  tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+  tex.generateMipmaps = false;
+  tex.needsUpdate = true;
+  return tex;
+}
+
+/** Info texture over the inner grid: R height, G urban, B forest, A 1. Also builds TERRAIN_DATA. */
+export function buildInfoTexture(heights, urbanFn, forestFn) {
+  const { half } = INNER;
   const N = 1024;
+  const cellM = (2 * half) / N;
   const data = new Uint16Array(N * N * 4);
   const toHalf = THREE.DataUtils.toHalfFloat;
   const urban = new Float32Array(N * N);
   const forest = new Float32Array(N * N);
+  const hgt = new Float32Array(N * N);
   for (let j = 0; j < N; j++) {
     for (let i = 0; i < N; i++) {
       const u = (i + 0.5) / N, v = (j + 0.5) / N;
       const x = -half + u * 2 * half, z = -half + v * 2 * half;
-      const gi = Math.min(Math.floor(u * n), n - 1), gj = Math.min(Math.floor(v * n), n - 1);
-      const h = heights[gj * s + gi];
+      const h = bilinearGrid(heights, u, v);
       const k = j * N + i;
       const ub = urbanFn(x, z, h);
       const fo = forestFn(x, z, h, ub);
-      urban[k] = ub; forest[k] = fo;
+      urban[k] = ub; forest[k] = fo; hgt[k] = h;
       data[k * 4] = toHalf(h);
       data[k * 4 + 1] = toHalf(ub);
       data[k * 4 + 2] = toHalf(fo);
@@ -286,134 +376,45 @@ export function buildInfoTexture(heights, urbanFn, forestFn) {
   tex.minFilter = THREE.LinearFilter;
   tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
   tex.needsUpdate = true;
-  return { tex, urban, forest, N };
+
+  // ---- shoreline / reef data ----
+  const land = new Uint8Array(N * N), water = new Uint8Array(N * N), deep = new Uint8Array(N * N);
+  for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+    const k = j * N + i, h = hgt[k];
+    land[k] = h > 0 ? 1 : 0; water[k] = h > 0 ? 0 : 1;
+    const x = -half + (i + 0.5) * cellM, z = -half + (j + 0.5) * cellM;
+    deep[k] = h < -28 && Math.hypot(x, z) > 5500 ? 1 : 0;
+  }
+  const dLand = edt2d(land, N), dWater = edt2d(water, N), dDeep = edt2d(deep, N);
+  const shore = new Float32Array(N * N), exposure = new Float32Array(N * N), crest = new Float32Array(N * N), curv = new Float32Array(N * N);
+  const nat = new Uint16Array(N * N * 4);
+  const sm = (a, b, x) => { const t = Math.min(Math.max((x - a) / (b - a), 0), 1); return t * t * (3 - 2 * t); };
+  for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+    const k = j * N + i, h = hgt[k];
+    const sd = land[k] ? Math.sqrt(dWater[k]) * cellM - cellM * 0.5 : -(Math.sqrt(dLand[k]) * cellM - cellM * 0.5);
+    const dd = Math.sqrt(dDeep[k]) * cellM;
+    const ex = 1 - sm(60, 900, dd);
+    const cr = h < -0.2 && h > -6 ? ex * (1 - sm(20, 110, dd)) : 0;
+    // curvature: laplacian of heights over ~3 cells (valleys positive)
+    const at = (a, b) => hgt[Math.min(N - 1, Math.max(0, j + b)) * N + Math.min(N - 1, Math.max(0, i + a))];
+    const lap = (at(3, 0) + at(-3, 0) + at(0, 3) + at(0, -3)) * 0.25 - h;
+    shore[k] = sd; exposure[k] = ex; crest[k] = cr; curv[k] = Math.max(-1, Math.min(1, lap * 0.35));
+    nat[k * 4] = toHalf(Math.max(-400, Math.min(400, sd)));
+    nat[k * 4 + 1] = toHalf(ex);
+    nat[k * 4 + 2] = toHalf(cr);
+    nat[k * 4 + 3] = toHalf(Math.max(-1, Math.min(1, lap * 0.35)));
+  }
+  const natureTex = new THREE.DataTexture(nat, N, N, THREE.RGBAFormat, THREE.HalfFloatType);
+  natureTex.magFilter = natureTex.minFilter = THREE.LinearFilter;
+  natureTex.wrapS = natureTex.wrapT = THREE.ClampToEdgeWrapping;
+  natureTex.needsUpdate = true;
+
+  const info = { tex, urban, forest, N, natureTex, shore, exposure, crest, curv, hgt };
+  Object.assign(TERRAIN_DATA, { heights, heightTex: buildHeightTexture(heights), natureTex, info, shore, exposure, crest, N });
+  return info;
 }
 
 // ---------------------------------------------------------------- material --
-export function createTerrainMaterial(infoTex) {
-  const uniforms = { uInfo: { value: infoTex }, uInfoHalf: { value: INNER.half } };
-  return patchedMaterial({ color: 0xffffff, roughness: 0.9, metalness: 0.0, envMapIntensity: 0.6 }, {
-    key: 'terrain',
-    uniforms,
-    fragment: {
-      pars: /* glsl */ `
-uniform sampler2D uInfo;
-uniform float uInfoHalf;
-vec4 infoAt(vec2 xz) {
-  vec2 uv = (xz + uInfoHalf) / (2.0 * uInfoHalf);
-  if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) return vec4(-100.0, 0.0, -1.0, 0.0);
-  return texture(uInfo, uv);
-}
-float tUrban; float tForest; float tRock; float tWet;
-vec3 tWorldN;
-`,
-      color: /* glsl */ `
-{
-  vec3 wp = vWPos;
-  vec3 N = normalize(vWNrm);
-  float slope = 1.0 - N.y;
-  vec4 info = infoAt(wp.xz);
-  float h = wp.y;
-  float dist = length(wp - cameraPosition);
-  float detailFade = 1.0 - smoothstep(1500.0, 6000.0, dist);
-  // macro variation
-  float m1 = fbm2(wp.xz * 0.0019);
-  float m2 = vnoise(wp.xz * 0.013);
-  float m3 = vnoise(wp.xz * 0.11);
-  float forestD = info.z >= 0.0 ? info.z : smoothstep(0.35, 0.65, m1 + 0.2 * (1.0 - slope)) * (1.0 - smoothstep(1500.0, 1900.0, h + m2 * 200.0));
-  tUrban = info.y;
-  // palette
-  vec3 sand = mix(vec3(0.62, 0.57, 0.46), vec3(0.72, 0.66, 0.53), m2);
-  vec3 wetSand = vec3(0.50, 0.46, 0.38);
-  vec3 grass = mix(vec3(0.16, 0.30, 0.07), vec3(0.34, 0.44, 0.13), m1 * 0.8 + m3 * 0.3);
-  vec3 forest = mix(vec3(0.045, 0.12, 0.035), vec3(0.09, 0.19, 0.05), m2) * (0.75 + 0.5 * m3 * detailFade + 0.25 * (1.0 - detailFade));
-  vec3 rock = mix(vec3(0.20, 0.19, 0.18), vec3(0.34, 0.31, 0.27), m2);
-  rock *= 0.85 + 0.3 * vnoise(vec2(wp.y * 0.05, m1 * 8.0));
-  vec3 reef = mix(vec3(0.62, 0.58, 0.46), vec3(0.42, 0.50, 0.40), smoothstep(0.4, 0.7, fbm2(wp.xz * 0.02)));
-  vec3 paving = mix(vec3(0.62, 0.60, 0.56), vec3(0.72, 0.70, 0.66), m3);
-  // layering
-  vec3 c = sand;
-  float beach = smoothstep(0.7, 2.0 + m2 * 1.2, h);
-  c = mix(wetSand, sand, smoothstep(-0.4, 0.8, h));
-  c = mix(c, reef, smoothstep(-1.5, -4.0, h) * 0.8);
-  c = mix(c, vec3(0.30, 0.34, 0.30), smoothstep(-8.0, -30.0, h));
-  vec3 veg = mix(grass, forest, forestD);
-  c = mix(c, veg, beach);
-  // tropical volcanic slopes stay green even when steep; bare rock only on cliffs
-  float mountainZone = smoothstep(120.0, 500.0, h);
-  tRock = smoothstep(mix(0.34, 0.62, mountainZone), mix(0.55, 0.85, mountainZone), slope + m2 * 0.12) * beach;
-  tRock = max(tRock, smoothstep(1900.0, 2300.0, h + m1 * 300.0) * 0.8);
-  vec3 moss = mix(vec3(0.06, 0.15, 0.04), vec3(0.14, 0.22, 0.08), m3);
-  vec3 cliff = mix(rock, moss, 0.45 * mountainZone * (1.0 - smoothstep(0.7, 0.95, slope)));
-  c = mix(c, cliff, tRock);
-  // cloud forest on the upper slopes: darker, bluer green
-  c = mix(c, c * vec3(0.8, 0.95, 1.05), smoothstep(700.0, 1400.0, h) * (1.0 - tRock));
-  // urban paving with garden courts
-  float court = smoothstep(0.45, 0.55, vnoise(wp.xz * 0.02));
-  vec3 urbanC = mix(paving, grass * 1.1, court * 0.55);
-  c = mix(c, urbanC, tUrban * beach);
-  tForest = forestD * beach * (1.0 - tUrban) * (1.0 - tRock);
-  tWet = 1.0 - smoothstep(-0.2, 1.0, h);
-  tWorldN = N;
-  diffuseColor.rgb = c;
-}
-`,
-      surface: /* glsl */ `
-roughnessFactor = mix(0.92, 0.35, tWet);
-roughnessFactor = mix(roughnessFactor, 0.6, tUrban);
-roughnessFactor = mix(roughnessFactor, 0.78, tRock);
-`,
-      normal: /* glsl */ `
-{
-  float dist = length(vWPos - cameraPosition);
-  float fade = 1.0 - smoothstep(200.0, 4000.0, dist);
-  vec3 g1 = vnoised(vWPos.xz * 0.045);
-  vec3 g2 = vnoised(vWPos.xz * 0.21 + 3.1);
-  vec3 g3 = vnoised(vWPos.xz * 0.006 - 7.0);
-  float amp = mix(0.35, 1.1, tForest) * (1.0 - tUrban * 0.8);
-  vec2 grad = (g1.yz * 0.045 * 6.0 + g2.yz * 0.21 * 1.5 * fade) * amp * fade + g3.yz * 0.006 * 40.0 * (0.3 + tRock);
-  vec3 wn = normalize(tWorldN + vec3(-grad.x, 0.0, -grad.y) * 0.9);
-  normal = normalize((viewMatrix * vec4(wn, 0.0)).xyz);
-}
-`,
-      emissive: /* glsl */ `
-{
-  // pathways and plaza lighting in urban districts at night
-  float u = tUrban;
-  if (u > 0.05 && uCityLights > 0.0) {
-    vec2 p = vWPos.xz;
-    // lamp posts along curving garden paths: discrete warm points, not painted lines
-    vec2 q = p / 14.0;
-    vec2 cell = floor(q);
-    vec2 f = fract(q) - 0.5;
-    float lamp = step(0.55, hash12(cell)) * smoothstep(0.22, 0.0, length(f - (hash22(cell) - 0.5) * 0.5));
-    float path = smoothstep(0.06, 0.0, abs(vnoise(p * 0.012) - 0.5)) ;
-    float dist = length(vWPos - cameraPosition);
-    float far = smoothstep(900.0, 5000.0, dist);
-    float L = mix(lamp * 1.6 + path * 0.25, 0.08, far);
-    vec3 tint = mix(vec3(1.0, 0.68, 0.38), vec3(0.75, 0.85, 1.0), step(0.8, hash12(cell + 3.0)));
-    totalEmissiveRadiance += tint * L * u * uCityLights * 0.12;
-  }
-}
-`,
-      preAerial: /* glsl */ `
-{
-  // seen through the lagoon: red light is absorbed on the way down and back up,
-  // sunlight is focused into dancing caustics on the sand
-  float depthW = -vWPos.y;
-  if (depthW > 0.0) {
-    vec3 V = normalize(cameraPosition - vWPos);
-    float path = depthW + depthW / max(V.y, 0.2);
-    vec3 Tw = exp(-vec3(0.30, 0.055, 0.030) * path);
-    vec2 cp = vWPos.xz * 0.35;
-    float c1 = vnoise(cp + vec2(uTime * 0.35, uTime * 0.2));
-    float c2 = vnoise(cp * 1.7 - vec2(uTime * 0.25, -uTime * 0.3));
-    float caus = pow(1.0 - abs(c1 - c2), 8.0) * 1.8 * exp(-depthW * 0.12);
-    vec3 sunIrr = uSunColor * uSunIlluminance * max(uSunDir.y, 0.0);
-    gl_FragColor.rgb = gl_FragColor.rgb * Tw * (1.0 + caus * max(uSunDir.y, 0.0));
-  }
-}
-`,
-    },
-  });
+export function createTerrainMaterial(infoTex, natureTex = TERRAIN_DATA.natureTex) {
+  return createTerrainShaderMaterial(infoTex, natureTex, INNER.half);
 }
