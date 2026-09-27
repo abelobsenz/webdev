@@ -720,7 +720,7 @@ vec3 sd = normalize(uSunDirH + vec3(0.0, 1e-4, 0.0));
 // track the sun: the mirror's normal halves the angle between the sun and the receiver;
 // after sunset they stow face-up
 float day = smoothstep(-0.05, 0.08, sd.y);
-vec3 nm = normalize(mix(vec3(0.0, 1.0, 0.0), normalize(sd + toR), day));
+vec3 nm = normalize(mix(vec3(0.0, 1.0, 0.0), normalize(sd + toR + vec3(0.0, 1e-3, 0.0)), day));
 vec3 hx = normalize(cross(vec3(0.0, 1.0, 0.0), nm) + vec3(1e-4, 0.0, 0.0));
 vec3 hy = cross(nm, hx);
 mat3 hsRot = mat3(hx, hy, nm);
