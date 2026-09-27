@@ -23,7 +23,6 @@ export function craftMesh(geo, opts = {}, mat = null) {
     mesh.getWorldPosition(mesh.userData.world);
     const sd = mesh.userData.sunDir || CRAFT_FRAME.sunDir;
     updateCraftMaterial(m, cam, sd, mesh.userData.world, CRAFT_FRAME.time);
-    if (m.uniforms.uFlood) m.uniforms.uFlood.value = mesh.userData.flood ?? 0;
     m.uniformsNeedUpdate = true;
   };
   return mesh;

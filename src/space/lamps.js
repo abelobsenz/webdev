@@ -37,7 +37,9 @@ void main() {
   float pxPerUnit = uRes.y * 0.5 * projectionMatrix[1][1] / d;
   float pxTrue = r * uHalo * pxPerUnit;
   float pxDraw = max(pxTrue, uMinPx);
-  float cover = (pxTrue / pxDraw) * (pxTrue / pxDraw);
+  // below the minimum size the lamp dims in proportion (smooth in distance, so it never
+  // pops; linear rather than by area, so harbour lights still read from far off)
+  float cover = pxTrue / pxDraw;
   // facing
   float face = 1.0;
   if (dot(iDir.xyz, iDir.xyz) > 0.25) {
@@ -82,7 +84,7 @@ export const LAMP = {
  * lamps: [{ p: Vector3, r: radius, color: [r, g, b], i: intensity, dir?: Vector3, breathe?: 0..1, phase?: 0..1 }]
  * Add the returned mesh as a child of the ship or station it belongs to.
  */
-export function createLamps(lamps, { minPx = 1.5, gain = 1, halo = 3 } = {}) {
+export function createLamps(lamps, { minPx = 1.5, gain = 1, halo = 2.2 } = {}) {
   const g = new THREE.InstancedBufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute([-1, -1, 0, 1, -1, 0, 1, 1, 0, -1, 1, 0], 3));
   g.setIndex([0, 1, 2, 0, 2, 3]);

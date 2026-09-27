@@ -97,7 +97,7 @@ export class SpaceMode {
     T('geo', {
       position: (o) => o.copy(merid).multiplyScalar(R_EARTH + GEO_ALT).applyQuaternion(sim.earthQuat),
       frame: (q) => q.setFromUnitVectors(_v2.set(0, 1, 0), _v.copy(merid).applyQuaternion(sim.earthQuat)).multiply(_q.setFromAxisAngle(_v2.set(1, 0, 0), 0)),
-      minDist: 25, maxDist: 200000, defaultDist: 80, view: { az: 0.7, el: 0.32 },
+      minDist: 8, maxDist: 200000, defaultDist: 36, view: { az: 0.7, el: 0.32 },
     });
     T('moon', { position: (o) => o.copy(sim.moonPos), frame: (q) => q.copy(sim.moonQuat), minDist: R_MOON + 250, maxDist: 400000, defaultDist: 7400, view: { az: 1.05, el: 0.22 } });
     T('sun', { position: (o) => o.copy(sim.sunPos), frame: identity, minDist: 3e6, maxDist: 1.2e8, defaultDist: 3.2e7, view: { az: 2.2, el: 0.55 } });
@@ -129,7 +129,7 @@ export class SpaceMode {
     const el = this.elevator;
     this.addBody('earth', [this.earth.mesh], () => _v.set(0, 0, 0), R_TOP + 4, { solid: true });
     this.addBody('rings', [this.rings.group], () => _v.set(0, 0, 0), R_EARTH + 2140);
-    this.addBody('junction', [el.junction], () => el.junction.getWorldPosition(_v), 8, { solid: true, hint: 0.3 });
+    this.addBody('junction', [el.junction], () => el.junction.getWorldPosition(_v), 8, { solid: true, hint: 0.7 });
     const segA = new THREE.Vector3(), segB = new THREE.Vector3(), segP = new THREE.Vector3();
     this.addBody('tether', [el.tether, el.climbers], null, 0, {
       interval: (cam) => {
@@ -140,8 +140,8 @@ export class SpaceMode {
         return [segP.distanceTo(cam), Math.max(segA.distanceTo(cam), segB.distanceTo(cam))];
       },
     });
-    this.addBody('harbour', [el.harbour], () => el.harbour.getWorldPosition(_v), 40, { solid: true, hint: 0.4 });
-    this.addBody('counter', [el.counter], () => el.counter.getWorldPosition(_v), 20, { solid: true, hint: 0.3 });
+    this.addBody('harbour', [el.harbour], () => el.harbour.getWorldPosition(_v), 17, { solid: true, hint: 0.95 });
+    this.addBody('counter', [el.counter], () => el.counter.getWorldPosition(_v), 20, { solid: true, hint: 0.6 });
     // Moon, Sun and swarm, the Hearth
     this.moon = new Moon(this);
     this.scene.add(this.moon.group);
@@ -563,7 +563,10 @@ export class SpaceMode {
       const ang = Math.asin(Math.min(1, b.radius / d));
       const off = Math.acos(THREE.MathUtils.clamp(rel.dot(fwd) / d, -1, 1));
       if (off > ang + halfFov * 1.2) continue;
-      const cov = THREE.MathUtils.clamp((ang * ang) / (halfFov * halfFov), 0, 1) * smooth(ang + halfFov * 1.2, Math.max(ang - halfFov, 0), off);
+      // expose for any sunlit hull that is more than a speck on screen: pearl plating in full
+      // sun must stay below the shoulder whether it fills the frame or a tenth of it
+      const pxR = (Math.tan(ang) / Math.tan(halfFov)) * this.size.y * 0.5;
+      const cov = smooth(2, 26, pxR) * smooth(ang + halfFov * 1.2, Math.max(ang - halfFov, 0), off);
       // in the Earth's shadow?
       const along = c.dot(this.sim.sunDir);
       const sunlit = along > 0 ? 1 : smooth(R_EARTH - 50, R_EARTH + 150, _v4.copy(c).addScaledVector(this.sim.sunDir, -along).length());

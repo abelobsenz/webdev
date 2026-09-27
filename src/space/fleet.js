@@ -133,24 +133,24 @@ export class Fleet {
     this.corridors = corr;
     const freighter = buildFreighter(1100);
     this._addVoyager('freighter', freighter, H, {
-      hold: corr.dA.clone().multiplyScalar(44).add(V(0, -6, 0)), start: corr.dD.clone().multiplyScalar(40).add(V(0, 5, 0)),
-      dA: corr.dA, dD: corr.dD, S: 2600, bulge: V(0, 10, 0), T: 1500, offset: 0.6,
+      hold: corr.dA.clone().multiplyScalar(19).add(V(0, -2.5, 0)), start: corr.dD.clone().multiplyScalar(17).add(V(0, 2, 0)),
+      dA: corr.dA, dD: corr.dD, S: 2600, bulge: V(0, 4, 0), T: 1500, offset: 0.6,
       engine: { scale: 0.62, length: 17, color: 0x7fd8ff }, glow: [0.55, 0.8, 1.0], accent: [0.55, 0.85, 1.0],
     });
     this._addVoyager('approach', liner, H, {
-      hold: corr.dA.clone().multiplyScalar(62).add(V(8, 10, 0)), start: corr.dD.clone().multiplyScalar(60).add(V(0, -8, 6)),
-      dA: corr.dA.clone().add(V(0.05, -0.1, 0.12)).normalize(), dD: corr.dD.clone().add(V(0, -0.08, -0.1)).normalize(), S: 3000, bulge: V(0, -14, 0), T: 2100, offset: 0.3,
+      hold: corr.dA.clone().multiplyScalar(27).add(V(3.5, 4, 0)), start: corr.dD.clone().multiplyScalar(26).add(V(0, -3.5, 2.5)),
+      dA: corr.dA.clone().add(V(0.05, -0.1, 0.12)).normalize(), dD: corr.dD.clone().add(V(0, -0.08, -0.1)).normalize(), S: 3000, bulge: V(0, -6, 0), T: 2100, offset: 0.3,
       engine: { scale: 0.55, length: 16, color: 0x7fd8ff }, glow: [0.55, 0.8, 1.0], accent: [1.0, 0.72, 0.45],
     });
     // ---- tugs and a courier working the Harbour (children of the Harbour: short hops)
     const tug = buildTug(80), courier = buildCourier(44), shuttle = buildShuttle(110);
     const A = station.data.arms;
-    const armHead = (i, extra = 0) => A[i].d.clone().multiplyScalar((A[i].L + 1400 + extra) * KM).setY(A[i].y * KM);
+    const armHead = (i, extra = 0) => A[i].d.clone().multiplyScalar((A[i].L + 650 + extra) * KM).setY(A[i].y * KM);
     const runs = [
-      { craft: tug, pts: [V(2.9, -14.6, 0.7), V(9, -12, 4), armHead(5).add(V(0, -3, 0)), armHead(5, 300)], move: 150, pause: 45, offset: 0 },
-      { craft: tug, pts: [armHead(1), armHead(1).add(V(0, 4, 0)), armHead(2).add(V(0, 4, 0)), armHead(2)], move: 130, pause: 60, offset: 80 },
-      { craft: courier, pts: [V(-2.3, 14.6, 0.4), V(-6, 17, 3), corr.dD.clone().multiplyScalar(22).add(V(0, 6, 0)), corr.dD.clone().multiplyScalar(30).add(V(0, 5, 0))], move: 110, pause: 50, offset: 30 },
-      { craft: shuttle, pts: [V(0.4, -14.6, -2.3), V(0, -20, -8), armHead(6).add(V(0, -6, 0)), armHead(6, 200).add(V(0, -1.2, 0))], move: 170, pause: 55, offset: 120 },
+      { craft: tug, pts: [V(1.25, -6.1, 0.35), V(3.8, -5.2, 1.7), armHead(5).add(V(0, -1.3, 0)), armHead(5, 150)], move: 150, pause: 45, offset: 0 },
+      { craft: tug, pts: [armHead(1), armHead(1).add(V(0, 1.7, 0)), armHead(2).add(V(0, 1.7, 0)), armHead(2)], move: 130, pause: 60, offset: 80 },
+      { craft: courier, pts: [V(-0.95, 6.1, 0.2), V(-2.5, 7.2, 1.3), corr.dD.clone().multiplyScalar(9.5).add(V(0, 2.5, 0)), corr.dD.clone().multiplyScalar(13).add(V(0, 2.1, 0))], move: 110, pause: 50, offset: 30 },
+      { craft: shuttle, pts: [V(0.2, -6.1, -1.0), V(0, -8.4, -3.4), armHead(6).add(V(0, -2.5, 0)), armHead(6, 100).add(V(0, -0.5, 0))], move: 170, pause: 55, offset: 120 },
     ];
     this.runs = runs.map((r, i) => {
       const m = craftMesh(r.craft.geo, { accent: [0.55, 0.9, 1.0], lit: 0.5 });
@@ -176,7 +176,7 @@ export class Fleet {
       g.add(m);
       this.portFrame.add(g);
       this.crafts.push(m);
-      space.addBody(`port${i}`, [g], () => g.getWorldPosition(_v), 1.2, { solid: true, hint: 0.1 });
+      space.addBody(`port${i}`, [g], () => g.getWorldPosition(_v), 1.2, { solid: true, hint: 0.4 });
       return { group: g, mesh: m, engines: eng, glow, offset: i * 470 };
     });
     // ---- reclamation tenders above the Halo near the Nauru port
@@ -210,7 +210,7 @@ export class Fleet {
       this.crafts.push(m);
     }
     space.scene.add(this.tenderGroup);
-    space.addBody('tenders', [this.tenderGroup], () => this.tenderGroup.getWorldPosition(_v), 6, { solid: true, hint: 0.25 });
+    space.addBody('tenders', [this.tenderGroup], () => this.tenderGroup.getWorldPosition(_v), 2.2, { solid: true, hint: 0.85 });
     // ---- Selene Works over the Moon's near side, with tankers
     const ref = buildRefinery(1);
     this.refinery = new THREE.Group();
@@ -236,7 +236,7 @@ export class Fleet {
     this.refineryMesh = rm;
     this.crafts.push(rm);
     space.scene.add(this.refinery);
-    space.addBody('selene', [this.refinery], () => this.refinery.getWorldPosition(_v), 6, { solid: true, hint: 0.35 });
+    space.addBody('selene', [this.refinery], () => this.refinery.getWorldPosition(_v), 6, { solid: true, hint: 0.85 });
     this.moonAlt = 2600;
     // a tanker on the Earth run, cycling through Selene's corridors (refinery frame, km)
     this._addVoyager('tanker', tanker, this.refinery, {
@@ -258,7 +258,7 @@ export class Fleet {
     this.space.scene.add(g);
     this.crafts.push(m);
     const r = c.radius ?? craft.length * KM * 0.5 + 0.8;
-    this.space.addBody(name, [g], () => g.getWorldPosition(_v), r, { solid: true, hint: 0.2 });
+    this.space.addBody(name, [g], () => g.getWorldPosition(_v), r, { solid: true, hint: 0.5 });
     const vy = { name, group: g, mesh: m, engines, glow, frameObj, c, pos: new THREE.Vector3(), fwd: new THREE.Vector3(0, 0, 1) };
     this.movers.push(vy);
     return vy;

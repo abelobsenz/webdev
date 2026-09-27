@@ -22,7 +22,7 @@ import * as THREE from 'three';
 //   refinery (from the cryo refinery)    Selene Works: spindle, habitat wheel, cracking
 //                                        columns, tank clusters, heat radiators, vent.
 
-export const CK = { GLASS: 0, HULL: 1, LANTERN: 2, GARDEN: 3, CONDUIT: 4, PANEL: 7, BRONZE: 8, DECK: 9, DARK: 10, RADIATOR: 11 };
+export const CK = { GLASS: 0, HULL: 1, LANTERN: 2, GARDEN: 3, CONDUIT: 4, PANEL: 7, BRONZE: 8, DECK: 9, DARK: 10, RADIATOR: 11, ROOF: 12 };
 const TAU = Math.PI * 2;
 
 export class CB {
@@ -185,6 +185,17 @@ export function sectionEllipse(a, b, count, n = 2, phase = 0, belly = 1) {
     pts.push([x, y]);
   }
   return pts;
+}
+
+/** Lathe about local z with one facade kind per band (prof = [[r, z, kind], ...]; band i..i+1 takes prof[i+1]'s kind). */
+function lathe(B, prof, seg = 16, phase = 0) {
+  for (let i = 0; i < prof.length - 1; i++) {
+    const [r0, z0] = prof[i];
+    const [r1, z1, k] = prof[i + 1];
+    if (Math.abs(r0 - r1) < 1e-6 && Math.abs(z0 - z1) < 1e-6) continue;
+    const e0 = Math.max(r0, 1e-3), e1 = Math.max(r1, 1e-3);
+    B.loft([{ z: z0, pts: sectionEllipse(e0, e0, seg, 2, phase) }, { z: z1, pts: sectionEllipse(e1, e1, seg, 2, phase) }], k ?? CK.HULL);
+  }
 }
 
 const lerp = (a, b, t) => a + (b - a) * t;
@@ -432,8 +443,45 @@ export function buildLiner(len = 2400) {
   };
   for (let k = 0; k < 3; k++) { const a = (k / 3) * TAU + Math.PI / 2; bell(Math.cos(a) * 58, Math.sin(a) * 44, 42, 70); }
   for (let k = 0; k < 6; k++) { const a = (k / 6) * TAU + Math.PI / 6; bell(Math.cos(a) * 88, Math.sin(a) * 58, 16, 28); }
+  // radiator fins in an X round the engine section: the drive's waste heat, shed edge-on
+  const lamps = [];
+  for (let k = 0; k < 4; k++) {
+    const a = (k / 4) * TAU + Math.PI / 4;
+    const c = Math.cos(a), sn = Math.sin(a);
+    const f0 = prof((-1060 + 1150) / 2400);
+    const r0 = Math.hypot(A * f0 * c, Bh * f0 * sn) * 0.92;
+    B.push(new THREE.Matrix4().makeRotationZ(a));
+    B.tube([new THREE.Vector3(r0 - 20, 0, -1000), new THREE.Vector3(r0 + 60, 0, -980)], 9, 8, CK.BRONZE);
+    B.box(r0 + 170, 0, -840, 300, 5, 420, CK.RADIATOR);
+    B.box(r0 + 170, 0, -1052, 304, 9, 8, CK.BRONZE);
+    B.box(r0 + 170, 0, -628, 304, 9, 8, CK.BRONZE);
+    B.box(r0 + 322, 0, -840, 6, 10, 428, CK.BRONZE);
+    B.pop();
+    lamps.push({ p: new THREE.Vector3(c * (r0 + 326), sn * (r0 + 326), -840).multiplyScalar(s), r: 3.2 * s, color: c > 0 ? [1.0, 0.16, 0.08] : [0.16, 1.0, 0.42], i: 3.4, dir: new THREE.Vector3(c, sn, 0) });
+  }
+  // docking collars along the keel for tenders and port shuttles
+  for (const z of [-420, -170, 80, 330, 580]) {
+    const f = prof((z + 1150) / 2400);
+    const y = -Bh * f * 0.8 + 4;
+    B.push(new THREE.Matrix4().makeRotationX(Math.PI / 2));
+    B.at(0, z, -y);
+    lathe(B, [[16, -2, CK.BRONZE], [19, 4, CK.BRONZE], [19, 10, CK.BRONZE], [15, 13, CK.DARK], [12, 14, CK.DARK], [0.1, 14, CK.DARK]], 16);
+    B.pop(); B.pop();
+    lamps.push({ p: new THREE.Vector3(21, y - 12, z).multiplyScalar(s), r: 2.2 * s, color: [1.0, 0.6, 0.22], i: 2.6, breathe: 0.3, phase: (z + 500) / 1200 });
+    lamps.push({ p: new THREE.Vector3(-21, y - 12, z).multiplyScalar(s), r: 2.2 * s, color: [1.0, 0.6, 0.22], i: 2.6, breathe: 0.3, phase: (z + 520) / 1200 });
+  }
+  // masthead, stern light, and a ring of teal lamps round the scoop
+  {
+    const u = (-760 + 1150) / 2400, top = Bh * prof(u);
+    lamps.push({ p: new THREE.Vector3(0, top - 10 + 232, -760).multiplyScalar(s), r: 3 * s, color: [1.0, 0.95, 0.86], i: 3.0, breathe: 0.3 });
+    lamps.push({ p: new THREE.Vector3(0, 70, -1150).multiplyScalar(s), r: 3 * s, color: [1.0, 0.95, 0.86], i: 2.4, dir: new THREE.Vector3(0, 0, -1) });
+    for (let k = 0; k < 8; k++) {
+      const a = (k / 8) * TAU;
+      lamps.push({ p: new THREE.Vector3(Math.cos(a) * 160, Math.sin(a) * 160, 1420).multiplyScalar(s), r: 3 * s, color: [0.35, 0.95, 1.0], i: 2.2, breathe: 0.25, phase: k / 8 });
+    }
+  }
   B.pop();
-  return { geo: B.geometry(), glows, length: len };
+  return { geo: B.geometry(), glows, lamps, length: len };
 }
 
 // -------------------------------------------------------------- refinery ----

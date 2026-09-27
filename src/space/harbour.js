@@ -20,6 +20,10 @@ import { craftMesh, craftPart, addLamps, placeMerge, placeLamps, pixelRadius, KM
 
 const TAU = Math.PI * 2;
 const V = (x, y, z) => new THREE.Vector3(x, y, z);
+// The station is laid out in design metres and drawn at HS of that size, while the ships at
+// its berths keep their true size: at full scale a 1 km freighter was a speck on an arm as
+// thick as its own radiators.
+export const HS = 0.42;
 
 /** Sweep a closed section [[dr, dy], ...] (with a kind per point) around the Y axis at radius R. */
 function sweepRing(B, R, yc, sec, seg) {
@@ -72,7 +76,7 @@ function troughSection(a, b) {
     const x = Math.sign(c) * Math.pow(Math.abs(c), 2 / 3.4) * a;      // axial
     const r = Math.sign(s) * Math.pow(Math.abs(s), 2 / 3.4) * b;      // radial (+ out)
     let k = CK.HULL;
-    if (s < -0.55) k = CK.GLASS;                     // roof, facing the axis
+    if (s < -0.55) k = CK.ROOF;                      // glass roof over the gardens, facing the axis
     else if (Math.abs(s) < 0.22) k = CK.LANTERN;     // galleries along the sides
     else if (s < -0.3 || (s > 0.22 && s < 0.36)) k = CK.BRONZE;
     pts.push([r, x, k]);
@@ -170,19 +174,8 @@ export function buildHarbour() {
     B.pop();
     wingRoots.push(V(0, 10400, sz * 4000));
   }
-  // the liner pier: gangways reaching down and out from arm 4 to the berthed liner's flank
-  {
-    const pa = arms[4];
-    for (const r of [22000, 22900, 23800]) {
-      const p0 = pa.d.clone().multiplyScalar(r).setY(pa.y);
-      const p1 = p0.clone().addScaledVector(pa.side, -330).setY(pa.y - 170);
-      B.tube([p0, p1], 38, 8, CK.HULL);
-      B.at(p1.x, p1.y, p1.z);
-      B.box(0, 0, 0, 90, 90, 90, CK.BRONZE);
-      B.pop();
-    }
-  }
-  const body = B.geometry();
+  const bodyDesign = B.geometry();
+  bodyDesign.scale(HS, HS, HS);
 
   // ---- habitat rings (separate: they turn)
   const rings = [];
@@ -213,7 +206,9 @@ export function buildHarbour() {
         W.pop();
       }
     }
-    rings.push({ geo: W.geometry(), dir: dirn, omega: Math.sqrt(9.81 / (R + b)), R, y: yc });
+    const rg = W.geometry();
+    rg.scale(HS, HS, HS);
+    rings.push({ geo: rg, dir: dirn, omega: Math.sqrt(9.81 / ((R + b) * HS)), R: R * HS, y: yc * HS });
   }
 
   // ---- solar wings: each a boom with six panel bays, turned about its boom (local Z)
@@ -227,6 +222,11 @@ export function buildHarbour() {
   }
   wing.box(0, 0, 21560, 4400, 60, 60, CK.BRONZE);
   const wingGeo = wing.geometry();
+  wingGeo.scale(HS, HS, HS);
+  for (const w of wingRoots) w.multiplyScalar(HS);
+  // berths and arms in drawn metres
+  for (const b of berths) { b.base.multiplyScalar(HS); b.tip.multiplyScalar(HS); b.r *= HS; b.y *= HS; }
+  for (const a of arms) { a.L *= HS; a.y *= HS; }
 
   // ---- berthed ships: freighters and tenders alongside the fingers, small craft in the bays
   const shipsBig = [], shipsSmall = [], lamps = [];
@@ -237,7 +237,7 @@ export function buildHarbour() {
   const rnd = () => { rs = (rs * 1664525 + 1013904223) >>> 0; return rs / 4294967296; };
   const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _s = new THREE.Vector3();
   for (const bth of berths) {
-    if (bth.arm === 4 && bth.r > 17000) continue;           // the liner pier's outer berths stay clear
+    if (bth.arm === 4 && bth.r > 17000 * HS) continue;      // the liner pier's outer berths stay clear
     const pick = rnd();
     if (pick < 0.12) continue;                              // an empty berth or two
     const big = pick < 0.66;
@@ -255,7 +255,7 @@ export function buildHarbour() {
     const M = new THREE.Matrix4().compose(pos, _q, _s);
     shipsBig.push({ geo: ship.geo, m: M });
     lamps.push(...placeLamps(ship.lamps || [], M, 6));
-    lamps.push({ p: bth.tip.clone().addScaledVector(upv, 240), r: 30, color: LAMP.AMBER, i: 2.4, breathe: 0.3, phase: rnd() });
+    lamps.push({ p: bth.tip.clone().addScaledVector(upv, 110), r: 9, color: LAMP.AMBER, i: 2.4, breathe: 0.3, phase: rnd() });
   }
   // small craft in the terminal bays round the lower and upper terminals
   for (const yT of [-14600, 14600]) {
@@ -264,7 +264,7 @@ export function buildHarbour() {
       const d = V(Math.cos(a), 0, Math.sin(a));
       const pick = k % 3;
       const ship = pick === 0 ? sh : pick === 1 ? tu : co;
-      const pos = d.clone().multiplyScalar(1950 + ship.length * 0.5 + 25).setY(yT + (k % 2 ? 350 : -350));
+      const pos = d.clone().multiplyScalar(1950 * HS + ship.length * 0.5 + 25).setY((yT + (k % 2 ? 350 : -350)) * HS);
       const upv = V(0, Math.sign(yT), 0);
       const fwd = d.clone().negate();
       const x = new THREE.Vector3().crossVectors(upv, fwd).normalize();
@@ -276,30 +276,42 @@ export function buildHarbour() {
   }
   // station lamps: arm heads, gallery markers, ring hubs, terminal throats
   for (const arm of arms) {
-    const head = arm.d.clone().multiplyScalar(arm.L + 800).setY(arm.y);
-    lamps.push({ p: head, r: 60, color: LAMP.WHITE, i: 3.0, breathe: 0.35, phase: arm.a / TAU });
-    for (let r = 3000; r < arm.L; r += 2800) {
-      lamps.push({ p: arm.d.clone().multiplyScalar(r).addScaledVector(arm.side, 260).setY(arm.y), r: 26, color: LAMP.AMBER, i: 1.6 });
-      lamps.push({ p: arm.d.clone().multiplyScalar(r).addScaledVector(arm.side, -260).setY(arm.y), r: 26, color: LAMP.AMBER, i: 1.6 });
+    const head = arm.d.clone().multiplyScalar(arm.L + 800 * HS).setY(arm.y);
+    lamps.push({ p: head, r: 14, color: LAMP.WHITE, i: 3.0, breathe: 0.35, phase: arm.a / TAU });
+    for (let r = 3000 * HS; r < arm.L; r += 2800 * HS) {
+      lamps.push({ p: arm.d.clone().multiplyScalar(r).addScaledVector(arm.side, 110).setY(arm.y), r: 6, color: LAMP.AMBER, i: 1.6 });
+      lamps.push({ p: arm.d.clone().multiplyScalar(r).addScaledVector(arm.side, -110).setY(arm.y), r: 6, color: LAMP.AMBER, i: 1.6 });
     }
   }
   for (const yT of [-17250, 17250]) for (let k = 0; k < 8; k++) {
     const a = (k / 8) * TAU;
-    lamps.push({ p: V(Math.cos(a) * 560, yT, Math.sin(a) * 560), r: 40, color: LAMP.TEAL, i: 2.2, breathe: 0.25, phase: k / 8 });
+    lamps.push({ p: V(Math.cos(a) * 560, yT, Math.sin(a) * 560).multiplyScalar(HS), r: 9, color: LAMP.TEAL, i: 2.2, breathe: 0.25, phase: k / 8 });
   }
   for (let k = 0; k < 4; k++) {
     const a = (k / 4) * TAU + Math.PI / 4;
-    lamps.push({ p: V(Math.cos(a) * 11300, -10200, Math.sin(a) * 11300), r: 60, color: k % 2 ? LAMP.RED : LAMP.GREEN, i: 2.6 });
+    lamps.push({ p: V(Math.cos(a) * 11300, -10200, Math.sin(a) * 11300).multiplyScalar(HS), r: 12, color: k % 2 ? LAMP.RED : LAMP.GREEN, i: 2.6 });
   }
   const shipsBigGeo = placeMerge(shipsBig);
   const shipsSmallGeo = placeMerge(shipsSmall);
-  // the liner pier: arm 4's outer berths
+  // the liner pier: arm 4's outer end; the liner lies alongside, a little below the gallery
   const pierArm = arms[4];
   const pier = {
-    pos: pierArm.d.clone().multiplyScalar(pierArm.L - 1900).addScaledVector(pierArm.side, -520).setY(pierArm.y - 260),
+    pos: pierArm.d.clone().multiplyScalar(pierArm.L - 1300).addScaledVector(pierArm.side, -330).setY(pierArm.y - 150),
     fwd: pierArm.d.clone(),
     side: pierArm.side.clone(),
   };
+  // gangways from the gallery to the liner's flank (true metres, like the ships)
+  const G = new CB();
+  for (const r of [pierArm.L - 2150, pierArm.L - 1350, pierArm.L - 550]) {
+    const p0 = pierArm.d.clone().multiplyScalar(r).setY(pierArm.y);
+    const p1 = p0.clone().addScaledVector(pierArm.side, -150).setY(pierArm.y - 140);
+    G.tube([p0, p1], 14, 8, CK.HULL);
+    G.at(p1.x, p1.y, p1.z);
+    G.box(0, 0, 0, 34, 34, 34, CK.BRONZE);
+    G.pop();
+    lamps.push({ p: p1.clone().add(V(0, 26, 0)), r: 4, color: LAMP.AMBER, i: 2.2, breathe: 0.3, phase: r * 0.001 });
+  }
+  const body = placeMerge([{ geo: bodyDesign, m: new THREE.Matrix4() }, { geo: G.geometry(), m: new THREE.Matrix4() }]);
   return { body, rings, wingGeo, wingRoots, shipsBigGeo, shipsSmallGeo, lamps, berths, arms, pier };
 }
 
@@ -333,7 +345,7 @@ export class HarbourStation {
     this.shipsSmall = craftPart(this.body, h.shipsSmallGeo);
     this.shipsSmall.scale.setScalar(KM);
     this.group.add(this.shipsBig, this.shipsSmall);
-    this.lampMesh = addLamps(this.body, h.lamps, { minPx: 1.4, halo: 3 });
+    this.lampMesh = addLamps(this.body, h.lamps, { minPx: 1.4 });
     this.group.traverse((o) => { o.frustumCulled = false; });
     this._sunL = new THREE.Vector3();
     this._q = new THREE.Quaternion();
@@ -362,9 +374,9 @@ export class HarbourStation {
     for (const w of this.wings) w.pivot.rotation.z = -ang;
     // small craft and lamps only when the station is big enough on screen to show them
     const cam = space.camera;
-    const px = pixelRadius(cam, this.group.getWorldPosition(this._w), 30, space.size.y);
-    this.shipsSmall.visible = px > 600;
-    this.shipsBig.visible = px > 60;
-    if (this.lampMesh) this.lampMesh.visible = px > 12;
+    const px = pixelRadius(cam, this.group.getWorldPosition(this._w), 13, space.size.y);
+    this.shipsSmall.visible = px > 350;
+    this.shipsBig.visible = px > 40;
+    if (this.lampMesh) this.lampMesh.visible = px > 10;
   }
 }
