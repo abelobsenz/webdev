@@ -94,6 +94,7 @@ export function planTrees(world) {
   const push = (x, z, sp, s, { lean = 0, rot = rnd() * Math.PI * 2, y, bloom, layer = 0, spacing } = {}) => {
     const trunkR = sp === SP.banyan ? 3.5 : sp === SP.mangrove ? 3 : Math.max(0.6, s * 0.035);
     const yy = y ?? rootY(x, z, trunkR);
+    if (y === undefined && yy < 0.25) return;           // no tree stands in the water
     trees.push({ x, y: yy, z, s, sp, rot, lean, tint: tint(sp), bloom });
     occupy(x, z, spacing ?? crownRadius(sp, s) * 0.45, layer);
   };
@@ -113,9 +114,9 @@ export function planTrees(world) {
       if (h < -1.0) continue;
       const u = info.urban[k], f = info.forest[k], sd = info.shore[k], ex = info.exposure[k], cv = info.curv[k];
       const r = rnd();
-      // mangrove stands along calm lagoon shores
+      // mangrove stands along calm lagoon shores, rooted on the dry fringe above the waterline
       if (h < 1.0) {
-        if (h > -0.85 && ex < 0.4 && u < 0.3 && sd > -32 && vnoise(x * 0.006 + 40, z * 0.006) > 0.45 && r < 0.6) {
+        if (h > 0.55 && ex < 0.4 && u < 0.3 && sd > -32 && vnoise(x * 0.006 + 40, z * 0.006) > 0.45 && r < 0.6) {
           const s = 6 + rnd() * 3;
           if (fits(x, z, SP.mangrove, s, u) && clear(x, z, 3.5, 0)) push(x, z, SP.mangrove, s, { spacing: 3.5 });
         }
@@ -266,8 +267,10 @@ export function planTrees(world) {
     // designed rows and rings (the Circus of the Planets, the Mall's araucarias, ...)
     for (const t of mp.trees || []) {
       const sp = SP[t.sp] ?? SP.flowering;
+      const y = wardHeight(t.x, t.z);
+      if (!(y > 2)) continue;                              // rooted on the platform, never over water
       if (!clear(t.x, t.z, 2.0, 6) || towerHit(t.x, t.z, 2)) continue;
-      push(t.x, t.z, sp, t.s * (0.94 + rnd() * 0.12), { y: t.y - 0.15, layer: 6, spacing: 2.2, rot: rnd() * Math.PI * 2 });
+      push(t.x, t.z, sp, t.s * (0.94 + rnd() * 0.12), { y: y - 0.15, layer: 6, spacing: 2.2, rot: rnd() * Math.PI * 2 });
     }
     // groves in the parks, each ward with its own trees
     const grove = {

@@ -15,9 +15,16 @@ varying vec3 vView;
 varying vec3 vN;
 void main() {
   vFac = aFacade;
+#ifdef USE_INSTANCING
+  // instanced hulls (traffic close-ups): instance matrices are relative to a local origin
+  // near the camera, so the composed transform stays small and exact in float32
+  vec4 mv = modelViewMatrix * (instanceMatrix * vec4(position, 1.0));
+  vN = normalize(normalMatrix * (mat3(instanceMatrix) * normal));
+#else
   vec4 mv = modelViewMatrix * vec4(position, 1.0);
-  vView = mv.xyz;
   vN = normalize(normalMatrix * normal);
+#endif
+  vView = mv.xyz;
   gl_Position = projectionMatrix * mv;
 }
 `;
@@ -32,6 +39,8 @@ uniform float uSunE;
 uniform float uTime;
 uniform vec3 uAccent;
 uniform float uLit;          // fraction of windows lit
+uniform float uFill;         // bounce light from the craft's own sunlit parts (fraction of the Sun)
+uniform float uFlood;        // exterior floodlights, on while the craft is in shadow
 varying vec3 vFac;
 varying vec3 vView;
 varying vec3 vN;
@@ -71,6 +80,33 @@ vec3 craftEnv(vec3 P, vec3 R, float rough) {
   return col;
 }
 
+// Kinds added for stations and big hulls (applied after the base palette):
+//  12 glass roof over gardens: planted parkland and lit towns seen through glazing on 9 m
+//     mullions, with an order of fields, woods and towns that still reads from tens of km
+void craftExtraKinds(float k, vec2 f, vec2 fw, float px, inout vec3 alb, inout float rough, inout float metal, inout vec3 em) {
+  if (k > 11.5 && k < 12.5) {
+    float dM = 1.0 - smoothstep(2.0, 3.6, px);                       // 9 m mullions >= 3 px
+    float dG = 1.0 - smoothstep(0.8, 2.4, px);                       // garden texture
+    float dT = 1.0 - smoothstep(60.0, 150.0, px);                    // 450 m districts
+    float g = vnoise(f * 0.011) * 0.55 + mix(0.5, vnoise(f * 0.09), dG) * 0.45;
+    vec3 garden = mix(vec3(0.03, 0.075, 0.028), vec3(0.11, 0.16, 0.055), g);
+    // districts: parkland, fields, lakes and towns along the roof's length
+    float dh = hash12(floor(f / vec2(450.0, 260.0)) + 29.0);
+    float town = mix(0.3, step(0.62, dh), dT);
+    float lake = mix(0.1, step(dh, 0.1), dT);
+    vec3 townC = vec3(0.26, 0.25, 0.23) * (0.9 + 0.2 * mix(0.5, hash12(floor(f / 18.0)), dG));
+    vec3 under = mix(garden, townC, town);
+    under = mix(under, vec3(0.012, 0.035, 0.05), lake);
+    float mull = mix(0.1, max(cLine(f.x, 9.0, 0.35, fw.x), cLine(f.y, 9.0, 0.35, fw.y)), dM);
+    alb = mix(under * 0.85, vec3(0.62, 0.61, 0.58), mull);
+    rough = mix(0.08, 0.4, mull); metal = mix(0.45, 0.15, mull);
+    // warm town light under the glass, its mean kept as it falls below a few pixels
+    float lc = hash12(floor(f / 22.0) + 5.0);
+    float lampOn = mix(0.18, smoothstep(0.55, 0.9, lc), 1.0 - smoothstep(4.0, 8.0, px));
+    em = vec3(1.0, 0.76, 0.5) * (0.04 + 0.5 * town * lampOn) * (1.0 - mull) * 0.6;
+  }
+}
+
 void main() {
   vec3 N = normalize(vN);
   if (!gl_FrontFacing) N = -N;
@@ -87,7 +123,7 @@ void main() {
   T /= max(length(T), 1e-12); B /= max(length(B), 1e-12);
   vec2 bump = vec2(0.0);
   vec3 sunL = spaceSunlight(uTransmittanceLUT, uObjWorld, uSunWorld) * uSunE;
-  vec3 alb = vec3(0.8, 0.79, 0.76);
+  vec3 alb = vec3(0.74, 0.73, 0.7);          // pearl composite (sunlit, it must sit below the tone curve shoulder)
   float rough = 0.38, metal = 0.08;
   vec3 em = vec3(0.0);
   // every pattern settles to its exact average while its cell still spans ~3 px
@@ -184,12 +220,13 @@ void main() {
   } else {
     // heat radiator: dark ceramic fins with glowing coolant channels, hottest near the manifold
     alb = vec3(0.1, 0.09, 0.085); rough = 0.7;
-    float ch = gridLine(f.y, 24.0, 2.0, fw.y);
+    float ch = mix(0.17, gridLine(f.y, 24.0, 2.0, fw.y), 1.0 - smoothstep(4.0, 9.0, fw.y));   // mean once under ~3 px
     float fin2 = gridLine(f.x, 3.0, 0.3, fw.x) * det;
     float heat = 0.55 + 0.45 * sin(f.x * 0.003 + 1.3);
     alb *= 1.0 - 0.3 * fin2;
     em = vec3(1.0, 0.36, 0.12) * (0.14 + 0.5 * ch) * heat * (0.8 + 0.2 * sin(uTime * 0.3 + f.x * 0.002));
   }
+  craftExtraKinds(k, f, fw, px, alb, rough, metal, em);
   N = normalize(N + T * bump.x + B * bump.y);
   // light: the Sun, earthshine, a little ambient, and the Earth mirrored in glossy surfaces
   vec3 toE = uEarthView - vView;
@@ -207,6 +244,11 @@ void main() {
   vec3 Fr = F0 + (1.0 - F0) * fres * (1.0 - rough);
   vec3 col = alb * (1.0 - metal * 0.8) / 3.14159 * (sunL * ndl + earthshine) + min((F0 + (1.0 - F0) * fres * 0.3) * sp * sunL * ndl, sunL * 0.5);
   col += Fr * craftEnv(vView, reflect(-V, N), max(rough, 0.12)) * 0.8;
+  // bounce from the craft's own sunlit plating (soft, from the side away from the Sun), and
+  // floodlights washing the hull while it is in shadow
+  float sunVis = clamp(dot(sunL, vec3(0.333)) / max(uSunE, 1e-3), 0.0, 1.0);
+  col += alb * (1.0 - metal * 0.6) / 3.14159 * sunL * uFill * (0.55 + 0.45 * max(dot(N, -uSunView), 0.0));
+  col += alb * (1.0 - metal * 0.5) * vec3(1.0, 0.86, 0.68) * uFlood * 0.06 * (1.0 - sunVis) * (0.6 + 0.4 * max(N.y, 0.0));
   col += alb * 0.004 + em;
   gl_FragColor = vec4(col, 1.0);
 }
@@ -214,7 +256,7 @@ void main() {
 
 const _m = new THREE.Matrix4(), _v = new THREE.Vector3();
 
-export function createCraftMaterial({ accent = [0.55, 0.85, 1.0], lit = 0.55 } = {}) {
+export function createCraftMaterial({ accent = [0.55, 0.85, 1.0], lit = 0.55, fill = 0.025, flood = 1 } = {}) {
   const m = new THREE.ShaderMaterial({
     vertexShader: VERT, fragmentShader: FRAG,
     uniforms: {
@@ -222,6 +264,7 @@ export function createCraftMaterial({ accent = [0.55, 0.85, 1.0], lit = 0.55 } =
       uSunView: { value: new THREE.Vector3(1, 0, 0) }, uSunWorld: { value: new THREE.Vector3(1, 0, 0) },
       uObjWorld: { value: new THREE.Vector3() }, uEarthView: { value: new THREE.Vector3() },
       uTime: { value: 0 }, uAccent: { value: new THREE.Color(...accent) }, uLit: { value: lit },
+      uFill: { value: fill }, uFlood: { value: flood },
     },
     side: THREE.DoubleSide,
   });

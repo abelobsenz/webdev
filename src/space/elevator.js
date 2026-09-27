@@ -2,6 +2,10 @@ import * as THREE from 'three';
 import { createRibbonMaterial, buildRibbonGeometry } from './lines.js';
 import { createHullMaterial, tag, merge, beam, KIND } from './hull.js';
 import { R_EARTH, GEO_ALT, COUNTERWEIGHT_ALT, MERIDIAN_LON, bodyDir } from './sim.js';
+import { HarbourStation } from './harbour.js';
+import { stationFrame, buildPortStation, buildCounterworks } from './stations.js';
+import { craftMesh, craftPart, addLamps } from './craftMesh.js';
+import { ClimberCars } from './climbers.js';
 
 // Meridian's space elevator: the tether (surface -> Halo -> Geostationary
 // Harbour -> counterweight), its climbers, and the stations along it.
@@ -58,7 +62,8 @@ void main() {
   gl_Position = projectionMatrix * mv;
   float d = -mv.z;
   vDir = aC.y;
-  vFade = clamp(3.0e5 / max(d, 1.0), 0.0, 1.0);
+  // within a few tens of km the nearest climbers are real cars (src/space/climbers.js)
+  vFade = clamp(3.0e5 / max(d, 1.0), 0.0, 1.0) * smoothstep(12.0, 50.0, d);
   gl_PointSize = uPx * clamp(900.0 / max(d, 1.0), 1.0, 3.0);
 }
 `;
@@ -85,63 +90,6 @@ function vnoise3(x, y, z) {
   const L = (a, b, t) => a + (b - a) * t;
   return L(L(L(h(fi, fj, fk), h(fi + 1, fj, fk), su), L(h(fi, fj + 1, fk), h(fi + 1, fj + 1, fk), su), sv),
     L(L(h(fi, fj, fk + 1), h(fi + 1, fj, fk + 1), su), L(h(fi, fj + 1, fk + 1), h(fi + 1, fj + 1, fk + 1), su), sv), sw);
-}
-
-function buildHarbour() {
-  const parts = [];
-  const rings = [];
-  const V = (x, y, z) => new THREE.Vector3(x, y, z);
-  // spindle along the tether (local +Y points away from the Earth)
-  parts.push(tag(new THREE.CylinderGeometry(0.75, 0.75, 28, 20, 1), KIND.PLATE));
-  for (const y of [-10, -8.4, 8.4, 10]) parts.push(tag(new THREE.CylinderGeometry(1.5, 1.5, 1.4, 24).translate(0, y, 0), KIND.HAB));
-  parts.push(tag(new THREE.CylinderGeometry(2.4, 1.2, 1.8, 24).translate(0, -13.2, 0), KIND.GOLD));
-  parts.push(tag(new THREE.CylinderGeometry(1.2, 2.4, 1.8, 24).translate(0, 13.2, 0), KIND.GOLD));
-  parts.push(tag(new THREE.TorusGeometry(1.2, 0.1, 6, 32).rotateX(Math.PI / 2).translate(0, 14.2, 0), KIND.GLOW));
-  parts.push(tag(new THREE.TorusGeometry(1.2, 0.1, 6, 32).rotateX(Math.PI / 2).translate(0, -14.2, 0), KIND.GLOW));
-  // docking arms with berths and ships
-  const r = rng(7);
-  const ships = [];
-  for (let i = 0; i < 8; i++) {
-    const a = (i / 8) * Math.PI * 2 + 0.2;
-    const y = i % 2 ? 2.4 : -2.4;
-    const dir = V(Math.cos(a), 0, Math.sin(a));
-    const L = 19 + (i % 3) * 3;
-    parts.push(beam(dir.clone().multiplyScalar(0.8).setY(y), dir.clone().multiplyScalar(L).setY(y), 0.2, KIND.TRUSS, 6));
-    for (let s = 3.5; s < L; s += 2.3) {
-      const c = dir.clone().multiplyScalar(s).setY(y);
-      const box = new THREE.BoxGeometry(0.7, 0.55, 0.7).translate(c.x, c.y, c.z);
-      parts.push(tag(box, KIND.HAB));
-      if (r() < 0.7) {
-        // a docked ship hanging off the berth
-        const side = r() < 0.5 ? 1 : -1;
-        const len = 0.9 + r() * 1.6;
-        const sg = new THREE.CylinderGeometry(0.16, 0.22, len, 8).translate(0, side * (len / 2 + 0.35), 0).translate(c.x, c.y, c.z);
-        ships.push(tag(sg, KIND.PLATE));
-        const eg = new THREE.CylinderGeometry(0.12, 0.12, 0.12, 8).translate(0, side * (len + 0.4), 0).translate(c.x, c.y, c.z);
-        ships.push(tag(eg, KIND.GLOW));
-      }
-    }
-    parts.push(tag(new THREE.BoxGeometry(0.4, 0.4, 0.4).translate(dir.x * L, y, dir.z * L), KIND.GLOW));
-  }
-  parts.push(...ships);
-  // solar wings and radiators
-  for (const s of [-1, 1]) {
-    parts.push(tag(new THREE.BoxGeometry(26, 0.06, 6.5).translate(s * 16, 11.5, 0), KIND.PANEL));
-    parts.push(beam(V(0, 11.5, 0), V(s * 29, 11.5, 0), 0.12, KIND.TRUSS, 5));
-    parts.push(tag(new THREE.BoxGeometry(5, 0.05, 20).translate(0, -11.5, s * 12.5), KIND.PANEL));
-  }
-  const body = merge(parts);
-  // three counter-rotating habitat rings with spokes
-  for (const [y, R, tube, dirn] of [[-6, 7.2, 0.5, 1], [0, 10.6, 0.7, -1], [6, 7.2, 0.5, 1]]) {
-    const rp = [tag(new THREE.TorusGeometry(R, tube, 14, 180).rotateX(Math.PI / 2).translate(0, y, 0), KIND.HAB)];
-    for (let k = 0; k < 6; k++) {
-      const a = (k / 6) * Math.PI * 2;
-      rp.push(beam(V(Math.cos(a) * 0.8, y, Math.sin(a) * 0.8), V(Math.cos(a) * (R - tube), y, Math.sin(a) * (R - tube)), 0.14, KIND.TRUSS, 5));
-    }
-    rp.push(tag(new THREE.TorusGeometry(R, tube * 0.18, 5, 180).rotateX(Math.PI / 2).translate(0, y + tube * 0.95, 0), KIND.GLOW));
-    rings.push({ geo: merge(rp), dir: dirn, omega: Math.sqrt(0.0098 / R) });
-  }
-  return { body, rings };
 }
 
 function buildCounterweight() {
@@ -203,37 +151,46 @@ export class Elevator {
     this.climbers.frustumCulled = false;
     this.climbers.renderOrder = 14;
     this.group.add(this.climbers);
+    this.cars = new ClimberCars(space, up, aC);
+    this.group.add(this.cars.group);
     // stations
     const qStation = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), up);
     this.hullMats = [];
     const mkMat = (o) => { const m = createHullMaterial(o); this.hullMats.push(m); return m; };
-    const harbour = buildHarbour();
-    const hMat = mkMat({ pattern: 0.045, accent: [0.55, 0.85, 1.0] });
-    this.harbour = new THREE.Group();
+    // the Geostationary Harbour (src/space/harbour.js), drawn with the ships' builder and material
+    this.station = new HarbourStation();
+    this.harbour = this.station.group;
     this.harbour.position.copy(up).multiplyScalar(R_EARTH + GEO_ALT);
-    this.harbour.quaternion.copy(qStation);
-    this.harbour.add(new THREE.Mesh(harbour.body, hMat));
-    this.harbourRings = harbour.rings.map((r) => { const m = new THREE.Mesh(r.geo, hMat); m.userData = r; this.harbour.add(m); return m; });
+    this.harbour.quaternion.copy(stationFrame(up));
     this.group.add(this.harbour);
-    // Halo junction: where the tether passes through the ring
-    const jParts = [tag(new THREE.CylinderGeometry(2.2, 2.2, 5, 24), KIND.HAB), tag(new THREE.TorusGeometry(4.6, 0.5, 10, 64).rotateX(Math.PI / 2), KIND.HAB),
-      tag(new THREE.TorusGeometry(4.6, 0.12, 5, 64).rotateX(Math.PI / 2).translate(0, 0.6, 0), KIND.GLOW)];
-    for (let k = 0; k < 4; k++) { const a = k * Math.PI / 2; jParts.push(beam(new THREE.Vector3(Math.cos(a) * 2.2, 0, Math.sin(a) * 2.2), new THREE.Vector3(Math.cos(a) * 4.2, 0, Math.sin(a) * 4.2), 0.25, KIND.TRUSS, 5)); }
-    this.junction = new THREE.Mesh(merge(jParts), mkMat({ pattern: 0.05, accent: [1.0, 0.75, 0.45] }));
-    this.junction.position.copy(up).multiplyScalar(R_EARTH + 620 + 5.5);
-    this.junction.quaternion.copy(qStation);
+    // Halo junction: the port station where the main tether passes through the ring, its
+    // climber terminal in the axis (src/space/stations.js)
+    const jn = buildPortStation({ junction: true });
+    this.junctionMesh = craftMesh(jn.geo, { accent: [1.0, 0.78, 0.5], lit: 0.62 });
+    this.junctionShips = craftPart(this.junctionMesh, jn.ships);
+    this.junctionMesh.add(this.junctionShips);
+    addLamps(this.junctionMesh, jn.lamps, { minPx: 1.3 });
+    this.junction = new THREE.Group();
+    this.junction.add(this.junctionMesh);
+    this.junction.position.copy(up).multiplyScalar(R_EARTH + 620);
+    stationFrame(up, this.junction.quaternion);
     this.group.add(this.junction);
     // counterweight
     this.counter = new THREE.Mesh(buildCounterweight(), mkMat({ pattern: 0.08, accent: [1.0, 0.6, 0.35] }));
     this.counter.position.copy(up).multiplyScalar(R_EARTH + COUNTERWEIGHT_ALT + 10);
     this.counter.quaternion.copy(qStation);
     this.group.add(this.counter);
-    for (const o of [this.harbour, this.junction, this.counter]) o.traverse((c) => { c.frustumCulled = false; c.renderOrder = 3; });
+    // the works on the rock: arrival terminal, habitat ring, mining gantries, radiators
+    const cw = buildCounterworks();
+    this.counterWorks = craftMesh(cw.geo, { accent: [1.0, 0.7, 0.4], lit: 0.6 });
+    addLamps(this.counterWorks, cw.lamps, { minPx: 1.3 });
+    this.counter.add(this.counterWorks);
+    for (const o of [this.junction, this.counter]) o.traverse((c) => { c.frustumCulled = false; });
   }
 
   setSize(w, h) { this.tetherMat.uniforms.uResolution.value.set(w, h); this.climbMat.uniforms.uPx.value = Math.max(2, h / 400); }
 
-  update(sim, realTime) {
+  update(sim, realTime, dt, space) {
     const tu = this.tetherMat.uniforms;
     tu.uSunDir.value.copy(sim.sunDir); tu.uTime.value = realTime; tu.uSimT.value = sim.t % 1e6;
     this.climbMat.uniforms.uClimbT.value = sim.t % CLIMB_PERIOD;
@@ -242,8 +199,8 @@ export class Elevator {
       m.uniforms.uTime.value = realTime;
       m.uniforms.uEarthPos.value.set(0, 0, 0);
     }
-    // habitat rings turn at their real 1 g rate in real time: driven by warped sim time
-    // they spun many times per second and strobed
-    for (const r of this.harbourRings) r.rotation.y = r.userData.dir * r.userData.omega * (realTime % 1e5);
+    // the Harbour's rings turn at their real 1 g rate in real time; its wings track the Sun
+    if (space) this.station.update(sim, realTime, space);
+    if (space) this.cars.update(sim, realTime, dt, space);
   }
 }
