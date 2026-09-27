@@ -161,13 +161,50 @@ export class People {
     const ground = (x, z) => world.groundHeight(x, z);
     const stations = (world.infra && world.infra.stations) || [];
     const blocked = (x, z) => stations.some((s) => Math.hypot(s.x - x, s.z - z) < s.r + 2);
-    // split a polyline wherever it enters a blocked area
-    const splitBlocked = (pts, closed) => {
+    // nobody walks in the water: a point at ground level is wet where the dry land (terrain
+    // or ward platform) under it is within 0.45 m of the lagoon; decks and the plaza stand clear
+    const wet = (x, y, z) => {
+      const g = ground(x, z);
+      return y - g < 1.0 && g < 0.45;
+    };
+    // resample a polyline to <= 4 m steps so the checks below see every stretch of it
+    const densify = (pts, closed) => {
+      const src = closed ? [...pts, pts[0]] : pts, out = [];
+      for (let i = 0; i < src.length - 1; i++) {
+        const a = src[i], b = src[i + 1], n = Math.max(1, Math.ceil(a.distanceTo(b) / 4));
+        for (let k = 0; k < n; k++) out.push(a.clone().lerp(b, k / n));
+      }
+      if (!closed && src.length) out.push(src[src.length - 1].clone());
+      return out;
+    };
+    // split a polyline wherever it (or either edge of its walking width) enters a blocked
+    // area or the water, dropping the scraps
+    const splitBlocked = (pts0, closed, half = 0) => {
+      let pts = densify(pts0, closed);
+      const n = pts.length;
+      const bad = pts.map((p, i) => {
+        if (blocked(p.x, p.z) || wet(p.x, p.y, p.z)) return true;
+        if (half <= 0) return false;
+        const a = pts[closed ? (i - 1 + n) % n : Math.max(i - 1, 0)], b = pts[closed ? (i + 1) % n : Math.min(i + 1, n - 1)];
+        const dx = b.x - a.x, dz = b.z - a.z, l = Math.hypot(dx, dz) || 1;
+        const sx = (-dz / l) * half * 0.9, sz = (dx / l) * half * 0.9;
+        return wet(p.x + sx, p.y, p.z + sz) || wet(p.x - sx, p.y, p.z - sz);
+      });
+      if (!bad.some(Boolean)) return n > 1 ? [{ pts, closed }] : [];
+      if (closed) {           // start the scan on a bad point so no good run wraps round
+        const s = bad.indexOf(true);
+        pts = [...pts.slice(s), ...pts.slice(0, s)];
+        bad.push(...bad.splice(0, s));
+      }
       const out = []; let cur = [];
-      for (const p of pts) { if (blocked(p.x, p.z)) { if (cur.length > 4) out.push(cur); cur = []; } else cur.push(p); }
-      if (cur.length > 4) out.push(cur);
-      if (out.length === 1 && out[0].length === pts.length) return [{ pts: out[0], closed }];
-      return out.map((p) => ({ pts: p, closed: false }));
+      const flush = () => {
+        let L = 0; for (let i = 1; i < cur.length; i++) L += cur[i].distanceTo(cur[i - 1]);
+        if (L > 8) out.push({ pts: cur, closed: false });
+        cur = [];
+      };
+      pts.forEach((p, i) => { if (bad[i]) flush(); else cur.push(p); });
+      flush();
+      return out;
     };
 
     // ---- the Axis plaza: ring lanes (split between the Axis roots) and twelve avenues
@@ -185,14 +222,14 @@ export class People {
           const n = Math.max(24, Math.ceil(((a1 - a0) * rm) / 6));
           const pts = [];
           for (let k = 0; k <= (closed ? n - 1 : n); k++) { const a = a0 + ((a1 - a0) * k) / n; pts.push(new THREE.Vector3(Math.cos(a) * rm, PLAZA_Y + 0.02, Math.sin(a) * rm)); }
-          for (const seg of splitBlocked(pts, closed)) g.rows.push({ row: addPath(seg.pts, seg.closed, half), density: 0.32 });
+          for (const seg of splitBlocked(pts, closed, half)) g.rows.push({ row: addPath(seg.pts, seg.closed, half), density: 0.32 });
         }
       });
       for (let k = 0; k < 12; k++) {
         const a = (k / 12) * TAU;
         const pts = [];
         for (let r = 95; r <= PLAZA_R - 6; r += 8) pts.push(new THREE.Vector3(Math.cos(a) * r, PLAZA_Y + 0.02, Math.sin(a) * r));
-        for (const seg of splitBlocked(pts, false)) g.rows.push({ row: addPath(seg.pts, false, 3.6), density: 0.5 });
+        for (const seg of splitBlocked(pts, false, 3.6)) g.rows.push({ row: addPath(seg.pts, false, 3.6), density: 0.5 });
       }
       groups.push(g);
     }
@@ -200,8 +237,9 @@ export class People {
     for (const [i, path] of ((world.infra && world.infra.promenades) || []).entries()) {
       const pts = path.map((p) => new THREE.Vector3(p.x, p.y + 0.22, p.z));
       const c = pts[Math.floor(pts.length / 2)];
-      const g = { name: `deck${i}`, rows: [{ row: addPath(pts, false, 10.5), density: 0.2 }], center: c.clone(), radius: pts[0].distanceTo(pts[pts.length - 1]) * 0.55 + 60, people: [] };
-      groups.push(g);
+      const g = { name: `deck${i}`, rows: [], center: c.clone(), radius: pts[0].distanceTo(pts[pts.length - 1]) * 0.55 + 60, people: [] };
+      for (const seg of splitBlocked(pts, false, 10.5)) g.rows.push({ row: addPath(seg.pts, false, 10.5), density: 0.2 });
+      if (g.rows.length) groups.push(g);
     }
     // ---- town streets and squares, grouped by district
     const plan = world.plan;
@@ -220,15 +258,17 @@ export class People {
           for (const p of pts) box.expandByPoint(p);
           const closed = pts.length > 8 && pts[0].distanceTo(pts[pts.length - 1]) < 12;
           const avenue = st.cls === ST.AVENUE;
-          g.rows.push({ row: addPath(pts, closed, Math.max(1.2, st.hw - 1.0)), density: st.cls === ST.LANE ? 0.05 : avenue ? 0.1 : 0.075, avenue, hw: st.hw });
+          const half = Math.max(1.2, st.hw - 1.0);
+          for (const seg of splitBlocked(pts, closed, half)) g.rows.push({ row: addPath(seg.pts, seg.closed, half), density: st.cls === ST.LANE ? 0.05 : avenue ? 0.1 : 0.075, avenue, hw: st.hw });
         }
         for (const q of plan.squares) {
           if (q.district !== list[0].district || q.kind === 'tower') continue;
           const n = 40, pts = [];
           const rr = q.r * 0.72;
           for (let k = 0; k < n; k++) { const a = (k / n) * TAU; const x = q.x + Math.cos(a) * rr, z = q.z + Math.sin(a) * rr; pts.push(new THREE.Vector3(x, ground(x, z) + 0.03, z)); box.expandByPoint(pts[pts.length - 1]); }
-          g.rows.push({ row: addPath(pts, true, q.r * 0.2), density: 0.18, idle: 0.3 });
+          for (const seg of splitBlocked(pts, true, q.r * 0.2)) g.rows.push({ row: addPath(seg.pts, seg.closed, q.r * 0.2), density: 0.18, idle: 0.3 });
         }
+        if (!g.rows.length) continue;
         const sph = box.getBoundingSphere(new THREE.Sphere());
         g.center = sph.center; g.radius = sph.radius + 30;
         groups.push(g);
