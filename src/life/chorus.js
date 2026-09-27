@@ -186,7 +186,7 @@ uniform float uScale;
 uniform vec3 uCenter;
 uniform float uPx;
 attribute vec3 posA; attribute vec3 posB; attribute vec3 colA; attribute vec3 colB; attribute float aSeed;
-varying vec3 vCol; varying vec3 vW; varying float vGlow; varying float vSeed;
+varying vec3 vCol; varying vec3 vW; varying float vGlow; varying float vSeed; varying float vPs;
 vec3 swirl(vec3 p, float s) {
   return vec3(sin(p.y * 3.1 + s * 6.0 + uTime * 0.7), sin(p.z * 2.7 + s * 5.0 - uTime * 0.6), sin(p.x * 3.3 + s * 4.0 + uTime * 0.5));
 }
@@ -210,10 +210,11 @@ void main() {
   vec4 mv = viewMatrix * vec4(w, 1.0);
   gl_Position = projectionMatrix * mv;
   gl_PointSize = clamp(uPx * 2.1 / -mv.z, 1.0, 14.0);
+  vPs = uPx * 2.1 / -mv.z;
 }`;
 
 const FRAG = /* glsl */ `
-varying vec3 vCol; varying vec3 vW; varying float vGlow; varying float vSeed;
+varying vec3 vCol; varying vec3 vW; varying float vGlow; varying float vSeed; varying float vPs;
 void main() {
   vec2 c = gl_PointCoord - 0.5;
   float d = dot(c, c) * 4.0;
@@ -224,8 +225,14 @@ void main() {
   vec3 V = normalize(cameraPosition - vW);
   vec3 H = normalize(V + uSunDir);
   float spec = pow(max(dot(nrm, uSunDir), 0.0), 2.0);
-  float glint = pow(max(dot(H, nrm), 0.0), 40.0) * step(0.9, fract(vSeed * 91.7 + uTime * 0.05));
+  // each mote turns its facet to the sun now and then: a slow, smooth swell, never an on/off
+  // flicker, and dimmed to its share of the pixel once the mote is smaller than a few pixels
+  float gp = fract(vSeed * 91.7 + uTime * 0.05) - 0.95;
+  float glint = pow(max(dot(H, nrm), 0.0), 40.0) * exp(-gp * gp * 1600.0) * smoothstep(1.0, 4.0, vPs);
   vec3 metal = mix(vec3(0.82, 0.84, 0.88), vCol, 0.3);
+  // polished rim: the sky it faces, brighter at grazing angles
+  float rimF = pow(1.0 - max(dot(nrm, vec3(0.0, 0.0, 1.0)), 0.0), 3.0) * smoothstep(2.0, 6.0, vPs);
+  metal *= 0.9 + 0.35 * rimF;
   vec3 base = metal * (uSunColor * uSunIlluminance * (0.06 + 0.1 * spec) + aerialInscatter(vec3(0.0, 1.0, 0.0)) * 0.25) * (0.55 + 0.45 * vGlow) + uSunColor * uSunIlluminance * glint * 0.8;
   vec3 emit = vCol * (0.02 + 0.13 * uCityLights) * vGlow * (1.0 - d * 0.6);
   vec3 col = applyAerial(base + emit, vW);

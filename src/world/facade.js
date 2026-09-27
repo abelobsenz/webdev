@@ -101,7 +101,8 @@ vec3 fStone(vec2 f, vec2 fw, vec3 base, float seed, float courseH, float jointW)
   float g1 = vnoise(f * vec2(1.7, 3.3) + bh.xy * 17.0);
   float g2 = vnoise(f * 9.0 + bh.yz * 23.0);
   float grain = mix(0.5, g1, fade) * 0.55 + mix(0.5, g2, fine) * 0.45;
-  vec3 c = base * mix(1.0, 0.9 + 0.17 * bh.x, 0.25 + 0.75 * fade);
+  float fadeB = max(fade, 1.0 - smoothstep(courseH * 0.12, courseH * 0.35, fwm));   // blocks >= 3 px
+  vec3 c = base * mix(1.0, 0.9 + 0.17 * bh.x, 0.25 + 0.75 * fadeB);
   c *= 1.0 + vec3(0.03, 0.0, -0.05) * (bh.y - 0.5) * fade;          // warm and cool blocks
   c *= 1.0 - 0.1 * (grain - 0.5) * 2.0;
   c *= 1.0 - 0.1 * smoothstep(0.78, 0.92, vnoise(f * 31.0 + bh.xz * 9.0)) * fine;   // shell / aggregate flecks
@@ -115,8 +116,8 @@ vec3 fStone(vec2 f, vec2 fw, vec3 base, float seed, float courseH, float jointW)
     fBump += nd.yz * 0.05 * bf;
   }
   // weathering on walls: faint rain streaks, heavier low down, and a splash line at the foot
-  float streak = vnoise(vec2(f.x * 0.9 + seed, f.y * 0.04));
-  c *= 1.0 - fVert * 0.1 * smoothstep(0.58, 0.92, streak) * (0.4 + 0.6 * exp(-max(f.y, 0.0) * 0.05));
+  float streak = mix(0.152, smoothstep(0.58, 0.92, vnoise(vec2(f.x * 0.9 + seed, f.y * 0.04))), 1.0 - smoothstep(0.3, 0.9, fw.x));
+  c *= 1.0 - fVert * 0.1 * streak * (0.4 + 0.6 * exp(-max(f.y, 0.0) * 0.05));
   c *= mix(vec3(1.0), vec3(0.8, 0.78, 0.72), fVert * (1.0 - smoothstep(0.0, 0.7, f.y)) * step(-0.8, f.y));
   return c;
 }
@@ -458,9 +459,24 @@ const FACADE_COLOR = /* glsl */ `
       fEmit += vec3(1.0, 0.8, 0.58) * lights * dlOn * (disc * 3.0 + sc * exp(-dd * dd * 3.0 / (grid * grid / 5.76)) * (grid > 3.0 ? 0.04 : 0.1));
       fRough = 0.72;
     } else {
+      #ifdef LOWRISE
       c = fStone(f, fw, stoneBase, FSEED, 3.0, 0.03);
       float panel = filteredPulse(f.y, 6.0, 5.7, fw.y) * filteredPulse(f.x, 8.0, 7.7, fw.x);
       c *= 0.9 + 0.1 * panel;
+      #else
+      // megastructure cladding: storey-high composite panels (6 m courses, staggered 10-16 m
+      // lengths) with 10 cm shadow gaps, each panel a shade apart so the scale reads from afar;
+      // pale rain tracks run down from every horizontal joint
+      c = fStone(f, fw, stoneBase, FSEED, 6.0, 0.1);
+      float pdm = 1.0 - smoothstep(0.02, 0.12, fwm);
+      if (pdm > 0.0) {
+        vec2 pq = vec2(mod(f.x, 1.2), mod(f.y, 6.0));
+        fBump.y += fBevel(pq.y - 0.1, 5.9, 0.06) * 0.6 * pdm;
+      }
+      float run = mix(0.5, 1.0 - mod(f.y, 6.0) / 6.0, 1.0 - smoothstep(0.7, 2.0, fw.y));   // 1 just below a joint
+      float track = mix(0.208, smoothstep(0.55, 0.85, vnoise(vec2(f.x * 1.3 + FSEED, f.y * 0.05))), 1.0 - smoothstep(0.25, 0.75, fw.x));
+      c *= 1.0 - fVert * 0.08 * track * run;
+      #endif
       fRough = 0.52;
       fAO = 1.0 - 0.3 * exp(-max(f.y, 0.0) * 0.35) * fVert;
     }
@@ -489,7 +505,17 @@ const FACADE_COLOR = /* glsl */ `
       vec3 avgG = mix(lawn, vec3(0.055, 0.11, 0.03), 0.4);
       c = mix(avgG, gNear, gd);
       if (gd > 0.0) { vec3 bn = vnoised(gp * 3.0 + w.z * 9.0); fBump += bn.yz * 0.25 * gd * clump; fAO *= mix(1.0, 0.75 + 0.25 * (1.0 - smoothstep(0.3, 0.7, w.x)), gd * step(0.35, w.z)); }
-      c = mix(c, vec3(0.42, 0.38, 0.3) * (0.9 + 0.2 * mix(0.5, vnoise(gp * 9.0), gd)), smoothstep(0.78, 0.86, vnoise(gp * 0.35)) * 0.8);  // gravel paths
+      // gravel paths winding between the beds (energy-conserving lines, so they thin to their
+      // average instead of breaking up at range)
+      vec3 pnd = vnoised(gp * 0.045 + FSEED * 0.37), pnd2 = vnoised(gp * 0.07 + 31.0);
+      float pn = pnd.x - 0.5, pn2 = pnd2.x - 0.5;                       // analytic footprints: this
+      float pw1 = max(dot(abs(pnd.yz), fwW) * 0.045, 1e-4);              // branch is non-uniform
+      float pw2 = max(dot(abs(pnd2.yz), fwW) * 0.07, 1e-4);
+      float gpath = max(clamp(1.0 - abs(pn) / max(0.022, pw1), 0.0, 1.0) * min(1.0, 0.022 / pw1),
+                        clamp(1.0 - abs(pn2) / max(0.016, pw2), 0.0, 1.0) * min(1.0, 0.016 / pw2) * 0.8);
+      vec3 grav = vec3(0.42, 0.38, 0.3) * (0.9 + 0.2 * mix(0.5, vnoise(gp * 9.0), gd));
+      c = mix(c, grav, gpath * 0.85);
+      fAO *= 1.0 - 0.15 * gpath * (1.0 - gpath) * gd;                     // soft edging
     } else {
       // vertical planting: trailing foliage spilling over planter lips and garden walls
       float strand = vnoise(vec2(f.x * 3.1, f.y * 0.6 + FSEED));
@@ -752,7 +778,7 @@ const FACADE_COLOR = /* glsl */ `
     fBump += vec2(fBevel(mod(f.x, R * 6.28318 / 6.0), R * 6.28318 / 6.0, 0.06) * 0.0, fBevel(mod(f.y, 7.5), 0.32, 0.06)) * ringF * 0.6 * fDetail;
     // navigation marker lights on the keel every 30 m, blinking in sequence along the line
     float mk = keel * fDot(length(vec2(mod(f.y, 30.0) - 15.0, 0.0)), 0.12, fwm, 30.0 * 0.3) * (1.0 - smoothstep(-0.95, -0.85, N.y));
-    fEmit += vec3(1.0, 0.75, 0.4) * mk * (0.2 + 3.0 * lights) * (0.6 + 0.4 * step(0.5, fract(uTime * 0.8 - f.y / 240.0)));
+    fEmit += vec3(1.0, 0.75, 0.4) * mk * (0.2 + 3.0 * lights) * (0.7 + 0.3 * sin(uTime * 1.2 - f.y / 40.0));
   }
   #ifdef LOWRISE
   // wall-washer sconces between the ground-floor openings of stone houses
