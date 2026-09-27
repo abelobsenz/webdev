@@ -121,13 +121,19 @@ export function aerialShaderMaterial({ vertexShader, fragmentShader, uniforms = 
 
 // Shared facade glass / structural helpers used by towers & low-rise buildings.
 export const FACADE_GLSL = /* glsl */ `
-// Anti-aliased rectangular pulse: 1 inside [0, w) of each period (filtered by footprint)
-float filteredPulse(float x, float period, float w, float fw) {
-  float p = x / period;
-  float dw = max(fw / period, 1e-4);
-  // integral of pulse train (box-filtered)
-  float a = floor(p + dw * 0.5) * w / period + max(fract(p + dw * 0.5) - (1.0 - w / period), 0.0);
-  float b = floor(p - dw * 0.5) * w / period + max(fract(p - dw * 0.5) - (1.0 - w / period), 0.0);
-  return (a - b) / dw;
+// Box-filtered periodic indicator of [a, b) (0 <= a < b <= P), pixel footprint fw. Evaluated
+// from the position reduced to one period, so it stays exact far from the origin and for
+// periods much longer than the footprint; returns (b - a) / P once fw spans many periods.
+float fPulse(float x, float P, float a, float b, float fw) {
+  float h = max(fw, 1e-5) * 0.5;
+  float xr = x - floor(x / P) * P;
+  float w = b - a;
+  float hi = xr + h, lo = xr - h;
+  float ih = floor(hi / P) * w + clamp(hi - floor(hi / P) * P - a, 0.0, w);
+  float il = floor(lo / P) * w + clamp(lo - floor(lo / P) * P - a, 0.0, w);
+  return (ih - il) / (2.0 * h);
 }
+// Anti-aliased rectangular pulse: 1 inside [period - w, period) of each period
+// (i.e. the w metres just before each multiple of the period), filtered by footprint
+float filteredPulse(float x, float period, float w, float fw) { return fPulse(x, period, period - w, period, fw); }
 `;
