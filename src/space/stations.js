@@ -13,3 +13,13 @@ export function stationFrame(up, out = new THREE.Quaternion()) {
   const north = new THREE.Vector3().crossVectors(west, up).normalize();
   return out.setFromRotationMatrix(new THREE.Matrix4().makeBasis(west, up, north));
 }
+
+/**
+ * The Harbour's traffic corridors, as directions in its local frame (x west, y up, z north).
+ * Arrivals come in from high and west (warm lane lights); departures leave eastward and
+ * outward, prograde, the way a ship bound for Mars or the outer system would burn.
+ */
+export const CORRIDORS = {
+  dA: new THREE.Vector3(0.78, 0.42, -0.46).normalize(),
+  dD: new THREE.Vector3(-0.86, 0.3, 0.41).normalize(),
+};

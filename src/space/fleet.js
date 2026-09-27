@@ -5,7 +5,7 @@ import { createGlowMesh } from '../craft/craftMaterial.js';
 import { craftMesh, craftPart, addEngines, addLamps, placeMerge, placeLamps, KM } from './craftMesh.js';
 import { LAMP } from './lamps.js';
 import { R_EARTH, R_MOON, MERIDIAN_LON, bodyDir } from './sim.js';
-import { stationFrame } from './stations.js';
+import { stationFrame, CORRIDORS } from './stations.js';
 
 // MERIDIAN's ships in the orbital view (km units; the craft are built in metres).
 //
@@ -126,10 +126,7 @@ export class Fleet {
     }
     // ---- voyage cycles through the Harbour's corridors (harbour frame, km)
     const H = el.harbour;
-    const corr = {
-      dA: V(0.78, 0.42, -0.46).normalize(),     // arrivals come in from high and west
-      dD: V(-0.86, 0.3, 0.41).normalize(),      // departures leave eastward and outward
-    };
+    const corr = CORRIDORS;
     this.corridors = corr;
     const freighter = buildFreighter(1100);
     this._addVoyager('freighter', freighter, H, {

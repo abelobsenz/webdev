@@ -19,6 +19,7 @@ import { Moon } from './moon.js';
 import { SunSwarm } from './sun.js';
 import { Hearth, RS } from './hearth.js';
 import { Traffic } from './traffic.js';
+import { Lanes } from './lanes.js';
 
 const smooth = (a, b, x) => { const t = Math.min(Math.max((x - a) / (b - a), 0), 1); return t * t * (3 - 2 * t); };
 const easeInOut = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
@@ -161,10 +162,12 @@ export class SpaceMode {
     this.addBody('traffic', [this.traffic.mesh], null, 0, {
       interval: (cam) => {
         const d = cam.length();
-        const reach = R_EARTH + GEO_ALT + 600;
+        const reach = R_EARTH + GEO_ALT + 21000;     // the departure corridor runs out 20,000 km
         return [Math.max(d - reach, 0.01), Math.max(d + reach, cam.distanceTo(this.sim.moonPos) + 6000)];
       },
     });
+    // lane guidance beacons along the corridors
+    this.lanes = new Lanes(this);
     // ships: liners at the Harbour, tenders over the Halo, Selene Works above the Moon
     this.fleet = new Fleet(this);
     this.modules.push(this.fleet);
@@ -574,7 +577,7 @@ export class SpaceMode {
     }
     lit = THREE.MathUtils.clamp(lit, 0, 1);
     this.litEstimate = lit;
-    return THREE.MathUtils.lerp(2.4, 0.46, Math.pow(lit, 0.7));
+    return THREE.MathUtils.lerp(2.4, 0.4, Math.pow(lit, 0.7));
   }
 
   renderToScreen(dt) { this.renderScene(dt, null); }

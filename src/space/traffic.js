@@ -1,34 +1,38 @@
 import * as THREE from 'three';
 import { R_EARTH, GEO_ALT, MERIDIAN_LON, bodyDir } from './sim.js';
 import { HALO_PORTS } from './earthData.js';
+import { CORRIDORS, stationFrame } from './stations.js';
 
-// Orbital traffic: thousands of ships as motion streaks, all positioned on the
-// GPU from the simulation clock, so time warp drives them consistently.
-//   0 lanes along each ring      1 transfers between rings
-//   2 shuttles between the ground ports and the Halo
-//   3 the Earth-Moon lane from the Geostationary Harbour
-//   4 ships manoeuvring around the Harbour
+// Orbital traffic as designed corridors, positioned on the GPU from the simulation clock
+// (so time warp drives it consistently) and drawn as short motion streaks.
+//
+//   0 ring lanes      four fixed lanes per ring: slow local lanes just above the deck,
+//                     fast express lanes higher up; prograde warm, retrograde cool;
+//                     ships evenly spaced along each lane so they read as a flow
+//   1 transfers       short hops between the Halo and the high rings at their nodes
+//                     (climbing cool, descending warm)
+//   2 port columns    at each Halo port: up the east column (cool), down the west (warm)
+//   3 Earth-Moon      two lanes a few thousand km apart: outbound cool, inbound warm
+//   4 Harbour         the arrival corridor (warm, braking inward) and the departure
+//                     corridor (cool, accelerating out; some bound for Mars and beyond)
+//
+// Colour code throughout: warm = inbound / prograde, cool = outbound / retrograde.
+// A CPU mirror of the same paths (shipPosJS) lets the nearest few be drawn as hulls.
 
-const VERT = /* glsl */ `
-attribute vec4 iA;
-attribute vec4 iB;
-attribute vec3 iC;
+export const TRAFFIC_GLSL = /* glsl */ `
 uniform float uT;
-uniform float uStreak;
 uniform vec3 uRA[4];
 uniform vec3 uRB[4];
 uniform float uRR[4];
 uniform vec3 uRN[4];
 uniform mat3 uEarthRot;
 uniform vec3 uGeo;
-uniform vec3 uGeoUp;
+uniform vec3 uHX;
+uniform vec3 uHY;
+uniform vec3 uHZ;
+uniform vec3 uCorrA;
+uniform vec3 uCorrD;
 uniform vec3 uMoon;
-uniform vec2 uRes;
-uniform float uPx;
-varying float vAlong;
-varying float vAcross;
-varying vec3 vCol;
-varying float vFade;
 
 vec3 ringPoint(int k, float th, float dr, float ax) {
   vec3 a = uRA[0], b = uRB[0], n = uRN[0]; float R = uRR[0];
@@ -37,90 +41,107 @@ vec3 ringPoint(int k, float th, float dr, float ax) {
   else if (k == 3) { a = uRA[3]; b = uRB[3]; n = uRN[3]; R = uRR[3]; }
   return (a * cos(th) + b * sin(th)) * (R + dr) + n * ax;
 }
+float ringR(int k) { return k == 0 ? uRR[0] : (k == 1 ? uRR[1] : (k == 2 ? uRR[2] : uRR[3])); }
+float endFade(float ph, float a, float b) { return smoothstep(0.0, a, ph) * (1.0 - smoothstep(1.0 - b, 1.0, ph)); }
 
-vec3 shipPos(float t, out float vis) {
-  float type = iA.x;
+vec3 shipPos(vec4 A, vec4 B, float t, out float vis) {
+  float type = A.x;
   vis = 1.0;
   if (type < 0.5) {
-    int k = int(iA.y + 0.5);
-    float R = uRR[k];
-    float th = iA.z + iA.w * t / R;
-    return ringPoint(k, th, iB.x, iB.y);
+    int k = int(A.y + 0.5);
+    float th = A.z + A.w * t / ringR(k);
+    return ringPoint(k, th, B.x, B.y);
   } else if (type < 1.5) {
-    int ka = int(iA.y + 0.5), kb = int(iA.z + 0.5);
-    float P = iB.z;
-    float ph = fract(t / P + iB.w);
+    int ka = int(A.y + 0.5), kb = int(A.z + 0.5);
+    float ph = fract(t / B.z + B.w);
     float s = ph / 0.6;
-    if (s > 1.0) { vis = 0.0; s = 1.0; }
+    vis = s > 1.0 ? 0.0 : endFade(s, 0.06, 0.06);
+    s = min(s, 1.0);
     float e = s * s * (3.0 - 2.0 * s);
-    vec3 pa = ringPoint(ka, iA.w, 4.0, 0.0);
-    vec3 pb = ringPoint(kb, iB.x, 4.0, 0.0);
+    vec3 pa = ringPoint(ka, A.w, 6.0, 0.0);
+    vec3 pb = ringPoint(kb, B.x, 6.0, 0.0);
     float ra = length(pa), rb = length(pb);
     vec3 d = normalize(mix(pa / ra, pb / rb, e));
-    return d * (mix(ra, rb, e) + sin(3.14159 * e) * iB.y);
+    return d * (mix(ra, rb, e) + sin(3.14159 * e) * B.y);
   } else if (type < 2.5) {
-    float lon = iA.y;
+    float lon = A.y;
     vec3 dir = uEarthRot * vec3(cos(lon), 0.0, -sin(lon));
     vec3 east = uEarthRot * vec3(-sin(lon), 0.0, -cos(lon));
-    float ph = fract(t / iA.w + iB.x);
-    float s = iB.y > 0.0 ? ph : 1.0 - ph;
-    float h = 8.0 + s * 604.0;
-    return dir * (${R_EARTH.toFixed(1)} + h) + east * iA.z;
+    float ph = fract(t / A.w + B.x);
+    float e = ph * ph * (3.0 - 2.0 * ph);
+    float s = B.y > 0.0 ? e : 1.0 - e;
+    vis = endFade(ph, 0.05, 0.05);
+    return dir * (${R_EARTH.toFixed(1)} + 8.0 + s * 602.0) + east * A.z;
   } else if (type < 3.5) {
-    float ph = fract(t / (3.2 * 86400.0) + iA.y);
-    float s = iA.w > 0.0 ? ph : 1.0 - ph;
+    float ph = fract(t / (3.2 * 86400.0) + A.y);
+    float s = A.w > 0.0 ? ph : 1.0 - ph;
+    vis = endFade(ph, 0.02, 0.02);
     vec3 a = uGeo, b = uMoon;
     vec3 m = (a + b) * 0.5;
     vec3 side = normalize(cross(b - a, vec3(0.0, 1.0, 0.0)));
-    vec3 c = m + side * length(b - a) * 0.22 + vec3(0.0, 1.0, 0.0) * iA.z;
+    vec3 c = m + side * length(b - a) * 0.22 + vec3(0.0, 1.0, 0.0) * B.x;
     vec3 p = mix(mix(a, c, s), mix(c, b, s), s);
-    return p + side * iA.z * 0.1 * sin(s * 3.14159);
+    return p + side * A.z * sin(3.14159 * s);
   } else {
-    float R = iA.y;
-    float th = iA.z + iA.w * t;
-    vec3 up = uGeoUp;
-    vec3 e1 = normalize(cross(up, vec3(0.0, 1.0, 0.0) + 1e-4));
-    vec3 e2 = cross(up, e1);
-    float tl = iB.x;
-    return uGeo + (e1 * cos(th) + (e2 * cos(tl) + up * sin(tl)) * sin(th)) * R;
+    // Harbour corridors, in the Harbour's frame
+    bool arr = A.y < 0.5;
+    vec3 dl = arr ? uCorrA : uCorrD;
+    vec3 dW = uHX * dl.x + uHY * dl.y + uHZ * dl.z;
+    vec3 e1 = normalize(cross(dW, uHY));
+    vec3 e2 = cross(e1, dW);
+    float ph = fract(t / A.w + A.z);
+    float s = arr ? (1.0 - ph) * (1.0 - ph) : ph * ph;
+    vis = arr ? endFade(ph, 0.03, 0.08) : endFade(ph, 0.06, 0.03);
+    return uGeo + dW * (B.w + s * B.z) + e1 * B.x + e2 * B.y;
   }
 }
+`;
+
+const VERT = /* glsl */ `
+attribute vec4 iA;
+attribute vec4 iB;
+attribute vec3 iC;
+uniform float uStreak;
+uniform vec2 uRes;
+uniform float uPx;
+varying float vAlong;
+varying float vAcross;
+varying vec3 vCol;
+varying float vFade;
+${TRAFFIC_GLSL}
 
 void main() {
   vCol = iC;
   float vis0, vis1;
-  vec3 head = shipPos(uT, vis0);
+  vec3 head = shipPos(iA, iB, uT, vis0);
   // the tail follows the ship's instantaneous velocity (a tiny step back, extrapolated),
-  // never a second sample a whole streak-time earlier: across a cycle wrap (a transfer
-  // just begun, a shuttle restarting its climb) that sample lay on the far side of the
-  // planet and the "streak" joined two unrelated points
+  // never a second sample a whole streak-time earlier: across a cycle wrap that sample lay
+  // on the far side of the planet and the "streak" joined two unrelated points
   float hs = max(uStreak * 0.02, 0.05);
-  vec3 prev = shipPos(uT - hs, vis1);
+  vec3 prev = shipPos(iA, iB, uT - hs, vis1);
   vec3 vel = (head - prev) / hs;
   float jump = length(head - prev);
   vec3 tail = head - vel * uStreak;
-  if (vis1 < 0.5 || jump > 60.0 * hs + 5.0) tail = head;   // the step itself crossed a wrap
+  if (vis1 < 0.02 || jump > 60.0 * hs + 5.0) tail = head;   // the step itself crossed a wrap
   vec4 ch = projectionMatrix * viewMatrix * vec4(head, 1.0);
   vec4 ct = projectionMatrix * viewMatrix * vec4(tail, 1.0);
   // cull anything the quad could not honestly draw: heads behind the camera or outside
   // this depth slice (each streak is drawn once, by the slice holding its head),
-  // off-screen heads (a streak never reaches further than 48 px from its head) and
-  // non-finite positions. A ship passing within metres of the camera otherwise produced
-  // a quad spanning the whole screen for a frame.
+  // off-screen heads (a streak never reaches further than 40 px from its head), invisible
+  // ships and non-finite positions
   vec2 sh = ch.xy / max(ch.w, 1e-6) * uRes * 0.5;
   bool bad = !(ch.w > 1e-3) || ch.z < -ch.w || ch.z > ch.w || any(isnan(sh)) || any(isinf(sh))
-          || any(greaterThan(abs(sh), uRes * 0.5 + 64.0));
+          || any(greaterThan(abs(sh), uRes * 0.5 + 64.0)) || vis0 < 0.004;
   if (bad) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
   if (!(ct.w > 1e-3)) ct = ch;
   vec2 st = ct.xy / ct.w * uRes * 0.5;
   if (any(isnan(st)) || any(isinf(st))) st = sh;
   vec2 dv = sh - st;
   float len = length(dv);
-  // unit direction from the full offset, BEFORE capping the length: dividing the uncapped
-  // offset by the capped length gave a "direction" up to ~70x too long, and the quad's
-  // width and end caps scale with it (the tan rectangle seen in orbit)
+  // unit direction from the full offset, BEFORE capping the length (dividing the uncapped
+  // offset by the capped length produced a giant quad: the tan rectangle seen in orbit)
   vec2 dir = len > 0.5 ? dv / len : vec2(1.0, 0.0);
-  if (len > 48.0) { st = sh - dir * 48.0; len = 48.0; }
+  if (len > 40.0) { st = sh - dir * 40.0; len = 40.0; }
   vec2 perp = vec2(-dir.y, dir.x);
   float w = uPx;
   // quad: x = 0 tail .. 1 head (extended by a pixel for a round head), y = -1..1
@@ -131,9 +152,10 @@ void main() {
   vAlong = position.x;
   vAcross = position.y;
   float dist = -(viewMatrix * vec4(head, 1.0)).z;
-  vFade = vis0 * clamp(2.5e5 / max(dist, 1.0), 0.15, 1.0) * clamp(30.0 / max(len, 1.0) + 0.35, 0.35, 1.0);
+  // distant ships fade (a calm planet, not confetti); long streaks spread their light
+  vFade = vis0 * clamp(1.6e5 / max(dist, 1.0), 0.08, 1.0) * clamp(24.0 / max(len, 1.0) + 0.3, 0.3, 1.0);
   // ships closer than a few km are real hulls, not specks: fade the streak out
-  vFade *= smoothstep(0.4, 4.0, dist);
+  vFade *= smoothstep(1.5, 6.0, dist);
 }
 `;
 
@@ -144,60 +166,111 @@ varying vec3 vCol;
 varying float vFade;
 void main() {
   float a = exp(-vAcross * vAcross * 3.0) * (0.2 + 0.8 * vAlong * vAlong);
-  gl_FragColor = vec4(vCol * a * vFade * 0.9, 0.0);
+  gl_FragColor = vec4(vCol * a * vFade * 0.8, 0.0);
 }
 `;
 
 function rnd(seed) { let s = seed >>> 0; return () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; }; }
 
+export const TCOL = {
+  WARM: [1.0, 0.7, 0.42],
+  COOL: [0.52, 0.78, 1.0],
+  WARMW: [1.0, 0.9, 0.76],
+  COOLW: [0.82, 0.9, 1.0],
+};
+
 export class Traffic {
   constructor(space, rings, q) {
     this.space = space;
     this.rings = rings;
-    const N = q.traffic;
+    const N = Math.round(q.traffic * 0.5);
     const r = rnd(4242);
     const A = [], B = [], C = [];
-    const cols = [[1.0, 0.86, 0.66], [0.66, 0.85, 1.0], [1.0, 0.55, 0.35], [0.9, 0.95, 1.0]];
     const push = (a, b, c) => { A.push(...a); B.push(...b); C.push(...c); };
-    // the Harbour keeps a modest local swarm (a denser one read as confetti around the station)
-    const nRing = Math.floor(N * 0.62), nXfer = Math.floor(N * 0.14), nPort = Math.floor(N * 0.1), nMoon = Math.floor(N * 0.1);
+    const nRing = Math.floor(N * 0.6), nXfer = Math.floor(N * 0.06), nPort = Math.floor(N * 0.16), nMoon = Math.floor(N * 0.06);
     const nGeo = N - nRing - nXfer - nPort - nMoon;
-    const widths = rings.defs.map((d) => d.width);
-    for (let i = 0; i < nRing; i++) {
-      const k = r() < 0.4 ? 0 : 1 + Math.floor(r() * 3);
-      const dir = r() < 0.5 ? 1 : -1;
-      const fast = r() < 0.3;
-      const v = dir * (fast ? 5 + r() * 3 : 0.8 + r() * 2.2);
-      const lane = Math.floor(r() * 4);
-      const dr = [-4, 6, 18, 40][lane] + (r() - 0.5) * 2;
-      const ax = (r() < 0.5 ? -1 : 1) * widths[k] * (0.55 + r() * 0.3) * (lane < 2 ? 1 : 0.4);
-      const c = fast ? cols[1] : cols[r() < 0.7 ? 0 : 3];
-      push([0, k, r() * Math.PI * 2, v], [dr, ax, 0, 0], c);
+    const defs = rings.defs;
+    // ---- ring lanes: per ring, four lanes, ships evenly spaced (a little jitter)
+    const share = [0.42, 0.2, 0.2, 0.18];
+    const lanes = [
+      { dr: 3.0, ax: -0.62, v: [1.6, 2.4], dir: 1, c: TCOL.WARM },
+      { dr: 3.0, ax: 0.62, v: [1.6, 2.4], dir: -1, c: TCOL.COOL },
+      { dr: 8.5, ax: -0.3, v: [5.6, 6.4], dir: 1, c: TCOL.WARMW },
+      { dr: 8.5, ax: 0.3, v: [5.6, 6.4], dir: -1, c: TCOL.COOLW },
+    ];
+    for (let k = 0; k < 4; k++) {
+      const nk = Math.floor(nRing * share[k]);
+      const w = defs[k].width;
+      for (let L = 0; L < 4; L++) {
+        const ln = lanes[L];
+        const n = Math.floor(nk / 4);
+        for (let i = 0; i < n; i++) {
+          const th0 = ((i + 0.35 * (r() - 0.5)) / n) * Math.PI * 2;
+          const v = ln.dir * (ln.v[0] + (ln.v[1] - ln.v[0]) * r());
+          push([0, k, th0, v], [ln.dr + (r() - 0.5) * 0.8, ln.ax * w + (r() - 0.5) * 0.5, 0, 0], ln.c);
+        }
+      }
+    }
+    // ---- transfers at the ring nodes
+    const nodes = [];
+    const b0 = rings.bases[0];
+    for (let k = 1; k < 4; k++) {
+      const bk = rings.bases[k];
+      const m = new THREE.Vector3().crossVectors(b0.n, bk.n).normalize();
+      for (const sgn of [1, -1]) {
+        const mm = m.clone().multiplyScalar(sgn);
+        nodes.push({ k, th0: Math.atan2(mm.dot(b0.b), mm.dot(b0.a)), thk: Math.atan2(mm.dot(bk.b), mm.dot(bk.a)) });
+      }
     }
     for (let i = 0; i < nXfer; i++) {
-      const ka = 0, kb = 1 + Math.floor(r() * 3);
-      const swap = r() < 0.5;
-      push([1, swap ? kb : ka, swap ? ka : kb, r() * Math.PI * 2], [r() * Math.PI * 2, 150 + r() * 500, 4000 + r() * 6000, r()], cols[r() < 0.5 ? 0 : 2]);
+      const nd = nodes[i % nodes.length];
+      const up = r() < 0.5;
+      const j0 = nd.th0 + (r() - 0.5) * 0.05, jk = nd.thk + (r() - 0.5) * 0.05;
+      push([1, up ? 0 : nd.k, up ? nd.k : 0, up ? j0 : jk], [up ? jk : j0, 50 + r() * 70, 3000 + r() * 3000, r()], up ? TCOL.COOL : TCOL.WARM);
     }
-    const ports = HALO_PORTS;
-    for (let i = 0; i < nPort; i++) {
-      const p = ports[Math.floor(r() * ports.length)];
-      push([2, THREE.MathUtils.degToRad(p.lon), (r() - 0.5) * 40, 1800 + r() * 2400], [r(), r() < 0.5 ? 1 : -1, 0, 0], cols[r() < 0.6 ? 0 : 1]);
+    // ---- port columns: up the east column, down the west
+    const perCol = Math.max(1, Math.floor(nPort / (HALO_PORTS.length * 2)));
+    for (const p of HALO_PORTS) {
+      const lon = THREE.MathUtils.degToRad(p.lon);
+      for (const up of [1, -1]) {
+        for (let i = 0; i < perCol; i++) {
+          push([2, lon, (up > 0 ? 12 : -12) + (r() - 0.5) * 0.8, 1800 + r() * 200], [(i + 0.3 * r()) / perCol, up, 0, 0], up > 0 ? TCOL.COOL : TCOL.WARM);
+        }
+      }
     }
-    for (let i = 0; i < nMoon; i++) push([3, r(), (r() - 0.5) * 3000, r() < 0.5 ? 1 : -1], [0, 0, 0, 0], cols[r() < 0.5 ? 0 : 3]);
-    for (let i = 0; i < nGeo; i++) push([4, 30 + Math.pow(r(), 2) * 400, r() * Math.PI * 2, (r() < 0.5 ? 1 : -1) * (0.0004 + r() * 0.002)], [(r() - 0.5) * 1.2, 0, 0, 0], cols[Math.floor(r() * 4)]);
+    // ---- the Earth-Moon run: two lanes
+    for (let i = 0; i < nMoon; i++) {
+      const out = i % 2 === 0;
+      push([3, (Math.floor(i / 2) + 0.3 * r()) / Math.ceil(nMoon / 2), (out ? 1500 : -1500) + (r() - 0.5) * 300, out ? 1 : -1], [(r() - 0.5) * 2000, 0, 0, 0], out ? TCOL.COOL : TCOL.WARM);
+    }
+    // ---- the Harbour's corridors: three lanes each, some departures bound far out
+    const latX = [-1.3, 0, 1.3], latY = [-0.7, 0.7];
+    for (let i = 0; i < nGeo; i++) {
+      const arr = i % 2 === 0;
+      const far = r() < (arr ? 0.3 : 0.4);
+      const S = far ? (arr ? 12000 : 20000) : 3000;
+      const P = far ? (arr ? 20000 : 24000) : (arr ? 5400 : 6000);
+      const lane = i % 6;
+      push([4, arr ? 0 : 1, r(), P], [latX[lane % 3] + (r() - 0.5) * 0.3, latY[lane % 2] + (r() - 0.5) * 0.3, S, arr ? 22 : 20], arr ? TCOL.WARM : (far ? TCOL.COOLW : TCOL.COOL));
+    }
+    const count = A.length / 4;
+    this.count = count;
+    this.iA = new Float32Array(A); this.iB = new Float32Array(B); this.iC = new Float32Array(C);
     const g = new THREE.InstancedBufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute([0, -1, 0, 1, -1, 0, 1, 1, 0, 0, 1, 0], 3));
     g.setIndex([0, 1, 2, 0, 2, 3]);
-    g.setAttribute('iA', new THREE.InstancedBufferAttribute(new Float32Array(A), 4));
-    g.setAttribute('iB', new THREE.InstancedBufferAttribute(new Float32Array(B), 4));
-    g.setAttribute('iC', new THREE.InstancedBufferAttribute(new Float32Array(C), 3));
-    g.instanceCount = N;
+    g.setAttribute('iA', new THREE.InstancedBufferAttribute(this.iA, 4));
+    g.setAttribute('iB', new THREE.InstancedBufferAttribute(this.iB, 4));
+    g.setAttribute('iC', new THREE.InstancedBufferAttribute(this.iC, 3));
+    g.instanceCount = count;
     this.uniforms = {
       uT: { value: 0 }, uStreak: { value: 1 },
       uRA: { value: [0, 1, 2, 3].map(() => new THREE.Vector3()) }, uRB: { value: [0, 1, 2, 3].map(() => new THREE.Vector3()) },
       uRN: { value: [0, 1, 2, 3].map(() => new THREE.Vector3()) }, uRR: { value: rings.bases.map((b) => b.R) },
-      uEarthRot: { value: new THREE.Matrix3() }, uGeo: { value: new THREE.Vector3() }, uGeoUp: { value: new THREE.Vector3() }, uMoon: { value: new THREE.Vector3() },
+      uEarthRot: { value: new THREE.Matrix3() }, uGeo: { value: new THREE.Vector3() },
+      uHX: { value: new THREE.Vector3() }, uHY: { value: new THREE.Vector3() }, uHZ: { value: new THREE.Vector3() },
+      uCorrA: { value: CORRIDORS.dA.clone() }, uCorrD: { value: CORRIDORS.dD.clone() },
+      uMoon: { value: new THREE.Vector3() },
       uRes: { value: new THREE.Vector2(1920, 1080) }, uPx: { value: 1.4 },
     };
     this.mesh = new THREE.Mesh(g, new THREE.ShaderMaterial({
@@ -207,9 +280,11 @@ export class Traffic {
     this.mesh.frustumCulled = false;
     this.mesh.renderOrder = 15;
     this.geoDir = bodyDir(0, MERIDIAN_LON);
+    this.geoQ = stationFrame(this.geoDir);
+    this._q = new THREE.Quaternion();
   }
 
-  setSize(w, h) { this.uniforms.uRes.value.set(w, h); this.uniforms.uPx.value = Math.max(1.5, h / 700); }
+  setSize(w, h) { this.uniforms.uRes.value.set(w, h); this.uniforms.uPx.value = Math.max(1.3, h / 760); }
 
   update(sim, realTime, dt, space) {
     const u = this.uniforms;
@@ -224,8 +299,11 @@ export class Traffic {
       u.uRN.value[i].copy(b.n).applyQuaternion(q);
     });
     u.uEarthRot.value.setFromMatrix4(sim.earthMat);
-    u.uGeoUp.value.copy(this.geoDir).applyQuaternion(q);
-    u.uGeo.value.copy(u.uGeoUp.value).multiplyScalar(R_EARTH + GEO_ALT);
+    u.uGeo.value.copy(this.geoDir).applyQuaternion(q).multiplyScalar(R_EARTH + GEO_ALT);
+    const hq = this._q.copy(q).multiply(this.geoQ);
+    u.uHX.value.set(1, 0, 0).applyQuaternion(hq);
+    u.uHY.value.set(0, 1, 0).applyQuaternion(hq);
+    u.uHZ.value.set(0, 0, 1).applyQuaternion(hq);
     u.uMoon.value.copy(sim.moonPos);
   }
 }

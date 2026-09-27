@@ -123,7 +123,7 @@ void main() {
   T /= max(length(T), 1e-12); B /= max(length(B), 1e-12);
   vec2 bump = vec2(0.0);
   vec3 sunL = spaceSunlight(uTransmittanceLUT, uObjWorld, uSunWorld) * uSunE;
-  vec3 alb = vec3(0.8, 0.79, 0.76);
+  vec3 alb = vec3(0.74, 0.73, 0.7);          // pearl composite (sunlit, it must sit below the tone curve shoulder)
   float rough = 0.38, metal = 0.08;
   vec3 em = vec3(0.0);
   // every pattern settles to its exact average while its cell still spans ~3 px
