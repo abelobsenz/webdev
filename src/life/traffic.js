@@ -65,7 +65,7 @@ varying float vPart; varying float vVariant; varying float vThrust; varying floa
 varying vec3 vLocal;
 uniform float uClass;
 uniform float uSeam;     // panel seam period in model units
-int vhPartI; float vhSeam;
+int vhPartI; float vhSeam; float vhPanel;
 vec3 vhLivery() {
   int v = int(vVariant * 7.99);
   if (uClass < 0.5) {
@@ -101,19 +101,44 @@ const VEH_COLOR = /* glsl */ `
   float sz = 1.0 - smoothstep(0.0, fz * 1.5, abs(fract(q.z + 0.5) - 0.5) - 0.02);
   float fy = fwidth(q.y) + 1e-4;
   float sy = 1.0 - smoothstep(0.0, fy * 1.5, abs(q.y - 0.05) - 0.015);
-  vhSeam = max(sz * step(0.2, abs(q.x) + abs(q.y)), sy) * (1.0 - smoothstep(0.3, 1.0, fz * 4.0));
+  float vhDet = 1.0 - smoothstep(0.3, 1.0, fz * 4.0);
+  vhSeam = max(sz * step(0.2, abs(q.x) + abs(q.y)), sy) * vhDet;
+  // where on the hull section we are: -1 keel, +1 spine (works for every scale of craft)
+  float cy = vLocal.y / max(length(vLocal.xy), 1e-4);
+  float ang = atan(vLocal.y, vLocal.x);
+  vhPanel = hash12(vec2(floor(q.z), floor(ang * 2.2)) + vSeed * 13.0);
   vec3 c = vec3(0.5);
-  if (vhPartI == 0) c = vhLivery();
-  else if (vhPartI == 1) c = vec3(0.015, 0.02, 0.028);
-  else if (vhPartI == 2) c = vec3(0.07, 0.075, 0.085);
+  if (vhPartI == 0) {
+    c = vhLivery();
+    // plates a shade apart, a darker belly, a pinstripe of the accent colour above the waist
+    c *= mix(1.0, 0.94 + 0.1 * vhPanel, vhDet);
+    c = mix(c, c * 0.55 + vec3(0.015), (1.0 - smoothstep(-0.6, -0.25, cy)) * 0.55);
+    float stripe = (1.0 - smoothstep(0.0, fy * 1.5, abs(q.y - 0.26) - 0.03)) * vhDet;
+    c = mix(c, vhAccent(), stripe * 0.85);
+    // hatches and access panels outlined on the larger craft
+    if (uClass > 0.5) {
+      vec2 hp = vec2(fract(q.z * 0.5), fract(ang * 1.1 + 0.3));
+      float hatch = step(0.62, vhPanel) * vhDet;
+      float outline = max(1.0 - smoothstep(0.0, fz * 2.0, abs(hp.x - 0.25) - 0.004), 1.0 - smoothstep(0.0, fz * 2.0, abs(hp.x - 0.75) - 0.004));
+      c *= 1.0 - 0.3 * outline * step(abs(hp.y - 0.5), 0.22) * hatch;
+    }
+    // exhaust soot and road-grime toward the stern and underside
+    c *= 1.0 - 0.18 * (1.0 - smoothstep(-0.9, 0.2, cy)) * vnoise(q.xz * vec2(3.0, 0.7) + vSeed * 20.0) * vhDet;
+  }
+  else if (vhPartI == 1) c = vec3(0.05, 0.06, 0.072);
+  else if (vhPartI == 2) {
+    // graphite structure: a woven carbon sheen close up
+    float weave = step(0.5, fract((floor(q.z * 24.0) + floor(ang * 30.0)) * 0.5));
+    c = vec3(0.07, 0.075, 0.085) * mix(1.0, 0.85 + 0.3 * weave, vhDet * (1.0 - smoothstep(0.005, 0.015, fz)));
+  }
   else if (vhPartI == 3) c = vec3(0.9, 0.9, 0.85);
   else if (vhPartI == 4) c = vec3(0.5, 0.05, 0.03);
   else if (vhPartI == 5) c = vec3(0.3, 0.5, 0.6);
-  else if (vhPartI == 6) c = vec3(0.04, 0.05, 0.06);
+  else if (vhPartI == 6) c = vec3(0.05, 0.06, 0.07);
   else if (vhPartI == 7) c = vhAccent();
   else if (vhPartI == 8) c = vec3(0.2, 0.25, 0.3);
   else if (vhPartI == 9) c = vec3(0.3, 0.3, 0.35);
-  else c = vec3(0.86, 0.86, 0.84);
+  else c = vec3(0.86, 0.86, 0.84) * mix(1.0, 0.93 + 0.1 * vhPanel, vhDet);
   if (vhPartI == 0 || vhPartI == 10 || vhPartI == 11) c *= 1.0 - 0.45 * vhSeam;
   diffuseColor.rgb = c;
 }`;
@@ -121,10 +146,10 @@ const VEH_COLOR = /* glsl */ `
 const VEH_SURFACE = /* glsl */ `
 {
   float r = 0.32, m = 0.35;
-  if (vhPartI == 0) { r = 0.22 + 0.08 * vhSeam; m = uClass > 3.5 && uClass < 4.5 ? 0.9 : 0.45; }
-  else if (vhPartI == 1 || vhPartI == 6) { r = 0.04; m = 0.9; }
-  else if (vhPartI == 2) { r = 0.45; m = 0.6; }
-  else if (vhPartI == 10 || vhPartI == 11) { r = 0.38; m = 0.05; }
+  if (vhPartI == 0) { r = 0.2 + 0.08 * vhSeam + 0.06 * vhPanel; m = uClass > 3.5 && uClass < 4.5 ? 0.9 : 0.45; }
+  else if (vhPartI == 1 || vhPartI == 6) { r = 0.05; m = 0.6; }
+  else if (vhPartI == 2) { r = 0.42; m = 0.55; }
+  else if (vhPartI == 10 || vhPartI == 11) { r = 0.34 + 0.08 * vhPanel; m = 0.05; }
   else if (vhPartI == 7) { r = 0.25; m = 0.7; }
   roughnessFactor = r; metalnessFactor = m;
 }`;
