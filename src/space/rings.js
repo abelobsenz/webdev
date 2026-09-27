@@ -110,9 +110,9 @@ void main() {
       vec3 diff = alb / 3.14159 * sunL * ndl;
       // glass roof: glints
       vec3 H = normalize(V + uSunDir);
-      float spec = pow(max(dot(N, H), 0.0), 900.0) * 40.0 + pow(max(dot(N, H), 0.0), 60.0) * 0.25;
-      float F = 0.04 + 0.96 * pow(1.0 - max(dot(N, V), 0.0), 5.0);
-      col = diff + sunL * spec * F * (0.4 + 0.6 * river);
+      float spec = pow(max(dot(N, H), 0.0), 700.0) * 5.0 + pow(max(dot(N, H), 0.0), 60.0) * 0.25;
+      float F = 0.04 + 0.96 * pow(clamp(1.0 - dot(N, V), 0.0, 1.0), 5.0);
+      col = diff + min(sunL * spec * F * (0.4 + 0.6 * river), vec3(8.0));
       col += vec3(0.02, 0.03, 0.05) * F * uSunE * 0.05;
       // lights
       float cell = hash12(floor(vec2(u / 0.35, v * uWidth / 0.35)));
@@ -149,8 +149,9 @@ void main() {
     col += sunL * pow(max(dot(N, H), 0.0), 200.0) * 0.8;
     float stripe = 1.0 - smoothstep(0.0, 0.06, abs(v - 0.9));
     em += uHabitatColor * stripe * 0.25;
-    float beacon = step(0.985, fract(u / 25.0)) * stripe * step(0.8, fract(uTime * 0.6 + floor(u / 25.0) * 0.37));
-    em += vec3(1.0, 0.3, 0.2) * beacon * 6.0;
+    // small soft-pulsing marker lamps (not long strips switching on and off)
+    float beacon = step(0.9985, fract(u / 25.0)) * stripe * (0.5 + 0.5 * sin(uTime * 2.2 + floor(u / 25.0) * 1.7));
+    em += vec3(1.0, 0.45, 0.3) * beacon * 1.4;
   } else {
     // ---- rotor tubes: the mass stream that holds the ring up ----
     vec3 alb = uAlbedo * 0.6;

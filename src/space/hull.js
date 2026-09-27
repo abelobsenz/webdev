@@ -93,17 +93,18 @@ void main() {
   }
   float ndl = max(dot(N, uSunDir), 0.0);
   vec3 H = normalize(V + uSunDir);
-  float sp = pow(max(dot(N, H), 0.0), mix(400.0, 12.0, rough)) * mix(8.0, 0.4, rough);
+  // glints stay physically shaped but bounded: flat kilometre-scale panels used to flare
+  // the whole screen white for an instant as the view swept through the mirror angle
+  float sp = pow(max(dot(N, H), 0.0), mix(160.0, 12.0, rough)) * mix(1.6, 0.35, rough);
   vec3 spec = mix(vec3(0.04), alb, metal) * sp;
   vec3 Hp = normalize(V + pDir);
-  float spp = pow(max(dot(N, Hp), 0.0), mix(400.0, 12.0, rough)) * mix(8.0, 0.4, rough);
+  float spp = pow(max(dot(N, Hp), 0.0), mix(160.0, 12.0, rough)) * mix(1.6, 0.35, rough);
   float diffK = k == 6.0 ? 0.03 : (1.0 - metal * 0.7);
-  vec3 col = alb * diffK / 3.14159 * (sunL * ndl + earthshine + pointL) + spec * sunL * ndl + mix(vec3(0.04), alb, metal) * spp * pointL;
+  vec3 col = alb * diffK / 3.14159 * (sunL * ndl + earthshine + pointL) + min(spec * sunL * ndl, vec3(6.0)) + min(mix(vec3(0.04), alb, metal) * spp * pointL, vec3(6.0));
   col += alb * 0.004;
   col += em;
-  // beacons at the ends of things
-  float beacon = step(0.9965, hash13(floor(vLocal * 2.0))) * step(0.7, fract(uTime * 0.8 + n * 7.0));
-  col += vec3(1.0, 0.35, 0.25) * beacon * 5.0;
+  // (no random blinking hull cells: they read as flashing white quads once bloomed;
+  //  the stations carry explicit beacon lamps instead)
   float a = 1.0;
   if (uBehindMask > 0.5) {
     vec4 hb = texture(uHearthTex, gl_FragCoord.xy / uHearthRes);

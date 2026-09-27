@@ -105,10 +105,10 @@ void main() {
   vec3 earthshine = vec3(0.35, 0.5, 0.85) * uSunE * 0.3 * eSize * eSize * max(dot(N, eDir), 0.0) * max(dot(-eDir, uSunView) * 0.5 + 0.5, 0.0);
   float ndl = max(dot(N, uSunView), 0.0);
   vec3 H = normalize(V + uSunView);
-  float sp = pow(max(dot(N, H), 0.0), mix(600.0, 14.0, rough)) * mix(10.0, 0.4, rough);
+  float sp = pow(max(dot(N, H), 0.0), mix(180.0, 14.0, rough)) * mix(1.8, 0.35, rough);
   vec3 F0 = mix(vec3(0.04), alb, metal);
   float fres = pow(1.0 - max(dot(N, V), 0.0), 5.0);
-  vec3 col = alb * (1.0 - metal * 0.8) / 3.14159 * (sunL * ndl + earthshine) + (F0 + (1.0 - F0) * fres * 0.3) * sp * sunL * ndl;
+  vec3 col = alb * (1.0 - metal * 0.8) / 3.14159 * (sunL * ndl + earthshine) + min((F0 + (1.0 - F0) * fres * 0.3) * sp * sunL * ndl, vec3(6.0));
   col += alb * 0.004 + em;
   gl_FragColor = vec4(col, 1.0);
 }
