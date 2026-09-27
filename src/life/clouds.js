@@ -127,7 +127,7 @@ void main() {
     vec3 wx = cloudWeather(p.xz);
     if (wx.x < 0.01) { t += ds * 1.7; continue; }      // clear column: stride ahead
     float detailW = 1.0 - smoothstep(uDetailDist * 0.55, uDetailDist, t);
-    float dens = cloudDensityWx(p, h, wx, detailW, lod) * (1.0 - smoothstep(40000.0, 62000.0, t));
+    float dens = cloudDensityWx(p, h, wx, detailW, lod) * (1.0 - smoothstep(40000.0, 62000.0, t - seg.x + min(seg.x, 12000.0)));
     if (dens > 0.003) {
       float sigS = dens * CLOUD_SIGMA;
       float od = lightOD(p, lod);
@@ -138,13 +138,14 @@ void main() {
       float dip = sqrt(2.0 * max(h, 0.0) / CLOUD_PLANET_R);
       lc *= smoothstep(-0.004, 0.006, dot(uLightDir, upP) + dip);
       // 3 scattering orders (Wrenninge): each flatter and less attenuated than the last
-      vec3 sunIn = lc * (exp(-od) * ph1 + 0.6 * exp(-od * 0.25) * ph2 + 0.45 * exp(-od * 0.06) * 0.0796);
+      // (+ a small floor: light diffusing through kilometres of neighbouring cloud)
+      vec3 sunIn = lc * (exp(-od) * ph1 + 0.6 * exp(-od * 0.25) * ph2 + 0.45 * exp(-od * 0.06) * 0.0796 + 0.0032);
       // powder: dark crevices and edges seen away from the light
       float powder = 1.0 - exp(-sigS * 220.0);
       sunIn *= mix(1.0, powder, 0.7 * cSat(0.6 - 0.6 * cosT));
       float hfLocal = cSat((h - CLOUD_BOTTOM - 150.0) / 2200.0);
       float city = uCityLights * smoothstep(11000.0, 3500.0, length(p.xz)) * (1.0 - hfLocal) * (1.0 - hfLocal);
-      vec3 amb = mix(ambBot, ambTop, hfLocal) + vec3(1.0, 0.56, 0.28) * 0.05 * city;
+      vec3 amb = mix(ambBot, ambTop, hfLocal) + vec3(1.0, 0.56, 0.28) * 0.016 * city * (1.0 - hfLocal);
       vec3 S = sigS * (sunIn * uMsBoost + amb * (0.35 + 0.65 * exp(-od * 0.08)));
       float Ts = exp(-sigS * ds);
       L += T * (S - S * Ts) / max(sigS, 1e-7);
@@ -238,6 +239,13 @@ void main() {
   vec4 c = acc / ws;
   gl_FragColor = vec4(c.rgb, c.a);
 }
+`;
+
+// Reflection pass: upsample the low-res march over the mirrored sky (before the scene).
+const REFL_COMP_FRAG = /* glsl */ `
+uniform sampler2D tCloud;
+varying vec2 vUv;
+void main() { gl_FragColor = texture(tCloud, vUv); }
 `;
 
 // Top-down optical depth toward the light at four levels through the deck.
@@ -463,8 +471,13 @@ export class Clouds {
     m.uLightSteps.value = s.cloudLightSteps || 6;
     m.uDetailDist.value = s.cloudDetailDist || 16000;
     this.resScale = s.cloudScale || 0.5;
-    for (const l of this.layers) l.layers.set(this.volumetric ? 2 : 0);
-    if (!this.volumetric) for (const l of this.layers) l.layers.enable(2);
+    // impostor deck: the visible layer without volumetrics, else reflection-only
+    // (and not at all when the reflection gets its own volumetric march)
+    for (const l of this.layers) {
+      if (!this.volumetric) { l.layers.set(0); l.layers.enable(2); }
+      else if (s.reflectionClouds) l.layers.disableAll();
+      else l.layers.set(2);
+    }
     this.composite.visible = this.volumetric;
     this.historyValid = false;
     if (this.size) this.setSize(this.size.x, this.size.y);
@@ -515,8 +528,8 @@ export class Clouds {
       this.lightColTop.multiplyScalar(E * fade);
     } else {
       const moonUp = THREE.MathUtils.smoothstep(moonDir.y, -0.02, 0.15);
-      const k = 0.1 * moonUp;
-      this.lightColBase.setRGB(0.62, 0.72, 1.0).multiplyScalar(k);
+      const k = 0.05 * moonUp;
+      this.lightColBase.setRGB(0.55, 0.68, 1.0).multiplyScalar(k);
       this.lightColTop.copy(this.lightColBase);
     }
     // shadow map centred on the footprint of the ground around the camera, snapped to texels
@@ -530,6 +543,39 @@ export class Clouds {
     this.fs.material = this.shadowMat;
     this.fs.render(renderer, this.shadowRT);
     U.uCloudShadowRect.value.set(ox, oz, 1 / this.shadowSize, 1);
+  }
+
+  /**
+   * Volumetric clouds in the planar water reflection: a cheap, depth-less march at
+   * a quarter of the reflection resolution composited over the mirrored sky before
+   * the mirrored scene is drawn (called by Water.renderReflection).
+   */
+  renderReflection(renderer, cam, target) {
+    if (!this.volumetric || !this.settings.reflectionClouds) return;
+    const w = Math.max(2, target.width >> 1), h = Math.max(2, target.height >> 1);
+    if (!this.reflMarchRT) {
+      this.reflMarchRT = makeRT(w, h);
+      this.farDepth = new THREE.DataTexture(new Float32Array([1e9, 0, 0, 1]), 1, 1, THREE.RGBAFormat, THREE.FloatType);
+      this.farDepth.needsUpdate = true;
+      this.reflCompMat = new THREE.ShaderMaterial({
+        vertexShader: FS_VERT, fragmentShader: REFL_COMP_FRAG, uniforms: { tCloud: { value: this.reflMarchRT.texture } },
+        transparent: true, depthTest: false, depthWrite: false,
+        blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.SrcAlphaFactor,
+        blendSrcAlpha: THREE.ZeroFactor, blendDstAlpha: THREE.OneFactor,
+      });
+    }
+    if (this.reflMarchRT.width !== w || this.reflMarchRT.height !== h) this.reflMarchRT.setSize(w, h);
+    const m = this.marchMat.uniforms;
+    const saved = [m.uSteps.value, m.uLightSteps.value, m.uFrame.value, m.tDepth.value];
+    m.uSteps.value = 36; m.uLightSteps.value = 3; m.uFrame.value = 0; m.tDepth.value = this.farDepth;
+    m.uInvProj.value.copy(cam.projectionMatrixInverse);
+    m.uCamWorld.value.copy(cam.matrixWorld);
+    m.uCamPos.value.setFromMatrixPosition(cam.matrixWorld);
+    this.fs.material = this.marchMat;
+    this.fs.render(renderer, this.reflMarchRT);
+    [m.uSteps.value, m.uLightSteps.value, m.uFrame.value, m.tDepth.value] = saved;
+    this.fs.material = this.reflCompMat;
+    this.fs.render(renderer, target);
   }
 
   /** Mid-frame (inside the main scene render): march + temporal resolve. */
@@ -548,6 +594,7 @@ export class Clouds {
 
     const m = this.marchMat.uniforms;
     setRay(m);
+    m.uDetailDist.value = (this.settings.cloudDetailDist || 16000) + Math.max(0, cam.position.y - 3000) * 1.2;
     m.tDepth.value = depthHalf;
     m.uFrame.value = this.frame % 64;
     this.fs.material = this.marchMat;

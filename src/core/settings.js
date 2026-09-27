@@ -5,9 +5,9 @@ export const PRESETS = {
   medium: { label: 'Medium', pixelRatio: 1.0, msaa: 2, shadows: true, shadowSize: 2048, reflections: false, reflectionScale: 0.35, trees: 0.6, traffic: 0.7, particles: 0.7, bloom: true, rays: true, lowrise: 0.75, people: true,
     clouds: 'volumetric', cloudScale: 0.38, cloudSteps: 48, cloudLightSteps: 4, cloudDetailDist: 9000, refraction: false, shafts: true, fxaa: false, ao: true },
   high: { label: 'High', pixelRatio: 1.25, msaa: 4, shadows: true, shadowSize: 4096, reflections: true, reflectionScale: 0.4, trees: 0.85, traffic: 1.0, particles: 1.0, bloom: true, rays: true, lowrise: 1.0, people: true,
-    clouds: 'volumetric', cloudScale: 0.42, cloudSteps: 56, cloudLightSteps: 5, cloudDetailDist: 14000, refraction: true, shafts: true, fxaa: true, ao: true },
+    clouds: 'volumetric', cloudScale: 0.42, cloudSteps: 56, cloudLightSteps: 5, cloudDetailDist: 14000, refraction: true, shafts: true, fxaa: true, ao: true, reflectionClouds: true },
   ultra: { label: 'Ultra', pixelRatio: 2.0, msaa: 4, shadows: true, shadowSize: 4096, reflections: true, reflectionScale: 0.5, trees: 1.0, traffic: 1.0, particles: 1.0, bloom: true, rays: true, lowrise: 1.0, people: true,
-    clouds: 'volumetric', cloudScale: 0.4, cloudSteps: 96, cloudLightSteps: 6, cloudDetailDist: 20000, refraction: true, shafts: true, fxaa: true, ao: true },
+    clouds: 'volumetric', cloudScale: 0.4, cloudSteps: 96, cloudLightSteps: 6, cloudDetailDist: 20000, refraction: true, shafts: true, fxaa: true, ao: true, reflectionClouds: true },
 };
 
 export function detectPreset() {

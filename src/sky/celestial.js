@@ -312,7 +312,7 @@ void main() {
   // atmosphere rim
   vec3 V = normalize(cameraPosition - vWorld);
   float rim = pow(1.0 - max(dot(n, V), 0.0), 3.0);
-  col += vec3(0.25, 0.5, 1.0) * rim * smoothstep(-0.3, 0.4, ndl) * uSunIlluminance * 0.25;
+  col += vec3(0.25, 0.5, 1.0) * rim * smoothstep(-0.3, 0.4, ndl) * uSunIlluminance * 0.08;
   float a = smoothstep(0.0, 1.0, uNight) * 0.98;
   gl_FragColor = vec4(col * T, a);
 }

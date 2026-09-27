@@ -81,11 +81,28 @@ uniform float uHasRefraction;
 uniform vec2 uScreenSize;
 uniform vec2 uNearFar;
 uniform vec3 uCamFwd;
+// rendering agent: sun shadows on the water (two-cascade SunLight atlas)
+uniform sampler2DShadow uShadowAtlas;
+uniform mat4 uShadowM0;
+uniform mat4 uShadowM1;
+uniform float uShadowOn;
 varying vec3 vWorld;
 varying vec4 vReflCoord;
 
 vec2 waveSample(vec2 p, float scale, vec2 vel) {
   return texture(uWaveTex, p / scale + vel * uTime / scale).xy * 2.0 - 1.0;
+}
+float sunShadow(vec3 p) {
+  if (uShadowOn < 0.5) return 1.0;
+  vec4 s0 = uShadowM0 * vec4(p, 1.0);
+  vec3 c0 = s0.xyz / s0.w;
+  vec2 o = vec2(0.6 / 3072.0, 0.0);
+  if (c0.x > 0.002 && c0.x < 0.498 && c0.y > 0.002 && c0.y < 0.998 && c0.z < 1.0)
+    return 0.25 * (texture(uShadowAtlas, vec3(c0.xy + o.xy, c0.z)) + texture(uShadowAtlas, vec3(c0.xy - o.xy, c0.z)) + texture(uShadowAtlas, vec3(c0.xy + o.yx, c0.z)) + texture(uShadowAtlas, vec3(c0.xy - o.yx, c0.z)));
+  vec4 s1 = uShadowM1 * vec4(p, 1.0);
+  vec3 c1 = s1.xyz / s1.w;
+  if (c1.x > 0.502 && c1.x < 0.998 && c1.y > 0.002 && c1.y < 0.998 && c1.z < 1.0) return texture(uShadowAtlas, vec3(c1.xy, c1.z));
+  return 1.0;
 }
 float viewZFromDepth(float d) {
   float n = uNearFar.x, f = uNearFar.y;
@@ -131,7 +148,7 @@ void main() {
 
   float cosT = clamp(dot(N, V), 0.0, 1.0);
   float F = 0.02 + 0.98 * pow(1.0 - cosT, 5.0);
-  float cs = mix(1.0, mix(0.1, 1.0, exp(-cloudShadowOD(vWorld))), uCloudShadow);
+  float cs = mix(1.0, mix(0.1, 1.0, exp(-cloudShadowOD(vWorld))), uCloudShadow) * sunShadow(vWorld);
 
   // --- reflection (planar, blurred by roughness via mips) ---
   vec3 R = reflect(-V, N);
@@ -254,6 +271,7 @@ export class Water {
         // rendering agent: refraction (bound by Pipeline.attach via attachScene)
         uSceneColor: { value: null }, uSceneDepth: { value: null }, uHasRefraction: { value: 0 },
         uScreenSize: { value: new THREE.Vector2(1, 1) }, uNearFar: { value: new THREE.Vector2(1, 1000) }, uCamFwd: { value: new THREE.Vector3(0, 0, -1) },
+        uShadowAtlas: { value: null }, uShadowM0: { value: new THREE.Matrix4() }, uShadowM1: { value: new THREE.Matrix4() }, uShadowOn: { value: 0 },
       }),
       transparent: true,
       depthWrite: false,
@@ -282,7 +300,7 @@ export class Water {
   }
 
   /** rendering agent: bind the pipeline's mid-frame opaque copy for refraction. */
-  attachScene(pipeline, camera) {
+  attachScene(pipeline, camera, sunLight) {
     const u = this.material.uniforms;
     u.uSceneColor.value = pipeline.sceneCopyRT.texture;
     u.uSceneDepth.value = pipeline.sceneCopyRT.depthTexture;
@@ -291,6 +309,14 @@ export class Water {
       u.uScreenSize.value.set(pipeline.sceneCopyRT.width, pipeline.sceneCopyRT.height);
       u.uNearFar.value.set(cam.near, cam.far);
       cam.getWorldDirection(u.uCamFwd.value);
+      const sh = sunLight && sunLight.castShadow && sunLight.shadow;
+      const map = sh && sh.map;
+      u.uShadowOn.value = map && sh.getMatrix ? 1 : 0;
+      if (u.uShadowOn.value) {
+        u.uShadowAtlas.value = map.depthTexture;
+        u.uShadowM0.value.copy(sh.getMatrix(0));
+        u.uShadowM1.value.copy(sh.getMatrix(1));
+      }
     };
   }
 
@@ -360,10 +386,14 @@ export class Water {
     renderer.autoClear = false;
     renderer.setRenderTarget(this.reflRT);
     renderer.clear();
+    this.reflRT.texture.generateMipmaps = false;   // only after the final scene draw
     if (skyDomeMat) skyDomeMat.uniforms.uEnvMode.value = 1;
     renderer.render(skyScene, sc);
     if (skyDomeMat) skyDomeMat.uniforms.uEnvMode.value = 0;
+    // rendering agent: volumetric clouds over the mirrored sky (see Clouds.renderReflection)
+    if (this.reflectionSkyHook) this.reflectionSkyHook(renderer, vc, this.reflRT);
     renderer.clearDepth();
+    this.reflRT.texture.generateMipmaps = true;
     renderer.render(scene, vc);
     renderer.autoClear = prevAuto;
     hide.forEach((o, i) => { o.visible = vis[i]; });

@@ -267,7 +267,8 @@ uniform sampler2D tLum;
 uniform sampler2D tPrev;
 uniform float uLevel;
 uniform float uExpectedLog;
-uniform float uRange;
+uniform float uRange;        // max darkening (EV)
+uniform float uRangeUp;      // max brightening (EV): small at night so night stays night
 uniform float uStrength;
 uniform float uDt;
 uniform float uReset;
@@ -275,7 +276,7 @@ varying vec2 vUv;
 void main() {
   vec2 m = textureLod(tLum, vec2(0.5), uLevel).rg;
   float avgLog = m.x / max(m.y, 1e-6);
-  float target = clamp((uExpectedLog - avgLog) * uStrength, -uRange, uRange);
+  float target = clamp((uExpectedLog - avgLog) * uStrength, -uRange, uRangeUp);
   float prev = texture(tPrev, vec2(0.5)).r;
   float speed = target > prev ? 1.1 : 2.2;       // adapt to darkness slowly, to glare quickly
   float ev = uReset > 0.5 ? target : prev + (target - prev) * (1.0 - exp(-uDt * speed));
@@ -327,6 +328,8 @@ uniform float uStreak;
 uniform float uDirt;
 uniform float uHLKnee;
 uniform float uHLSlope;
+uniform float uHLLocal;
+uniform sampler2D tBloomLocal;
 uniform float uTime;
 uniform vec2 uRes;
 uniform float uVignette;
@@ -422,12 +425,18 @@ void main() {
   if (uFlare > 0.0) col += flare(uv) * uFlare;
   if (uStreak > 0.0) col += texture(tStreak, uv).rgb * uStreak * vec3(0.55, 0.75, 1.0);
   if (uDirt > 0.0) col += texture(tBloomWide, uv).rgb * texture(tDirt, uv).rgb * uDirt;
-  col *= uExposure * exp2(texture(tExposure, vec2(0.5)).r);
+  float expo = uExposure * exp2(texture(tExposure, vec2(0.5)).r);
+  col *= expo;
   // highlight handling: log-domain knee on luminance (hue-preserving); strong at night so
-  // the sunlit Halo and the Moon stay dazzling (bloom sees the full HDR) yet detailed
+  // the sunlit Halo and the Moon stay dazzling (bloom sees the full HDR) yet detailed.
+  // Local term: large bright regions (the blurred bright-pass around this pixel) are
+  // compressed harder than isolated points (exposure-fusion style, gated by the
+  // pixel's own luminance so dark sky next to the ring is never dimmed).
   float lum = dot(col, vec3(0.2126, 0.7152, 0.0722));
   if (lum > uHLKnee) {
-    float lc = uHLKnee * exp2(log2(lum / uHLKnee) * uHLSlope);
+    float loc = dot(texture(tBloomLocal, uv).rgb, vec3(0.2126, 0.7152, 0.0722)) * expo;
+    float slope = uHLSlope / (1.0 + uHLLocal * max(log2(max(loc, 1e-4) / uHLKnee), 0.0));
+    float lc = uHLKnee * exp2(log2(lum / uHLKnee) * slope);
     col *= lc / lum;
   }
   // grading in scene-linear: lift / gain
@@ -589,7 +598,7 @@ export class Pipeline {
     this.expRT = [0, 1].map(() => new THREE.WebGLRenderTarget(1, 1, { type: THREE.FloatType, format: THREE.RGBAFormat, depthBuffer: false, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter, generateMipmaps: false }));
     this.expIdx = 0;
     this.lumMat = mk(LUM_FRAG, { tSrc: { value: null } });
-    this.adaptMat = mk(ADAPT_FRAG, { tLum: { value: this.lumRT.texture }, tPrev: { value: null }, uLevel: { value: 7 }, uExpectedLog: { value: 0 }, uRange: { value: 1.1 }, uStrength: { value: 0.6 }, uDt: { value: 0.016 }, uReset: { value: 1 } });
+    this.adaptMat = mk(ADAPT_FRAG, { tLum: { value: this.lumRT.texture }, tPrev: { value: null }, uLevel: { value: 7 }, uExpectedLog: { value: 0 }, uRange: { value: 1.2 }, uRangeUp: { value: 0.7 }, uStrength: { value: 0.6 }, uDt: { value: 0.016 }, uReset: { value: 1 } });
     this.expReset = true;
     // volumetric shafts (resolution follows the cloud / linear-depth buffer)
     this.shaftRT = new THREE.WebGLRenderTarget(1, 1, { ...hf, depthBuffer: false });
@@ -626,8 +635,8 @@ export class Pipeline {
       tShafts: { value: black }, tExposure: { value: this.expRT[0].texture }, tStreak: { value: this.streakRT[0].texture }, tDirt: { value: this.dirtTex },
       uExposure: { value: 1 }, uBloom: { value: 0.05 }, uRays: { value: 0 }, uRaysColor: { value: new THREE.Color(1, 0.9, 0.7) },
       uShaftColor: { value: new THREE.Color() }, uShaftDark: { value: 0 }, uShaftLit: { value: 0 }, uStreak: { value: 0 }, uDirt: { value: 0 },
-      uHLKnee: { value: 1.5 }, uHLSlope: { value: 1 }, tAO: { value: black }, uAO: { value: 0 },
-      uTime: { value: 0 }, uRes: { value: new THREE.Vector2() }, uVignette: { value: 0.3 }, uGrain: { value: 0.02 }, uCA: { value: 0.004 },
+      uHLKnee: { value: 1.5 }, uHLSlope: { value: 1 }, uHLLocal: { value: 0.35 }, tBloomLocal: { value: this.bloomRTs[3].texture }, tAO: { value: black }, uAO: { value: 0 },
+      uTime: { value: 0 }, uRes: { value: new THREE.Vector2() }, uVignette: { value: 0.3 }, uGrain: { value: 0.02 }, uCA: { value: 0.0015 },
       uFlare: { value: 0.0 }, uSun: { value: new THREE.Vector2() }, uSunVis: { value: 0 },
       uLift: { value: new THREE.Vector3(0, 0, 0) }, uGain: { value: new THREE.Vector3(1, 1, 1) },
       uSaturation: { value: 1.15 }, uContrast: { value: 1.08 }, uLdrOut: { value: 0 },
@@ -672,14 +681,17 @@ export class Pipeline {
   }
 
   /** Hook the volumetric passes into the main scene (called once the world exists). */
-  attach(world, scene, camera) {
+  attach(world, scene, camera, sunLight) {
     this.mainCamera = camera;
     scene.add(this.hook);
     if (world && world.clouds) {
       this.clouds = world.clouds;
       this.clouds.init(this.renderer, this.settings);
     }
-    if (world && world.water && world.water.attachScene) world.water.attachScene(this, camera);
+    if (world && world.water && world.water.attachScene) {
+      world.water.attachScene(this, camera, sunLight);
+      if (this.clouds) world.water.reflectionSkyHook = (r, cam, target) => this.clouds.renderReflection(r, cam, target);
+    }
     this.applySettings(this.settings);
   }
 
@@ -687,6 +699,8 @@ export class Pipeline {
     this.settings = settings;
     this.linScale = settings.cloudScale || 0.5;
     this.wantColorCopy = !!settings.refraction;
+    // the mid-frame capture is only needed by volumetric / depth-aware features
+    this.captureNeeded = settings.clouds === 'volumetric' || !!settings.refraction || settings.shafts !== false || !!settings.ao || !!settings.rays;
     if (this.clouds) this.clouds.applyQuality(settings);
     this.shaftValid = false;
     this.setSize(this.size.x, this.size.y);
@@ -717,7 +731,7 @@ export class Pipeline {
   }
 
   captureOpaque(renderer, camera) {
-    if (camera !== this.mainCamera || this.captured) return;
+    if (camera !== this.mainCamera || this.captured || this.captureNeeded === false) return;
     const target = renderer.getRenderTarget();
     if (target !== this.hdrRT) return;
     this.timer.begin('capture+clouds');
@@ -821,6 +835,7 @@ export class Pipeline {
     a.uDt.value = dt;
     a.uReset.value = (reset || this.expReset) ? 1 : 0;
     a.uStrength.value = this.settings.autoExposure === false ? 0 : 0.65;
+    a.uRangeUp.value = 0.7 - 0.5 * U.uNight.value;
     fs.material = this.adaptMat;
     fs.render(r, next);
     this.expIdx = 1 - this.expIdx;
@@ -855,6 +870,10 @@ export class Pipeline {
       u.uShadowM1.value.copy(sh.getMatrix ? sh.getMatrix(1) : sh.matrix);
     }
     u.uFrame.value = (this.shaftFrame++) % 64;
+    // teleports (tour, captures) invalidate the temporal histories
+    if (!this._lastPos) this._lastPos = camera.position.clone();
+    if (this._lastPos.distanceTo(camera.position) > 300) { this.shaftValid = false; this.aoValid = false; }
+    this._lastPos.copy(camera.position);
     u.uMaxDist.value = THREE.MathUtils.clamp(9000 + camera.position.y * 2, 9000, 30000);
     fs.material = this.shaftMat;
     fs.render(r, this.shaftRT);
@@ -875,7 +894,7 @@ export class Pipeline {
     f.tShafts.value = next.texture;
     f.uShaftColor.value.copy(sunRadiance);
     f.uShaftDark.value = 0.85 * strength;
-    f.uShaftLit.value = 0.35 * strength;
+    f.uShaftLit.value = 0.15 * strength;
   }
 
   /** Screen-space ambient obscurance (reduced resolution, temporally accumulated). */

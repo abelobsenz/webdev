@@ -63,7 +63,7 @@ class App {
     this.world = new World(this);
     await this.world.build(progress);
     // rendering agent: hook volumetric clouds / mid-frame depth capture into the main pass
-    this.pipeline.attach(this.world, this.scene, this.camera);
+    this.pipeline.attach(this.world, this.scene, this.camera, this.lighting.sun);
     this.controls = new FlyControls(this.camera, this.canvas, {
       groundHeight: (x, z) => this.world.groundHeight(x, z),
       colliders: this.world.colliders,
@@ -219,7 +219,7 @@ class App {
       const lp = this._lastExpPose || (this._lastExpPose = { pos: this.camera.position.clone(), h: this.hours });
       const jump = lp.pos.distanceTo(this.camera.position) > 300 || Math.abs(lp.h - this.hours) > 0.2;
       lp.pos.copy(this.camera.position); lp.h = this.hours;
-      p.renderExposure(dt, 0.2 / exposure, jump);
+      p.renderExposure(dt, (0.2 / exposure) * (1 - 0.45 * U.uNight.value), jump);
     }
     this.updateGrade();
     // sun rays
@@ -241,7 +241,7 @@ class App {
       p.renderAO(this.camera, 0.85);
       const sunVis = inFront ? smooth(0.95, 0.6, Math.max(Math.abs(sp.x), Math.abs(sp.y))) * sunUp : 0;
       p.renderStreaks(this.settings.bloom ? 0.05 * sunVis + 0.03 * U.uNight.value : 0, 6.0 / exposure);
-      p.finalMat.uniforms.uDirt.value = this.settings.bloom ? 0.35 * sunVis + 0.12 * U.uNight.value : 0;
+      p.finalMat.uniforms.uDirt.value = this.settings.bloom ? 0.3 * sunVis + 0.03 * U.uNight.value : 0;
     }
     p.composite();
   }
@@ -256,10 +256,10 @@ class App {
     f.uLift.value.set(0.0, 0.0015 * night, 0.004 * night);
     f.uSaturation.value = 1.12 + golden * 0.08 - night * 0.1;
     f.uContrast.value = 1.06;
-    f.uBloom.value = this.settings.bloom ? 0.035 + night * 0.025 : 0;
+    f.uBloom.value = this.settings.bloom ? 0.035 + night * 0.012 : 0;
     // rendering agent: highlight knee (log domain) replaces the old sky-object night dimming
-    f.uHLKnee.value = 1.4;
-    f.uHLSlope.value = THREE.MathUtils.lerp(0.9, 0.3, smooth(0.0, 0.8, night));
+    f.uHLKnee.value = THREE.MathUtils.lerp(1.4, 0.9, night);
+    f.uHLSlope.value = THREE.MathUtils.lerp(0.9, 0.22, smooth(0.0, 0.8, night));
   }
 
   adaptResolution(dt) {

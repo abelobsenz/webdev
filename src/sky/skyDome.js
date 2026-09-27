@@ -57,7 +57,7 @@ vec3 starLayer(vec3 d, float scale, float density, float bright) {
   // colour temperature: blue-white to orange
   float t = h.z;
   vec3 col = t < 0.2 ? vec3(0.62, 0.72, 1.0) : t < 0.55 ? vec3(0.95, 0.96, 1.0) : t < 0.8 ? vec3(1.0, 0.93, 0.80) : vec3(1.0, 0.76, 0.52);
-  return col * core * (0.006 + 0.35 * mag) * bright * tw;
+  return col * core * (0.0022 + 0.3 * mag) * bright * tw;
 }
 
 // Milky Way: baked once into an equirectangular texture in equatorial coordinates
@@ -93,28 +93,31 @@ vec3 airglow(vec3 dir, float mu) {
   return (vec3(0.30, 1.0, 0.42) * 0.00055 * waves * vrG + vec3(1.0, 0.22, 0.12) * 0.00022 * vrR) * smoothstep(-0.02, 0.06, mu);
 }
 
+vec3 veilSheet(vec3 ro, vec3 dir, float z0, float amp, float k, float phase, float width) {
+  if (abs(dir.z) < 1e-3) return vec3(0.0);
+  float t = (z0 - ro.z) / dir.z;
+  if (t <= 0.0) return vec3(0.0);
+  for (int it = 0; it < 2; it++) {                       // follow the ribbon's folds
+    vec3 p = ro + dir * t;
+    float zt = z0 + amp * sin(p.x * k + phase) + amp * 0.3 * sin(p.x * k * 3.7 - phase * 1.9);
+    t = (zt - ro.z) / dir.z;
+  }
+  if (t <= 0.0) return vec3(0.0);
+  vec3 p = ro + dir * t;
+  float h = length(p) - Rg;
+  float vert = smoothstep(96.0, 112.0, h) * exp(-max(h - 110.0, 0.0) / 60.0) * (1.0 - smoothstep(230.0, 280.0, h));
+  if (vert <= 0.0) return vec3(0.0);
+  float rays = 0.35 + 0.65 * vnoise(vec2(p.x * 0.11 + uTime * 0.15, 0.5)) * (0.5 + 0.5 * vnoise(vec2(p.x * 0.027 - uTime * 0.05, 3.0)));
+  float path = min(width / max(abs(dir.z), 0.05), 90.0);
+  vec3 colH = mix(vec3(0.22, 1.0, 0.55), vec3(0.8, 0.3, 0.95), smoothstep(125.0, 230.0, h));
+  return colH * vert * rays * path;
+}
 // The Veil: faint auroral curtains hung beneath the Halo, where the ring's mass
 // streams bleed charge into the upper atmosphere (100 - 260 km).
 vec3 veil(vec3 ro, vec3 dir) {
-  vec2 h0 = vec2(raySphere(ro, dir, Rg + 100.0), raySphere(ro, dir, Rg + 260.0));
-  if (h0.x < 0.0 || h0.y < 0.0) return vec3(0.0);
-  vec3 acc = vec3(0.0);
-  const int N = 10;
-  float dt = (h0.y - h0.x) / float(N);
-  for (int i = 0; i < N; i++) {
-    vec3 p = ro + dir * (h0.x + (float(i) + 0.5) * dt);
-    float h = length(p) - Rg;
-    float x = p.x, z = p.z;
-    // two wavy ribbons running east-west, south and north of the zenith
-    float zA = 150.0 + 28.0 * sin(x * 0.006 + uTime * 0.03) + 9.0 * sin(x * 0.021 - uTime * 0.07);
-    float zB = -230.0 + 36.0 * sin(x * 0.004 - uTime * 0.02 + 1.7) + 12.0 * sin(x * 0.017 + uTime * 0.05);
-    float wA = exp(-pow((z - zA) / 7.0, 2.0)), wB = exp(-pow((z - zB) / 10.0, 2.0)) * 0.7;
-    float rays = 0.45 + 0.55 * vnoise(vec2(x * 0.09 + uTime * 0.12, 0.5)) * vnoise(vec2(x * 0.023 - uTime * 0.04, 3.0));
-    float vert = smoothstep(98.0, 112.0, h) * exp(-(h - 110.0) / 55.0);
-    vec3 colH = mix(vec3(0.25, 1.0, 0.55), vec3(0.75, 0.3, 0.95), smoothstep(125.0, 230.0, h));
-    acc += colH * (wA + wB) * rays * vert * dt;
-  }
-  return acc * 0.00016;
+  vec3 acc = veilSheet(ro, dir, 150.0, 26.0, 0.006, uTime * 0.03, 6.0);
+  acc += veilSheet(ro, dir, -230.0, 34.0, 0.0045, uTime * 0.02 + 1.7, 9.0) * 0.7;
+  return acc * 0.00011;
 }
 
 // Noctilucent clouds (~83 km): silver-blue ripples still in sunlight in deep twilight.
