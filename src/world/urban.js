@@ -232,6 +232,21 @@ function obbOverlap(a, b, gap) {
   return true;
 }
 
+/** Widest horizontal reach of a built tower's geometry within `band` metres of its base. */
+function towerFootprint(t, band) {
+  const m = t.mesh, g = m && m.geometry;
+  if (!g || !g.attributes.position) return 0;
+  m.updateMatrixWorld(true);
+  const p = g.attributes.position, v = new THREE.Vector3();
+  let r = 0;
+  for (let i = 0; i < p.count; i++) {
+    v.fromBufferAttribute(p, i).applyMatrix4(m.matrixWorld);
+    if (v.y - t.baseY > band) continue;
+    r = Math.max(r, Math.hypot(v.x - t.def.x, v.z - t.def.z));
+  }
+  return r;
+}
+
 /**
  * Build the plan. ground(x,z) = raw terrain height, towers = built arcologies,
  * promenades = deck polylines (Vector3[]), urbanMask(x,z,h) for the rim towns.
@@ -245,9 +260,12 @@ export function planCity({ ground, towers, promenades, urbanMask, stations = [] 
   const add = (pts, cls, d, name) => { for (const seg of clipByGround(pts, ground)) streets.push({ pts: seg, cls, hw: HALF_W[cls], district: d.id, name }); };
 
   for (const t of towers) {
-    const base = t.collide ? t.collide(0) : (t.def.radius || 60) * 1.4;
-    exclusions.push({ x: t.def.x, z: t.def.z, r: base + 10 });
-    squares.push({ x: t.def.x, z: t.def.z, r: base + 16, kind: 'tower' });
+    // the tower's real footprint where town buildings stand: the widest horizontal reach
+    // of its geometry up to 100 m above its base (lean, flare, podium, plates, lattice).
+    // collide() is only the camera-collision core and let low-rises grow into the towers
+    const base = Math.max(towerFootprint(t, 100), t.collide ? t.collide(0) : (t.def.radius || 60) * 1.4);
+    exclusions.push({ x: t.def.x, z: t.def.z, r: base + 12 });
+    squares.push({ x: t.def.x, z: t.def.z, r: base + 18, kind: 'tower' });
   }
   for (const sx of [-1, 1]) exclusions.push({ x: GATE.x + sx * GATE.span / 2, z: GATE.z, r: 130 });
   // maglev terminals: nothing built on them; the island ones stand in a paved forecourt
