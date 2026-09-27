@@ -8416,7 +8416,7 @@ void main() {
     // understorey in the forest. Probabilistic thinning keeps the edges soft.
     float cover = k.x * (1.0 - k.z);
     if (r < cover) {
-      float hgt = mix(0.11, 0.55, k.y);                                          // mown lawn -> unmown meadow
+      float hgt = mix(0.17, 0.6, k.y);                                           // mown lawn -> unmown meadow
       float wildH = mix(0.32 + 0.3 * vnoise(p * 0.05 + 3.0), 0.4, strand);       // grassland, strand grass
       hgt = mix(wildH, hgt, uw);
       hgt *= 1.0 - 0.45 * forestD;
@@ -8501,11 +8501,14 @@ ${uC}
   float bend = t * t;
   vec2 xz = gRoot + off + sdir * position.x * W * (1.0 - t * 0.85) + lean * H * bend;
   float y = gH + H * t * (1.0 - 0.28 * bend * length(lean)) - 0.02;
-  transformed = vec3(xz.x, y, xz.y) * gKeep;
+  gcP = vec3(xz.x, y, xz.y) * gKeep;
   // normal: the blade face, bent back and rounded across, blended toward the ground normal
   vec3 bn = normalize(vec3(fdir.x, 0.35 + t * 0.4, fdir.y) + vec3(sdir.x, 0.0, sdir.y) * position.x * 0.9);
   gcN = normalize(mix(bn, gN, 0.45));
-  vGC = gCol * (0.95 + 0.1 * hb);
+  // each blade its own shade: greener, yellower, a few dry ones
+  float hc = hash12(cid * 3.3 + bi * 1.7);
+  vGC = gCol * (0.78 + 0.44 * hb) * vec3(1.0 + 0.2 * (hc - 0.5), 1.0, 1.0 - 0.25 * (hc - 0.5));
+  vGC = mix(vGC, vec3(0.34, 0.3, 0.14), step(0.94, hc) * 0.6);
   vGT = t;
   vGPart = 0.0;
 }
@@ -8532,7 +8535,7 @@ ${uC}
   vec2 r = vec2(q.x * c - q.z * s, q.x * s + q.z * c);
   float sway = clamp(q.y / max(H, 0.01), 0.0, 1.0);
   vec2 xz = gRoot + r + wind * sway * H * 4.0;
-  transformed = vec3(xz.x, gH + q.y - 0.01, xz.y) * gKeep;
+  gcP = vec3(xz.x, gH + q.y - 0.01, xz.y) * gKeep;
   gcN = normalize(mix(vec3(0.0, 1.0, 0.0), gN, 0.3));
   vGC = part > 1.5 ? mix(vec3(0.95, 0.78, 0.2), gCol, 0.35) : part > 0.5 ? gCol : vec3(0.07, 0.16, 0.035);
   vGT = part > 0.5 ? 1.0 : p.y;
@@ -8552,23 +8555,23 @@ ${uC}
   float outR = H * (0.15 + 0.55 * t);
   float y = H * (sin(t * 2.4) * 0.72);
   vec2 xz = gRoot + dir * outR + side * position.x * W * sin(3.14159 * max(t, 0.12)) + wind * t * H;
-  transformed = vec3(xz.x, gH + y - 0.01, xz.y) * gKeep;
+  gcP = vec3(xz.x, gH + y - 0.01, xz.y) * gKeep;
   gcN = normalize(vec3(dir.x * 0.4, 1.0 - t * 0.5, dir.y * 0.4));
   vGC = gCol * (0.85 + 0.3 * hb);
   vGT = t;
   vGPart = 0.0;
 }
 `;function bC(e,t,n,{flower:r=!1}={}){let i={uPlace:{value:t},...n};return $v({color:16777215,roughness:.62,metalness:0,side:2},{key:`groundcover-${e.length}-${r?`f`:`g`}`,uniforms:i,vertex:{pars:hC+(r?`attribute float aPart;`:``)+`
-vec3 gcN;`,preNormal:`objectNormal = vec3(0.0, 1.0, 0.0);`,transform:e+`
-objectNormal = gcN; transformedNormal = normalMatrix * gcN; vNormal = normalize(transformedNormal);`},fragment:{pars:`varying vec3 vGC; varying float vGT; varying float vGPart;`,color:`
+vec3 gcN; vec3 gcP;`,preNormal:e+`
+objectNormal = gcN;`,transform:`transformed = gcP;`},fragment:{pars:`varying vec3 vGC; varying float vGT; varying float vGPart;`,color:`
         // darker, cooler down in the sward; sun-bleached tips
-        vec3 gc = vGC * mix(0.55, 1.12, smoothstep(0.0, 0.9, vGT));
+        vec3 gc = vGC * mix(0.42, 1.25, smoothstep(0.0, 0.95, vGT));
         gc = mix(gc, gc * vec3(1.18, 1.1, 0.8), smoothstep(0.7, 1.0, vGT) * 0.4 * step(vGPart, 0.5));
         diffuseColor.rgb = gc;`,surface:`roughnessFactor = vGPart > 0.5 ? 0.55 : mix(0.75, 0.5, vGT);`,emissive:`{
         vec3 vdir = normalize(vWPos - cameraPosition);
         float back = pow(max(dot(vdir, uSunDir), 0.0), 3.0) * smoothstep(0.0, 0.25, uSunDir.y);
         totalEmissiveRadiance += diffuseColor.rgb * uSunColor * back * vGT * 0.35;
-      }`}})}var xC=[{kind:`grass`,layer:0,cell:.3,rIn:0,rOut:32,blades:3,segs:4,width:.012},{kind:`grass`,layer:0,cell:.8,rIn:30,rOut:95,blades:3,segs:2,width:.03},{kind:`grass`,layer:0,cell:1.8,rIn:90,rOut:200,blades:2,segs:1,width:.07},{kind:`flower`,layer:1,cell:1/3,rIn:0,rOut:42},{kind:`clump`,layer:2,cell:.6,rIn:0,rOut:40}],SC=class{constructor(e,t){this.world=e,this.scene=e.scene,this.renderer=e.app.renderer,this.occ=lC(e),this.common={uInfo:{value:e.info.tex},uNature:{value:jy.natureTex},uHeight:{value:jy.heightTex},uOcc:{value:this.occ},uInfoHalf:{value:Ty.half},uHN:{value:Ty.n},uStreets:iy.uStreets,uStreetHalf:iy.uStreetHalf,uStreetFrame:iy.uStreetFrame,uBloom:iy.uBloom},this.layers=[],this.enabled=!0,this.scaleQ=1,this.applyQuality(t,!0)}_build(){for(let e of this.layers)this.scene.remove(e.mesh),e.mesh.geometry.dispose(),e.mesh.material.dispose(),e.rt.dispose(),e.placeMat.dispose();if(this.layers=[],this.enabled)for(let e of xC){let t=this.scaleQ,n=e.rOut*t,r=e.rIn*t,i=Math.ceil(2*n/e.cell)+32,a=new Kn(i,i,{type:T,format:j,depthBuffer:!1,minFilter:l,magFilter:l,generateMipmaps:!1}),o={...this.common,uOriginCell:{value:new L},uCell:{value:e.cell},uN:{value:i},uLayer:{value:e.layer}},s=new G({vertexShader:d_,fragmentShader:dC,uniforms:o,depthTest:!1,depthWrite:!1}),c={uOriginCell:o.uOriginCell,uCell:o.uCell,uN:o.uN,uRIn:{value:r},uROut:{value:n},uPixAng:{value:.001},uWidthK:{value:e.width||.02}},u,d;e.kind===`grass`?(u=fC(e.blades,e.segs),d=bC(_C,a.texture,c)):e.kind===`flower`?(u=pC(),d=bC(vC,a.texture,c,{flower:!0})):(u=mC(),d=bC(yC,a.texture,c)),u.instanceCount=i*i;let f=new W(u,d);f.frustumCulled=!1,f.receiveShadow=!0,f.castShadow=!1,f.layers.set(1),f.name=`Ground cover (${e.kind} ${r.toFixed(0)}-${n.toFixed(0)} m)`,f.renderOrder=1,this.scene.add(f),this.layers.push({def:e,N:i,snap:16,rt:a,placeMat:s,pass:new u_(s),mesh:f,shared:c,origin:new L(1e9,1e9),dirty:!0})}}applyQuality(e,t=!1){let n=e.grass??(e.lowrise>=1?1:e.lowrise>=.75?.65:0),r=n>.01;(t||n!==this.scaleQ||r!==this.enabled)&&(this.scaleQ=Math.max(n,.3),this.enabled=r,this._build())}update(e,t,n){if(!this.enabled||!n)return;let r=this.renderer,i=2*Math.tan(I.degToRad(n.fov)*.5)/Math.max(r.domElement.height,1),a=n.position.y-Math.max(this.world.groundHeight(n.position.x,n.position.z),0)<260*this.scaleQ;for(let e of this.layers){if(e.mesh.visible=a,e.shared.uPixAng.value=i,!a)continue;let t=e.def.cell,o=t*e.snap,s=Math.floor(n.position.x/o)*o,c=Math.floor(n.position.z/o)*o;if(s!==e.origin.x||c!==e.origin.y||e.dirty){e.origin.set(s,c),e.shared.uOriginCell.value.set(Math.round(s/t)-Math.floor(e.N/2),Math.round(c/t)-Math.floor(e.N/2));let n=r.getRenderTarget();e.pass.render(r,e.rt),r.setRenderTarget(n),e.dirty=!1}}}invalidate(){for(let e of this.layers)e.dirty=!0}},CC=[[-.24,-.3],[-.265,.32],[-.22,.6],[-.11,.7],[.11,.7],[.22,.6],[.265,.32],[.24,-.3]];function wC(e,t,n){let r=CC.length,i=n.pos.length/3,a=new R(0,1,0),o=new R,s=new R;for(let r=0;r<e.length;r++){let i=e[Math.max(r-1,0)],c=e[Math.min(r+1,e.length-1)];o.subVectors(c,i).setY(0).normalize(),s.crossVectors(o,a).normalize();for(let[i,a]of CC){let o=e[r];n.pos.push(o.x+s.x*i,o.y+a*t,o.z+s.z*i)}}for(let t=0;t<e.length-1;t++)for(let e=0;e<r-1;e++){let a=i+t*r+e,o=a+1,s=a+r,c=s+1;n.idx.push(a,s,o,o,s,c)}for(let[t,a]of[[0,!0],[e.length-1,!1]]){let e=i+t*r;for(let t=1;t<r-1;t++)a?n.idx.push(e,e+t,e+t+1):n.idx.push(e,e+t+1,e+t)}}var TC=`
+      }`}})}var xC=[{kind:`grass`,layer:0,cell:.22,rIn:0,rOut:38,blades:3,segs:4,width:.016},{kind:`grass`,layer:0,cell:.7,rIn:34,rOut:105,blades:3,segs:2,width:.034},{kind:`grass`,layer:0,cell:1.6,rIn:98,rOut:220,blades:2,segs:1,width:.075},{kind:`flower`,layer:1,cell:1/3,rIn:0,rOut:42},{kind:`clump`,layer:2,cell:.6,rIn:0,rOut:40}],SC=class{constructor(e,t){this.world=e,this.scene=e.scene,this.renderer=e.app.renderer,this.occ=lC(e),this.common={uInfo:{value:e.info.tex},uNature:{value:jy.natureTex},uHeight:{value:jy.heightTex},uOcc:{value:this.occ},uInfoHalf:{value:Ty.half},uHN:{value:Ty.n},uStreets:iy.uStreets,uStreetHalf:iy.uStreetHalf,uStreetFrame:iy.uStreetFrame,uBloom:iy.uBloom},this.layers=[],this.enabled=!0,this.scaleQ=1,this.applyQuality(t,!0)}_build(){for(let e of this.layers)this.scene.remove(e.mesh),e.mesh.geometry.dispose(),e.mesh.material.dispose(),e.rt.dispose(),e.placeMat.dispose();if(this.layers=[],this.enabled)for(let e of xC){let t=this.scaleQ,n=e.rOut*t,r=e.rIn*t,i=Math.ceil(2*n/e.cell)+32,a=new Kn(i,i,{type:T,format:j,depthBuffer:!1,minFilter:l,magFilter:l,generateMipmaps:!1}),o={...this.common,uOriginCell:{value:new L},uCell:{value:e.cell},uN:{value:i},uLayer:{value:e.layer}},s=new G({vertexShader:d_,fragmentShader:dC,uniforms:o,depthTest:!1,depthWrite:!1}),c={uOriginCell:o.uOriginCell,uCell:o.uCell,uN:o.uN,uRIn:{value:r},uROut:{value:n},uPixAng:{value:.001},uWidthK:{value:e.width||.02}},u,d;e.kind===`grass`?(u=fC(e.blades,e.segs),d=bC(_C,a.texture,c)):e.kind===`flower`?(u=pC(),d=bC(vC,a.texture,c,{flower:!0})):(u=mC(),d=bC(yC,a.texture,c)),u.instanceCount=i*i;let f=new W(u,d);f.frustumCulled=!1,f.receiveShadow=!0,f.castShadow=!1,f.layers.set(1),f.name=`Ground cover (${e.kind} ${r.toFixed(0)}-${n.toFixed(0)} m)`,f.renderOrder=1,this.scene.add(f),this.layers.push({def:e,N:i,snap:16,rt:a,placeMat:s,pass:new u_(s),mesh:f,shared:c,origin:new L(1e9,1e9),dirty:!0})}}applyQuality(e,t=!1){let n=e.grass??(e.lowrise>=1?1:e.lowrise>=.75?.65:0),r=n>.01;(t||n!==this.scaleQ||r!==this.enabled)&&(this.scaleQ=Math.max(n,.3),this.enabled=r,this._build())}update(e,t,n){if(!this.enabled||!n)return;let r=this.renderer,i=2*Math.tan(I.degToRad(n.fov)*.5)/Math.max(r.domElement.height,1),a=n.position.y-Math.max(this.world.groundHeight(n.position.x,n.position.z),0)<260*this.scaleQ;for(let e of this.layers){if(e.mesh.visible=a,e.shared.uPixAng.value=i,!a)continue;let t=e.def.cell,o=t*e.snap,s=Math.floor(n.position.x/o)*o,c=Math.floor(n.position.z/o)*o;if(s!==e.origin.x||c!==e.origin.y||e.dirty){e.origin.set(s,c),e.shared.uOriginCell.value.set(Math.round(s/t)-Math.floor(e.N/2),Math.round(c/t)-Math.floor(e.N/2));let n=r.getRenderTarget();e.pass.render(r,e.rt),r.setRenderTarget(n),e.dirty=!1}}}invalidate(){for(let e of this.layers)e.dirty=!0}},CC=[[-.24,-.3],[-.265,.32],[-.22,.6],[-.11,.7],[.11,.7],[.22,.6],[.265,.32],[.24,-.3]];function wC(e,t,n){let r=CC.length,i=n.pos.length/3,a=new R(0,1,0),o=new R,s=new R;for(let r=0;r<e.length;r++){let i=e[Math.max(r-1,0)],c=e[Math.min(r+1,e.length-1)];o.subVectors(c,i).setY(0).normalize(),s.crossVectors(o,a).normalize();for(let[i,a]of CC){let o=e[r];n.pos.push(o.x+s.x*i,o.y+a*t,o.z+s.z*i)}}for(let t=0;t<e.length-1;t++)for(let e=0;e<r-1;e++){let a=i+t*r+e,o=a+1,s=a+r,c=s+1;n.idx.push(a,s,o,o,s,c)}for(let[t,a]of[[0,!0],[e.length-1,!1]]){let e=i+t*r;for(let t=1;t<r-1;t++)a?n.idx.push(e,e+t,e+t+1):n.idx.push(e,e+t+1,e+t)}}var TC=`
 {
   // clipped box, privet and pittosporum: leaf clusters at three scales, lighter new growth
   // on the clipped top, darker in the recesses; every scale fades to its average once it

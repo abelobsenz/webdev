@@ -221,7 +221,7 @@ void main() {
     // understorey in the forest. Probabilistic thinning keeps the edges soft.
     float cover = k.x * (1.0 - k.z);
     if (r < cover) {
-      float hgt = mix(0.11, 0.55, k.y);                                          // mown lawn -> unmown meadow
+      float hgt = mix(0.17, 0.6, k.y);                                           // mown lawn -> unmown meadow
       float wildH = mix(0.32 + 0.3 * vnoise(p * 0.05 + 3.0), 0.4, strand);       // grassland, strand grass
       hgt = mix(wildH, hgt, uw);
       hgt *= 1.0 - 0.45 * forestD;
@@ -390,11 +390,14 @@ const GRASS_TRANSFORM = /* glsl */ `
   float bend = t * t;
   vec2 xz = gRoot + off + sdir * position.x * W * (1.0 - t * 0.85) + lean * H * bend;
   float y = gH + H * t * (1.0 - 0.28 * bend * length(lean)) - 0.02;
-  transformed = vec3(xz.x, y, xz.y) * gKeep;
+  gcP = vec3(xz.x, y, xz.y) * gKeep;
   // normal: the blade face, bent back and rounded across, blended toward the ground normal
   vec3 bn = normalize(vec3(fdir.x, 0.35 + t * 0.4, fdir.y) + vec3(sdir.x, 0.0, sdir.y) * position.x * 0.9);
   gcN = normalize(mix(bn, gN, 0.45));
-  vGC = gCol * (0.95 + 0.1 * hb);
+  // each blade its own shade: greener, yellower, a few dry ones
+  float hc = hash12(cid * 3.3 + bi * 1.7);
+  vGC = gCol * (0.78 + 0.44 * hb) * vec3(1.0 + 0.2 * (hc - 0.5), 1.0, 1.0 - 0.25 * (hc - 0.5));
+  vGC = mix(vGC, vec3(0.34, 0.3, 0.14), step(0.94, hc) * 0.6);
   vGT = t;
   vGPart = 0.0;
 }
@@ -423,7 +426,7 @@ const FLOWER_TRANSFORM = /* glsl */ `
   vec2 r = vec2(q.x * c - q.z * s, q.x * s + q.z * c);
   float sway = clamp(q.y / max(H, 0.01), 0.0, 1.0);
   vec2 xz = gRoot + r + wind * sway * H * 4.0;
-  transformed = vec3(xz.x, gH + q.y - 0.01, xz.y) * gKeep;
+  gcP = vec3(xz.x, gH + q.y - 0.01, xz.y) * gKeep;
   gcN = normalize(mix(vec3(0.0, 1.0, 0.0), gN, 0.3));
   vGC = part > 1.5 ? mix(vec3(0.95, 0.78, 0.2), gCol, 0.35) : part > 0.5 ? gCol : vec3(0.07, 0.16, 0.035);
   vGT = part > 0.5 ? 1.0 : p.y;
@@ -445,7 +448,7 @@ const CLUMP_TRANSFORM = /* glsl */ `
   float outR = H * (0.15 + 0.55 * t);
   float y = H * (sin(t * 2.4) * 0.72);
   vec2 xz = gRoot + dir * outR + side * position.x * W * sin(3.14159 * max(t, 0.12)) + wind * t * H;
-  transformed = vec3(xz.x, gH + y - 0.01, xz.y) * gKeep;
+  gcP = vec3(xz.x, gH + y - 0.01, xz.y) * gKeep;
   gcN = normalize(vec3(dir.x * 0.4, 1.0 - t * 0.5, dir.y * 0.4));
   vGC = gCol * (0.85 + 0.3 * hb);
   vGT = t;
@@ -459,15 +462,17 @@ function layerMaterial(transform, place, uniforms, { flower = false } = {}) {
     key: `groundcover-${transform.length}-${flower ? 'f' : 'g'}`,
     uniforms: u,
     vertex: {
-      pars: INSTANCE_PARS + (flower ? 'attribute float aPart;' : '') + '\nvec3 gcN;',
-      preNormal: 'objectNormal = vec3(0.0, 1.0, 0.0);',
-      transform: transform + '\nobjectNormal = gcN; transformedNormal = normalMatrix * gcN; vNormal = normalize(transformedNormal);',
+      pars: INSTANCE_PARS + (flower ? 'attribute float aPart;' : '') + '\nvec3 gcN; vec3 gcP;',
+      // the blade is built before three derives its normals, so the lighting normal and
+      // the position come from the same instance record
+      preNormal: transform + '\nobjectNormal = gcN;',
+      transform: 'transformed = gcP;',
     },
     fragment: {
       pars: 'varying vec3 vGC; varying float vGT; varying float vGPart;',
       color: `
         // darker, cooler down in the sward; sun-bleached tips
-        vec3 gc = vGC * mix(0.55, 1.12, smoothstep(0.0, 0.9, vGT));
+        vec3 gc = vGC * mix(0.42, 1.25, smoothstep(0.0, 0.95, vGT));
         gc = mix(gc, gc * vec3(1.18, 1.1, 0.8), smoothstep(0.7, 1.0, vGT) * 0.4 * step(vGPart, 0.5));
         diffuseColor.rgb = gc;`,
       surface: 'roughnessFactor = vGPart > 0.5 ? 0.55 : mix(0.75, 0.5, vGT);',
@@ -484,9 +489,9 @@ function layerMaterial(transform, place, uniforms, { flower = false } = {}) {
 // --------------------------------------------------------------------- the system --
 const LAYERS = [
   // grass: dense multi-blade tufts close by, simpler blades further out
-  { kind: 'grass', layer: 0, cell: 0.3, rIn: 0, rOut: 32, blades: 3, segs: 4, width: 0.012 },
-  { kind: 'grass', layer: 0, cell: 0.8, rIn: 30, rOut: 95, blades: 3, segs: 2, width: 0.03 },
-  { kind: 'grass', layer: 0, cell: 1.8, rIn: 90, rOut: 200, blades: 2, segs: 1, width: 0.07 },
+  { kind: 'grass', layer: 0, cell: 0.22, rIn: 0, rOut: 38, blades: 3, segs: 4, width: 0.016 },
+  { kind: 'grass', layer: 0, cell: 0.7, rIn: 34, rOut: 105, blades: 3, segs: 2, width: 0.034 },
+  { kind: 'grass', layer: 0, cell: 1.6, rIn: 98, rOut: 220, blades: 2, segs: 1, width: 0.075 },
   { kind: 'flower', layer: 1, cell: 1 / 3, rIn: 0, rOut: 42 },
   { kind: 'clump', layer: 2, cell: 0.6, rIn: 0, rOut: 40 },
 ];
