@@ -193,7 +193,8 @@ export class Lighting {
   updateEnvironment(skyScene, sunDir, dt, force = false, skyDomeMat = null) {
     this.envTimer += dt;
     const moved = this.lastEnvSun.angleTo(sunDir);
-    if (!force && (moved < 0.004 || this.envTimer < 0.25)) return;
+    // big jumps (time presets, tour cuts) refresh at once; gradual motion is throttled
+    if (!force && moved < 0.035 && (moved < 0.004 || this.envTimer < 0.25)) return;
     this.envTimer = 0;
     this.lastEnvSun.copy(sunDir);
     if (skyDomeMat) skyDomeMat.uniforms.uEnvMode.value = 1;
