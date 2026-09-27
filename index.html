@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Meridian</title>
+<meta name="description" content="An explorable real-time vision of humanity's capital city in the year 5026." />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Jost:wght@300;400;500&family=Marcellus&family=Martian+Mono:wght@300;400&display=swap" />
+</head>
+<body>
+<canvas id="scene" aria-label="Real-time 3D view of Meridian"></canvas>
+
+<div id="loader" role="status" aria-live="polite">
+  <div class="loader-inner">
+    <p class="eyebrow">Terran Concord · 5026 CE</p>
+    <div class="wordmark">Meridian</div>
+    <div class="loader-track"><div id="loader-bar"></div></div>
+    <div id="loader-status">Preparing the atmosphere</div>
+  </div>
+</div>
+
+<div id="intro" hidden>
+  <div class="intro-inner">
+    <p class="eyebrow">The year 5026 · Equatorial Pacific · 0° latitude</p>
+    <h1 class="wordmark big">Meridian</h1>
+    <p class="intro-lede">This is the capital of a united humanity. It is built into a restored caldera lagoon on the equator, beneath the orbital rings, around the anchor of the space elevator. You can fly anywhere you like, or take the guided tour.</p>
+    <div class="intro-actions">
+      <button id="btn-tour" class="primary" type="button">Take the guided tour</button>
+      <button id="btn-explore" type="button">Explore freely</button>
+    </div>
+    <label class="check"><input type="checkbox" id="opt-audio-intro" checked /> <span>Ambient sound</span></label>
+    <p class="intro-keys"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> fly · drag to look · <kbd>Shift</kbd> boost · scroll to change speed · <kbd>Z</kbd> zoom · <kbd>H</kbd> hide interface</p>
+  </div>
+</div>
+
+<div id="hud" hidden>
+  <header class="hud-top">
+    <div class="brand">
+      <span class="wordmark small">Meridian</span>
+      <span class="brand-sub">Capital of the Terran Concord</span>
+    </div>
+    <div class="compass" id="compass" aria-hidden="true">
+      <div class="compass-tape" id="compass-tape"></div>
+      <div class="compass-caret"></div>
+    </div>
+    <dl class="readouts">
+      <div><dt>Local</dt><dd id="ro-time">17:30</dd></div>
+      <div><dt>Alt</dt><dd id="ro-alt">230 m</dd></div>
+      <div><dt>Speed</dt><dd id="ro-speed">0 m/s</dd></div>
+      <div id="ro-fps-wrap" hidden><dt>FPS</dt><dd id="ro-fps">60</dd></div>
+    </dl>
+  </header>
+
+  <aside class="landmarks" id="landmarks">
+    <button class="panel-toggle" id="lm-toggle" type="button" aria-expanded="true" aria-controls="lm-list">Landmarks</button>
+    <ol id="lm-list"></ol>
+  </aside>
+
+  <section class="lore" id="lore" hidden aria-live="polite">
+    <p class="eyebrow" id="lore-district"></p>
+    <h2 id="lore-name"></h2>
+    <p class="live" id="lore-live" hidden></p>
+    <p id="lore-text"></p>
+    <dl id="lore-facts"></dl>
+    <button class="close" id="lore-close" type="button" aria-label="Close">×</button>
+  </section>
+
+  <div class="tourbar" id="tourbar" hidden>
+    <span id="tour-step">Tour · 1 / 15</span>
+    <button id="tour-next" type="button">Next</button>
+    <button id="tour-exit" type="button">End tour</button>
+  </div>
+
+  <footer class="timebar">
+    <button id="btn-play" class="icon" type="button" title="Let time flow (P)" aria-label="Let time flow">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path id="play-glyph" d="M4 2.5v11l9-5.5z" fill="currentColor"/></svg>
+    </button>
+    <div class="dial">
+      <label class="sr" for="time">Time of day</label>
+      <input type="range" id="time" min="0" max="24" step="0.01" value="17.5" />
+      <div class="dial-marks" aria-hidden="true"><span>00</span><span>06</span><span>12</span><span>18</span><span>24</span></div>
+    </div>
+    <div class="presets" role="group" aria-label="Time presets">
+      <button type="button" data-t="6.15">Dawn</button>
+      <button type="button" data-t="12.2">Noon</button>
+      <button type="button" data-t="17.45">Golden</button>
+      <button type="button" data-t="18.3">Dusk</button>
+      <button type="button" data-t="22.4">Night</button>
+    </div>
+    <div class="actions">
+      <button type="button" id="btn-tour2">Tour</button>
+      <button type="button" id="btn-settings" aria-expanded="false" aria-controls="settings">Settings</button>
+      <button type="button" id="btn-help" aria-expanded="false" aria-controls="help">Keys</button>
+    </div>
+  </footer>
+
+  <div class="panel settings" id="settings" hidden>
+    <h3>Settings</h3>
+    <label class="row"><span>Quality</span>
+      <select id="opt-quality">
+        <option value="low">Low</option>
+        <option value="medium">Medium</option>
+        <option value="high">High</option>
+        <option value="ultra">Ultra (Apple Pro/Max, desktop GPUs)</option>
+      </select>
+    </label>
+    <label class="row"><span>Time flow</span>
+      <select id="opt-speed">
+        <option value="0.0166">1 hour per minute</option>
+        <option value="0.0833">5 hours per minute</option>
+        <option value="0.2">1 day per 2 minutes</option>
+        <option value="0.8">1 day per 30 s</option>
+      </select>
+    </label>
+    <label class="row check"><input type="checkbox" id="opt-clouds" checked /> <span>Clouds</span></label>
+    <label class="row check"><input type="checkbox" id="opt-audio" /> <span>Ambient sound</span></label>
+    <label class="row check"><input type="checkbox" id="opt-fps" /> <span>Show frame rate</span></label>
+    <label class="row check"><input type="checkbox" id="opt-lock" /> <span>Capture mouse while flying</span></label>
+    <p class="note" id="opt-note"></p>
+  </div>
+
+  <div class="panel help" id="help" hidden>
+    <h3>Controls</h3>
+    <dl>
+      <div><dt><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> / arrows</dt><dd>Fly</dd></div>
+      <div><dt><kbd>Space</kbd> <kbd>E</kbd> · <kbd>C</kbd> <kbd>Q</kbd></dt><dd>Rise · descend</dd></div>
+      <div><dt>Drag · right-drag</dt><dd>Look · zoom lens</dd></div>
+      <div><dt><kbd>Shift</kbd> · <kbd>Alt</kbd></dt><dd>Boost · fine control</dd></div>
+      <div><dt>Scroll</dt><dd>Cruise speed</dd></div>
+      <div><dt><kbd>Z</kbd></dt><dd>Zoom lens (hold)</dd></div>
+      <div><dt><kbd>1</kbd>–<kbd>0</kbd></dt><dd>Fly to landmark</dd></div>
+      <div><dt><kbd>T</kbd></dt><dd>Guided tour</dd></div>
+      <div><dt><kbd>P</kbd> · <kbd>[</kbd> <kbd>]</kbd></dt><dd>Time flow · scrub time</dd></div>
+      <div><dt><kbd>H</kbd> · <kbd>F</kbd></dt><dd>Hide interface · fullscreen</dd></div>
+    </dl>
+  </div>
+
+  <div class="hint" id="hint">Drag to look · <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> to fly · <kbd>1</kbd>–<kbd>0</kbd> landmarks</div>
+</div>
+
+<script type="module" src="/src/main.js"></script>
+</body>
+</html>

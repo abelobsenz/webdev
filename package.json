@@ -1,0 +1,19 @@
+{
+  "name": "meridian",
+  "private": true,
+  "version": "1.0.0",
+  "description": "MERIDIAN — an explorable real-time 3D vision of humanity's capital city in the year 5026.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "three": "0.186.1"
+  },
+  "devDependencies": {
+    "vite": "8.3.1",
+    "vite-plugin-singlefile": "2.3.3"
+  }
+}
