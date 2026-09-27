@@ -1,0 +1,40 @@
+// Focus targets for the orbital view, with short lore in the house style.
+export const TARGET_INFO = {
+  earth: {
+    key: '1', name: 'Earth', district: 'Home · 1 AU from the Sun',
+    lore: 'The whole planet, as the Halo sees it every ninety minutes. The Sahara is still a desert at its heart, but its margins have been green for a thousand years. The lights on the night side trace the old coastal cities and the equator, where the elevators come down.',
+    facts: [['Radius', '6,371 km'], ['Rings', '4'], ['Population', '11.2 billion']],
+  },
+  meridian: {
+    key: '2', name: 'Meridian', district: 'Equator · 157° W',
+    lore: 'From orbit the capital is a turquoise ring in an empty ocean, and at night the brightest point on Earth. The tether rises straight out of its centre. It is the only city on the planet you can find from the Moon with the naked eye.',
+    facts: [['Lagoon', '11.8 km'], ['Tether', '100,000 km'], ['Climbers', '1 every 6 min']],
+  },
+  halo: {
+    key: '3', name: 'The Halo', district: 'Orbital Ring · 620 km',
+    lore: 'An unbroken ring around the equator, carried on a magnetic rotor that moves faster than orbit so the habitat deck can stand still over the ground. Seven tethers hang from it to the equatorial ports. Its shadow is the thin dark line you can see crossing the tropics.',
+    facts: [['Circumference', '43,900 km'], ['Width', '32 km'], ['Residents', '90 million']],
+  },
+  geo: {
+    key: '4', name: 'Geostationary Harbour', district: 'Tether · 35,786 km',
+    lore: 'Halfway up the tether, where an orbit takes exactly one day, climbers stop and ships leave. Its three counter-rotating rings echo the Crown on the Axis far below. Everything bound for Mars, the belt or the outer moons departs from these docks.',
+    facts: [['Rings', '3, counter-rotating'], ['Berths', '1,140'], ['Climb from Meridian', '15 h']],
+  },
+  moon: {
+    key: '5', name: 'The Moon', district: 'Luna · 384,400 km',
+    lore: 'Terraformed between 4230 and 4630 CE. The old maria are shallow seas now, the highlands are green, and a thin atmosphere holds clouds. A single ring circles its equator. Forty million people live there, most of them on the near side, facing home.',
+    facts: [['Radius', '1,737 km'], ['Surface gravity', '0.17 g'], ['Population', '40 million']],
+  },
+  sun: {
+    key: '6', name: 'The Sun and the Swarm', district: 'Sol · 1 AU',
+    lore: 'Four inclined rings of collectors orbit the Sun between 0.05 and 0.13 AU, with statites hovering above its poles. Together they catch a little under one percent of its light. That is enough to power every city, ring and ship in the system many times over.',
+    facts: [['Collectors', '2.1 × 10¹⁵'], ['Captured', '0.8 % of output'], ['Rings', '4']],
+  },
+  hearth: {
+    key: '7', name: 'The Hearth', district: 'Sun–Earth L2 · 1.5 million km',
+    lore: 'A spinning black hole, grown from a primordial seed and kept on a wide orbit beyond the Earth. Matter fed into its disc falls toward the horizon at half the speed of light and glows hotter than any star. The collector ring around it turns that light into power. Its gravity bends the stars behind it into a ring.',
+    facts: [['Horizon', '60 km across'], ['Spin', 'a = 0.7'], ['Output', '4 × 10²⁴ W']],
+  },
+};
+
+export const TARGET_ORDER = ['earth', 'meridian', 'halo', 'geo', 'moon', 'sun', 'hearth'];

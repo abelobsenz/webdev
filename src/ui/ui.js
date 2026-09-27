@@ -186,6 +186,8 @@ export class UI {
     time.addEventListener('input', () => { app.hours = parseFloat(time.value); this.timeTarget = null; });
     for (const b of document.querySelectorAll('.presets button')) b.addEventListener('click', () => { this.setTimeSmooth(parseFloat(b.dataset.t)); this.sound('tick'); });
     $('btn-play').addEventListener('click', () => this.togglePlay());
+    // [space] orbital view
+    if ($('btn-orbit')) $('btn-orbit').addEventListener('click', () => { if (app.space) app.space.toggle(); });
     const toggle = (panel) => {
       const open = $(panel).hidden;
       for (const id of ['settings', 'help']) $(id).hidden = true;
@@ -268,6 +270,10 @@ export class UI {
       if (code === 'Escape') { own(); this.tour.stop(); return; }
     }
     if (t && t.type === 'range' && code.startsWith('Arrow')) return;
+    // [space] orbital view: its own keys while it is up; O toggles it from anywhere
+    if (this.app.space && this.app.space.handleKey(e)) return;
+    if (code === 'KeyO' && this.app.space) { own(); this.tour.stop(); this.app.space.toggle(); return; }
+    if (this.app.space && this.app.space.active) return;
     const poi = POIS.find((p) => p.key === e.key);
     if (poi && !e.altKey) { this.tour.stop(); this.goTo(poi); return; }
     switch (code) {
@@ -370,6 +376,7 @@ export class UI {
   // ------------------------------------------------------------- actions --
   togglePlay() {
     const app = this.app;
+    if (app.space && app.space.active) { app.space.hud.togglePause(); return; } // [space] pause the time warp
     app.timeSpeed = app.timeSpeed ? 0 : this.flowSpeed;
     this.timeTarget = null;
     this._syncPlay();
@@ -464,6 +471,7 @@ export class UI {
 
   update(dt) {
     const app = this.app;
+    if (app.space && app.space.active && app.space.mode !== 'ascend') { app.space.updateHud(dt); return; } // [space]
     // animated time changes
     if (this.timeTarget) {
       const tt = this.timeTarget;

@@ -15,6 +15,8 @@ import { POIS } from './ui/pois.js';
 import { AmbientAudio } from './ui/audio.js';
 import { PerfManager } from './core/perf.js';            // [experience] GPU timing + dynamic resolution
 import { loaderProgress, nextPaint } from './ui/loader.js'; // [experience] loader stages
+// [space] orbital view (src/space): its own km-scale scene, entered by riding the tether
+import { SpaceMode } from './space/index.js';
 
 const smooth = (a, b, x) => { const t = Math.min(Math.max((x - a) / (b - a), 0), 1); return t * t * (3 - 2 * t); };
 const params = new URLSearchParams(location.search);
@@ -77,6 +79,8 @@ class App {
     this.perf = new PerfManager(this);
     { const frame = this.frame.bind(this); this.frame = (dt) => { this.perf.begin(); frame(dt); this.perf.end(); }; }
     this.ui = new UI(this);
+    // [space] orbital view (heavy resources are built on first use)
+    this.space = new SpaceMode(this);
     const start = POIS[0];
     if (params.has('cam')) {
       const [x, y, z, yaw, pitch] = params.get('cam').split(',').map(Number);
@@ -109,6 +113,7 @@ class App {
     this.pipeline.applySettings(this.settings);   // rendering agent: cloud / post quality keys
     this.lighting.setShadowQuality(this.settings.shadows, this.settings.shadowSize);
     this.world.applyQuality(this.settings);
+    if (this.space) this.space.applyQuality(this.settings); // [space]
     this.dynScale = 1;
     this.resize();
   }
@@ -127,6 +132,7 @@ class App {
     this.pipeline.setSize(bw, bh);
     this.world.setSize(bw, bh);
     this.celestial.setResolution(bw, bh);
+    if (this.space) this.space.setSize(bw, bh); // [space]
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
     this.lastResize = performance.now();
@@ -162,7 +168,9 @@ class App {
     U.uTime.value = this.elapsed;
     this.hours = (this.hours + this.timeSpeed * dt + 24) % 24;
 
-    this.controls.update(dt);
+    // [space] while the orbital view is up the city is not rendered at all
+    if (this.space && this.space.onlySpace) { this.space.frame(dt); if (this.ui) this.ui.update(dt); this.adaptResolution(dt); return; }
+    if (this.space && this.space.cityCam) this.space.driveCity(dt); else this.controls.update(dt); // [space] ride up/down the tether
     // adapt clip planes: keep depth precision when flying high above the city
     {
       const alt = this.camera.position.y;
@@ -173,6 +181,7 @@ class App {
         this.camera.updateProjectionMatrix();
       }
     }
+    if (this.space) this.space.afterCityCamera(this.camera); // [space]
     this.camera.updateMatrixWorld();
     this.updateSky(dt);
 
@@ -191,6 +200,7 @@ class App {
     this.world.update(dt, this.elapsed);
 
     this.render(dt);
+    if (this.space) this.space.afterCityRender(dt); // [space] crossfade during the ride
     if (this.ui) this.ui.update(dt);
     this.adaptResolution(dt);
   }
