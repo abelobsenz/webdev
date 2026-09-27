@@ -149,7 +149,7 @@ vec3 integrateAtmo(vec3 ro, vec3 rd, float t0, float t1, bool ground, vec3 sun, 
       vec3 S = ((sR * pR + sM * pM) * Ts + (sR + vec3(sM)) * ms) * uSunE;
       // green oxygen airglow near 95 km (only visible against the night)
       float h = r - Rg;
-      S += vec3(0.25, 1.0, 0.45) * 2.2e-5 * exp(-pow((h - 94.0) / 5.0, 2.0)) * (1.0 - smoothstep(-0.25, 0.05, mu));
+      S += vec3(0.25, 1.0, 0.45) * 2.2e-5 * exp(-pow(abs(h - 94.0) / 5.0, 2.0)) * (1.0 - smoothstep(-0.25, 0.05, mu));
       vec3 sT = exp(-ext * dt);
       L += T * (S - S * sT) / max(ext, vec3(1e-7));
       T *= sT;
@@ -275,7 +275,7 @@ void main() {
     float k = al * 0.5;
     float G = (nv / (nv * (1.0 - k) + k)) * (nl / (nl * (1.0 - k) + k));
     float F = 0.02 + 0.98 * pow(1.0 - max(dot(V, Hh), 0.0), 5.0);
-    float Fv = 0.02 + 0.98 * pow(1.0 - nv, 5.0);
+    float Fv = 0.02 + 0.98 * pow(clamp(1.0 - nv, 0.0, 1.0), 5.0);
     vec3 spec = vec3(D * G * F / (4.0 * nv + 1e-4)) * uSunE * sunT * shadow;
     vec3 skyRefl = uSunE * vec3(0.03, 0.06, 0.13) * smoothstep(-0.2, 0.3, mu);
     vec3 body = seaAlb / S_PI * (uSunE * sunT * nl * shadow + skyAmb);

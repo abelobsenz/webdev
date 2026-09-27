@@ -156,7 +156,7 @@ void main() {
     vec3 alb = uAlbedo * 0.6;
     col = alb / 3.14159 * (sunL * ndl + earthshine * 2.0);
     float pulse = pow(fract(u / 37.0 - uTime * 0.9 * uSpeed * sign(v)), 14.0);
-    float rim = pow(1.0 - abs(dot(N, V)), 2.0);
+    float rim = pow(max(1.0 - abs(dot(N, V)), 0.0), 2.0);
     em += uStreamColor * (0.12 + 1.6 * pulse * detail + 0.3 * rim);
   }
   gl_FragColor = vec4(col + em, 1.0);

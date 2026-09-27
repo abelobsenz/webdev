@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { U } from '../core/uniforms.js';
+import { Fleet, fleetTargets } from './fleet.js';
 import { FullscreenPass, FS_VERT } from '../core/fullscreen.js';
 import { SpaceSim, R_EARTH, R_MOON, GEO_ALT, COUNTERWEIGHT_ALT, MERIDIAN_LON, bodyDir, cityToBody } from './sim.js';
 import { EarthBake, maskReady } from './earthBake.js';
@@ -92,6 +93,7 @@ export class SpaceMode {
     });
     T('moon', { position: (o) => o.copy(sim.moonPos), frame: (q) => q.copy(sim.moonQuat), minDist: R_MOON + 250, maxDist: 400000, defaultDist: 7400, view: { az: 1.05, el: 0.22 } });
     T('sun', { position: (o) => o.copy(sim.sunPos), frame: identity, minDist: 3e6, maxDist: 1.2e8, defaultDist: 3.2e7, view: { az: 2.2, el: 0.55 } });
+    for (const [k, o] of Object.entries(fleetTargets(this))) T(k, o);
     T('hearth', {
       position: (o) => o.copy(sim.hearthPos),
       frame: (q) => q.copy(self.hearth ? self.hearth.quat : q.identity()),
@@ -155,6 +157,9 @@ export class SpaceMode {
         return [Math.max(d - reach, 0.01), Math.max(d + reach, cam.distanceTo(this.sim.moonPos) + 6000)];
       },
     });
+    // ships: liners at the Harbour, tenders over the Halo, Selene Works above the Moon
+    this.fleet = new Fleet(this);
+    this.modules.push(this.fleet);
     for (const b of this.bodies) if (!b.local) b.remote = true;
     // post: crossfade helper
     this.fadeRT = new THREE.WebGLRenderTarget(1, 1, { type: THREE.UnsignedByteType, depthBuffer: false });

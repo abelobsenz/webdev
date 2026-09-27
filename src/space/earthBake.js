@@ -78,14 +78,14 @@ float cloudPotential(vec3 d, float seed, out float hurricane) {
   float cells = sridged(p * 34.0 + seed * 3.0, 4);
   float n = large * 0.62 + mid * 0.38;
   // zonal climate: ITCZ (a little north in June), dry subtropics, stormy mid-latitudes
-  float itcz = exp(-pow((lat - 0.1) / 0.075, 2.0));
-  float subtrop = exp(-pow((alat - 0.43) / 0.12, 2.0));
-  float storm = exp(-pow((alat - 0.96) / 0.22, 2.0));
+  float itcz = exp(-pow(abs(lat - 0.1) / 0.075, 2.0));
+  float subtrop = exp(-pow(abs(alat - 0.43) / 0.12, 2.0));
+  float storm = exp(-pow(abs(alat - 0.96) / 0.22, 2.0));
   float polar = smoothstep(1.15, 1.4, alat);
   float bias = 0.03 + 0.26 * itcz - 0.22 * subtrop + 0.16 * storm + 0.05 * polar;
   float pot = n * 0.8 + cells * 0.2 + bias;
   // storm tracks become streaky fronts
-  float front = pow(1.0 - abs(sfbm(p * vec3(2.2, 7.0, 2.2) + seed * 1.7, 5)), 6.0) * storm;
+  float front = pow(max(1.0 - abs(sfbm(p * vec3(2.2, 7.0, 2.2) + seed * 1.7, 5)), 0.0), 6.0) * storm;
   pot += front * 0.35;
   return pot;
 }
@@ -107,11 +107,11 @@ void main() {
     float b = cloudPotential(d, 37.0, hB);
     // cirrus: streaks along the jets
     float ci = sfbm(vec3(d.x * 5.0, d.y * 42.0, d.z * 5.0) + vec3(sfbm(d * 6.0, 3) * 2.0), 5) * 0.5 + 0.5;
-    float jet = exp(-pow((alat - 38.0) / 14.0, 2.0)) + 0.5 * exp(-pow((latD - 6.0) / 10.0, 2.0));
+    float jet = exp(-pow(abs(alat - 38.0) / 14.0, 2.0)) + 0.5 * exp(-pow(abs(latD - 6.0) / 10.0, 2.0));
     // land: clearer deserts, cloudier rainforest
     float des = 0.0;
     for (int i = 0; i < 10; i++) des = max(des, boxMask(latD, lonD, uDeserts[i], 3.0));
-    float bias = -0.22 * des * mc + 0.06 * exp(-pow(latD / 10.0, 2.0)) * mc;
+    float bias = -0.22 * des * mc + 0.06 * exp(-pow(abs(latD) / 10.0, 2.0)) * mc;
     gl_FragColor = vec4(clamp(a * 0.8, 0.0, 1.0), clamp(b * 0.8, 0.0, 1.0), clamp(0.5 + bias, 0.0, 1.0), clamp(ci * jet, 0.0, 1.0));
     return;
   }
@@ -131,7 +131,7 @@ void main() {
     vec4 b = uDeserts[i];
     desert = max(desert, boxMask(latD, lonD, b, 4.0));
   }
-  float subtrop = exp(-pow((alat - 24.0) / 8.0, 2.0)) * smoothstep(0.5, 0.95, mC);
+  float subtrop = exp(-pow(abs(alat - 24.0) / 8.0, 2.0)) * smoothstep(0.5, 0.95, mC);
   float arid = clamp(max(desert * (0.75 + 0.35 * n1), subtrop * 0.55) + n2 * 0.12, 0.0, 1.0);
   arid *= smoothstep(0.1, 0.6, mc + 0.2);
 
@@ -174,7 +174,7 @@ void main() {
   float hills = sfbm(d * 24.0 + 9.0, 5) * 0.5 + 0.5;
   float hland = 0.015 + 0.05 * mc + mount * (0.28 + 0.72 * rid) * 0.9 + 0.06 * hills * hills + 0.05 * rid * smoothstep(0.4, 0.9, hills);
   float depth = 0.08 + 0.55 * smoothstep(0.0, 0.55, 1.0 - mc) + 0.12 * (sfbm(d * 12.0, 4) * 0.5 + 0.5);
-  depth -= 0.1 * pow(1.0 - abs(sfbm(d * vec3(3.0, 5.0, 3.0) + 2.0, 4)), 8.0); // mid-ocean ridges
+  depth -= 0.1 * pow(max(1.0 - abs(sfbm(d * vec3(3.0, 5.0, 3.0) + 2.0, 4)), 0.0), 8.0); // mid-ocean ridges
   float H = s * 0.25 + (land > 0.5 ? hland : -depth);
 
   // --- biomes (linear albedo) ---
@@ -187,7 +187,7 @@ void main() {
   vec3 redsand = vec3(0.46, 0.25, 0.12);
   vec3 tundraC = vec3(0.15, 0.14, 0.115);
   vec3 rock = vec3(0.2, 0.18, 0.155);
-  float wet = exp(-pow(latD / 11.0, 2.0)) * (1.0 - arid);
+  float wet = exp(-pow(abs(latD) / 11.0, 2.0)) * (1.0 - arid);
   float boreal = smoothstep(47.0, 55.0, alat) * (1.0 - smoothstep(63.0, 69.0, alat));
   float tundra = smoothstep(62.0, 70.0, alat);
   vec3 c = mix(temperate, rain, wet);

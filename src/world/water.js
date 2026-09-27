@@ -147,7 +147,7 @@ void main() {
   float slopeVar = strength * strength * (0.12 * (1.0 - fade1) + 0.05 * (1.0 - fade2) + 0.25 * flatten) * swell;
 
   float cosT = clamp(dot(N, V), 0.0, 1.0);
-  float F = 0.02 + 0.98 * pow(1.0 - cosT, 5.0);
+  float F = 0.02 + 0.98 * pow(clamp(1.0 - cosT, 0.0, 1.0), 5.0);
   float cs = mix(1.0, mix(0.1, 1.0, exp(-cloudShadowOD(vWorld))), uCloudShadow) * sunShadow(vWorld);
 
   // --- reflection (planar, blurred by roughness via mips) ---

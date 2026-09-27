@@ -56,7 +56,7 @@ float craters(vec3 p, float scale, out float rim) {
     float d = length(q - cell - h) / rr;
     float on = step(0.35, h.y);
     bowl = max(bowl, (1.0 - smoothstep(0.0, 1.0, d)) * on);
-    rim = max(rim, exp(-pow((d - 1.0) * 5.0, 2.0)) * on);
+    rim = max(rim, exp(-pow(abs(d - 1.0) * 5.0, 2.0)) * on);
   }
   return bowl;
 }

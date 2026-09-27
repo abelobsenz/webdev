@@ -945,7 +945,7 @@ void main() {
   float puff = 0.65 + 0.35 * sin(vAge * 173.0 + vAcross * 2.0) * sin(vAge * 61.0 - vAcross * 1.3);
   vec3 sunCol = uSunColor / max(max(uSunColor.r, max(uSunColor.g, uSunColor.b)), 1e-3);
   vec3 lit = mix(vec3(1.0, 0.62, 0.45), vec3(1.0, 0.95, 0.9), smoothstep(0.2, 0.9, sunCol.b)) * 0.55;
-  vec3 vapour = mix(vec3(0.4, 0.5, 0.8) * 0.012, lit, vLit) * puff * pow(1.0 - vAge, 1.5);
+  vec3 vapour = mix(vec3(0.4, 0.5, 0.8) * 0.012, lit, vLit) * puff * pow(max(1.0 - vAge, 0.0), 1.5);
   vec3 hot = vec3(0.55, 0.72, 1.0) * vHot * 2.2;
   vec3 col = (vapour + hot) * prof * vI;
   gl_FragColor = vec4(col, 1.0);
@@ -992,7 +992,7 @@ void main() {
   float w = mix(0.5, 1.0, x);
   float core = exp(-y * y / (w * w) * 9.0);
   float diamonds = 0.7 + 0.3 * cos(x * 38.0 - uTime * 60.0);
-  float fade = pow(1.0 - x, 1.6);
+  float fade = pow(max(1.0 - x, 0.0), 1.6);
   vec3 col = mix(vec3(0.95, 0.97, 1.0), vec3(0.4, 0.55, 1.0), smoothstep(0.0, 0.5, x));
   col = mix(col, vec3(0.75, 0.45, 1.0), smoothstep(0.4, 1.0, x) * 0.6);
   gl_FragColor = vec4(col * core * diamonds * fade * vT * 14.0, 1.0);

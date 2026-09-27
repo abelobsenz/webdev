@@ -112,9 +112,11 @@ export function buildAxis(scene, updaters) {
   // ---------------------------------------------------------- plaza --------
   const plazaProfile = [
     { r: 0.1, y: PLAZA_Y }, { r: PLAZA_R, y: PLAZA_Y }, { r: PLAZA_R + 0.5, y: PLAZA_Y - 0.6 },
-    { r: PLAZA_R + 2, y: PLAZA_Y - 3.5 }, { r: PLAZA_R + 44, y: PLAZA_Y - 3.5 }, { r: PLAZA_R + 45, y: PLAZA_Y - 7 },
-    { r: PLAZA_R + 92, y: PLAZA_Y - 7 }, { r: PLAZA_R + 93, y: PLAZA_Y - 10.5 }, { r: PLAZA_R + 145, y: PLAZA_Y - 10.5 },
-    { r: PLAZA_R + 146, y: PLAZA_Y - 14 }, { r: PLAZA_R + 205, y: PLAZA_Y - 14.5 }, { r: PLAZA_R + 215, y: -6 },
+    { r: PLAZA_R + 2, y: PLAZA_Y - 3.5 }, { r: PLAZA_R + 44, y: PLAZA_Y - 3.5 },
+    // one planted terrace, then a clean retaining wall down into the ground: the ring town
+    // around it is built on the island itself (the old lower terraces surfaced wherever the
+    // ground falls away to the east beach)
+    { r: PLAZA_R + 44.6, y: PLAZA_Y - 4.2 }, { r: PLAZA_R + 45, y: -6 },
   ].reverse();
   const plazaGeo = latheFacade(plazaProfile, 256);
   const plaza = new THREE.Mesh(plazaGeo, plazaMaterial());

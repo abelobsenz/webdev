@@ -159,7 +159,10 @@ const COLOR = /* glsl */ `
     grass = mix(grass, vec3(0.16, 0.17, 0.08), smoothstep(1700.0, 2000.0, h));    // montane heath
     vec3 floorC = mix(vec3(0.055, 0.08, 0.03), vec3(0.13, 0.10, 0.055), vnoise(wp.xz * 0.33));
     floorC = mix(floorC, vec3(0.09, 0.14, 0.05), smoothstep(0.55, 0.75, vnoise(wp.xz * 0.08)));  // fern patches
-    float canopyW = forestD * smoothstep(110.0, 360.0, dist);
+    // Painted canopy only where no real trees are planted (the outer massif, outside the
+    // surveyed grid), and never as a function of distance: the ground is the same texture
+    // from any range, it only gains detail as you approach.
+    float canopyW = info.z >= 0.0 ? 0.0 : forestD;
     vec3 veg = mix(grass, floorC, forestD * (1.0 - canopyW) * 0.9);
     if (canopyW > 0.01) {
       float S = mix(10.0, 7.5, mountainZone);

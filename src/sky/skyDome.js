@@ -229,7 +229,7 @@ void main() {
     rdir.y = abs(rdir.y);
     vec3 skyR = skyRadiance(uSkyViewLUT, Rg + 0.002, n, normalize(rdir), uSunDir) * uSunIlluminance;
     float cosI = clamp(dot(-dir, wn), 0.0, 1.0);
-    float F = 0.02 + 0.98 * pow(1.0 - cosI, 5.0);
+    float F = 0.02 + 0.98 * pow(clamp(1.0 - cosI, 0.0, 1.0), 5.0);
     float sunMu = dot(n, uSunDir);
     vec3 sunT = sampleTransmittance(uTransmittanceLUT, Rg, sunMu) * smoothstep(-0.02, 0.02, sunMu);
     float spec = pow(max(dot(normalize(rdir), uSunDir), 0.0), 900.0) * 60.0;

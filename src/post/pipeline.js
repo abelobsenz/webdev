@@ -263,7 +263,7 @@ void main() {
   float l = dot(min(c, vec3(6e4)), vec3(0.2126, 0.7152, 0.0722));
   vec2 d = vUv - 0.5;
   float w = exp(-dot(d, d) * 5.0) + 0.15;
-  gl_FragColor = vec4(log2(l + 1e-5) * w, w, 0.0, 1.0);
+  gl_FragColor = vec4(log2(max(l, 0.0) + 1e-5) * w, w, 0.0, 1.0);
 }
 `;
 const ADAPT_FRAG = /* glsl */ `
@@ -394,14 +394,14 @@ vec3 flare(vec2 uv) {
   vec3 acc = vec3(0.0);
   for (int i = 0; i < 5; i++) {
     vec2 o = fract(tc + gv * float(i));
-    float w = pow(1.0 - length(vec2(0.5) - o) / 0.7071, 8.0);
+    float w = pow(max(1.0 - length(vec2(0.5) - o) / 0.7071, 0.0), 8.0);
     vec3 s = texture(tBloom, o).rgb;
     float fringe = float(i) * 0.15;
     acc += s * w * mix(vec3(1.0, 0.7, 0.4), vec3(0.5, 0.7, 1.0), fract(fringe));
   }
   // halo ring
   vec2 hv = normalize(vec2(0.5) - tc) * 0.42;
-  float hw = pow(1.0 - length(vec2(0.5) - fract(tc + hv)) / 0.7071, 6.0);
+  float hw = pow(max(1.0 - length(vec2(0.5) - fract(tc + hv)) / 0.7071, 0.0), 6.0);
   acc += texture(tBloom, fract(tc + hv)).rgb * hw * vec3(0.6, 0.8, 1.0) * 0.6;
   return acc;
 }
@@ -457,7 +457,7 @@ void main() {
         gh += tint * disc * (0.6 - 0.08 * f);
       }
       // a faint halo ring round the centre
-      float ring = exp(-pow((length((uv - 0.5) * asp) - 0.42) / 0.012, 2.0)) * 0.25;
+      float ring = exp(-pow(abs(length((uv - 0.5) * asp) - 0.42) / 0.012, 2.0)) * 0.25;
       gh += vec3(0.6, 0.8, 1.0) * ring * smoothstep(0.6, 0.0, length(uv - uGlareUV));
       col += uGlare * gh * uGhosts * onScreen;
     }

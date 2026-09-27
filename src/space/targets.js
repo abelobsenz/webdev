@@ -37,4 +37,20 @@ export const TARGET_INFO = {
   },
 };
 
-export const TARGET_ORDER = ['earth', 'meridian', 'halo', 'geo', 'moon', 'sun', 'hearth'];
+TARGET_INFO.liner = {
+  key: '8', name: 'Concord-class Liner', district: 'Berthed at the Harbour',
+  lore: 'Two and a half kilometres of passenger ship, grown rather than welded. The garden along her back is real, under ribs that carry the hull loads; the lit galleries on her flanks are the promenade decks. The ring ahead of her prow is a magnetic scoop that gathers interplanetary hydrogen on the long run to Mars.',
+  facts: [['Length', '2.4 km'], ['Passengers', '38,000'], ['Earth to Mars', '19 days']],
+};
+TARGET_INFO.tenders = {
+  key: '9', name: 'Reclamation Tenders', district: 'Above the Halo · 624 km',
+  lore: 'Nothing in orbit is thrown away. The tenders drift along the Halo gathering dead satellites, spent tethers and the dust of old collisions in their three-armed cradles, and carry it all to the ring foundries to be made into something new. Low orbit has been clean for eight hundred years.',
+  facts: [['Length', '320 m'], ['Fleet', '4,200'], ['Recovered yearly', '1.6 Mt']],
+};
+TARGET_INFO.selene = {
+  key: '0', name: 'Selene Works', district: 'Above the near side · 2,600 km',
+  lore: 'Water, oxygen and metals from the lunar highlands are refined here and sent down the gravity well to the harbours. The great fins are radiators, glowing with waste heat. The wheel holds six thousand people, most of them in the one job that never runs out: looking after the machines.',
+  facts: [['Span', '6 km'], ['Wheel', '4.4 km, 1 rpm'], ['Crew', '6,000']],
+};
+
+export const TARGET_ORDER = ['earth', 'meridian', 'halo', 'geo', 'moon', 'sun', 'hearth', 'liner', 'tenders', 'selene'];
