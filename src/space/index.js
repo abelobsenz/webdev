@@ -446,6 +446,16 @@ export class SpaceMode {
     const E = U.uSunIlluminance.value * g.vis * (this.skyDim ?? 1);
     f.uGlare.value.set(1.0, 0.93, 0.84).multiplyScalar(this.app.settings.bloom ? E * 0.6 : E * 0.2);
     f.uGhosts.value = this.app.settings.bloom ? 0.012 : 0;
+    // the planets hide the rays that would cross their discs
+    {
+      const inv = cam.matrixWorldInverse;
+      const ty = Math.tan(THREE.MathUtils.degToRad(cam.fov) * 0.5);
+      f.uTanHalf.value.set(ty * cam.aspect, ty);
+      const e = _v3.set(0, 0, 0).applyMatrix4(inv);
+      f.uOcc1.value.set(e.x, e.y, e.z, R_EARTH + 30);
+      const m = _v3.copy(this.sim.moonPos).applyMatrix4(inv);
+      f.uOcc2.value.set(m.x, m.y, m.z, R_MOON);
+    }
     if (target) { p.fs.material = p.finalMat; p.fs.render(this.renderer, target); }
     else p.composite();
   }

@@ -124,7 +124,7 @@ export class Lighting {
     this.sun = new SunLight(0xffffff, 1);
     this.sun.shadow = new MeridianSunShadow();
     this.sun.castShadow = settings.shadows;
-    this.cascadeSize = (size) => Math.min(4096, Math.round(size * 0.75));
+    this.cascadeSize = (size) => Math.min(8192, Math.round(size * 0.75));
     this.sun.shadow.mapSize.set(this.cascadeSize(settings.shadowSize), this.cascadeSize(settings.shadowSize));
     this.sun.shadow.bias = -0.00003;
     this.sun.shadow.normalBias = 0.9;

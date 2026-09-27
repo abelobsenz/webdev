@@ -1,4 +1,4 @@
-// Quality presets. "Ultra" is tuned for Apple M-series Pro/Max GPUs.
+// Quality presets. "Max" is the default on Apple M3/M4 Pro and Max GPUs.
 export const PRESETS = {
   low: { label: 'Low', pixelRatio: 0.75, msaa: 0, shadows: false, shadowSize: 1024, reflections: false, reflectionScale: 0.25, trees: 0.35, traffic: 0.4, particles: 0.4, bloom: true, rays: false, lowrise: 0.5, people: false, minScale: 0.6,
     clouds: 'impostor', cloudScale: 0.5, refraction: false, shafts: false, fxaa: false, ao: false },
@@ -6,12 +6,23 @@ export const PRESETS = {
     clouds: 'volumetric', cloudScale: 0.38, cloudSteps: 48, cloudLightSteps: 4, cloudDetailDist: 9000, refraction: false, shafts: true, fxaa: false, ao: true },
   high: { label: 'High', pixelRatio: 1.25, msaa: 4, shadows: true, shadowSize: 4096, reflections: true, reflectionScale: 0.4, trees: 0.85, traffic: 1.0, particles: 1.0, bloom: true, rays: true, lowrise: 1.0, people: true, minScale: 0.5,
     clouds: 'volumetric', cloudScale: 0.42, cloudSteps: 56, cloudLightSteps: 5, cloudDetailDist: 14000, refraction: true, shafts: true, fxaa: true, ao: true, reflectionClouds: true },
-  ultra: { label: 'Ultra', pixelRatio: 2.0, msaa: 4, shadows: true, shadowSize: 4096, reflections: true, reflectionScale: 0.6, trees: 1.0, traffic: 1.0, particles: 1.0, bloom: true, rays: true, lowrise: 1.0, people: true, minScale: 0.45,
+  ultra: { label: 'Ultra', pixelRatio: 2.0, msaa: 4, shadows: true, shadowSize: 4096, reflections: true, reflectionScale: 0.6, trees: 1.0, traffic: 1.0, particles: 1.0, bloom: true, rays: true, lowrise: 1.0, people: true, minScale: 0.7, treeNear: 420, lowriseNear: 1100,
     clouds: 'volumetric', cloudScale: 0.45, cloudSteps: 96, cloudLightSteps: 6, cloudDetailDist: 20000, refraction: true, shafts: true, fxaa: true, ao: true, reflectionClouds: true },
-  // Above Ultra: supersampled beyond the display's native resolution, full-resolution
-  // mirror reflections, the densest clouds. Meant for M-series Pro/Max and desktop GPUs.
-  cinematic: { label: 'Cinematic', pixelRatio: 2.5, supersample: true, msaa: 4, shadows: true, shadowSize: 4096, reflections: true, reflectionScale: 0.85, trees: 1.0, traffic: 1.0, particles: 1.0, bloom: true, rays: true, lowrise: 1.0, people: true, minScale: 0.4,
-    clouds: 'volumetric', cloudScale: 0.55, cloudSteps: 128, cloudLightSteps: 8, cloudDetailDist: 26000, refraction: true, shafts: true, fxaa: true, ao: true, reflectionClouds: true },
+  // Max: the real-time top tier. Never renders below the display's native resolution
+  // (supersampled on 1x screens), MSAA + contrast-adaptive sharpening instead of FXAA,
+  // 8K shadows, near full-resolution reflections and clouds, long detail distances.
+  max: { label: 'Max', pixelRatio: 2.0, supersample: true, msaa: 4, shadows: true, shadowSize: 8192, reflections: true, reflectionScale: 0.85, trees: 1.0, traffic: 1.0, particles: 1.0, bloom: true, rays: true, lowrise: 1.0, people: true, minScale: 1.0,
+    clouds: 'volumetric', cloudScale: 0.62, cloudSteps: 112, cloudLightSteps: 8, cloudDetailDist: 26000, refraction: true, shafts: true, fxaa: false, sharpen: 0.35, ao: true, reflectionClouds: true,
+    treeNear: 560, lowriseNear: 1500, caScale: 0.35 },
+  // Above Max: supersampled beyond native for smoother edges and finer texture.
+  cinematic: { label: 'Cinematic', pixelRatio: 2.5, supersample: true, msaa: 4, shadows: true, shadowSize: 8192, reflections: true, reflectionScale: 0.9, trees: 1.0, traffic: 1.0, particles: 1.0, bloom: true, rays: true, lowrise: 1.0, people: true, minScale: 0.85,
+    clouds: 'volumetric', cloudScale: 0.66, cloudSteps: 128, cloudLightSteps: 8, cloudDetailDist: 28000, refraction: true, shafts: true, fxaa: false, sharpen: 0.25, ao: true, reflectionClouds: true,
+    treeNear: 700, lowriseNear: 1900, caScale: 0.5 },
+  // Reference: for stills and slow flights. 3x supersampled, full-resolution clouds and
+  // reflections, everything at its highest detail everywhere; frame rate is not a goal.
+  reference: { label: 'Reference', pixelRatio: 3.0, supersample: true, msaa: 4, shadows: true, shadowSize: 8192, reflections: true, reflectionScale: 1.0, trees: 1.0, traffic: 1.0, particles: 1.0, bloom: true, rays: true, lowrise: 1.0, people: true, minScale: 1.0,
+    clouds: 'volumetric', cloudScale: 0.85, cloudSteps: 192, cloudLightSteps: 10, cloudDetailDist: 36000, refraction: true, shafts: true, fxaa: false, sharpen: 0.15, ao: true, reflectionClouds: true,
+    treeNear: 900, lowriseNear: 3000, caScale: 0.5 },
 };
 
 // ------------------------------------------------------------------------
@@ -42,8 +53,7 @@ export function detectGPU() {
   if (/SwiftShader|llvmpipe|softpipe|Software|Microsoft Basic/i.test(r)) pick('low', 'software renderer');
   else if ((m = r.match(/Apple M(\d+)\s*(Pro|Max|Ultra)?/i))) {
     const gen = parseInt(m[1], 10), tier = (m[2] || '').toLowerCase();
-    if (tier === 'max' || tier === 'ultra') pick(gen >= 3 ? 'cinematic' : 'ultra', `Apple M${gen} ${m[2]}`);
-    else if (tier === 'pro') pick('ultra', `Apple M${gen} Pro`);
+    if (tier === 'max' || tier === 'ultra' || tier === 'pro') pick(gen >= 3 ? 'max' : 'ultra', `Apple M${gen} ${m[2]}`);
     else pick('high', `Apple M${gen}`);
   } else if (/Apple A\d+|Mali|Adreno|PowerVR|Immortalis|Xclipse/i.test(r)) pick('low', 'mobile GPU');
   else if (/Apple GPU/i.test(r)) pick(isMobile() ? 'low' : 'ultra', 'Apple GPU');
