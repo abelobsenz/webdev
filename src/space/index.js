@@ -20,6 +20,8 @@ const smooth = (a, b, x) => { const t = Math.min(Math.max((x - a) / (b - a), 0),
 const easeInOut = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
 const _v = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
+const _v3 = new THREE.Vector3();
+const _qg = new THREE.Quaternion();
 const _q = new THREE.Quaternion();
 
 const FADE_FRAG = /* glsl */ `
@@ -420,6 +422,9 @@ export class SpaceMode {
     f.uExposure.value = this.exposure;
     p.downMat.uniforms.uThreshold.value = 1.0 / this.exposure;
     p.downMat.uniforms.uKnee.value = 0.6 / this.exposure;
+    // the Sun is handled analytically (glare below): keep its disc out of the bloom chain,
+    // or the screen-space halo would switch on and off as the disc crosses the frame edge
+    p.downMat.uniforms.uClamp.value = 40 / this.exposure;
     f.uTime.value = this.realTime;
     p.renderBloom();
     f.uGain.value.set(1.0, 1.0, 1.0);
@@ -428,11 +433,50 @@ export class SpaceMode {
     f.uContrast.value = 1.07;
     f.uBloom.value = this.app.settings.bloom ? 0.055 : 0;
     p.renderRays(new THREE.Vector2(0.5, 0.5), 0);
-    // lens flare only when the Sun is on screen and not behind the planet
-    const sunVis = this._sunScreen();
-    f.uFlare.value = this.app.settings.bloom ? 0.018 * sunVis : 0;
+    // analytic sun glare + ghosts: smooth in angle, in and out of frame and across limbs
+    const g = this._sunGlare();
+    f.uFlare.value = 0;
+    f.uGlareUV.value.copy(g.uv);
+    f.uGlareFov.value = THREE.MathUtils.degToRad(cam.fov);
+    const E = U.uSunIlluminance.value * g.vis * (this.skyDim ?? 1);
+    f.uGlare.value.set(1.0, 0.93, 0.84).multiplyScalar(this.app.settings.bloom ? E * 0.6 : E * 0.2);
+    f.uGhosts.value = this.app.settings.bloom ? 0.012 : 0;
     if (target) { p.fs.material = p.finalMat; p.fs.render(this.renderer, target); }
     else p.composite();
+  }
+
+  /** Sun position on screen (may be off screen) and a smooth visibility factor. */
+  _sunGlare() {
+    const cam = this.camera;
+    const o = cam.position;
+    const toS = _v.copy(this.sim.sunPos).sub(o);
+    const dS = toS.length();
+    const sd = toS.divideScalar(dS);
+    const rs = 696000 / dS;                                   // solar angular radius
+    // fraction of the disc clear of a body of angular radius rb at separation sep
+    const clearOf = (center, radius) => {
+      const rel = _v2.copy(center).sub(o);
+      const d = rel.length();
+      if (d < radius) return 1;
+      if (rel.dot(sd) < 0) return 1;
+      const sep = Math.acos(THREE.MathUtils.clamp(rel.dot(sd) / d, -1, 1));
+      const rb = Math.asin(Math.min(1, radius / d));
+      return smooth(rb - rs * 1.2, rb + rs * 1.2, sep);
+    };
+    let vis = clearOf(_v3.set(0, 0, 0), R_EARTH + 45);
+    if (this.moon) vis *= clearOf(this.sim.moonPos, R_MOON);
+    // fade as the Sun swings behind the viewer (the glare lives in the lens)
+    const fwd = _v2.set(0, 0, -1).applyQuaternion(cam.quaternion);
+    const off = Math.acos(THREE.MathUtils.clamp(fwd.dot(sd), -1, 1));
+    const halfDiag = Math.atan(Math.tan(THREE.MathUtils.degToRad(cam.fov) * 0.5) * Math.hypot(1, cam.aspect));
+    vis *= smooth(halfDiag + 0.4, halfDiag - 0.05, off);
+    // project the direction (not a point: the depth-sliced projection has no fixed near/far)
+    const vd = _v3.copy(sd).applyQuaternion(_qg.copy(cam.quaternion).invert());
+    const ty = Math.tan(THREE.MathUtils.degToRad(cam.fov) * 0.5), tx = ty * cam.aspect;
+    const zz = Math.max(-vd.z, 0.02);
+    if (!this._glareUV) this._glareUV = new THREE.Vector2();
+    this._glareUV.set(0.5 + 0.5 * (vd.x / zz) / tx, 0.5 + 0.5 * (vd.y / zz) / ty);
+    return { uv: this._glareUV, vis };
   }
 
   _sunScreen() {

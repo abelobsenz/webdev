@@ -4,6 +4,8 @@
 /** Uniforms shared by the nature shaders (terrain, trees, ground cover). */
 export const NATURE_U = {
   uBloom: { value: 1.0 },          // how much of the flowering canopy is in bloom (0..1)
+  uStreets: { value: null },       // town-plan street field (urban.js)
+  uStreetHalf: { value: 7200 },
 };
 
 export const NATURE_GLSL = /* glsl */ `
@@ -22,25 +24,27 @@ vec3 flowerPalette(float k) {
   return vec3(0.72, 0.10, 0.40);
 }
 
-// Garden-city ground. walkDist: approx. metres from the nearest walk centreline
-// (main walks everywhere in town, lanes in the denser districts).
-float walkDist(vec2 p, float urban) {
-  float d1 = abs(vnoise(p * 0.0105 + 3.7) - 0.5) / (0.0105 * 1.25);
-  float d2 = abs(vnoise(p * 0.023 - 8.1) - 0.5) / (0.023 * 1.25);
-  d2 = mix(99.0, d2 * 2.0, smoothstep(0.45, 0.7, urban));
-  return min(d1, d2 + 1.3);
+// Garden-city ground, driven by the town plan's street field (urban.js):
+//   r = signed metres from the nearest kerb (negative on the carriageway), g = signed
+//   metres from that street's centreline, b = paved squares, a = street-lamp light.
+uniform sampler2D uStreets;
+uniform float uStreetHalf;
+vec4 streetAt(vec2 p) {
+  vec2 uv = p / (2.0 * uStreetHalf) + 0.5;
+  if (uv.x <= 0.0 || uv.y <= 0.0 || uv.x >= 1.0 || uv.y >= 1.0) return vec4(1.0, 1.0, 0.0, 0.0);
+  return texture(uStreets, uv);
 }
-// 1 on paved walks and plazas, 0 on lawns and planted beds. fw = metres per pixel.
-// Used by the terrain and to keep ground cover and trees off the walks.
-float plazaMask(vec2 p, float urban, float aa) {
-  float plazaN = vnoise(p * 0.0068 + 21.0);
-  return smoothstep(0.665 - aa * 0.004, 0.669 + aa * 0.004, plazaN) * smoothstep(0.5, 0.85, urban);
-}
+float streetEdge(vec4 s) { return s.r * 32.0 - 16.0; }
+float streetCentre(vec4 s) { return s.g * 32.0 - 16.0; }
+// approx. metres from the nearest walk centreline (a walk is 2.6 m to either side)
+float walkDist(vec2 p, float urban) { return streetEdge(streetAt(p)) + 2.6; }
+// 1 on paved squares
+float plazaMask(vec2 p, float urban, float aa) { return smoothstep(0.3, 0.7, streetAt(p).b); }
+// 1 on streets and squares, 0 on lawns and planted beds. fw = metres per pixel.
 float pavedMask(vec2 p, float urban, float fw) {
-  if (urban < 0.12) return 0.0;
-  float aa = max(fw, 0.35);
-  float walk = 1.0 - smoothstep(2.6 - aa, 2.6 + aa, walkDist(p, urban));
-  return clamp(max(walk, plazaMask(p, urban, aa)), 0.0, 1.0) * smoothstep(0.12, 0.3, urban);
+  vec4 s = streetAt(p);
+  float aa = max(fw, 0.12);
+  return max(1.0 - smoothstep(-aa, aa, streetEdge(s)), smoothstep(0.3, 0.7, s.b));
 }
 
 // Worley cells: x = F1 distance, y = F2 - F1 (edge distance), z = cell hash

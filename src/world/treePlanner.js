@@ -31,14 +31,14 @@ function vnoise(px, py) {
   return a + (b - a) * ux + (c - a) * uy + (a - b - c + d) * ux * uy;
 }
 const sstep = (a, b, x) => { const t = Math.min(Math.max((x - a) / (b - a), 0), 1); return t * t * (3 - 2 * t); };
-export function walkDist(x, z, urban) {
+export function walkDistNoise(x, z, urban) {
   const d1 = Math.abs(vnoise(x * 0.0105 + 3.7, z * 0.0105 + 3.7) - 0.5) / (0.0105 * 1.25);
   let d2 = Math.abs(vnoise(x * 0.023 - 8.1, z * 0.023 - 8.1) - 0.5) / (0.023 * 1.25);
   const w = sstep(0.45, 0.7, urban);
   d2 = 99 + (d2 * 2 - 99) * w;
   return Math.min(d1, d2 + 1.3);
 }
-export function plazaMask(x, z, urban) {
+export function plazaMaskNoise(x, z, urban) {
   return sstep(0.662, 0.672, vnoise(x * 0.0068 + 21, z * 0.0068 + 21)) * sstep(0.5, 0.85, urban);
 }
 
@@ -48,6 +48,11 @@ export function planTrees(world) {
   const rnd = mulberry32(2024);
   const { info, sampler } = world;
   const C = world.clearance;
+  const plan = world.plan;
+  const stations = (world.infra && world.infra.stations) || [];
+  // the town plan's street field replaces the old procedural walks
+  const walkDist = plan ? (x, z) => plan.field.edge(x, z) + 2.6 : walkDistNoise;
+  const plazaMask = plan ? (x, z) => plan.field.squareAt(x, z) : plazaMaskNoise;
   const N = info.N, half = INNER.half, cell = (2 * half) / N;
   const trees = [];
   const G = 12;
@@ -79,7 +84,7 @@ export function planTrees(world) {
       if (C.groundAt(x, z) < cr * 0.92 + 0.8) return false;
       if (C.overAt(x, z) < cr + 1.5) return false;
     }
-    if (urban > 0.1) {
+    if (urban > 0.1 || plan) {
       if (walkDist(x, z, urban) < 2.6 + Math.max(1.4, s * 0.05) + 0.6) return false;
       if (plazaMask(x, z, urban) > 0.2) return false;
     }
@@ -159,16 +164,12 @@ export function planTrees(world) {
         }
         continue;
       }
-      // the garden city: avenue trees along the walks, park trees on the lawns
+      // the garden city: park trees on the lawns and in the block courtyards
+      // (street trees are planted along the plan's streets below)
       for (let m = 0; m < 3; m++) {
         const ax = -half + (i + rnd()) * cell, az = -half + (j + rnd()) * cell;
         const wd = walkDist(ax, az, u);
-        if (wd > 4.1 && wd < 5.3) {
-          const q = rnd();
-          const sp = q < 0.5 ? SP.flowering : q < 0.72 ? SP.rainTree : SP.palm;
-          const s = sp === SP.flowering ? 8 + rnd() * 3 : sp === SP.rainTree ? 10 + rnd() * 3 : 13 + rnd() * 5;
-          if (fits(ax, az, sp, s, u) && clear(ax, az, 11, 2)) push(ax, az, sp, s, { layer: 2, spacing: 11 });
-        } else if (wd > 14 && rnd() < 0.012) {
+        if (wd > 14 && rnd() < 0.016) {
           const q = rnd();
           const sp = q < 0.2 ? SP.banyan : q < 0.6 ? SP.rainTree : SP.flowering;
           const s = sp === SP.banyan ? 18 + rnd() * 5 : sp === SP.rainTree ? 12 + rnd() * 4 : 9 + rnd() * 3;
@@ -176,6 +177,46 @@ export function planTrees(world) {
         }
       }
     }
+  }
+
+  // ------------------------------------------------ street trees --
+  // Every street gets one species, planted at an even rhythm: palms down the avenue
+  // medians, flowering trees or rain trees on the street verges, palms on the esplanades.
+  if (plan) {
+    for (const l of plan.lamps) occupy(l.x, l.z, 2.2, 6);
+    const verge = [SP.flowering, SP.rainTree, SP.flowering, SP.araucaria];
+    plan.streets.forEach((st, si) => {
+      if (st.cls === 1) return;                          // lanes are too narrow
+      const P = st.pts;
+      const avenue = st.cls === 3, esplanade = st.cls === 4;
+      const sp = avenue ? SP.palm : esplanade ? SP.palm : verge[si % verge.length];
+      const spacing = avenue ? 12 : sp === SP.rainTree ? 17 : sp === SP.araucaria ? 15 : 13;
+      const offs = avenue ? [0] : [-(st.hw + 2.7), st.hw + 2.7];
+      const baseS = sp === SP.palm ? 12 : sp === SP.rainTree ? 9.5 : sp === SP.araucaria ? 16 : 8;
+      let acc = spacing * 0.5;
+      for (let i2 = 1; i2 < P.length; i2++) {
+        const dx = P[i2][0] - P[i2 - 1][0], dz = P[i2][1] - P[i2 - 1][1];
+        const L = Math.hypot(dx, dz);
+        acc += L;
+        while (acc >= spacing) {
+          acc -= spacing;
+          const t = 1 - acc / L;
+          const x0 = P[i2 - 1][0] + dx * t, z0 = P[i2 - 1][1] + dz * t;
+          const nx = -dz / L, nz = dx / L;
+          for (const o of offs) {
+            const x = x0 + nx * o, z = z0 + nz * o;
+            const s = baseS * (0.92 + rnd() * 0.16);
+            if (sampler.get(x, z) < 1.5) continue;
+            if (plan.field.squareAt(x, z) > 0.05) continue;
+            if (!avenue && plan.field.edge(x, z) < 2.0) continue;          // a cross street, not a verge
+            const cr = crownRadius(sp, s);
+            if (C && (C.groundAt(x, z) < Math.min(cr, 3.2) + 0.8 || C.overAt(x, z) < cr + 1.0)) continue;
+            if (!clear(x, z, 2.5, 6)) continue;
+            push(x, z, sp, s, { layer: 6, spacing: 2.5, lean: sp === SP.palm ? rnd() * 0.04 : 0, rot: rnd() * Math.PI * 2 });
+          }
+        }
+      }
+    });
   }
 
   // ------------------------------------------------ the Axis plaza --
@@ -189,7 +230,11 @@ export function planTrees(world) {
       const a = (k / n) * Math.PI * 2;
       const s = sMin + rnd() * (sMax - sMin);
       if (!avenueClear(a, r, Math.min(crownRadius(sp, s), 6))) continue;
-      push(Math.cos(a) * r, Math.sin(a) * r, sp, s, { y, bloom, layer: 3, spacing: 1 });
+      const x = Math.cos(a) * r, z = Math.sin(a) * r;
+      // keep clear of the maglev terminals and the promenade decks landing on the plaza
+      if (stations.some((st) => Math.hypot(st.x - x, st.z - z) < st.r + Math.min(crownRadius(sp, s), 5))) continue;
+      if (C && C.overAt(x, z) < Math.min(crownRadius(sp, s), 5) && r > PLAZA_R - 10) continue;
+      push(x, z, sp, s, { y, bloom, layer: 3, spacing: 1 });
     }
   };
   // garden rings on the plaza: royal palms in the inner ring, jacarandas in the outer
@@ -198,7 +243,8 @@ export function planTrees(world) {
   ring(384, 17, SP.flowering, 9, 10.5, PLAZA_Y - 0.2, 0.3);
   ring(406, 17, SP.flowering, 9, 10.5, PLAZA_Y - 0.2, 0.3);
   // terraces stepping down from the plaza edge
-  const terr = [[PLAZA_R + 23, PLAZA_Y - 3.5, SP.flowering, 0.1], [PLAZA_R + 68, PLAZA_Y - 7, SP.rainTree], [PLAZA_R + 119, PLAZA_Y - 10.5, SP.flowering, 0.6], [PLAZA_R + 175, PLAZA_Y - 14.2, SP.rainTree]];
+  // (the lower terraces lie under the ring town's ground; the town plan plants those streets)
+  const terr = [[PLAZA_R + 23, PLAZA_Y - 3.5, SP.flowering, 0.1]];
   for (const [r, y, sp, bloom] of terr) {
     const s = sp === SP.rainTree ? 11 : 8.5;
     ring(r, sp === SP.rainTree ? 24 : 16, sp, s, s + 2, y - 0.1, bloom);

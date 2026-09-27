@@ -22,7 +22,7 @@ vec4 natureAt(vec2 xz, float h) {
   if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) return vec4(h * 12.0, 1.0, 0.0, 0.0);
   return texture(uNature, uv);
 }
-float tUrban; float tRock; float tWet; float tRough; float tAO;
+float tUrban; float tPaved; float tRock; float tWet; float tRough; float tAO;
 vec3 tN;
 
 // Lagoon floor: coral sand, seagrass, bommies, reef flats and seaward spur-and-groove.
@@ -80,6 +80,7 @@ vec3 lagoonFloorColor(vec2 p, float depth, float expo, float crest, float fw, in
 const COLOR = /* glsl */ `
 {
   vec3 wp = vWPos;
+  tPaved = 0.0;
   vec3 Ng = normalize(vWNrm);
   float slope = 1.0 - Ng.y;
   float dist = length(wp - cameraPosition);
@@ -101,6 +102,11 @@ const COLOR = /* glsl */ `
   float mountainZone = smoothstep(80.0, 420.0, h);
   float cloudF = smoothstep(700.0, 1200.0, h + m2 * 150.0) * (1.0 - smoothstep(1750.0, 2050.0, h));
 
+  // the town plan: streets, squares and lamp light (urban.js)
+  vec4 stS = streetAt(wp.xz);
+  float stE = streetEdge(stS), stC = streetCentre(stS);
+  float stHW = abs(stC) - stE;                       // half-width of the street we are on or beside
+  float nearStreet = max(1.0 - smoothstep(3.0, 9.0, stE), smoothstep(0.1, 0.5, stS.b));
   // forest density: the surveyed mask inside the city grid, wild forest beyond it
   float forestD;
   if (info.z >= 0.0) forestD = info.z;
@@ -108,6 +114,7 @@ const COLOR = /* glsl */ `
     forestD = max(smoothstep(0.3, 0.55, m1 + 0.2), smoothstep(30.0, 160.0, h));
     forestD *= smoothstep(2.0, 12.0, h) * (1.0 - smoothstep(1600.0, 1950.0, h + m2 * 260.0));
   }
+  forestD *= 1.0 - nearStreet;
 
   // zone weights
   float beachTop = 1.5 + 1.3 * m2 + 1.4 * expo;
@@ -233,36 +240,60 @@ const COLOR = /* glsl */ `
     rough = mix(rough, 0.8, wRock);
   }
 
-  // ---------------- the garden city: lawns, beds, walks, plazas ----------------
-  if (urban > 0.05 && wVeg > 0.001) {
-    float paved = pavedMask(wp.xz, urban, fw);
-    vec3 stone = mix(vec3(0.44, 0.42, 0.38), vec3(0.54, 0.51, 0.46), m3);
+  // ---------------- the garden city: streets, verges, lawns, squares ----------------
+  if ((urban > 0.05 || nearStreet > 0.01) && wVeg > 0.001) {
+    float aa = max(fw, 0.08);
+    float onStreet = 1.0 - smoothstep(-aa, aa, stE);
+    float square = smoothstep(0.3, 0.7, stS.b);
+    float isAve = smoothstep(6.5, 7.5, stHW);
+    float isLane = 1.0 - smoothstep(3.6, 4.4, stHW);
+    // stone: warm granite on the avenues, pale limestone setts on streets, flags on lanes
+    vec3 stone = mix(vec3(0.50, 0.48, 0.44), vec3(0.58, 0.55, 0.50), m3);
+    stone = mix(stone, vec3(0.56, 0.50, 0.44), isAve * 0.6);
+    stone = mix(stone, vec3(0.62, 0.60, 0.56), square * 0.6);
+    float roughS = 0.62;
     if (nearF > 0.0) {
-      // flagstones with dark joints, worn and weathered
-      vec3 fl = worley2(wp.xz * 0.75);
-      stone *= mix(1.0, (0.86 + 0.2 * fl.z) * (0.62 + 0.38 * smoothstep(0.0, 0.07, fl.y)) * (0.9 + 0.2 * vnoise(wp.xz * 6.0)), nearF);
-      stone = mix(stone, vec3(0.12, 0.16, 0.06), (1.0 - smoothstep(0.0, 0.05, fl.y)) * 0.5 * nearF);   // moss in the joints
+      float sc = mix(mix(0.9, 0.55, isLane), 0.42, isAve);            // stones per metre
+      sc = mix(sc, 0.5, square);
+      vec3 fl = worley2(wp.xz * sc);
+      float joint = smoothstep(0.0, 0.06, fl.y);
+      stone *= mix(1.0, (0.84 + 0.24 * fl.z) * (0.58 + 0.42 * joint) * (0.9 + 0.2 * vnoise(wp.xz * 5.0)), nearF);
+      stone = mix(stone, vec3(0.13, 0.17, 0.07), (1.0 - joint) * 0.35 * nearF * (1.0 - isAve));   // moss in the joints
+      hg += (hash22(vec2(fl.z * 91.0, 3.0)) - 0.5) * 0.05 * nearF;                                // each stone a touch uneven
+      ao *= mix(1.0, 0.8 + 0.2 * joint, nearF);
+      // kerbs: a pale granite band with a shadowed gutter on the street side
+      float kerb = (1.0 - smoothstep(0.0, aa, stE)) * smoothstep(-0.42 - aa, -0.42, stE);
+      stone = mix(stone, vec3(0.70, 0.68, 0.64) * (0.92 + 0.1 * vnoise(wp.xz * 3.0)), kerb * (1.0 - square));
+      ao *= 1.0 - 0.35 * (1.0 - smoothstep(0.0, 0.25, abs(stE + 0.5))) * (1.0 - square);
+      // bronze inlay down the middle of the streets and esplanades (it glows at night)
+      float inlay = (1.0 - smoothstep(0.06, 0.06 + aa, abs(stC))) * (1.0 - isAve) * (1.0 - isLane) * onStreet * (1.0 - square);
+      stone = mix(stone, vec3(0.55, 0.38, 0.2), inlay);
+      roughS = mix(roughS, 0.3, inlay);
     }
+    // avenue median: a planted strip with its own kerbs
+    float median = isAve * (1.0 - smoothstep(2.1, 2.1 + aa, abs(stC))) * onStreet * (1.0 - square);
     vec3 lawn = mix(vec3(0.075, 0.15, 0.03), vec3(0.12, 0.21, 0.045), m3);
     lawn = mix(lawn, vec3(0.16, 0.19, 0.07), smoothstep(0.6, 0.85, m2) * 0.4);
     lawn *= mix(1.0, 0.8 + 0.4 * vnoise(wp.xz * 1.9), nearF);
-    // herbaceous borders along the walks: dark foliage with flower heads
-    float wd = walkDist(wp.xz, urban);
-    float border = smoothstep(2.9, 3.4, wd) * (1.0 - smoothstep(4.8, 5.6, wd)) * smoothstep(0.35, 0.55, vnoise(wp.xz * 0.045 + 5.0));
-    border *= midF * smoothstep(0.2, 0.45, urban);
+    // verge beds between the kerb and the building line: dark foliage and flower heads
+    float border = smoothstep(0.35, 0.8, stE) * (1.0 - smoothstep(2.6, 3.2, stE)) * (1.0 - isLane) * (1.0 - square);
+    border = max(border, median * smoothstep(1.9, 1.5, abs(stC)));
+    border *= midF;
     vec3 foliage = vec3(0.05, 0.10, 0.03) * (0.8 + 0.4 * vnoise(wp.xz * 1.1));
-    float fk = hash12(floor(wp.xz * 0.06 + 9.0));
+    float fk = hash12(floor(wp.xz * 0.05 + 9.0));
     vec3 fc = flowerPalette(fk);
     float dots = smoothstep(0.55, 0.75, vnoise(wp.xz * 4.5 + fk * 30.0));
     vec3 bedC = mix(foliage, fc * 0.8, mix(0.28, dots * 0.9, nearF));
     lawn = mix(lawn, bedC, border);
     ao *= 1.0 - border * 0.25;
+    float paved = max(onStreet * (1.0 - median), square);
     vec3 urbanC = mix(lawn, stone, paved);
-    float uw = smoothstep(0.08, 0.4, urban) * wVeg * (1.0 - wRock * 0.7);
+    float uw = max(smoothstep(0.08, 0.4, urban), nearStreet) * wVeg * (1.0 - wRock * 0.7);
     c = mix(c, urbanC, uw);
-    rough = mix(rough, mix(0.9, 0.55, paved), uw);
-    ao = mix(ao, 1.0, uw * paved);
-    tUrban = urban * uw;
+    rough = mix(rough, mix(0.9, roughS, paved), uw);
+    ao = mix(ao, 1.0, uw * paved * 0.3);
+    tUrban = max(urban, nearStreet) * uw;
+    tPaved = paved * uw;
   } else {
     tUrban = 0.0;
   }
@@ -290,21 +321,15 @@ reflectedLight.directDiffuse *= mix(1.0, tAO, 0.5);
 
 const EMISSIVE = /* glsl */ `
 {
-  // lamp-lit walks in the garden city at night
-  float u = tUrban;
-  if (u > 0.05 && uCityLights > 0.0) {
-    vec2 p = vWPos.xz;
-    vec2 q = p / 14.0;
-    vec2 cell = floor(q);
-    vec2 f = fract(q) - 0.5;
-    float lamp = step(0.55, hash12(cell)) * smoothstep(0.22, 0.0, length(f - (hash22(cell) - 0.5) * 0.5));
-    float dist = length(vWPos - cameraPosition);
-    float fwp = max(length(fwidth(p)), 1e-3);
-    float walk = pavedMask(p, u, fwp);
-    float far = smoothstep(900.0, 5000.0, dist);
-    float L = mix(lamp * 1.6 * (0.3 + 0.7 * walk) + walk * 0.22, 0.08, far);
-    vec3 tint = mix(vec3(1.0, 0.68, 0.38), vec3(0.75, 0.85, 1.0), step(0.8, hash12(cell + 3.0)));
-    totalEmissiveRadiance += tint * L * u * uCityLights * 0.12;
+  // street lamps pool warm light on the paving and verges (baked from the real lamp posts)
+  if (tUrban > 0.02 && uCityLights > 0.0) {
+    vec4 st = streetAt(vWPos.xz);
+    float pool = st.a * st.a;
+    vec3 warm = vec3(1.0, 0.74, 0.48);
+    totalEmissiveRadiance += diffuseColor.rgb * warm * pool * uCityLights * 0.9;
+    // the bronze inlays glow faintly, a guide line home
+    float inl = (1.0 - smoothstep(0.05, 0.2, abs(streetCentre(st)))) * (1.0 - smoothstep(-0.2, 0.2, streetEdge(st))) * smoothstep(4.4, 5.0, abs(streetCentre(st)) - streetEdge(st)) * (1.0 - smoothstep(6.5, 7.5, abs(streetCentre(st)) - streetEdge(st)));
+    totalEmissiveRadiance += vec3(1.0, 0.62, 0.3) * inl * uCityLights * 0.06;
   }
 }
 `;
@@ -331,7 +356,7 @@ const PRE_AERIAL = /* glsl */ `
 `;
 
 export function createTerrainShaderMaterial(infoTex, natureTex, half) {
-  const uniforms = { uInfo: { value: infoTex }, uNature: { value: natureTex }, uInfoHalf: { value: half }, uBloom: NATURE_U.uBloom };
+  const uniforms = { uInfo: { value: infoTex }, uNature: { value: natureTex }, uInfoHalf: { value: half }, uBloom: NATURE_U.uBloom, uStreets: NATURE_U.uStreets, uStreetHalf: NATURE_U.uStreetHalf };
   return patchedMaterial({ color: 0xffffff, roughness: 0.9, metalness: 0.0, envMapIntensity: 0.6 }, {
     key: 'terrain2',
     uniforms,

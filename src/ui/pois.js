@@ -45,8 +45,8 @@ export const POIS = [
   },
   {
     id: 'gardens', key: '6', name: 'The Archipelago Aloft', district: 'Floating Gardens',
-    view: V(1900, 660, -380), target: V(1300, 540, -1000), time: 9.4,
-    orbit: { center: V(1300, 560, -1000), radius: 620, height: 110, speed: 0.07 },
+    view: V(2164, 660, 127), target: V(1564, 540, -493), time: 9.4,
+    orbit: { center: V(1564, 560, -493), radius: 620, height: 110, speed: 0.07 },
     lore: 'The public gardens float. Each island rests on a lattice of diamagnetic crystal that glows faintly when it is carrying load. Their waterfalls never reach the lagoon. The water turns to mist on the way down and is collected by the air itself.',
     facts: [['Islands', '8'], ['Altitude', '540 – 1,380 m'], ['Oldest', '4406 CE']],
   },

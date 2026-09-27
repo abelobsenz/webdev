@@ -51,9 +51,9 @@ export const TOWERS = [
 ];
 
 export const FLOATING_ISLANDS = [
-  { x: 1300, y: 560, z: -1000, r: 175, seed: 1 },
+  { x: 1564, y: 560, z: -493, r: 175, seed: 1 },     // kept clear of the promenades (and their air)
   { x: 2150, y: 830, z: -560, r: 140, seed: 2 },
-  { x: 1780, y: 1160, z: 180, r: 115, seed: 3 },
+  { x: 1608, y: 1160, z: 784, r: 115, seed: 3 },
   { x: 880, y: 1380, z: -1720, r: 105, seed: 4 },
   { x: 2750, y: 610, z: 450, r: 125, seed: 5 },
   { x: 560, y: 780, z: -2250, r: 135, seed: 6 },
@@ -64,3 +64,15 @@ export const FLOATING_ISLANDS = [
 export const CHORUS = { x: 1450, y: 700, z: 1350, scale: 230 };
 
 export const SKYPORT = { x: -2900, y: 1500, z: -2550, r: 380 };
+
+// Promenades: one bridge from the Axis plaza rim to each island. The deck leaves the
+// plaza at its own level and comes down onto a landing square on the island's main
+// avenue (the island radial that points back at the Axis).
+export const PROM_LAND_F = 0.68;
+export function promenadeAxis(isl) {
+  const dx = isl.x - CENTRAL_ISLAND.x, dz = isl.z - CENTRAL_ISLAND.z;
+  const dist = Math.hypot(dx, dz);
+  const dir = { x: dx / dist, z: dz / dist };
+  const end = dist - isl.r * PROM_LAND_F;
+  return { dir, dist, start: PLAZA_R - 4, end, landing: { x: dir.x * end, z: dir.z * end }, angleOnIsland: Math.atan2(-dz, -dx) };
+}

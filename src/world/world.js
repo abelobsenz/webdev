@@ -5,7 +5,10 @@ import { CENTRAL_ISLAND, ISLANDS, PLAZA_R, PLAZA_Y, TOWERS, FLOATING_ISLANDS } f
 import { smoothstep, createNoise2D, mulberry32 } from './noise.js';
 import { buildAxis } from './axis.js';
 import { buildTowers } from './towers.js';
-import { buildLowrise } from './lowrise.js';
+import { planCity } from './urban.js';
+import { buildBuildings } from './buildings.js';
+import { buildStreetscape } from './streetscape.js';
+import { NATURE_U } from './natureGlsl.js';
 import { TreeField } from './vegetation.js';
 import { planTrees } from './treePlanner.js';
 import { buildClearance } from './clearance.js';
@@ -113,13 +116,18 @@ export class World {
       this.colliders.push({ x: t.def.x, z: t.def.z, y0: t.baseY - 10, y1: t.top, radius: (y) => c(y - t.baseY) + 4 });
     }
     progress(0.35); await tick();
-    // Low-rise districts
-    this.lowrise = buildLowrise(this.scene, gh, this.towers, this.settings);
-    this.updaters.push(this.lowrise);
-    progress(0.55); await tick();
     // Promenades, the Gate, lotus pads, skyport
     this.infra = buildInfrastructure(this.scene, gh, (x, z) => this.sampler.get(x, z));
     this.colliders.push(...this.infra.colliders);
+    progress(0.45); await tick();
+    // The town plan (streets, squares, lots, lamps) and the towns built on it
+    const raw = (x, z) => this.sampler.get(x, z);
+    this.plan = planCity({ ground: raw, towers: this.towers, promenades: this.infra.promenades, urbanMask, stations: this.infra.stations });
+    NATURE_U.uStreets.value = this.plan.field.texture();
+    progress(0.55); await tick();
+    this.lowrise = buildBuildings(this.scene, this.plan, raw, this.settings);
+    this.updaters.push({ applyQuality: (s) => this.lowrise.applyQuality(s), update: (dt, t) => this.lowrise.update(dt, t, this.app.camera) });
+    this.streetscape = buildStreetscape(this.scene, this.plan, raw, this.infra.promLamps);
     progress(0.7); await tick();
     // --- nature (vegetation after all architecture, so it can keep clear of it) ---
     this.clearance = buildClearance(this.scene, (x, z) => this.sampler.get(x, z));

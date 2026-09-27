@@ -13,6 +13,7 @@ uniform vec2 uTexel;
 uniform float uFirst;
 uniform float uThreshold;
 uniform float uKnee;
+uniform float uClamp;
 varying vec2 vUv;
 float luma(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
 vec3 prefilter(vec3 c) {
@@ -23,7 +24,7 @@ vec3 prefilter(vec3 c) {
   return c * contrib;
 }
 // sanitise: a NaN/Inf pixel must never bleed through the whole bloom chain
-vec3 s(vec2 o) { vec3 c = texture(tSrc, vUv + o * uTexel).rgb; return (any(isnan(c)) || any(isinf(c))) ? vec3(0.0) : min(max(c, 0.0), vec3(6e4)); }
+vec3 s(vec2 o) { vec3 c = texture(tSrc, vUv + o * uTexel).rgb; return (any(isnan(c)) || any(isinf(c))) ? vec3(0.0) : min(max(c, 0.0), vec3(uClamp)); }
 void main() {
   vec3 a = s(vec2(-2, 2)), b = s(vec2(0, 2)), c = s(vec2(2, 2));
   vec3 d = s(vec2(-2, 0)), e = s(vec2(0, 0)), f = s(vec2(2, 0));
@@ -341,6 +342,10 @@ uniform float uCA;
 uniform float uFlare;
 uniform vec2 uSun;
 uniform float uSunVis;
+uniform vec3 uGlare;         // analytic sun glare (HDR colour x strength); zero = off
+uniform vec2 uGlareUV;       // the Sun's position in uv, may lie well off screen
+uniform float uGlareFov;     // vertical field of view (radians)
+uniform float uGhosts;       // lens ghost strength
 uniform vec3 uLift;
 uniform vec3 uGain;
 uniform float uSaturation;
@@ -426,6 +431,37 @@ void main() {
   col = mix(col, bloom, uBloom);
   col += texture(tRays, uv).rgb * uRays * uRaysColor;
   if (uFlare > 0.0) col += flare(uv) * uFlare;
+  if (uGlare.r + uGlare.g + uGlare.b > 0.0) {
+    // Veiling glare and diffraction from a source far too bright for screen-space bloom.
+    // A function of the angle to the Sun, so it fades smoothly as the Sun leaves the frame.
+    vec2 asp = vec2(uRes.x / uRes.y, 1.0);
+    vec2 dv = (uv - uGlareUV) * asp;
+    float th = length(dv) * uGlareFov;
+    float t1 = th / 0.006, t2 = th / 0.05, t3 = th / 0.35;
+    float g = 0.55 / (1.0 + t1 * t1) + 0.04 / (1.0 + t2 * t2) + 0.004 / (1.0 + t3 * t3);
+    float a = atan(dv.y, dv.x);
+    float spikes = (pow(abs(cos(a * 3.0 + 0.3)), 90.0) + 0.6 * pow(abs(cos(a * 3.0 + 1.35)), 140.0)) * exp(-th * 30.0) * 0.35;
+    col += uGlare * (g + spikes);
+    if (uGhosts > 0.0) {
+      vec2 axis = vec2(0.5) - uGlareUV;
+      float onScreen = 1.0 - smoothstep(0.55, 0.9, max(abs(uGlareUV.x - 0.5), abs(uGlareUV.y - 0.5)));
+      vec3 gh = vec3(0.0);
+      for (int i = 0; i < 5; i++) {
+        float f = float(i);
+        float k = 0.55 + f * 0.36;                        // position along the axis
+        float r = 0.018 + 0.03 * fract(f * 0.618 + 0.2);  // radius (uv height units)
+        vec2 gp = uGlareUV + axis * 2.0 * k;
+        float d = length((uv - gp) * asp);
+        float disc = smoothstep(r, r * 0.55, d) * (0.5 + 0.5 * smoothstep(r * 0.4, r, d));
+        vec3 tint = mix(vec3(1.0, 0.55, 0.25), vec3(0.35, 0.75, 1.0), fract(f * 0.37 + 0.1));
+        gh += tint * disc * (0.6 - 0.08 * f);
+      }
+      // a faint halo ring round the centre
+      float ring = exp(-pow((length((uv - 0.5) * asp) - 0.42) / 0.012, 2.0)) * 0.25;
+      gh += vec3(0.6, 0.8, 1.0) * ring * smoothstep(0.6, 0.0, length(uv - uGlareUV));
+      col += uGlare * gh * uGhosts * onScreen;
+    }
+  }
   if (uStreak > 0.0) col += texture(tStreak, uv).rgb * uStreak * vec3(0.55, 0.75, 1.0);
   if (uDirt > 0.0) col += texture(tBloomWide, uv).rgb * texture(tDirt, uv).rgb * uDirt;
   float expo = uExposure * exp2(texture(tExposure, vec2(0.5)).r);
@@ -590,7 +626,7 @@ export class Pipeline {
       vertexShader: RAY_VERT, fragmentShader: frag, depthTest: false, depthWrite: false,
       uniforms: { uInvProj: { value: new THREE.Matrix4() }, uCamWorld: { value: new THREE.Matrix4() }, uCamPos: { value: new THREE.Vector3() }, ...uniforms },
     });
-    this.downMat = mk(DOWN_FRAG, { tSrc: { value: null }, uTexel: { value: new THREE.Vector2() }, uFirst: { value: 0 }, uThreshold: { value: 1.2 }, uKnee: { value: 0.6 } });
+    this.downMat = mk(DOWN_FRAG, { tSrc: { value: null }, uTexel: { value: new THREE.Vector2() }, uFirst: { value: 0 }, uThreshold: { value: 1.2 }, uKnee: { value: 0.6 }, uClamp: { value: 6e4 } });
     this.upMat = mk(UP_FRAG, { tSrc: { value: null }, uTexel: { value: new THREE.Vector2() }, uWeight: { value: 1 } }, { blending: THREE.AdditiveBlending, transparent: true });
     this.rayMaskMat = mk(RAYMASK_FRAG, { tSrc: { value: null }, tDepth: { value: null }, uSun: { value: new THREE.Vector2() }, uAspect: { value: 1 }, uThreshold: { value: 3 } });
     this.rayBlurMat = mk(RAYBLUR_FRAG, { tSrc: { value: null }, uSun: { value: new THREE.Vector2() }, uStep: { value: 1 } });
@@ -640,7 +676,7 @@ export class Pipeline {
       uShaftColor: { value: new THREE.Color() }, uShaftDark: { value: 0 }, uShaftLit: { value: 0 }, uStreak: { value: 0 }, uDirt: { value: 0 },
       uHLKnee: { value: 1.5 }, uHLSlope: { value: 1 }, uHLLocal: { value: 0.35 }, tBloomLocal: { value: this.bloomRTs[3].texture }, tAO: { value: black }, uAO: { value: 0 },
       uTime: { value: 0 }, uRes: { value: new THREE.Vector2() }, uVignette: { value: 0.3 }, uGrain: { value: 0.02 }, uCA: { value: 0.0015 },
-      uFlare: { value: 0.0 }, uSun: { value: new THREE.Vector2() }, uSunVis: { value: 0 },
+      uFlare: { value: 0.0 }, uSun: { value: new THREE.Vector2() }, uSunVis: { value: 0 }, uGlare: { value: new THREE.Vector3() }, uGlareUV: { value: new THREE.Vector2() }, uGlareFov: { value: 1 }, uGhosts: { value: 0 },
       uLift: { value: new THREE.Vector3(0, 0, 0) }, uGain: { value: new THREE.Vector3(1, 1, 1) },
       uSaturation: { value: 1.15 }, uContrast: { value: 1.08 }, uLdrOut: { value: 0 },
     });

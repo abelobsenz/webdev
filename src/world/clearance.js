@@ -79,7 +79,7 @@ export function buildClearance(scene, groundAt, { N = 2048 } = {}) {
     }
   }
   // the Axis plaza and its terraces are designed spaces: keep the generic planting off them
-  const pr = PLAZA_R + 216;
+  const pr = PLAZA_R + 46;          // the plaza and its one visible terrace (the rest is under the ring town)
   for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
     const x = -half + (i + 0.5) * cell, z = -half + (j + 0.5) * cell;
     if (x * x + z * z < pr * pr) G[j * N + i] = 1;
