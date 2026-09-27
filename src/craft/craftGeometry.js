@@ -25,7 +25,7 @@ import * as THREE from 'three';
 export const CK = { GLASS: 0, HULL: 1, LANTERN: 2, GARDEN: 3, CONDUIT: 4, PANEL: 7, BRONZE: 8, DECK: 9, DARK: 10, RADIATOR: 11 };
 const TAU = Math.PI * 2;
 
-class CB {
+export class CB {
   constructor() {
     this.pos = []; this.fac = []; this.idx = [];
     this.stack = [new THREE.Matrix4()];
