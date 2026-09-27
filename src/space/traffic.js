@@ -90,7 +90,16 @@ void main() {
   vCol = iC;
   float vis0, vis1;
   vec3 head = shipPos(uT, vis0);
-  vec3 tail = shipPos(uT - uStreak, vis1);
+  // the tail follows the ship's instantaneous velocity (a tiny step back, extrapolated),
+  // never a second sample a whole streak-time earlier: across a cycle wrap (a transfer
+  // just begun, a shuttle restarting its climb) that sample lay on the far side of the
+  // planet and the "streak" joined two unrelated points
+  float hs = max(uStreak * 0.02, 0.05);
+  vec3 prev = shipPos(uT - hs, vis1);
+  vec3 vel = (head - prev) / hs;
+  float jump = length(head - prev);
+  vec3 tail = head - vel * uStreak;
+  if (vis1 < 0.5 || jump > 60.0 * hs + 5.0) tail = head;   // the step itself crossed a wrap
   vec4 ch = projectionMatrix * viewMatrix * vec4(head, 1.0);
   vec4 ct = projectionMatrix * viewMatrix * vec4(tail, 1.0);
   // cull anything the quad could not honestly draw: heads behind the camera or outside
