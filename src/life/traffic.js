@@ -161,22 +161,25 @@ const VEH_EMISSIVE = /* glsl */ `
   vec3 e = vec3(0.0);
   if (vhPartI == 3) e = vec3(1.0, 0.92, 0.8) * (2.2 + 1.5 * night);
   else if (vhPartI == 4) e = vec3(1.0, 0.08, 0.03) * (1.2 + 1.2 * night);
-  else if (vhPartI == 5) e = vec3(0.35, 0.78, 1.0) * (0.25 + 1.1 * night) * (0.85 + 0.15 * sin(uTime * 13.0 + vSeed * 40.0));
+  else if (vhPartI == 5) e = vec3(0.35, 0.78, 1.0) * (0.25 + 1.1 * night) * (0.94 + 0.06 * sin(uTime * 4.0 + vSeed * 40.0));
   else if (vhPartI == 6) {
     // window cells along the hull; a few dark cabins
     float cell = floor(vLocal.z / (uSeam * 0.85));
     float lit = step(0.18, fract(sin(cell * 12.9898 + vSeed * 78.233) * 43758.5453));
     float frame = smoothstep(0.1, 0.2, abs(fract(vLocal.z / (uSeam * 0.85)) - 0.5));
-    e = vec3(1.0, 0.74, 0.46) * (0.04 + 0.5 * night) * lit * frame;
+    // cells fade to their average before they shrink below a few pixels (no sparkle)
+    float cw = fwidth(vLocal.z / (uSeam * 0.85));
+    float det = 1.0 - smoothstep(0.12, 0.4, cw);
+    e = vec3(1.0, 0.74, 0.46) * (0.04 + 0.5 * night) * mix(0.82 * 0.7, lit * frame, det);
   }
   else if (vhPartI == 8) e = vec3(0.55, 0.75, 1.0) * (2.0 + 60.0 * vThrust);
   else if (vhPartI == 9) {
-    float ph = fract(uTime * 1.6 + vSeed * 7.0);
+    float sw = 0.5 + 0.5 * sin((uTime * 0.9 + vSeed * 7.0) * 6.2831853);
     float left = step(0.0, vLocal.x);
     vec3 a = vVariant < 0.5 ? vec3(0.15, 0.35, 1.0) : vec3(1.0, 0.55, 0.1);
     vec3 b = vVariant < 0.5 ? vec3(1.0, 0.1, 0.08) : vec3(1.0, 0.55, 0.1);
-    float on = left > 0.5 ? step(ph, 0.5) : step(0.5, ph);
-    e = mix(b, a, left) * on * (3.0 + 3.0 * night);
+    float on = 0.2 + 0.8 * (left > 0.5 ? sw : 1.0 - sw);   // smooth cross-fade, not hard switching
+    e = mix(b, a, left) * on * (2.2 + 2.2 * night);
   }
   else if (vhPartI == 7 && uClass > 3.5) e = vec3(1.0, 0.8, 0.5) * 0.04 * night;
   totalEmissiveRadiance += e;
@@ -241,7 +244,7 @@ void main() {
     I = mix(uLC[cls * 6 + 1].y * 0.7, uLC[cls * 6].y, front) * 0.8;
     if (cls == 2) col = mix(col, vec3(1.0, 0.6, 0.2), 0.5);
     if (cls == 1) { col = mix(col, vec3(1.0, 0.8, 0.55), 0.4); I *= 1.6; }
-    if (cls == 3) { float ph = fract(uTime * 1.6 + seed * 7.0); col = aLane.z < 0.5 ? (ph < 0.5 ? vec3(0.2, 0.4, 1.0) : vec3(1.0, 0.15, 0.1)) : vec3(1.0, 0.6, 0.15); I = 7.0; }
+    if (cls == 3) { float sw = 0.5 + 0.5 * sin((uTime * 0.9 + seed * 7.0) * 6.2831853); col = aLane.z < 0.5 ? mix(vec3(1.0, 0.15, 0.1), vec3(0.2, 0.4, 1.0), sw) : vec3(1.0, 0.6, 0.15); I = 5.0; }
     LC.x = uLC[cls * 6].x * 1.4;
   } else if (type < 0.5) {            // head light
     col = vec3(1.0, 0.91, 0.78); I *= 0.06 + 0.94 * smoothstep(-0.1, 0.75, cf);
@@ -252,22 +255,24 @@ void main() {
   } else if (type < 3.5) {            // starboard nav (green)
     col = vec3(0.1, 1.0, 0.35); I *= smoothstep(-0.35, 0.2, -dot(left, toCam));
   } else if (type < 4.5) {            // anti-collision strobe
-    blink = step(0.955, fract(uTime * 0.85 + seed * 17.0));
+    // a soft slow pulse, not a hard strobe pop (hard on/off lights read as flashing)
+    float sp = fract(uTime * 0.5 + seed * 17.0) - 0.5;
+    blink = 0.15 + 0.85 * exp(-sp * sp * 40.0);
   } else if (type < 5.5) {            // lift-fan glow, seen from below
     col = vec3(0.35, 0.75, 1.0); I *= (0.35 + 0.65 * smoothstep(0.2, -0.6, dot(up, toCam))) * (0.3 + night);
   } else if (type < 6.5) {            // pulse blue
-    float ph = fract(uTime * 1.6 + seed * 7.0); col = aLane.z < 0.5 ? vec3(0.15, 0.35, 1.0) : vec3(1.0, 0.55, 0.1); blink = step(ph, 0.5);
+    float ph = uTime * 0.9 + seed * 7.0; col = aLane.z < 0.5 ? vec3(0.15, 0.35, 1.0) : vec3(1.0, 0.55, 0.1); blink = 0.2 + 0.8 * (0.5 + 0.5 * sin(ph * 6.2831853));
   } else if (type < 7.5) {            // pulse red
-    float ph = fract(uTime * 1.6 + seed * 7.0); col = aLane.z < 0.5 ? vec3(1.0, 0.1, 0.08) : vec3(1.0, 0.55, 0.1); blink = step(0.5, ph);
+    float ph = uTime * 0.9 + seed * 7.0; col = aLane.z < 0.5 ? vec3(1.0, 0.1, 0.08) : vec3(1.0, 0.55, 0.1); blink = 0.2 + 0.8 * (0.5 - 0.5 * sin(ph * 6.2831853));
   } else if (type < 8.5) {            // starship engine: dark when berthed, glowing under way
     col = vec3(0.6, 0.78, 1.0); I *= fr.thrust * smoothstep(3.0, 18.0, fr.speed) * (0.25 + 0.75 * smoothstep(0.3, -0.5, cf));
     // pull the glow toward the viewer by its own size so the flat sprite never slices
     // through the hull it sits on (that left a hard straight edge across the glow)
     p += toCam * LC.x * scale * 1.3;
   } else if (type < 9.5) {            // amber beacon (rotating)
-    col = vec3(1.0, 0.55, 0.12); blink = 0.25 + 0.75 * pow(max(0.0, sin(uTime * 5.0 + seed * 30.0)), 6.0);
+    col = vec3(1.0, 0.55, 0.12); blink = 0.3 + 0.7 * pow(max(0.0, sin(uTime * 2.5 + seed * 30.0)), 4.0);
   } else {                             // passenger window glow
-    col = vec3(1.0, 0.75, 0.45); I *= night;
+    col = vec3(1.0, 0.75, 0.45); I *= night * 0.3;          // a warm hint, never a bloomed white capsule
   }
   I *= blink * fr.vis;
   // physical size vs pixel footprint: tiny lights conserve energy instead of staying bright
@@ -709,7 +714,8 @@ void main() {
   float proj = 0.5 * uPx / max(d, 1.0);
   float ratio = min(1.0, proj / 1.3);
   // a slow wave of light runs along each motorway in the direction of travel
-  float chase = pow(fract(aInfo.x / 1800.0 - uTime * 0.06), 10.0);
+  float cp = fract(aInfo.x / 1800.0 - uTime * 0.06) - 0.5;
+  float chase = exp(-cp * cp * 70.0);                     // a soft travelling wave, no hard edge
   vI = uCityLights * (0.25 + 0.9 * chase) * 3.0 * ratio * sqrt(ratio) * (1.0 - smoothstep(6000.0, 11000.0, d));
   vCol = aInfo.y < 0.5 ? vec3(0.5, 0.95, 0.9) : vec3(1.0, 0.82, 0.55);
   gl_Position = projectionMatrix * mv;
