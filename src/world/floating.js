@@ -85,7 +85,7 @@ function rockMaterial() {
       emissive: /* glsl */ `
 {
   float pulse = 0.6 + 0.4 * sin(uTime * 1.2 + vObjPos.y * 0.05 + vObjPos.x * 0.02);
-  totalEmissiveRadiance += vec3(0.35, 0.8, 1.0) * vGlow * pulse * (0.04 + 0.5 * uCityLights);
+  totalEmissiveRadiance += vec3(0.35, 0.8, 1.0) * vGlow * pulse * (0.02 + 0.16 * uCityLights);
 }`,
     },
   });

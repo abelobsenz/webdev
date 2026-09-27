@@ -39,8 +39,8 @@ export const POIS = [
     id: 'chorus', key: '5', name: 'The Chorus', district: 'Lagoon · East',
     view: V(CHORUS.x - 620, CHORUS.y + 40, CHORUS.z + 540), target: V(CHORUS.x, CHORUS.y, CHORUS.z), time: 20.6,
     orbit: { center: V(CHORUS.x, CHORUS.y, CHORUS.z), radius: 820, height: 60, speed: 0.05 },
-    lore: 'A monument of sixty thousand motes of programmable matter. It never holds a form for long. Every few seconds it moves on to the next chapter of the human story: stardust, the helix, the tree of life, fire, the first photograph of home, the atom, the Axis, and the galaxy ahead.',
-    facts: [['Motes', '60,000'], ['Span', '460 m'], ['Cycle', '8 forms']],
+    lore: 'A monument of one hundred thousand motes of programmable matter. It never holds a form for long. Every few seconds it moves on to the next chapter of the human story: stardust, the helix, the tree of life, fire, the first photograph of home, the atom, the Axis, and the galaxy ahead.',
+    facts: [['Motes', '100,000'], ['Span', '460 m'], ['Cycle', '8 forms']],
     live: 'chorus',
   },
   {

@@ -171,9 +171,12 @@ void main() {
   vec3 ins = aerialInscatter(-V);
   col = col * airT + ins * (1.0 - airT) * alpha;
 
-  // hand over to the analytic ocean of the sky dome near the far plane
-  float farFade = 1.0 - smoothstep(30000.0, 44000.0, dist);
-  gl_FragColor = vec4(col * farFade, alpha * farFade);
+  // far away the surface is opaque so the (clipped) sea floor never shows through;
+  // beyond the far plane the sky dome's analytic ocean takes over seamlessly
+  float farOpaque = smoothstep(38000.0, 45000.0, length(vWorld.xz));
+  col += (ins * (1.0 - airT) + body * airT) * (1.0 - alpha) * farOpaque;
+  alpha = mix(alpha, 1.0, farOpaque);
+  gl_FragColor = vec4(col, alpha);
 }
 `;
 
@@ -199,7 +202,7 @@ export class Water {
       blendSrc: THREE.OneFactor,
       blendDst: THREE.OneMinusSrcAlphaFactor,
     });
-    const geo = new THREE.PlaneGeometry(92000, 92000, 64, 64);
+    const geo = new THREE.PlaneGeometry(400000, 400000, 64, 64);
     geo.rotateX(-Math.PI / 2);
     this.mesh = new THREE.Mesh(geo, this.material);
     this.mesh.renderOrder = -1;

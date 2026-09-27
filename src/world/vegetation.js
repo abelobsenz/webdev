@@ -43,6 +43,124 @@ function broadleafGeometry(rnd) {
   return g;
 }
 
+// ------------------------------------------------ high-detail (near) trees --
+function smoothBlob(detail, s, center, rnd, jitter = 0.12) {
+  const g = new THREE.IcosahedronGeometry(1, detail);
+  const p = g.attributes.position;
+  const v = new THREE.Vector3();
+  const ph = rnd() * 10;
+  for (let i = 0; i < p.count; i++) {
+    v.fromBufferAttribute(p, i);
+    const k = 1 + jitter * Math.sin(v.x * 5.1 + ph) * Math.sin(v.y * 4.3 + ph * 1.3) * Math.sin(v.z * 4.7 - ph);
+    p.setXYZ(i, v.x * k, v.y * k, v.z * k);
+  }
+  g.scale(s[0], s[1], s[2]);
+  g.translate(center.x, center.y, center.z);
+  g.computeVertexNormals();
+  return g;
+}
+
+function shadeCanopy(g, base, rnd, cy) {
+  // per-vertex colour: self-shadowed underside, sun-bleached top, hue drift per crown
+  const p = g.attributes.position;
+  const col = new Float32Array(p.count * 3);
+  const drift = (rnd() - 0.5) * 0.05;
+  for (let i = 0; i < p.count; i++) {
+    const y = p.getY(i);
+    const ao = THREE.MathUtils.clamp(0.55 + (y - cy) * 3.2, 0.45, 1.15);
+    col[i * 3] = (base[0] + drift) * ao;
+    col[i * 3 + 1] = (base[1] + drift * 0.5) * ao;
+    col[i * 3 + 2] = base[2] * ao;
+  }
+  g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  const can = new Float32Array(p.count).fill(1);
+  g.setAttribute('aCanopy', new THREE.BufferAttribute(can, 1));
+  for (const k of Object.keys(g.attributes)) if (!['position', 'normal', 'color', 'aCanopy'].includes(k)) g.deleteAttribute(k);
+  return g.index ? g.toNonIndexed() : g;
+}
+
+function broadleafHigh(rnd) {
+  const parts = [];
+  const trunk = new THREE.CylinderGeometry(0.028, 0.06, 0.56, 9, 3, true).translate(0, 0.28, 0);
+  parts.push(colorize(trunk, [0.24, 0.18, 0.12], 0));
+  // spreading limbs
+  for (let b = 0; b < 4; b++) {
+    const a = (b / 4) * Math.PI * 2 + rnd() * 0.6;
+    const pts = [new THREE.Vector3(0, 0.42, 0), new THREE.Vector3(Math.cos(a) * 0.12, 0.55, Math.sin(a) * 0.12), new THREE.Vector3(Math.cos(a) * 0.26, 0.64, Math.sin(a) * 0.26)];
+    parts.push(colorize(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 5, 0.016, 5, false), [0.24, 0.18, 0.12], 0));
+  }
+  const crowns = [{ a: 0, r: 0, s: 0.3, y: 0.76 }];
+  for (let i = 0; i < 6; i++) crowns.push({ a: (i / 6) * Math.PI * 2 + rnd() * 0.5, r: 0.2 + rnd() * 0.1, s: 0.18 + rnd() * 0.07, y: 0.66 + rnd() * 0.1 });
+  for (const c of crowns) {
+    const center = new THREE.Vector3(Math.cos(c.a) * c.r, c.y, Math.sin(c.a) * c.r);
+    const g = smoothBlob(1, [c.s * 1.3, c.s * 0.72, c.s * 1.3], center, rnd);
+    parts.push(shadeCanopy(g, [0.1 + rnd() * 0.04, 0.21 + rnd() * 0.06, 0.06], rnd, c.y));
+  }
+  return mergeGeometries(parts, false);
+}
+
+function palmHigh(rnd) {
+  const parts = [];
+  const pts = [];
+  const lean = 0.12 + rnd() * 0.1;
+  for (let i = 0; i <= 8; i++) { const t = i / 8; pts.push(new THREE.Vector3(lean * t * t, t * 0.95, 0)); }
+  const curve = new THREE.CatmullRomCurve3(pts);
+  const trunk = new THREE.TubeGeometry(curve, 14, 0.019, 7, false);
+  // ring scars on the trunk
+  const tp = trunk.attributes.position;
+  const tcol = new Float32Array(tp.count * 3);
+  for (let i = 0; i < tp.count; i++) { const y = tp.getY(i); const ring = 0.85 + 0.15 * Math.sin(y * 160); tcol.set([0.38 * ring, 0.32 * ring, 0.24 * ring], i * 3); }
+  const tg = colorize(trunk, [0.38, 0.32, 0.24], 0);
+  parts.push(tg);
+  const top = pts[pts.length - 1];
+  const fronds = 13;
+  for (let f = 0; f < fronds; f++) {
+    const a = (f / fronds) * Math.PI * 2 + rnd() * 0.25;
+    const up = f % 3 === 0 ? 0.18 : 0.08;
+    const seg = 8, len = 0.4 + rnd() * 0.12, w = 0.085;
+    const verts = [];
+    const ribAt = (t) => {
+      const r = t * len;
+      return new THREE.Vector3(top.x + Math.cos(a) * r, top.y + up * Math.sin(t * Math.PI * 0.7) - t * t * 0.3, top.z + Math.sin(a) * r);
+    };
+    for (let sI = 0; sI < seg; sI++) {
+      const t0 = sI / seg, t1 = (sI + 1) / seg;
+      const c0 = ribAt(t0), c1 = ribAt(t1);
+      const side = new THREE.Vector3(-Math.sin(a), 0, Math.cos(a));
+      const w0 = w * Math.sin(Math.PI * Math.min(1, t0 * 1.15 + 0.05)), w1 = w * Math.sin(Math.PI * Math.min(1, t1 * 1.15 + 0.05));
+      const droop = -0.035;
+      for (const sd of [-1, 1]) {
+        const l0 = c0.clone().addScaledVector(side, sd * w0).add(new THREE.Vector3(0, droop * (w0 / w), 0));
+        const l1 = c1.clone().addScaledVector(side, sd * w1).add(new THREE.Vector3(0, droop * (w1 / w), 0));
+        if (sd < 0) verts.push(...c0.toArray(), ...l0.toArray(), ...c1.toArray(), ...l0.toArray(), ...l1.toArray(), ...c1.toArray());
+        else verts.push(...c0.toArray(), ...c1.toArray(), ...l0.toArray(), ...l0.toArray(), ...c1.toArray(), ...l1.toArray());
+      }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
+    g.computeVertexNormals();
+    parts.push(colorize(g, [0.15 + rnd() * 0.04, 0.3 + rnd() * 0.05, 0.08], 1));
+  }
+  // coconuts
+  const nut = new THREE.SphereGeometry(0.018, 6, 4);
+  for (let k = 0; k < 4; k++) { const g = nut.clone().translate(top.x + Math.cos(k * 1.7) * 0.02, top.y - 0.02, top.z + Math.sin(k * 1.7) * 0.02); parts.push(colorize(g, [0.3, 0.26, 0.12], 0)); }
+  return mergeGeometries(parts, false);
+}
+
+function cypressHigh(rnd) {
+  const prof = [];
+  for (let i = 0; i <= 12; i++) { const t = i / 12; prof.push(new THREE.Vector2(0.12 * Math.sin(Math.PI * Math.pow(t, 0.8)) + 0.004, t)); }
+  const g = new THREE.LatheGeometry(prof, 12);
+  const p = g.attributes.position;
+  for (let i = 0; i < p.count; i++) {
+    const x = p.getX(i), y = p.getY(i), z = p.getZ(i);
+    const k = 1 + 0.12 * Math.sin(y * 40 + Math.atan2(z, x) * 3) ;
+    p.setXYZ(i, x * k, y, z * k);
+  }
+  g.computeVertexNormals();
+  return shadeCanopy(g, [0.06, 0.15, 0.06], rnd, 0.5);
+}
+
 /** Coconut palm: leaning curved trunk with drooping fronds. */
 function palmGeometry(rnd) {
   const parts = [];
@@ -87,13 +205,27 @@ function cypressGeometry() {
 }
 
 // --------------------------------------------------------------- material --
-export function createTreeMaterial() {
+export function createTreeMaterial(lod = 0) {
+  // lod: 0 = none, 1 = far field (hidden near the viewer), -1 = near set (hidden far away)
   return patchedMaterial({ vertexColors: true, roughness: 0.85, metalness: 0, envMapIntensity: 0.5, side: THREE.DoubleSide }, {
-    key: 'trees',
+    key: `trees${lod}`,
+    uniforms: { uNearR: SHARED_NEAR_R },
+    defines: lod ? { TREE_LOD: lod.toFixed(1) } : {},
     vertex: {
-      pars: 'attribute float aCanopy; varying float vCanopy;',
+      pars: 'attribute float aCanopy; varying float vCanopy; uniform float uNearR;',
       transform: /* glsl */ `
 vCanopy = aCanopy;
+#ifdef TREE_LOD
+{
+  #ifdef USE_INSTANCING
+  vec3 lp = instanceMatrix[3].xyz;
+  #else
+  vec3 lp = vec3(0.0);
+  #endif
+  float dd = distance(lp, cameraPosition);
+  if ((TREE_LOD > 0.0 && dd < uNearR) || (TREE_LOD < 0.0 && dd >= uNearR)) transformed *= 0.0;
+}
+#endif
 {
   #ifdef USE_INSTANCING
   vec3 ip = instanceMatrix[3].xyz;
@@ -136,21 +268,100 @@ vCanopy = aCanopy;
   });
 }
 
+const SHARED_NEAR_R = { value: 380 };
+
 // ------------------------------------------------------------- tree field --
 const TYPES = { broadleaf: 0, palm: 1, cypress: 2 };
 
 export class TreeField {
   constructor(scene, settings) {
     this.scene = scene;
-    this.material = createTreeMaterial();
+    this.material = createTreeMaterial(1);     // far field
+    this.localMaterial = createTreeMaterial(0); // moving gardens
+    this.nearMaterial = createTreeMaterial(-1); // detailed trees around the viewer
     const rnd = mulberry32(77);
     this.geos = [broadleafGeometry(rnd), palmGeometry(rnd), cypressGeometry()];
+    this.geosHigh = [broadleafHigh(rnd), palmHigh(rnd), cypressHigh(rnd)];
     this.chunks = [];
     this.settings = settings;
+    this.near = null;
+  }
+
+  _buildNear(trees) {
+    const N = trees.length;
+    const mats = new Float32Array(N * 16), cols = new Float32Array(N * 3), pos = new Float32Array(N * 3), types = new Uint8Array(N);
+    const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0);
+    const grid = new Map();
+    const CELL = 200;
+    trees.forEach((t, i) => {
+      q.setFromAxisAngle(up, t.rot);
+      m4.compose(new THREE.Vector3(t.x, t.y, t.z), q, new THREE.Vector3(t.s * (t.sx || 1), t.s, t.s * (t.sx || 1)));
+      m4.toArray(mats, i * 16);
+      cols.set(t.tint, i * 3);
+      pos.set([t.x, t.y, t.z], i * 3);
+      types[i] = t.type;
+      const k = `${Math.floor(t.x / CELL)},${Math.floor(t.z / CELL)}`;
+      if (!grid.has(k)) grid.set(k, []);
+      grid.get(k).push(i);
+    });
+    const cap = 9000;
+    const meshes = this.geosHigh.map((g) => {
+      const m = new THREE.InstancedMesh(g, this.nearMaterial, cap);
+      m.count = 0;
+      m.frustumCulled = false;
+      m.castShadow = false;
+      m.receiveShadow = true;
+      m.layers.set(1);
+      m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      m.setColorAt(0, new THREE.Color(1, 1, 1));
+      this.scene.add(m);
+      return m;
+    });
+    this.near = { mats, cols, pos, types, grid, CELL, meshes, cap, last: new THREE.Vector3(1e9, 0, 0) };
+  }
+
+  _updateNear(camera) {
+    const n = this.near;
+    if (!n) return;
+    const cp = camera.position;
+    const R = SHARED_NEAR_R.value;
+    const margin = 70;
+    if (n.last.distanceTo(cp) < margin * 0.8) return;
+    n.last.copy(cp);
+    const counts = [0, 0, 0];
+    const RR = R + margin;
+    const c0x = Math.floor((cp.x - RR) / n.CELL), c1x = Math.floor((cp.x + RR) / n.CELL);
+    const c0z = Math.floor((cp.z - RR) / n.CELL), c1z = Math.floor((cp.z + RR) / n.CELL);
+    const thin = this.settings.trees;
+    for (let cx = c0x; cx <= c1x; cx++) for (let cz = c0z; cz <= c1z; cz++) {
+      const list = n.grid.get(`${cx},${cz}`);
+      if (!list) continue;
+      for (const i of list) {
+        const dx = n.pos[i * 3] - cp.x, dy = n.pos[i * 3 + 1] - cp.y, dz = n.pos[i * 3 + 2] - cp.z;
+        if (dx * dx + dy * dy + dz * dz > RR * RR) continue;
+        if (thin < 1 && ((i * 2654435761) % 1000) / 1000 > thin) continue;
+        const t = n.types[i];
+        if (counts[t] >= n.cap) continue;
+        const m = n.meshes[t];
+        m.instanceMatrix.array.set(n.mats.subarray(i * 16, i * 16 + 16), counts[t] * 16);
+        m.instanceColor.array.set(n.cols.subarray(i * 3, i * 3 + 3), counts[t] * 3);
+        counts[t]++;
+      }
+    }
+    n.meshes.forEach((m, t) => {
+      m.count = counts[t];
+      m.instanceMatrix.clearUpdateRanges();
+      m.instanceMatrix.addUpdateRange(0, counts[t] * 16);
+      m.instanceMatrix.needsUpdate = true;
+      m.instanceColor.clearUpdateRanges();
+      m.instanceColor.addUpdateRange(0, counts[t] * 3);
+      m.instanceColor.needsUpdate = true;
+    });
   }
 
   /** trees: [{x,y,z,s,type,rot,tint}] — built into spatial chunks for culling. */
   build(trees, { chunk = 2400, layer = 1 } = {}) {
+    this._buildNear(trees);
     const buckets = new Map();
     for (const t of trees) {
       const key = `${Math.floor(t.x / chunk)},${Math.floor(t.z / chunk)},${t.type}`;
@@ -193,7 +404,7 @@ export class TreeField {
     const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0), c = new THREE.Color();
     byType.forEach((list, type) => {
       if (!list.length) return;
-      const mesh = new THREE.InstancedMesh(this.geos[type], this.material, list.length);
+      const mesh = new THREE.InstancedMesh(this.geosHigh[type], this.localMaterial, list.length);
       list.forEach((t, i) => {
         q.setFromAxisAngle(up, t.rot);
         m4.compose(new THREE.Vector3(t.x, t.y, t.z), q, new THREE.Vector3(t.s, t.s, t.s));
@@ -212,10 +423,12 @@ export class TreeField {
   applyQuality(s) {
     this.settings = s;
     for (const m of this.chunks) m.count = Math.max(1, Math.floor(m.userData.fullCount * s.trees));
+    if (this.near) this.near.last.set(1e9, 0, 0);
   }
 
   update(dt, t, camera) {
     if (!camera) return;
+    this._updateNear(camera);
     const cp = camera.position;
     const maxD = 6500 + cp.y * 1.2;
     for (const m of this.chunks) {

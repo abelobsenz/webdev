@@ -202,11 +202,14 @@ void main() {
   vec3 w = uCenter + p * uScale;
   vW = w;
   vCol = mix(colA, colB, m);
-  vGlow = 1.0 + mid * 1.5;
+  // depth cue: motes on the far side of the form are dimmer
+  vec3 toCam = normalize(cameraPosition - uCenter);
+  float facing = smoothstep(-0.35, 0.35, dot(normalize(p + 1e-4), toCam));
+  vGlow = (1.0 + mid * 1.5) * (0.4 + 0.6 * facing);
   vSeed = aSeed;
   vec4 mv = viewMatrix * vec4(w, 1.0);
   gl_Position = projectionMatrix * mv;
-  gl_PointSize = clamp(uPx * 1.9 / -mv.z, 1.0, 14.0);
+  gl_PointSize = clamp(uPx * 2.1 / -mv.z, 1.0, 14.0);
 }`;
 
 const FRAG = /* glsl */ `
@@ -223,7 +226,7 @@ void main() {
   float spec = pow(max(dot(nrm, uSunDir), 0.0), 2.0);
   float glint = pow(max(dot(H, nrm), 0.0), 40.0) * step(0.9, fract(vSeed * 91.7 + uTime * 0.05));
   vec3 metal = mix(vec3(0.82, 0.84, 0.88), vCol, 0.3);
-  vec3 base = metal * (uSunColor * uSunIlluminance * (0.06 + 0.1 * spec) + aerialInscatter(vec3(0.0, 1.0, 0.0)) * 0.25) + uSunColor * uSunIlluminance * glint * 0.8;
+  vec3 base = metal * (uSunColor * uSunIlluminance * (0.06 + 0.1 * spec) + aerialInscatter(vec3(0.0, 1.0, 0.0)) * 0.25) * (0.55 + 0.45 * vGlow) + uSunColor * uSunIlluminance * glint * 0.8;
   vec3 emit = vCol * (0.02 + 0.13 * uCityLights) * vGlow * (1.0 - d * 0.6);
   vec3 col = applyAerial(base + emit, vW);
   gl_FragColor = vec4(col, 1.0);
@@ -231,7 +234,7 @@ void main() {
 
 export class Chorus {
   constructor(scene, settings) {
-    this.count = 60000;
+    this.count = 100000;
     const rnd = mulberry32(31337);
     this.rnd = rnd;
     this.targets = SHAPES.map((s) => {

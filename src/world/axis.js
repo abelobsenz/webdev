@@ -285,7 +285,7 @@ void main() {
   const tether = new THREE.Mesh(tetherGeo, tetherMat);
   tether.frustumCulled = false;
   group.add(tether);
-  const halo = new THREE.Mesh(new THREE.CylinderGeometry(40, 60, tetherTop - AXIS.anchorY, 16, 1, true).translate(0, (tetherTop + AXIS.anchorY) / 2, 0), glowMaterial(0x6fb4ff, 0.12, { fresnelPow: 3.0, nightOnly: 0.97 }));
+  const halo = new THREE.Mesh(new THREE.CylinderGeometry(40, 60, tetherTop - AXIS.anchorY, 16, 1, true).translate(0, (tetherTop + AXIS.anchorY) / 2, 0), glowMaterial(0x6fb4ff, 0.07, { fresnelPow: 3.0, nightOnly: 0.97 }));
   halo.frustumCulled = false;
   group.add(halo);
 

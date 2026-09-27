@@ -150,6 +150,16 @@ class App {
     this.hours = (this.hours + this.timeSpeed * dt + 24) % 24;
 
     this.controls.update(dt);
+    // adapt clip planes: keep depth precision when flying high above the city
+    {
+      const alt = this.camera.position.y;
+      const near = THREE.MathUtils.clamp((alt - 3400) * 0.03, 1, 700);
+      const far = Math.max(60000, alt * 4);
+      if (Math.abs(near - this.camera.near) > 0.5 || far !== this.camera.far) {
+        this.camera.near = near; this.camera.far = far;
+        this.camera.updateProjectionMatrix();
+      }
+    }
     this.camera.updateMatrixWorld();
     this.updateSky(dt);
 

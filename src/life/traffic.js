@@ -210,7 +210,8 @@ diffuseColor.rgb = bodyCols[int(vVariant * 3.99)];`,
         emissive: /* glsl */ `
 {
   float e = vEmit;
-  float lights = 0.35 + 0.65 * uCityLights;
+  float far = 1.0 - 0.75 * smoothstep(2500.0, 9000.0, length(vWPos - cameraPosition));
+  float lights = (0.35 + 0.65 * uCityLights) * far;
   if (e > 0.5 && e < 1.5) totalEmissiveRadiance += vec3(1.0, 0.95, 0.85) * 1.6 * lights;
   else if (e > 1.5 && e < 2.5) totalEmissiveRadiance += vec3(1.0, 0.15, 0.08) * 0.9 * lights;
   else if (e > 2.5 && e < 3.5) totalEmissiveRadiance += vec3(0.3, 0.8, 1.0) * 0.25 * lights;
