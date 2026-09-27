@@ -85,6 +85,8 @@ export class UI {
     time.addEventListener('input', () => { app.hours = parseFloat(time.value); this.timeTarget = null; });
     for (const b of document.querySelectorAll('.presets button')) b.addEventListener('click', () => this.setTimeSmooth(parseFloat(b.dataset.t)));
     $('btn-play').addEventListener('click', () => this.togglePlay());
+    // [space] orbital view
+    if ($('btn-orbit')) $('btn-orbit').addEventListener('click', () => { if (app.space) app.space.toggle(); });
     const toggle = (btn, panel) => {
       const open = $(panel).hidden;
       for (const id of ['settings', 'help']) $(id).hidden = true;
@@ -105,11 +107,13 @@ export class UI {
     window.addEventListener('keydown', (e) => {
       if (e.target && ['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName) && e.target.type !== 'range') return;
       if (!$('intro').hidden) { if (e.code === 'Enter') this._enter(false); return; }
+      if (app.space && app.space.handleKey(e)) return; // [space] orbital view keys
       const k = e.key;
       const poi = POIS.find((p) => p.key === k);
       if (poi && !e.metaKey && !e.ctrlKey) { this.stopTour(); this.goTo(poi); return; }
       switch (e.code) {
         case 'KeyT': this.touring ? this.stopTour() : this.startTour(); break;
+        case 'KeyO': if (app.space) app.space.toggle(); break; // [space]
         case 'KeyH': document.body.classList.toggle('hide-ui'); break;
         case 'KeyP': this.togglePlay(); break;
         case 'BracketLeft': this.setTimeSmooth((app.hours - 0.5 + 24) % 24, 0.6); break;
@@ -158,6 +162,7 @@ export class UI {
   // ------------------------------------------------------------- actions --
   togglePlay() {
     const app = this.app;
+    if (app.space && app.space.active) { app.space.hud.togglePause(); return; } // [space] pause the time warp
     app.timeSpeed = app.timeSpeed ? 0 : this.flowSpeed;
     this.timeTarget = null;
     $('play-glyph').setAttribute('d', app.timeSpeed ? 'M4 3h3v10H4zM9 3h3v10H9z' : 'M4 2.5v11l9-5.5z');
@@ -248,6 +253,7 @@ export class UI {
 
   update(dt) {
     const app = this.app;
+    if (app.space && app.space.active && app.space.mode !== 'ascend') { app.space.updateHud(dt); return; } // [space]
     // animated time changes
     if (this.timeTarget) {
       const tt = this.timeTarget;
