@@ -29,9 +29,10 @@ const E_RANGE = 16;                 // signed metres stored around each street
 const enc = (d) => Math.max(0, Math.min(255, Math.round((d + E_RANGE) * (255 / (2 * E_RANGE)))));
 
 export class StreetField {
-  constructor(N = 4096) {
+  /** N texels over [-half, half]² (local coordinates); frame = also keep the paving frame. */
+  constructor(N = 4096, half = INNER.half, { frame = true } = {}) {
     this.N = N;
-    this.half = INNER.half;
+    this.half = half;
     this.cell = (2 * this.half) / N;
     const data = new Uint8Array(N * N * 4);
     for (let i = 0; i < N * N; i++) { data[i * 4] = 255; data[i * 4 + 1] = 255; }
@@ -42,8 +43,8 @@ export class StreetField {
     // lays its paving courses, kerb joints and lawn stripes in this frame.
     this.AN = N >> 1;
     this.acell = (2 * this.half) / this.AN;
-    this.frameData = new Float32Array(this.AN * this.AN * 2);
-    this.bestA = new Float32Array(this.AN * this.AN).fill(1e9);
+    this.frameData = frame ? new Float32Array(this.AN * this.AN * 2) : null;
+    this.bestA = frame ? new Float32Array(this.AN * this.AN).fill(1e9) : null;
   }
 
   _range(x0, z0, x1, z1) {
@@ -55,7 +56,7 @@ export class StreetField {
   }
 
   segment(ax, az, bx, bz, hw, s0 = 0) {
-    this._frameSegment(ax, az, bx, bz, hw, s0);
+    if (this.frameData) this._frameSegment(ax, az, bx, bz, hw, s0);
     const { half, cell, N, data, bestC } = this;
     const pad = hw + E_RANGE;
     const [i0, i1, j0, j1] = this._range(Math.min(ax, bx) - pad, Math.min(az, bz) - pad, Math.max(ax, bx) + pad, Math.max(az, bz) + pad);
@@ -219,7 +220,7 @@ function clipByGround(pts, ground, minH = 1.6, maxH = 60) {
 function polyLength(pts) { let L = 0; for (let i = 1; i < pts.length; i++) L += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]); return L; }
 
 /** Oriented rectangle overlap (separating axes), with a gap. */
-function obbOverlap(a, b, gap) {
+export function obbOverlap(a, b, gap) {
   const axes = [[Math.cos(a.rot), -Math.sin(a.rot)], [Math.sin(a.rot), Math.cos(a.rot)], [Math.cos(b.rot), -Math.sin(b.rot)], [Math.sin(b.rot), Math.cos(b.rot)]];
   const dx = b.x - a.x, dz = b.z - a.z;
   for (const [ax, az] of axes) {
@@ -230,6 +231,21 @@ function obbOverlap(a, b, gap) {
     if (Math.abs(dx * ax + dz * az) > proj(a) + proj(b) + gap) return false;
   }
   return true;
+}
+
+/** Widest horizontal reach of a built tower's geometry within `band` metres of its base. */
+export function towerFootprint(t, band) {
+  const m = t.mesh, g = m && m.geometry;
+  if (!g || !g.attributes.position) return 0;
+  m.updateMatrixWorld(true);
+  const p = g.attributes.position, v = new THREE.Vector3();
+  let r = 0;
+  for (let i = 0; i < p.count; i++) {
+    v.fromBufferAttribute(p, i).applyMatrix4(m.matrixWorld);
+    if (v.y - t.baseY > band) continue;
+    r = Math.max(r, Math.hypot(v.x - t.def.x, v.z - t.def.z));
+  }
+  return r;
 }
 
 /**
@@ -245,9 +261,12 @@ export function planCity({ ground, towers, promenades, urbanMask, stations = [] 
   const add = (pts, cls, d, name) => { for (const seg of clipByGround(pts, ground)) streets.push({ pts: seg, cls, hw: HALF_W[cls], district: d.id, name }); };
 
   for (const t of towers) {
-    const base = t.collide ? t.collide(0) : (t.def.radius || 60) * 1.4;
-    exclusions.push({ x: t.def.x, z: t.def.z, r: base + 10 });
-    squares.push({ x: t.def.x, z: t.def.z, r: base + 16, kind: 'tower' });
+    // the tower's real footprint where town buildings stand: the widest horizontal reach
+    // of its geometry up to 100 m above its base (lean, flare, podium, plates, lattice).
+    // collide() is only the camera-collision core and let low-rises grow into the towers
+    const base = Math.max(towerFootprint(t, 100), t.collide ? t.collide(0) : (t.def.radius || 60) * 1.4);
+    exclusions.push({ x: t.def.x, z: t.def.z, r: base + 12 });
+    squares.push({ x: t.def.x, z: t.def.z, r: base + 18, kind: 'tower' });
   }
   for (const sx of [-1, 1]) exclusions.push({ x: GATE.x + sx * GATE.span / 2, z: GATE.z, r: 130 });
   // maglev terminals: nothing built on them; the island ones stand in a paved forecourt

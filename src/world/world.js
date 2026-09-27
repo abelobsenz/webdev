@@ -5,7 +5,9 @@ import { CENTRAL_ISLAND, ISLANDS, PLAZA_R, PLAZA_Y, TOWERS, FLOATING_ISLANDS } f
 import { smoothstep, createNoise2D, mulberry32 } from './noise.js';
 import { buildAxis } from './axis.js';
 import { buildTowers } from './towers.js';
-import { planCity } from './urban.js';
+import { planCity, towerFootprint } from './urban.js';
+import { wardTowerDefs, wardBridgePaths, buildMetro, wardHeight } from './metro.js';
+import { buildSkyline } from './skyline.js';
 import { buildBuildings } from './buildings.js';
 import { buildStreetscape } from './streetscape.js';
 import { NATURE_U } from './natureGlsl.js';
@@ -13,6 +15,7 @@ import { TreeField } from './vegetation.js';
 import { planTrees } from './treePlanner.js';
 import { buildClearance } from './clearance.js';
 import { buildNature } from './nature.js';
+import { GroundCover, buildHedges } from './groundCover.js';
 import { buildFloatingIslands } from './floating.js';
 import { INNER } from './terrain.js';
 import { buildInfrastructure, createBeacons } from './infrastructure.js';
@@ -112,6 +115,10 @@ export class World {
     progress(0.15); await tick();
     // Arcologies
     this.towers = buildTowers(TOWERS, gh, this.scene);
+    // the Outer Wards' arcologies stand on their platforms (groundHeight knows the wards)
+    this.wardTowers = buildTowers(wardTowerDefs(), gh, this.scene);
+    for (const t of this.wardTowers) t.footprint = towerFootprint(t, 100);
+    this.towers.push(...this.wardTowers);
     for (const t of this.towers) {
       const c = t.collide;
       this.colliders.push({ x: t.def.x, z: t.def.z, y0: t.baseY - 10, y1: t.top, radius: (y) => c(y - t.baseY) + 4 });
@@ -123,13 +130,22 @@ export class World {
     progress(0.45); await tick();
     // The town plan (streets, squares, lots, lamps) and the towns built on it
     const raw = (x, z) => this.sampler.get(x, z);
-    this.plan = planCity({ ground: raw, towers: this.towers, promenades: this.infra.promenades, urbanMask, stations: this.infra.stations });
+    // bridges to the Outer Wards leave from the rim: the rim towns keep clear of them
+    this.wardBridgePaths = wardBridgePaths(gh);
+    this.plan = planCity({ ground: raw, towers: this.towers, promenades: [...this.infra.promenades, ...this.wardBridgePaths.map((b) => b.path)], urbanMask, stations: this.infra.stations });
     NATURE_U.uStreets.value = this.plan.field.texture();
     NATURE_U.uStreetFrame.value = this.plan.field.frameTexture();
     progress(0.55); await tick();
     this.lowrise = buildBuildings(this.scene, this.plan, raw, this.settings);
     this.updaters.push({ applyQuality: (s) => this.lowrise.applyQuality(s), update: (dt, t) => this.lowrise.update(dt, t, this.app.camera) });
     this.streetscape = buildStreetscape(this.scene, this.plan, raw, this.infra.promLamps);
+    // Greater Meridian: the Outer Wards (platforms, bridges, their towns and streets)
+    this.metro = buildMetro(this.scene, this.wardTowers, this.wardBridgePaths, gh);
+    this.wardTowns = buildBuildings(this.scene, this.metro.plan, gh, this.settings);
+    this.updaters.push({ applyQuality: (s) => this.wardTowns.applyQuality(s), update: (dt, t) => this.wardTowns.update(dt, t, this.app.camera) });
+    this.wardStreets = buildStreetscape(this.scene, this.metro.plan, gh);
+    // and the metropolitan horizon beyond: towns of towers on the far islands and massif
+    this.skyline = buildSkyline(this.scene);
     progress(0.7); await tick();
     // --- nature (vegetation after all architecture, so it can keep clear of it) ---
     this.clearance = buildClearance(this.scene, (x, z) => this.sampler.get(x, z));
@@ -143,6 +159,12 @@ export class World {
     this.updaters.push(this.floating);
     progress(0.82); await tick();
     this.nature = buildNature(this);
+    // living ground cover: 3D grass on the lawns and grassland, flowers in the beds and
+    // drifts, leafy perennials in the verge beds, and clipped hedges along the kerbs
+    this.groundCover = new GroundCover(this, this.settings);
+    this.updaters.push({ applyQuality: (s) => this.groundCover.applyQuality(s), update: (dt, t) => this.groundCover.update(dt, t, this.app.camera) });
+    this.hedges = buildHedges(this);
+    this.updaters.push({ update: () => this.app.camera && this.hedges.update(this.app.camera) });
     // --- end nature ---
     // City life
     this.traffic = new Traffic(this.scene, this.settings, this);   // citylife: world passed for lane clearance + docks
@@ -171,7 +193,7 @@ export class World {
 
   groundHeight(x, z) {
     const h = this.sampler.get(x, z);
-    return Math.max(h, 0);
+    return Math.max(h, 0, wardHeight(x, z));
   }
 
   applyQuality(settings) {

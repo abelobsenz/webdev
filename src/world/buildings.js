@@ -475,6 +475,11 @@ function chooseType(L, R) {
   if (L.dk === 'rim') return r < 0.55 ? 'mews' : r < 0.75 ? 'terrace' : r < 0.87 && big ? 'cloister' : r < 0.94 ? 'stack' : 'pavilion';
   if (L.dk === 'islet') return r < 0.45 ? 'mews' : r < 0.65 ? 'terrace' : r < 0.85 ? 'ribbon' : 'stack';
   if (L.cls === ST.LANE) return r < 0.5 ? 'mews' : r < 0.8 ? 'stack' : 'terrace';
+  // the Outer Wards: denser and taller, towers gathering toward each ward's heart
+  if (L.dk === 'ward') {
+    if (L.centre > 0.35 && big && r < 0.5) return 'tower';
+    return r < 0.34 ? 'ribbon' : r < 0.56 ? 'terrace' : r < 0.8 && big ? 'cloister' : r < 0.92 ? 'stack' : 'pavilion';
+  }
   if (L.dk === 'central') return r < 0.34 ? 'ribbon' : r < 0.62 ? 'terrace' : r < 0.82 && big ? 'cloister' : r < 0.9 ? 'stack' : 'pavilion';
   // island towns
   if (L.centre > 0.55 && big && r < 0.35) return 'tower';
@@ -485,9 +490,10 @@ function heightFor(L, R, type) {
   const c = L.centre;
   let floors;
   switch (L.dk) {
-    case 'rim': floors = 2 + Math.floor(R() * 2); break;
+    case 'rim': floors = 3 + Math.floor(R() * 4); break;
     case 'islet': floors = 2 + Math.floor(R() * 3); break;
     case 'central': floors = 3 + Math.floor(R() * 5); break;
+    case 'ward': floors = 4 + Math.round(Math.pow(c, 1.2) * (5 + R() * 12)) + Math.floor(R() * 3); break;
     default: floors = 3 + Math.round(Math.pow(c, 1.5) * (3 + R() * 9)) + Math.floor(R() * 3);
   }
   if (type === 'tower') floors = Math.max(floors + 6, 13 + Math.floor(R() * 8));
@@ -508,7 +514,7 @@ export function buildBuildings(scene, plan, ground, settings) {
     if (!d) return 'misc';
     if (d.kind === 'islet') return d.id;
     const a = Math.atan2(L.z - d.z, L.x - d.x);
-    const sectors = d.kind === 'rim' ? 28 : d.kind === 'central' ? 8 : 4;
+    const sectors = d.kind === 'rim' ? 28 : d.kind === 'central' ? 8 : d.kind === 'ward' ? 12 : 4;
     return `${d.id}:${Math.floor(((a + Math.PI) / TAU) * sectors) % sectors}`;
   };
   const placements = [];

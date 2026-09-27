@@ -8,7 +8,7 @@ import { U } from '../core/uniforms.js';
 const TAU = Math.PI * 2;
 
 /** Extrude a 2D cross-section (in side/up coordinates) along a path with a world-up frame. */
-function extrudeAlong(path, section, kindFn) {
+export function extrudeAlong(path, section, kindFn) {
   const pos = [], fac = [], idx = [];
   const n = section.length;
   let len = 0;
@@ -45,7 +45,7 @@ function extrudeAlong(path, section, kindFn) {
 }
 
 // ------------------------------------------------------------ promenades --
-function frameAt(path, k) {
+export function frameAt(path, k) {
   const a = path[Math.max(k - 1, 0)], b = path[Math.min(k + 1, path.length - 1)];
   const t = new THREE.Vector3().subVectors(b, a).normalize();
   const side = new THREE.Vector3(-t.z, 0, t.x).normalize();

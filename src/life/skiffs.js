@@ -64,7 +64,15 @@ export class Skiffs {
     }
     this.curves = paths.map((P) => new THREE.CatmullRomCurve3(P, true, 'centripetal'));
     const sk = buildSkiff();
-    const mat = createFacadeMaterial('pearl', 620, { litFrac: 0.8, uplight: 0 });
+    // the skiff is built with craft kinds; in the city facade material kind 8 is timber,
+    // so its bronze engine section becomes dark metal, and like the docked ships it gets
+    // metre-scale plating and no garden bands (band 1e5)
+    {
+      const f = sk.geo.attributes.aFacade;
+      for (let i = 0; i < f.count; i++) if (Math.round(f.getZ(i)) === 8) f.setZ(i, 10);
+      f.needsUpdate = true;
+    }
+    const mat = createFacadeMaterial('pearl', 620, { litFrac: 0.8, uplight: 0, band: 1e5, colW: 2.6, floorH: 3.2 });
     this.craft = [];
     const colors = [[0x7fd8ff, 0xeefaff], [0xffb46a, 0xfff2e0], [0x9affd6, 0xf2fff8], [0xc8a6ff, 0xf6f0ff]];
     const perPath = [2, 2, 1, 1, 1, 1, 1, 1];

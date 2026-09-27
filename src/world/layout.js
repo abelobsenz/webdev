@@ -48,6 +48,39 @@ export const TOWERS = [
   { type: 'shell', x: -5200, z: 2450, height: 640, radius: 70, seed: 18 },
   { type: 'lattice', x: 5500, z: 1900, height: 520, radius: 60, seed: 19 },
   { type: 'canopy', x: -4300, z: -4050, height: 480, radius: 36, seed: 20 },
+  // Greater Meridian: the rim grows into a ring of arcologies round the lagoon
+  { type: 'lens', x: 5023, z: 2900, height: 980, radius: 110, seed: 21 },
+  { type: 'helix', x: 3341, z: 4772, height: 860, radius: 58, petals: 5, twist: 1.1, seed: 22 },
+  { type: 'canopy', x: 2078, z: 5709, height: 640, radius: 44, seed: 23 },
+  { type: 'canopy', x: -1924, z: 5286, height: 600, radius: 42, seed: 24 },
+  { type: 'lattice', x: -3960, z: 3960, height: 1080, radius: 100, seed: 25, name: 'Cantor Rim Lattice' },
+  { type: 'helix', x: -6002, z: 525, height: 1240, radius: 74, petals: 6, twist: 0.8, seed: 26 },
+  { type: 'lens', x: -5347, z: -2493, height: 900, radius: 100, seed: 27 },
+  { type: 'shell', x: -3441, z: -4915, height: 1100, radius: 96, seed: 28 },
+  { type: 'helix', x: -503, z: -5753, height: 980, radius: 64, petals: 4, twist: -1.1, seed: 29 },
+  { type: 'lattice', x: 2567, z: -5506, height: 900, radius: 86, seed: 30 },
+  { type: 'shell', x: 5370, z: -2504, height: 1000, radius: 90, seed: 31 },
+];
+
+// The Outer Wards: seven sea districts on built platforms around the atoll, each a
+// full town under its own cluster of arcologies, joined to the rim by a bridge and
+// maglev. They make Meridian a metropolis some 35 km across.
+//   towers: [type, angle (rad, ward frame), distance (fraction of r), height, radius, extras]
+export const WARDS = [
+  { id: 'aurora', name: 'Aurora', x: 10200, z: -5400, r: 1350, seed: 3, palette: 'silver',
+    towers: [['lattice', 0, 0, 1880, 150], ['helix', 0.6, 0.5, 1180, 70, { petals: 5, twist: 1.1 }], ['lens', 2.4, 0.52, 960, 110], ['canopy', 4.1, 0.48, 640, 44], ['shell', 5.3, 0.55, 880, 80]] },
+  { id: 'tidewater', name: 'Tidewater', x: 12200, z: 2400, r: 1150, seed: 5, palette: 'jade',
+    towers: [['helix', 0, 0, 1620, 92, { petals: 6, twist: 0.9 }], ['canopy', 1.2, 0.5, 700, 48], ['lattice', 3.3, 0.52, 980, 90], ['helix', 5.0, 0.5, 820, 56, { petals: 4, twist: -1.3 }]] },
+  { id: 'sunward', name: 'Sunward', x: 16500, z: -1500, r: 1000, seed: 7, palette: 'bronze',
+    towers: [['shell', 0, 0, 1420, 120], ['lens', 1.9, 0.5, 780, 90], ['helix', 4.2, 0.5, 700, 50, { petals: 5, twist: 1.4 }]] },
+  { id: 'seraph', name: 'Seraph', x: 8200, z: 9400, r: 1050, seed: 11, palette: 'rose',
+    towers: [['lens', 0, 0, 1500, 150], ['helix', 0.9, 0.52, 900, 60, { petals: 6, twist: 1.0 }], ['canopy', 3.0, 0.5, 620, 42], ['lattice', 4.9, 0.5, 760, 74]] },
+  { id: 'southmarch', name: 'Southmarch', x: 0, z: 13800, r: 1250, seed: 13, palette: 'pearl',
+    towers: [['helix', 0, 0, 2100, 100, { petals: 6, twist: 1.2 }], ['lattice', 1.6, 0.52, 1100, 100], ['shell', 3.4, 0.5, 940, 86], ['lens', 5.0, 0.52, 820, 100], ['canopy', 2.5, 0.72, 560, 40]] },
+  { id: 'coral', name: 'Coral Reach', x: -7800, z: 9600, r: 1100, seed: 17, palette: 'sand',
+    towers: [['canopy', 0, 0, 1180, 70], ['helix', 1.4, 0.5, 1020, 64, { petals: 5, twist: -0.9 }], ['lens', 3.6, 0.5, 860, 96], ['helix', 5.2, 0.55, 680, 48, { petals: 3, twist: 1.5 }]] },
+  { id: 'westmere', name: 'Westmere', x: -12000, z: 3000, r: 1300, seed: 19, palette: 'silver',
+    towers: [['lattice', 0, 0, 1720, 140], ['shell', 0.8, 0.52, 1060, 90], ['helix', 2.6, 0.5, 1240, 72, { petals: 6, twist: 0.7 }], ['canopy', 4.2, 0.5, 660, 46], ['lens', 5.4, 0.52, 900, 104]] },
 ];
 
 export const FLOATING_ISLANDS = [
