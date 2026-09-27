@@ -221,14 +221,20 @@ export function planTrees(world) {
   }
 
   // ------------------------------------------------ the Outer Wards --
-  // the same street planting on the ward platforms (their street level is built, not terrain)
+  // street planting on every level of the ward platforms, the designed allees and rings,
+  // groves in the parks, specimen trees on the garden lawns and shade trees along the quays
+  // (their ground is built, not terrain: every tree is rooted at its level explicitly)
   const mp = world.metro && world.metro.plan;
   if (mp) {
     for (const l of mp.lamps) occupy(l.x, l.z, 2.2, 6);
+    const towerHit = (x, z, r) => (world.wardTowers || []).some((t) => Math.hypot(t.def.x - x, t.def.z - z) < (t.footprint || 60) + r + 4);
+    const reserved = (x, z) => (mp.reservedAt ? mp.reservedAt(x, z) : 0);
+    const levelOk = (x, z, y) => Math.abs(wardHeight(x, z) - y) < 0.1;
     const verge = [SP.rainTree, SP.flowering, SP.araucaria, SP.flowering];
     mp.streets.forEach((st, si) => {
       if (st.cls === 1) return;
       const P = st.pts;
+      const y0 = st.y ?? WARD_TOP;
       const avenue = st.cls === 3, esplanade = st.cls === 4;
       const sp = avenue || esplanade ? SP.palm : verge[si % verge.length];
       const spacing = avenue ? 13 : sp === SP.rainTree ? 18 : sp === SP.araucaria ? 16 : 14;
@@ -246,16 +252,89 @@ export function planTrees(world) {
           const nx = -dz / L, nz = dx / L;
           for (const o of offs) {
             const x = x0 + nx * o, z = z0 + nz * o;
-            if (wardHeight(x, z) < WARD_TOP - 0.5) continue;               // street level only
+            if (!levelOk(x, z, y0)) continue;
             if (mp.field.squareAt(x, z) > 0.05) continue;
             if (!avenue && mp.field.edge(x, z) < 2.0) continue;
+            if (reserved(x, z) === 2 || towerHit(x, z, 3)) continue;
             if (!clear(x, z, 2.5, 6)) continue;
-            const s = baseS * (0.92 + rnd() * 0.16);
-            push(x, z, sp, s, { y: WARD_TOP - 0.15, layer: 6, spacing: 2.5, lean: sp === SP.palm ? rnd() * 0.04 : 0, rot: rnd() * Math.PI * 2 });
+            const s2 = baseS * (0.92 + rnd() * 0.16);
+            push(x, z, sp, s2, { y: y0 - 0.15, layer: 6, spacing: 2.5, lean: sp === SP.palm ? rnd() * 0.04 : 0, rot: rnd() * Math.PI * 2 });
           }
         }
       }
     });
+    // designed rows and rings (the Circus of the Planets, the Mall's araucarias, ...)
+    for (const t of mp.trees || []) {
+      const sp = SP[t.sp] ?? SP.flowering;
+      if (!clear(t.x, t.z, 2.0, 6) || towerHit(t.x, t.z, 2)) continue;
+      push(t.x, t.z, sp, t.s * (0.94 + rnd() * 0.12), { y: t.y - 0.15, layer: 6, spacing: 2.2, rot: rnd() * Math.PI * 2 });
+    }
+    // groves in the parks, each ward with its own trees
+    const grove = {
+      aurora: [SP.araucaria, SP.flowering, SP.rainTree], tidewater: [SP.rainTree, SP.flowering, SP.banyan], sunward: [SP.palm, SP.flowering, SP.palm],
+      seraph: [SP.flowering, SP.palm, SP.flowering], southmarch: [SP.rainTree, SP.araucaria, SP.flowering], coral: [SP.palm, SP.treeFern, SP.banana, SP.palm], westmere: [SP.rainTree, SP.araucaria, SP.flowering],
+    };
+    const surf = (x, z) => (mp.surfaceAt ? mp.surfaceAt(x, z) : 'lawn');
+    for (const pk of mp.parks || []) {
+      const prim = pk.prim;
+      if (!prim) continue;
+      const [x0, z0, x1, z1] = prim.bbox;
+      const area = (x1 - x0) * (z1 - z0);
+      const n = Math.floor(area * 0.0022 * (pk.trees ?? 1));
+      const list = grove[pk.ward] || grove.tidewater;
+      for (let k = 0; k < n; k++) {
+        const lx = x0 + rnd() * (x1 - x0), lz = z0 + rnd() * (z1 - z0);
+        if (prim.d(lx, lz) > -4) continue;
+        const x = pk.ox + lx, z = pk.oz + lz;
+        const s0 = surf(x, z);
+        if (s0 !== 'lawn' && s0 !== 'bed' && s0 !== 'zone') continue;
+        const sp = list[Math.floor(rnd() * list.length)];
+        const s2 = sp === SP.palm ? 11 + rnd() * 5 : sp === SP.araucaria ? 14 + rnd() * 6 : sp === SP.banyan ? 15 + rnd() * 4 : sp === SP.treeFern ? 4 + rnd() * 3 : sp === SP.banana ? 3.5 + rnd() * 1.5 : 8 + rnd() * 5;
+        const cr = crownRadius(sp, s2);
+        if (!clear(x, z, cr * 0.7, 7) || towerHit(x, z, cr)) continue;
+        const y = wardHeight(x, z);
+        if (!(y > 2)) continue;
+        push(x, z, sp, s2, { y: y - 0.15, layer: 7, spacing: cr * 0.7, lean: sp === SP.palm ? rnd() * 0.06 : 0 });
+      }
+    }
+    // specimen trees on the lawns of the garden blocks, clear of every building
+    const towns = world.wardTowns;
+    for (const d of mp.districts || []) {
+      const R = d.R * 1.05;
+      const n = Math.floor(R * R * 0.0016);
+      const list = grove[d.id] || grove.tidewater;
+      for (let k = 0; k < n; k++) {
+        const a = rnd() * Math.PI * 2, r = Math.sqrt(rnd()) * R;
+        const x = d.x + Math.cos(a) * r, z = d.z + Math.sin(a) * r;
+        if (surf(x, z) !== 'lawn') continue;
+        if (mp.field.edge(x, z) < 6) continue;
+        if (reserved(x, z)) continue;
+        const sp = list[Math.floor(rnd() * list.length)];
+        const s2 = sp === SP.palm ? 11 + rnd() * 4 : sp === SP.araucaria ? 13 + rnd() * 6 : sp === SP.treeFern ? 4 + rnd() * 3 : sp === SP.banana ? 3.5 + rnd() : 8 + rnd() * 5;
+        const cr = crownRadius(sp, s2);
+        if (towns && !towns.isFree(x, z, cr + 2)) continue;
+        if (towerHit(x, z, cr) || !clear(x, z, cr * 0.8, 7)) continue;
+        const y = wardHeight(x, z);
+        if (!(y > 2)) continue;
+        push(x, z, sp, s2, { y: y - 0.15, layer: 7, spacing: cr * 0.8 });
+      }
+    }
+    // shade trees along the quays
+    for (const qw of mp.quayWalks || []) {
+      const P = qw.pts;
+      let acc = 9;
+      for (let i2 = 1; i2 < P.length; i2++) {
+        acc += Math.hypot(P[i2][0] - P[i2 - 1][0], P[i2][1] - P[i2 - 1][1]);
+        if (acc < 17) continue;
+        acc = 0;
+        const [x, z] = P[i2];
+        if (Math.abs(wardHeight(x, z) - qw.y) > 0.1) continue;
+        const sp = (qw.ward === 'coral' || qw.ward === 'sunward' || qw.ward === 'seraph') ? SP.palm : SP.flowering;
+        const s2 = sp === SP.palm ? 11 + rnd() * 3 : 7.5 + rnd() * 2;
+        if (!clear(x, z, 3.2, 6) || towerHit(x, z, 4)) continue;
+        push(x, z, sp, s2, { y: qw.y - 0.15, layer: 6, spacing: 3.2, lean: sp === SP.palm ? rnd() * 0.05 : 0 });
+      }
+    }
   }
 
   // ------------------------------------------------ the Axis plaza --

@@ -563,7 +563,7 @@ const coral = {
     ctx.features.beaches.push({ a0: 0.72, a1: 1.28 }, { a0: 3.85, a1: 4.35 });
     ctx.features.ghats.push({ inner: true, a0: 2.0, a1: 2.9 }, { inner: true, a0: -0.9, a1: -0.2 });
     ctx.features.basins.push({ x: 0, z: 0, r: 330, kind: 'lagoon' });
-    ctx.features.domes = [[240, 1.1, 26], [250, 1.9, 18], [236, 2.6, 30], [252, 3.8, 20], [240, 4.5, 24], [244, 5.3, 16], [258, 0.4, 14], [225, 3.2, 12]].map(([r, a, s]) => ({ x: Math.cos(a) * r, z: Math.sin(a) * r, r: s }));
+    ctx.features.domes = [[240, 1.1, 26], [250, 1.9, 18], [236, 2.6, 30], [252, 3.8, 20], [240, 4.5, 24], [244, 5.3, 16], [258, 0.4, 14]].map(([r, a, s]) => ({ x: Math.cos(a) * r, z: Math.sin(a) * r, r: s }));
   },
   plan(ctx) {
     const { R, rnd } = ctx;

@@ -83,6 +83,31 @@ export const POIS = [
   },
 
   {
+    id: 'observatory', name: 'The Great Observatory', district: 'Aurora',
+    view: V(10950, 240, -7760), target: V(10200, 60, -7170), time: 19.6,
+    lore: 'Aurora is the academy of the Concord, laid out on the true meridian. Its Meridian Way runs from the south quay through the Circus of the Planets, where the orbits are inlaid in bronze, to the hill at the tip of Observatory Point. The great dome still opens every clear night, although most of what it watches now is our own work among the stars.',
+    facts: [['Crown', '1,880 m crystal cluster'], ['Colleges', '8 quads'], ['Dome', '90 m']],
+  },
+  {
+    id: 'harbour', name: 'The Grand Harbour', district: 'Southmarch',
+    view: V(950, 330, 15250), target: V(0, 40, 14350), time: 7.4,
+    orbit: { center: V(0, 200, 14200), radius: 1600, height: 200, speed: 0.03 },
+    lore: 'Southmarch is the sea gate of the capital. Ships berth at the finger piers of Crown Harbour, ferries cross to the island cities, and above it all the tallest crown in Meridian carries the mooring halo where the sky-ships dock, nose to the mast, before their slow crossings to the south.',
+    facts: [['Crown', '2,100 m'], ['Piers', '3 + marina'], ['Sky-ship berths', '3']],
+  },
+  {
+    id: 'ring', name: 'The Great Ring', district: 'Greater Meridian',
+    view: V(-640, 95, 15560), target: V(-1090, 12, 15100), time: 20.4,
+    lore: 'The Great Ring is the metropolitan line of Greater Meridian: a vacuum tube laid on the sea floor that joins the seven wards and the massif towns, with branches to the five island cities. At every stop it surfaces through a sculpted portal, rides into a glass rotunda on its own island and dives again. At night soft lines of light in the water show where it runs.',
+    facts: [['Loop', '84 km'], ['Stations', '10 + 5 island cities'], ['Top speed', '540 km/h']],
+  },
+  {
+    id: 'thalassa', name: 'Thalassa', district: 'Island City · 25 km',
+    view: V(15200, 420, 17600), target: V(19200, 160, 21700), time: 17.8,
+    lore: 'Thalassa climbs its island in white terraces that follow the contours of the hill, each street a balcony over the one below, to the temple of the sea on the summit. The far line from Seraph surfaces off its harbour, and the hydrofoils from Tidewater berth at its quay.',
+    facts: [['Distance', '25 km'], ['Terraces', '11'], ['Harbour', 'quay, two moles']],
+  },
+  {
     id: 'skyport', name: 'Skyport Meridian', district: 'Hovering Harbour',
     view: V(SKYPORT.x + 900, SKYPORT.y + 280, SKYPORT.z + 900), target: V(SKYPORT.x, SKYPORT.y, SKYPORT.z), time: 11.2,
     orbit: { center: V(SKYPORT.x, SKYPORT.y, SKYPORT.z), radius: 1250, height: 250, speed: 0.05 },
@@ -104,7 +129,7 @@ export const POIS = [
   {
     id: 'massif', name: 'Northern Massif', district: 'Cloud Forest',
     view: V(2400, 1650, -11200), target: V(0, 400, 0), time: 17.2,
-    lore: 'The volcanic highlands north of the city have been left wild. Nothing has been built there for a thousand years. It is a cloud forest with orchids, tree ferns and birds that were brought back from extinction, and from the ridges you can watch the whole capital catch the evening light.',
+    lore: 'Above its terrace towns the volcanic highlands north of the city have been left wild. Nothing has been built on the heights for a thousand years. They are a cloud forest with orchids, tree ferns and birds that were brought back from extinction; gondolas climb from the Great Ring stations on the shore to Ridgeholm, Highgate and Cloudmere, and from the ridges you can watch the whole capital catch the evening light.',
     facts: [['Summit', '1,950 m'], ['Protected', 'since 3120 CE'], ['Species restored', '612']],
   },
   {

@@ -711,7 +711,7 @@ function heliostatMesh(L, rec, world) {
     key: 'heliostats',
     uniforms,
     vertex: {
-      pars: 'attribute float aPart; attribute vec2 aPos; uniform vec3 uRecv; uniform float uBaseY; varying float vPart; varying float vHF;',
+      pars: 'attribute float aPart; attribute vec2 aPos; uniform vec3 uRecv; uniform float uBaseY; uniform vec3 uSunDirH; varying float vPart; varying float vHF;',
       preNormal: /* glsl */ `
 vec3 hsBase = vec3(aPos.x, uBaseY, aPos.y);
 vec3 hsPivot = hsBase + vec3(0.0, 3.0, 0.0);
@@ -771,7 +771,7 @@ function withKind(g, kind) {
 }
 
 // ------------------------------------------------------------------ lights --
-function signalLights(list) {
+export function signalLights(list) {
   if (!list.length) return null;
   const pos = new Float32Array(list.length * 3), col = new Float32Array(list.length * 3), size = new Float32Array(list.length);
   list.forEach((l, i) => { pos.set([l.x, l.y, l.z], i * 3); col.set(l.c, i * 3); size[i] = l.s || 2; });

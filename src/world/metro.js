@@ -11,6 +11,7 @@ import { SDFGrid, SD, sweepLoop, capPolys, nestLoops, loopSpan, loopArea } from 
 import { buildWardPlan, landTexture, T } from './wardPlan.js';
 import { DESIGNS, wardShape, angDiff, inArc } from './wards.js';
 import { buildBuildings } from './buildings.js';
+import { buildStreetscape } from './streetscape.js';
 import { buildWardBridges } from './bridges.js';
 import { buildWardLandmarks } from './wardLandmarks.js';
 
@@ -29,6 +30,8 @@ const TAU = Math.PI * 2;
 export const WARD_TOP = 9;          // street level
 export const QUAY_Y = 3;            // quay level
 const SEABED_Y = -7.5;
+// where each ward's Great Ring station island lies (bearing from the ward centre)
+export const RING_BEARING = { aurora: -0.487, sunward: -0.09, tidewater: 0.194, seraph: 1.83, southmarch: 2.27, coral: 2.25, westmere: 3.49 };
 export const STATION_LAT = 32;      // maglev stations stand beside the bridge decks, on the tube side
 const ss = (a, b, x) => { const t = Math.min(Math.max((x - a) / (b - a), 0), 1); return t * t * (3 - 2 * t); };
 export { wardShape };
@@ -124,8 +127,10 @@ function buildFields(rec) {
   rec.levels = [{ y: WARD_TOP, name: 'street', grid: top }, ...extra];
   const levelGrid = (y) => (rec.levels.find((l) => Math.abs(l.y - y) < 0.1) || rec.levels[0]).grid;
   // landings: solid ground under each bridge end and its station
-  rec.landings = [{ b: rec.b, own: true }];
-  if (rec.linkBearing !== undefined) rec.landings.push({ b: rec.linkBearing, own: false });
+  rec.landings = [{ b: rec.b, own: true, kind: 'bridge' }];
+  if (rec.linkBearing !== undefined) rec.landings.push({ b: rec.linkBearing, own: false, kind: 'link' });
+  // the Great Ring: a footbridge out to the ward's station island
+  rec.landings.push({ b: RING_BEARING[w.id], own: false, kind: 'ring' });
   for (const L of rec.landings) {
     const d = [Math.cos(L.b), Math.sin(L.b)];
     const r0 = R(L.b) - design.quayW(L.b);
@@ -162,7 +167,7 @@ function buildFields(rec) {
     L.side = [-L.t[1], L.t[0]];                        // frameAt side: (-t.z, t.x)
     L.x = L.E[0] - d[0] * 2; L.z = L.E[1] - d[1] * 2;
     const lat = STATION_LAT;
-    L.station = { x: L.E[0] + L.t[0] * 35 + L.side[0] * lat, z: L.E[1] + L.t[1] * 35 + L.side[1] * lat, rot: Math.atan2(L.t[1], L.t[0]) };
+    L.station = L.kind === 'ring' ? null : { x: L.E[0] + L.t[0] * 35 + L.side[0] * lat, z: L.E[1] + L.t[1] * 35 + L.side[1] * lat, rot: Math.atan2(L.t[1], L.t[0]) };
   }
   ctx.landing = rec.landings[0];
   ctx.landings = rec.landings;
@@ -387,7 +392,7 @@ function buildPlatform(rec, P) {
   const walls = [], quay = [], grounds = [], sand = [], near = [], far = [];
   // gaps in the parapets: bridge landings, the heads of stairs, quay stairs
   const topGaps = [], levelGaps = levels.map(() => []), seaGaps = [];
-  for (const L of rec.landings) topGaps.push({ x: L.E[0], z: L.E[1], hw: 14.5 });
+  for (const L of rec.landings) topGaps.push({ x: L.E[0], z: L.E[1], hw: L.kind === 'ring' ? 7.5 : 14.5 });
   for (const s of P.stairs) {
     const k = levels.findIndex((l) => Math.abs(l.y - s.y1) < 0.1);
     if (k > 0) {
@@ -479,7 +484,7 @@ function buildPlatform(rec, P) {
     if (k < levels.length - 1) g = g.clone().combine(levels[k + 1].grid, (a, b) => Math.max(a, -b));
     if (k === 0) {
       g = g === levels[k].grid ? g.clone() : g;
-      for (const L of rec.landings) g.sub(SD.rbox(L.station.x, L.station.z, 37, 15, L.station.rot, 10));
+      for (const L of rec.landings) if (L.station) g.sub(SD.rbox(L.station.x, L.station.z, 37, 15, L.station.rot, 10));
     }
     if (holes.length) { g = g === levels[k].grid ? g.clone() : g; for (const h of holes) g.sub(h); }
     grounds.push(capPolys(nestLoops(g.contours(0, 0.2)), levels[k].y, 0, { ox, oz, facade: false }));
@@ -632,6 +637,18 @@ float joints(vec2 p, vec2 size, float jw, vec2 fw) {
   float jy = 1.0 - fPulse(p.y, size.y, 0.0, size.y - jw, fw.y);
   return max(jx, jy);
 }
+vec3 worleyG(vec2 p) {
+  vec2 ip = floor(p), fp = fract(p);
+  float d1 = 8.0, d2 = 8.0, id = 0.0;
+  for (int j = -1; j <= 1; j++) for (int i = -1; i <= 1; i++) {
+    vec2 o = vec2(float(i), float(j));
+    vec2 r = o + hash22(ip + o) - fp;
+    float d = dot(r, r);
+    if (d < d1) { d2 = d1; d1 = d; id = hash12(ip + o + 5.7); } else if (d < d2) d2 = d;
+  }
+  d1 = sqrt(d1);
+  return vec3(d1, sqrt(d2) - d1, id);
+}
 vec3 wardPaving(vec2 p, vec2 fw, float det) {
   float style = uPaveStyle;
   vec3 c = uPave1;
@@ -688,18 +705,6 @@ vec3 wardPaving(vec2 p, vec2 fw, float det) {
     c *= 0.97 + 0.06 * vnoise(p * 1.3) * det;
   }
   return c;
-}
-vec3 worleyG(vec2 p) {
-  vec2 ip = floor(p), fp = fract(p);
-  float d1 = 8.0, d2 = 8.0, id = 0.0;
-  for (int j = -1; j <= 1; j++) for (int i = -1; i <= 1; i++) {
-    vec2 o = vec2(float(i), float(j));
-    vec2 r = o + hash22(ip + o) - fp;
-    float d = dot(r, r);
-    if (d < d1) { d2 = d1; d1 = d; id = hash12(ip + o + 5.7); } else if (d < d2) d2 = d;
-  }
-  d1 = sqrt(d1);
-  return vec3(d1, sqrt(d2) - d1, id);
 }
 `;
 const GROUND_COLOR = /* glsl */ `
@@ -873,7 +878,7 @@ function seabedMaterial() {
  */
 export function buildMetro(scene, towers, bridgePaths, ground, world = null) {
   const recs = ensureWards();
-  const out = { meshes: [], wards: [], lod: [], towns: [] };
+  const out = { meshes: [], wards: [], lod: [], towns: [], streetscapes: [] };
   const plan = { streets: [], squares: [], lots: [], lamps: [], districts: [], quayWalks: [], parks: [], trees: [], pools: [], bridges: [], stairs: [] };
   const sandMat = sandMaterial(), bedMat = seabedMaterial();
   const add = (m, name) => { m.name = name; m.matrixAutoUpdate = false; m.updateMatrix(); scene.add(m); out.meshes.push(m); return m; };
@@ -891,7 +896,7 @@ export function buildMetro(scene, towers, bridgePaths, ground, world = null) {
     ctx.R = rec.R;
     ctx.levelAt = (x, z, m) => levelAtRec(rec, x, z, m);
     ctx.towersBuilt = wt.map((t) => ({ x: t.def.x - w.x, z: t.def.z - w.z, r: t.footprint, def: t.def, level: t.def.level }));
-    ctx.blocked = (x, z, hw) => ctx.towersBuilt.some((t) => Math.hypot(x - t.x, z - t.z) < t.r + hw + 5) || rec.landings.some((L) => { const s = L.station; const dx = x - s.x, dz = z - s.z; const c = Math.cos(s.rot), sn = Math.sin(s.rot); return Math.abs(dx * c + dz * sn) < 41 + hw && Math.abs(-dx * sn + dz * c) < 18 + hw * 0.4; });
+    ctx.blocked = (x, z, hw) => ctx.towersBuilt.some((t) => Math.hypot(x - t.x, z - t.z) < t.r + hw + 5) || rec.landings.some((L) => { const s = L.station; if (!s) return false; const dx = x - s.x, dz = z - s.z; const c = Math.cos(s.rot), sn = Math.sin(s.rot); return Math.abs(dx * c + dz * sn) < 41 + hw && Math.abs(-dx * sn + dz * c) < 18 + hw * 0.4; });
     const planDesign = {
       plan: (c, Tk) => {
         const raw = design.plan(c, Tk);
@@ -902,8 +907,8 @@ export function buildMetro(scene, towers, bridgePaths, ground, world = null) {
         }
         for (const L of rec.landings) {
           const s = L.station;
-          raw.sites.push({ box: { x: s.x, z: s.z, hw: 41, hd: 18, rot: s.rot }, margin: 3 });
-          if (!L.own) raw.plazas.push({ x: L.x + L.t[0] * 40, z: L.z + L.t[1] * 40, hw: 50, hd: 44, rot: L.b, kind: 'landing' });
+          if (s) raw.sites.push({ box: { x: s.x, z: s.z, hw: 41, hd: 18, rot: s.rot }, margin: 3 });
+          if (!L.own) raw.plazas.push({ x: L.x + L.t[0] * (L.kind === 'ring' ? 26 : 40), z: L.z + L.t[1] * (L.kind === 'ring' ? 26 : 40), hw: L.kind === 'ring' ? 30 : 50, hd: L.kind === 'ring' ? 34 : 44, rot: L.b, kind: 'landing' });
         }
         return raw;
       },
@@ -947,6 +952,12 @@ export function buildMetro(scene, towers, bridgePaths, ground, world = null) {
     const town = buildBuildings(scene, wp, ground, world ? world.settings : { lowrise: 1 }, { palette: design.lowrise.palette, warmth: design.lowrise.warmth, litFrac: design.lowrise.litFrac, lampTint: design.lowrise.lampTint });
     out.towns.push(town);
     lap('towns');
+    // lamps (in the ward's own light), benches and centrepieces, drawn only near the ward
+    const fv = { edge: (x, z) => P.field.edge(x - w.x, z - w.z), centre: (x, z) => P.field.centre(x - w.x, z - w.z), squareAt: (x, z) => P.field.squareAt(x - w.x, z - w.z) };
+    const SS = buildStreetscape(scene, { streets: wp.streets, squares: wp.squares, lamps: wp.lamps, field: fv }, ground);
+    for (const m of SS.meshes) out.lod.push({ near: m, far: null, center: new THREE.Vector3(w.x, 10, w.z), radius: rec.R(0) * 1.15, nearDist: 1500 });
+    out.streetscapes.push(SS);
+    lap('streetscape');
     plan.districts.push(...wp.districts);
     plan.streets.push(...wp.streets);
     plan.squares.push(...wp.squares);
@@ -984,13 +995,46 @@ export function buildMetro(scene, towers, bridgePaths, ground, world = null) {
     if (P.land[k + 2] > 128) return 'bed';
     return 'lawn';
   };
+  /** 0 free, 1 park, 2 landmark site or station, 3 plaza. */
+  plan.reservedAt = (x, z) => {
+    const w = fieldRec(x, z);
+    if (!w) return 0;
+    const P = w.plan, N = P.field.N;
+    const i = Math.floor((x - w.def.x + P.half) / P.field.cell), j = Math.floor((z - w.def.z + P.half) / P.field.cell);
+    if (i < 0 || j < 0 || i >= N || j >= N) return 0;
+    return P.reserve[j * N + i];
+  };
   out.plan = plan;
+  // a spatial index of every ward building, for anything that must keep clear of them
+  const GI = 60, gidx = new Map();
+  for (const t of out.towns) for (const p of t.placements) {
+    const k = `${Math.floor(p.x / GI)},${Math.floor(p.z / GI)}`;
+    if (!gidx.has(k)) gidx.set(k, []);
+    gidx.get(k).push(p);
+  }
+  out.isFree = (x, z, r) => {
+    const gx = Math.floor(x / GI), gz = Math.floor(z / GI);
+    for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) {
+      const l = gidx.get(`${gx + dx},${gz + dz}`);
+      if (l) for (const p of l) if (Math.hypot(p.x - x, p.z - z) < r + Math.max(p.sx, p.sz) * 0.6) return false;
+    }
+    return true;
+  };
   // bridges and their maglevs, stations at both ends
   const B = buildWardBridges(scene, bridgePaths, recs, ground, world);
   out.meshes.push(...B.meshes);
   out.lod.push(...(B.lod || []));
   out.bridges = B;
   out.stations = B.stations;
+  // deck lamps, one group per bridge
+  for (const bp of bridgePaths) {
+    const list = B.lamps.filter((l) => l.bridge === bp.ward);
+    if (!list.length) continue;
+    const SS = buildStreetscape(scene, { streets: [], squares: [], lamps: [], field: { edge: () => 16, centre: () => 16, squareAt: () => 0 } }, ground, list);
+    const mid = bp.path[Math.floor(bp.path.length / 2)];
+    const half = bp.path[0].distanceTo(bp.path[bp.path.length - 1]) / 2;
+    for (const m of SS.meshes) out.lod.push({ near: m, far: null, center: mid.clone(), radius: half, nearDist: 1500 });
+  }
   // LOD: detail near the camera, massing beyond
   out.nearDist = 900;
   out.applyQuality = (s) => {

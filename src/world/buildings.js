@@ -882,6 +882,8 @@ function museum(B, L, R, H, lod) {
 function chooseType(L, R) {
   const r = R();
   const big = L.w > 26 && L.d > 24;
+  // the rim towns: arcades along their waterfront esplanades, terraces and mews behind
+  if (L.dk === 'rim' && L.cls === ST.ESPLANADE && r < 0.5) return 'arcade';
   if (L.dk === 'rim') return r < 0.55 ? 'mews' : r < 0.75 ? 'terrace' : r < 0.87 && big ? 'cloister' : r < 0.94 ? 'stack' : 'pavilion';
   if (L.dk === 'islet') return r < 0.45 ? 'mews' : r < 0.65 ? 'terrace' : r < 0.85 ? 'ribbon' : 'stack';
   if (L.cls === ST.LANE) return r < 0.5 ? 'mews' : r < 0.8 ? 'stack' : 'terrace';

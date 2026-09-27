@@ -81,6 +81,9 @@ vLampSeed = 0.5;
       emissive: /* glsl */ `
 {
   vec3 warm = mix(vec3(1.0, 0.72, 0.45), vec3(1.0, 0.82, 0.62), vLampSeed);
+  #ifdef USE_COLOR
+  warm = mix(warm, vColor * 1.1, 0.8);        // a district's own light (the Outer Wards)
+  #endif
   // the diffuser glows brightest in a ring round its centre
   float rr = length(vObjPos.xz);
   float rq = (rr - 0.3) / 0.12;
@@ -149,10 +152,15 @@ export function buildStreetscape(scene, plan, ground, extraLamps = []) {
   const out = { meshes: [] };
 
   // ---- lamps
-  const lamps = [...plan.lamps.map((l) => ({ ...l, y: ground(l.x, l.z) - 0.1 })), ...extraLamps];
+  const lamps = [...plan.lamps.map((l) => ({ ...l, y: (l.y ?? ground(l.x, l.z)) - 0.1 })), ...extraLamps];
   const lampMesh = new THREE.InstancedMesh(lampGeometry(), lampMaterial(), lamps.length);
   lamps.forEach((l, i) => { q.setFromAxisAngle(up, l.yaw || 0); m4.compose(new THREE.Vector3(l.x, l.y, l.z), q, one); lampMesh.setMatrixAt(i, m4); });
   lampMesh.instanceMatrix.needsUpdate = true;
+  if (lamps.some((l) => l.tint)) {
+    const c = new THREE.Color();
+    lamps.forEach((l, i) => { if (l.tint) c.setRGB(l.tint[0], l.tint[1], l.tint[2]); else c.setRGB(1, 0.78, 0.55); lampMesh.setColorAt(i, c); });
+    lampMesh.instanceColor.needsUpdate = true;
+  }
   lampMesh.castShadow = false; lampMesh.receiveShadow = true;
   lampMesh.layers.set(1);
   lampMesh.frustumCulled = false;

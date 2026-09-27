@@ -532,6 +532,39 @@ export class Traffic {
     }
     // ---- starships -----------------------------------------------------------------
     this.buildShipRoutes();
+    // ---- Greater Meridian: the Ward Way over the seven wards, and belts out from the rim
+    this.buildWardLanes();
+  }
+
+  buildWardLanes() {
+    const metro = this.world && this.world.metro;
+    if (!metro) return;
+    const ease = (t) => t * t * (3 - 2 * t);
+    // the Ward Way: a two-way ring 12.9 km out, 560 m up, passing over most of the wards
+    let pts = circlePath(0, 0, 12900, 560, { n: Math.ceil((TAU * 12900) / 10) });
+    pts = this.engineer('ward-way', pts, 60);
+    const way = this.bank.add({ polyline: pts, speed: 78, accel: 2.5 });
+    way.name = 'ward-way';
+    for (const dir of [1, -1]) {
+      for (const [lat, up, mul] of [[7, 0, 1.1], [15, 0, 1.0], [11, 8, 0.95]]) this.spawnLane(way, 'car', { lat, up, mul, dir, perKm: 1.6 });
+      this.spawnLane(way, 'ferry', { lat: 25, up: 4, mul: 0.6, dir, perKm: 0.06, minGap: 60 });
+    }
+    this.beaconsAlong(way, { edges: [-30, 30], up: 4, every: 140, color: 1 });
+    // a belt from the rim to each ward, circling it 350 m out
+    const alt = { aurora: [430, 300], tidewater: [470, 320], sunward: [500, 330], seraph: [440, 290], southmarch: [480, 340], coral: [450, 300], westmere: [460, 310] };
+    for (const w of metro.wards.map((q) => q.def)) {
+      const [yA, yB] = alt[w.id] || [450, 300];
+      // (Southmarch's belt leaves the rim west of the Gate of Concord, clear of its arches)
+      const a = w.id === 'southmarch' ? 1.885 : Math.atan2(w.z, w.x);
+      const A = new THREE.Vector3(Math.cos(a) * 5600, 0, Math.sin(a) * 5600);
+      let p2 = beltPath(A, 420, new THREE.Vector3(w.x, 0, w.z), w.r + 360, (tag, t) => (tag === 'A' ? yA : tag === 'B' ? yB : tag === 'AB' ? yA + (yB - yA) * ease(t) : yB + (yA - yB) * ease(t)));
+      p2 = smoothClosed(p2, 4, 8);
+      p2 = this.engineer(`ward-belt-${w.id}`, p2, 50);
+      const route = this.bank.add({ polyline: p2, speed: 64, accel: 2.2, latAccel: 3.0 });
+      route.name = `ward-belt-${w.id}`;
+      for (const ln of this.lanesPetal.slice(0, 4)) this.spawnLane(route, 'car', { ...ln, perKm: 2.2 });
+      this.spawnLane(route, 'cargo', { lat: 36, up: -40, mul: 0.8, perKm: 0.5, minGap: 8 });
+    }
   }
 
   /** Off-ramp from a motorway down to a pad (full stop, dwell) and back on. */

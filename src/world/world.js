@@ -8,6 +8,10 @@ import { buildTowers } from './towers.js';
 import { planCity, towerFootprint } from './urban.js';
 import { wardTowerDefs, wardBridgePaths, buildMetro, wardHeight } from './metro.js';
 import { buildSkyline } from './skyline.js';
+import { buildTransit } from './transit.js';
+import { buildRimForecourts } from './rimForecourts.js';
+import { signalLights } from './wardLandmarks.js';
+import { Transit } from '../life/transit.js';
 import { buildBuildings } from './buildings.js';
 import { buildStreetscape } from './streetscape.js';
 import { NATURE_U } from './natureGlsl.js';
@@ -139,12 +143,24 @@ export class World {
     progress(0.55); await tick();
     this.lowrise = buildBuildings(this.scene, this.plan, raw, this.settings);
     this.updaters.push({ applyQuality: (s) => this.lowrise.applyQuality(s), update: (dt, t) => this.lowrise.update(dt, t, this.app.camera) });
-    this.streetscape = buildStreetscape(this.scene, this.plan, raw, this.infra.promLamps);
+    // the rim arcologies' forecourts: ring colonnades, fountains, obelisks, their lamps
+    const bridgeAvoid = (x, z, r) => this.wardBridgePaths.some((b) => (b.head && Math.hypot(b.head.x - x, b.head.z - z) < r + 75) || b.path.slice(0, 30).some((p) => Math.hypot(p.x - x, p.z - z) < r + 22));
+    this.rimCourts = buildRimForecourts(this.scene, this.towers, raw, bridgeAvoid);
+    this.streetscape = buildStreetscape(this.scene, this.plan, raw, [...this.infra.promLamps, ...this.rimCourts.lamps]);
     // Greater Meridian: the Outer Wards (platforms, their towns, landmarks, bridges, stations)
     this.metro = buildMetro(this.scene, this.wardTowers, this.wardBridgePaths.map((b) => b), gh, this);
-    this.wardTowns = { placements: this.metro.towns.flatMap((t) => t.placements), isFree: (x, z, r) => this.metro.towns.every((t) => t.isFree(x, z, r)) };
+    this.wardTowns = { placements: this.metro.towns.flatMap((t) => t.placements), isFree: (x, z, r) => this.metro.isFree(x, z, r) };
     this.updaters.push({ applyQuality: (s) => this.metro.applyQuality(s), update: (dt, t) => this.metro.update(dt, t, this.app.camera) });
-    this.wardStreets = buildStreetscape(this.scene, this.metro.plan, gh);
+    this.wardStreets = { lamps: this.metro.plan.lamps };
+    // the metropolitan transit network: the Great Ring, far lines, gondolas, the canal line
+    this.transitNet = buildTransit(this.scene, this);
+    {
+      const T = this.transitNet;
+      const SS = buildStreetscape(this.scene, { streets: [], squares: [], lamps: [], field: { edge: () => 16, centre: () => 16, squareAt: () => 0 } }, gh, T.lamps);
+      for (const m of SS.meshes) this.metro.lod.push({ near: m, far: null, center: new THREE.Vector3(0, 0, 0), radius: 60000, nearDist: 1e9 });
+      const sl = signalLights(T.lights);
+      if (sl) this.scene.add(sl);
+    }
     // and the metropolitan horizon beyond: towns of towers on the far islands and massif
     this.skyline = buildSkyline(this.scene);
     progress(0.7); await tick();
@@ -171,6 +187,8 @@ export class World {
     this.updaters.push(this.chorus);
     this.clouds = new Clouds(this.scene);
     this.updaters.push({ update: (dt) => this.clouds.update(dt, this.app.camera) });
+    // trains, ferries, launches, gondolas and sky-ships on the metropolitan network
+    this.transit = new Transit(this.scene, this, this.transitNet);
     this.people = new People(this.scene, this.settings, this);
     this.updaters.push({ applyQuality: (s) => this.people.applyQuality(s), update: (dt, t) => this.people.update(dt, t, this.app.camera) });
     // aircraft beacons on every summit

@@ -235,6 +235,52 @@ export class People {
       }
     }
 
+    // ---- the Outer Wards: streets on every level, squares, quays, and the bridge decks
+    const mp = world.metro && world.metro.plan;
+    if (mp) {
+      const byW = new Map();
+      for (const st of mp.streets) {
+        if (!byW.has(st.district)) byW.set(st.district, { streets: [], squares: [], quays: [] });
+        byW.get(st.district).streets.push(st);
+      }
+      for (const q of mp.squares) if (byW.has(q.district)) byW.get(q.district).squares.push(q);
+      for (const q of mp.quayWalks || []) if (byW.has(q.ward)) byW.get(q.ward).quays.push(q);
+      for (const [id, W] of byW) {
+        const g = { name: `ward-${id}`, rows: [], people: [] };
+        const box = new THREE.Box3();
+        for (const st of W.streets) {
+          const y = (st.y ?? ground(st.pts[0][0], st.pts[0][1])) + 0.03;
+          const pts = st.pts.map(([x, z]) => new THREE.Vector3(x, y, z));
+          for (const p of pts) box.expandByPoint(p);
+          const closed = pts.length > 8 && pts[0].distanceTo(pts[pts.length - 1]) < 12;
+          const avenue = st.cls === ST.AVENUE;
+          g.rows.push({ row: addPath(pts, closed, Math.max(1.2, st.hw - 1.0)), density: st.cls === ST.LANE ? 0.03 : avenue ? 0.07 : 0.05, avenue, hw: st.hw });
+        }
+        for (const q of W.squares) {
+          if (q.kind === 'tower' || q.r < 16) continue;
+          const n = 48, pts = [];
+          const rr = q.kind === 'crown' ? q.r * 0.86 : q.r * 0.7;
+          const y = ground(q.x + rr, q.z) + 0.03;
+          for (let k = 0; k < n; k++) { const a = (k / n) * TAU; pts.push(new THREE.Vector3(q.x + Math.cos(a) * rr, y, q.z + Math.sin(a) * rr)); }
+          g.rows.push({ row: addPath(pts, true, Math.min(q.r * 0.12, 9)), density: 0.14, idle: 0.3 });
+        }
+        for (const q of W.quays) {
+          const pts = q.pts.map(([x, z]) => new THREE.Vector3(x, q.y + 0.03, z));
+          if (pts.length < 8) continue;
+          g.rows.push({ row: addPath(pts, true, 2.2), density: 0.035, idle: 0.2 });
+        }
+        if (!g.rows.length) continue;
+        const sph = box.getBoundingSphere(new THREE.Sphere());
+        g.center = sph.center; g.radius = sph.radius + 40;
+        groups.push(g);
+      }
+      for (const [i, d] of ((world.metro.bridges && world.metro.bridges.decks) || []).entries()) {
+        const pts = d.path.map((p) => new THREE.Vector3(p.x, p.y + 0.22, p.z));
+        const c = pts[Math.floor(pts.length / 2)];
+        groups.push({ name: `ward-deck${i}`, rows: [{ row: addPath(pts, false, 9.5), density: 0.1 }], center: c.clone(), radius: pts[0].distanceTo(pts[pts.length - 1]) * 0.55 + 60, people: [] });
+      }
+    }
+
     // ---- resample every path into the texture
     const tex = new Float32Array(W * paths.length * 4);
     const lengths = [];
