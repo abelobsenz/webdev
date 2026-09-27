@@ -210,7 +210,10 @@ function buildPromenades(groundHeight) {
       const sway = 70 * Math.sin(2 * Math.PI * t) * Math.sin(Math.PI * t);
       const x = dir.x * d + perp.x * sway, z = dir.y * d + perp.y * sway;
       const g0 = groundHeight(x, z);
-      let y = (PLAZA_Y - 0.2) * (1 - t) + (gL + 0.05) * t + 28 * Math.sin(Math.PI * t) + 5 * ss(0, 0.06, t) * (1 - ss(0.78, 1, t));
+      // the walking surface (path + 0.2) starts 35 cm proud of the plaza, a raised
+      // promenade with its own kerb step: starting flush, it rose so gently that deck and
+      // plaza stayed coplanar for tens of metres and z-fought
+      let y = (PLAZA_Y + 0.15) * (1 - t) + (gL + 0.05) * t + 28 * Math.sin(Math.PI * t) + 5 * ss(0, 0.06, t) * (1 - ss(0.78, 1, t));
       if (t < 0.9) y = Math.max(y, g0 + 6);
       else y = Math.max(y, g0 + 0.2 + 5.8 * ss(1, 0.9, t));
       path.push(new THREE.Vector3(x, y, z));
@@ -246,8 +249,9 @@ function buildPromenades(groundHeight) {
     // square's platform, with the pod reaching on into town.
     {
       const e0 = tube[1].clone().setY(0), c0 = e0.clone().addScaledVector(f0.t, -(33 - 5));
-      station(parts, c0, f0.t, f0.side, PLAZA_Y, 1, PLAZA_Y - 4);
-      stations.push({ x: c0.x, z: c0.z, r: 42, y: PLAZA_Y, end: 'plaza', island: isl.id });
+      // on a 30 cm plinth, never flush with the plaza paving (coplanar tops z-fought)
+      station(parts, c0, f0.t, f0.side, PLAZA_Y + 0.3, 1, PLAZA_Y - 4);
+      stations.push({ x: c0.x, z: c0.z, r: 42, y: PLAZA_Y + 0.3, end: 'plaza', island: isl.id });
       const e1 = tube[N - 1].clone().setY(0), c1 = e1.clone().addScaledVector(f1.t, 33 - 5);
       let lo = 1e9, hi = -1e9;
       for (let u = -40; u <= 40; u += 8) for (let v = -18; v <= 18; v += 6) {
