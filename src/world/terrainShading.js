@@ -1,4 +1,4 @@
-import { patchedMaterial } from './materials.js';
+import { patchedMaterial, FACADE_GLSL } from './materials.js';
 import { NATURE_GLSL, NATURE_U } from './natureGlsl.js';
 
 // The ground of MERIDIAN: coral sand and reef, strand, meadow, rainforest canopy,
@@ -12,6 +12,7 @@ uniform sampler2D uNature;
 uniform float uInfoHalf;
 uniform float uBloom;
 ${NATURE_GLSL}
+${FACADE_GLSL}
 vec4 infoAt(vec2 xz) {
   vec2 uv = (xz + uInfoHalf) / (2.0 * uInfoHalf);
   if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) return vec4(-100.0, 0.0, -1.0, 0.0);
@@ -250,45 +251,149 @@ const COLOR = /* glsl */ `
     float square = smoothstep(0.3, 0.7, stS.b);
     float isAve = smoothstep(6.5, 7.5, stHW);
     float isLane = 1.0 - smoothstep(3.6, 4.4, stHW);
-    // stone: warm granite on the avenues, pale limestone setts on streets, flags on lanes
-    vec3 stone = mix(vec3(0.50, 0.48, 0.44), vec3(0.58, 0.55, 0.50), m3);
-    stone = mix(stone, vec3(0.56, 0.50, 0.44), isAve * 0.6);
-    stone = mix(stone, vec3(0.62, 0.60, 0.56), square * 0.6);
+    float pd = 1.0 - smoothstep(0.012, 0.07, fw);        // joints and arrises resolvable
+    float pt = 1.0 - smoothstep(0.1, 0.45, fw);          // stone-to-stone tone resolvable
+    float pg = 1.0 - smoothstep(0.004, 0.025, fw);       // grain within a stone
+    // the street frame: metres along / across the owning street (urban.js), and the kerb
+    // line from it wherever it agrees with the coarse field
+    vec2 gAl = vec2(0.0), gAc = vec2(0.0);
+    vec2 sf = (pt > 0.0 || nearF > 0.0) ? streetFrameG(wp.xz, gAl, gAc) : vec2(0.0, stC);
+    float al = sf.x, ac = sf.y;
+    float hwS = stHW < 4.0 ? 3.0 : stHW < 5.75 ? 5.0 : stHW < 7.75 ? 6.5 : 9.0;
+    float eP = abs(ac) - hwS;
+    float e = abs(eP - stE) < 0.6 ? eP : stE;
+    vec2 gE = (ac < 0.0 ? -1.0 : 1.0) * gAc;             // world direction out toward the kerb
+    // field paving (what it reads as from afar: stone tone with its joints mixed in):
+    // pale granite setts on streets, warm granite slabs on avenues, clay pavers on lanes
+    vec3 settC = vec3(0.54, 0.52, 0.48), slabC = vec3(0.57, 0.53, 0.47), brickC = vec3(0.56, 0.41, 0.31);
+    vec3 jointC = mix(vec3(0.25, 0.23, 0.2), vec3(0.15, 0.19, 0.09), 0.4 * (1.0 - isAve));  // sand, a little moss
+    vec3 base = mix(mix(settC, slabC, isAve), brickC, isLane) * (0.94 + 0.12 * m3);
+    float jf = mix(mix(0.13, 0.025, isAve), 0.09, isLane);
+    vec3 stone = mix(base, jointC, jf);
     float roughS = 0.62;
-    if (nearF > 0.0) {
-      float sc = mix(mix(0.9, 0.55, isLane), 0.42, isAve);            // stones per metre
-      sc = mix(sc, 0.5, square);
-      vec3 fl = worley2(wp.xz * sc);
-      float joint = smoothstep(0.0, 0.06, fl.y);
-      stone *= mix(1.0, (0.84 + 0.24 * fl.z) * (0.58 + 0.42 * joint) * (0.9 + 0.2 * vnoise(wp.xz * 5.0)), nearF);
-      stone = mix(stone, vec3(0.13, 0.17, 0.07), (1.0 - joint) * 0.35 * nearF * (1.0 - isAve));   // moss in the joints
-      hg += (hash22(vec2(fl.z * 91.0, 3.0)) - 0.5) * 0.05 * nearF;                                // each stone a touch uneven
-      ao *= mix(1.0, 0.8 + 0.2 * joint, nearF);
-      // kerbs: a pale granite band with a shadowed gutter on the street side
-      float kerb = (1.0 - smoothstep(0.0, aa, stE)) * smoothstep(-0.42 - aa, -0.42, stE);
-      stone = mix(stone, vec3(0.70, 0.68, 0.64) * (0.92 + 0.1 * vnoise(wp.xz * 3.0)), kerb * (1.0 - square));
-      ao *= 1.0 - 0.35 * (1.0 - smoothstep(0.0, 0.25, abs(stE + 0.5))) * (1.0 - square);
+    if (pt > 0.0) {
+      float joint, sid;
+      if (isLane > 0.5) {
+        // lanes: clay pavers laid in basketweave
+        vec2 q = vec2(al, ac) * 10.0;
+        float fq = fw * 10.0;
+        vec2 cb = floor(q * 0.5);
+        float hz = mod(cb.x + cb.y, 2.0);
+        vec2 lq = q - cb * 2.0;
+        float jc = max(1.0 - filteredPulse(q.x, 2.0, 1.9, fq), 1.0 - filteredPulse(q.y, 2.0, 1.9, fq));
+        float jm = mix(1.0 - filteredPulse(q.x - 1.0, 2.0, 1.9, fq), 1.0 - filteredPulse(q.y - 1.0, 2.0, 1.9, fq), hz);
+        joint = max(jc, jm);
+        sid = hash12(cb * 2.0 + (hz > 0.5 ? vec2(0.0, step(1.0, lq.y)) : vec2(step(1.0, lq.x), 0.0)) + 7.0);
+        vec3 clay = mix(vec3(0.48, 0.32, 0.23), vec3(0.66, 0.49, 0.35), sid);
+        clay = mix(clay, vec3(0.36, 0.3, 0.27), step(0.9, fract(sid * 11.3)));        // a few clinkers
+        base = mix(base, clay * (0.94 + 0.12 * m3), pt);
+        hg -= (gAl * nBevel(mod(q.x, 1.0) - 0.1, 0.9, 0.12) + gAc * nBevel(mod(q.y, 1.0) - 0.1, 0.9, 0.12)) * 0.03 * pd;
+      } else if (isAve > 0.5) {
+        // avenues: 0.6 x 1.2 m granite slabs in running bond across the street
+        float row = floor(al / 0.6);
+        float x = ac + mod(row, 2.0) * 0.6;
+        sid = hash12(vec2(floor(x / 1.2), row) + 3.0);
+        joint = max(1.0 - filteredPulse(al, 0.6, 0.592, fw), 1.0 - filteredPulse(x, 1.2, 1.192, fw));
+        base *= mix(1.0, 0.86 + 0.28 * sid, pt);
+        hg -= (gAl * nBevel(mod(al, 0.6) - 0.008, 0.592, 0.012) + gAc * nBevel(mod(x, 1.2) - 0.008, 1.192, 0.012)) * 0.4 * pd;
+      } else {
+        // streets: granite setts in courses across the street
+        float course = floor(al / 0.15);
+        float sl = 0.17 + 0.08 * hash11(course * 1.37 + 0.3);
+        float x = ac + hash11(course * 2.71) * sl;
+        sid = hash12(vec2(floor(x / sl), course) + 11.0);
+        joint = max(1.0 - filteredPulse(al, 0.15, 0.138, fw), 1.0 - filteredPulse(x, sl, sl - 0.012, fw));
+        base *= mix(1.0, 0.8 + 0.4 * sid, pt);
+        base *= 1.0 + vec3(0.03, 0.0, -0.04) * (fract(sid * 7.7) - 0.5) * pt;            // warm and grey setts
+        hg -= (gAl * nBevel(mod(al, 0.15) - 0.012, 0.138, 0.02) + gAc * nBevel(mod(x, sl) - 0.012, sl - 0.012, 0.02)) * 0.5 * pd;
+      }
+      base *= mix(1.0, 0.9 + 0.2 * vnoise(wp.xz * 11.0 + sid * 17.0), pd);                  // grain
+      base *= 1.0 - 0.12 * smoothstep(0.78, 0.94, vnoise(wp.xz * 43.0)) * pg;                // mica and feldspar flecks
+      hg += (hash22(vec2(sid * 91.0, 3.0)) - 0.5) * 0.045 * pd;                             // each stone a touch uneven
+      ao *= 1.0 - 0.35 * joint * pd;
+      stone = mix(stone, mix(base, jointC, joint), pt);
+    }
+    // squares: limestone flags in running bond with a basalt border course
+    if (square > 0.01) {
+      vec3 flag = vec3(0.64, 0.62, 0.58) * (0.95 + 0.1 * m3);
+      float border = smoothstep(0.3, 0.36, stS.b) * (1.0 - smoothstep(0.5, 0.56, stS.b));
+      vec3 flagFar = mix(mix(flag, jointC, 0.03), vec3(0.24, 0.24, 0.25), border * 0.8);
+      vec3 flagC = flagFar;
+      if (pt > 0.0) {
+        float row = floor(wp.z / 0.8);
+        float x = wp.x + mod(row, 2.0) * 0.4;
+        float fid = hash12(vec2(floor(x / 0.8), row) + 5.0);
+        float j = max(1.0 - filteredPulse(wp.z, 0.8, 0.79, fw), 1.0 - filteredPulse(x, 0.8, 0.79, fw));
+        vec3 f1 = flag * (0.88 + 0.24 * fid) * (0.92 + 0.16 * mix(0.5, vnoise(wp.xz * 7.0 + fid * 13.0), pd));
+        f1 = mix(f1, vec3(0.24, 0.24, 0.25) * (0.85 + 0.3 * fid), border * 0.8);
+        hg += (hash22(vec2(fid * 57.0, 1.0)) - 0.5) * 0.03 * pd;
+        hg -= (vec2(0.0, 1.0) * nBevel(mod(wp.z, 0.8) - 0.01, 0.79, 0.01) + vec2(1.0, 0.0) * nBevel(mod(x, 0.8) - 0.01, 0.79, 0.01)) * 0.35 * pd;
+        ao *= 1.0 - 0.3 * j * pd;
+        flagC = mix(flagFar, mix(f1, jointC, j), pt);
+      }
+      stone = mix(stone, flagC, square);
+    }
+    if (nearF > 0.0 || pt > 0.0) {
+      float kd = max(nearF, pt);
+      // kerbs: pale granite in 1 m lengths with a rounded arris; the upstand shades a thin line
+      float kerb = (1.0 - smoothstep(-aa * 0.5, aa * 0.5, e)) * smoothstep(-0.42 - aa * 0.5, -0.42 + aa * 0.5, e) * (1.0 - square);
+      float kj = 1.0 - filteredPulse(al, 1.0, 0.992, fw);
+      vec3 kerbC = vec3(0.70, 0.68, 0.64) * (0.92 + 0.1 * vnoise(wp.xz * 3.0)) * (0.94 + 0.12 * hash11(floor(al) + 3.0) * pt);
+      kerbC = mix(kerbC, jointC, kj * pd);
+      stone = mix(stone, kerbC, kerb * kd);
+      hg += gE * (1.0 - smoothstep(-0.42, -0.33, e)) * kerb * 0.9 * pd;
+      ao *= 1.0 - 0.5 * (1.0 - smoothstep(0.0, 0.03 + fw, abs(e + 0.43))) * (1.0 - square) * onStreet * kd;
+      // gutter: two courses of dark basalt setts along the kerb, a cast grate every 24 m
+      float gut = smoothstep(-0.98 - aa * 0.5, -0.98 + aa * 0.5, e) * (1.0 - smoothstep(-0.42 - aa * 0.5, -0.42 + aa * 0.5, e)) * (1.0 - isLane) * (1.0 - square);
+      float gj = max(1.0 - filteredPulse(al, 0.14, 0.128, fw), 1.0 - filteredPulse(e + 0.98, 0.28, 0.268, fw));
+      vec3 gutC = mix(vec3(0.27, 0.27, 0.28) * (0.85 + 0.3 * hash12(vec2(floor(al / 0.14), floor((e + 0.98) / 0.28))) * pt), jointC * 0.8, gj);
+      float grate = fBoxT(vec2(mod(al, 24.0) - 12.0, e + 0.7), vec2(-0.3, -0.22), vec2(0.3, 0.22), fw) * gut;
+      float slots = 1.0 - filteredPulse(al, 0.05, 0.03, fw);
+      gutC = mix(gutC, vec3(0.06, 0.06, 0.065) * (0.6 + 0.4 * slots), grate);
+      stone = mix(stone, gutC, gut * kd);
+      roughS = mix(roughS, 0.42, gut * kd);
+      ao *= 1.0 - 0.3 * (1.0 - smoothstep(0.0, 0.3, abs(e + 0.5))) * (1.0 - square) * onStreet;
       // bronze inlay down the middle of the streets and esplanades (it glows at night)
-      float inlay = (1.0 - smoothstep(0.06, 0.06 + aa, abs(stC))) * (1.0 - isAve) * (1.0 - isLane) * onStreet * (1.0 - square);
-      stone = mix(stone, vec3(0.55, 0.38, 0.2), inlay);
-      roughS = mix(roughS, 0.3, inlay);
+      float inlay = (1.0 - smoothstep(0.06, 0.06 + aa, abs(ac))) * (1.0 - isAve) * (1.0 - isLane) * onStreet * (1.0 - square);
+      stone = mix(stone, vec3(0.55, 0.38, 0.2), inlay * kd);
+      roughS = mix(roughS, 0.3, inlay * kd);
     }
     // avenue median: a planted strip with its own kerbs
-    float median = isAve * (1.0 - smoothstep(2.1, 2.1 + aa, abs(stC))) * onStreet * (1.0 - square);
+    float median = isAve * (1.0 - smoothstep(2.1, 2.1 + aa, abs(ac))) * onStreet * (1.0 - square);
+    // lawns: close up the blades, clover drifts and the odd daisy
     vec3 lawn = mix(vec3(0.075, 0.15, 0.03), vec3(0.12, 0.21, 0.045), m3);
     lawn = mix(lawn, vec3(0.16, 0.19, 0.07), smoothstep(0.6, 0.85, m2) * 0.4);
     lawn *= mix(1.0, 0.8 + 0.4 * vnoise(wp.xz * 1.9), nearF);
-    // verge beds between the kerb and the building line: dark foliage and flower heads
-    float border = smoothstep(0.35, 0.8, stE) * (1.0 - smoothstep(2.6, 3.2, stE)) * (1.0 - isLane) * (1.0 - square);
-    border = max(border, median * smoothstep(1.9, 1.5, abs(stC)));
+    if (pd > 0.0) {
+      float blade = vnoise(wp.xz * vec2(31.0, 7.0)) * 0.5 + vnoise(wp.xz * vec2(9.0, 37.0)) * 0.5;
+      float clover = smoothstep(0.62, 0.78, vnoise(wp.xz * 0.9 + 3.0));
+      lawn *= mix(1.0, 0.82 + 0.36 * blade, pg);
+      lawn = mix(lawn, lawn * vec3(0.8, 1.05, 0.9), clover * pd * 0.6);
+      lawn = mix(lawn, vec3(0.85, 0.84, 0.76), step(0.93, hash12(floor(wp.xz * 9.0))) * clover * pg);
+      hg += vnoised(wp.xz * 5.0).yz * 0.06 * pd;
+    }
+    // verge beds between the kerb and the building line: a clipped hedge on the kerb side,
+    // then drifts of perennials over dark mulch
+    float border = smoothstep(0.35, 0.8, e) * (1.0 - smoothstep(2.6, 3.2, e)) * (1.0 - isLane) * (1.0 - square);
+    border = max(border, median * (1.0 - smoothstep(1.5, 1.9, abs(ac))));
     border *= midF;
-    vec3 foliage = vec3(0.05, 0.10, 0.03) * (0.8 + 0.4 * vnoise(wp.xz * 1.1));
-    float fk = hash12(floor(wp.xz * 0.05 + 9.0));
-    vec3 fc = flowerPalette(fk);
-    float dots = smoothstep(0.55, 0.75, vnoise(wp.xz * 4.5 + fk * 30.0));
-    vec3 bedC = mix(foliage, fc * 0.8, mix(0.28, dots * 0.9, nearF));
+    float bd = 1.0 - smoothstep(0.12, 0.5, fw);
+    vec3 bedC = vec3(0.07, 0.095, 0.04);
+    if (bd > 0.0 && border > 0.0) {
+      vec3 wv = worley2(wp.xz * 0.9);
+      vec3 fc = flowerPalette(fract(wv.z * 7.3));
+      float plant = 1.0 - smoothstep(0.3, 0.66, wv.x);
+      float bloom = smoothstep(0.5, 0.75, vnoise(wp.xz * 6.0 + wv.z * 20.0)) * step(0.55, fract(wv.z * 3.7));
+      vec3 foliage = mix(vec3(0.03, 0.07, 0.02), vec3(0.1, 0.16, 0.045), fract(wv.z * 3.1)) * (0.75 + 0.5 * vnoise(wp.xz * 4.0));
+      vec3 bedN = mix(vec3(0.09, 0.065, 0.045), mix(foliage, fc * 0.7, bloom * 0.7), plant);
+      float hedge = smoothstep(0.35, 0.42, e) * (1.0 - smoothstep(0.88, 0.95, e)) * (1.0 - median);
+      bedN = mix(bedN, vec3(0.035, 0.085, 0.022) * (0.8 + 0.4 * vnoise(wp.xz * 7.0)), hedge);
+      hg += vnoised(wp.xz * 4.0 + wv.z * 5.0).yz * 0.25 * bd * max(plant, hedge);
+      ao *= mix(1.0, 0.7 + 0.3 * plant, bd * (1.0 - hedge));
+      bedC = mix(bedC, bedN, bd);
+    }
     lawn = mix(lawn, bedC, border);
-    ao *= 1.0 - border * 0.25;
+    ao *= 1.0 - border * 0.2;
     float paved = max(onStreet * (1.0 - median), square);
     vec3 urbanC = mix(lawn, stone, paved);
     float uw = max(smoothstep(0.08, 0.4, urban), nearStreet) * wVeg * (1.0 - wRock * 0.7);
@@ -359,7 +464,7 @@ const PRE_AERIAL = /* glsl */ `
 `;
 
 export function createTerrainShaderMaterial(infoTex, natureTex, half) {
-  const uniforms = { uInfo: { value: infoTex }, uNature: { value: natureTex }, uInfoHalf: { value: half }, uBloom: NATURE_U.uBloom, uStreets: NATURE_U.uStreets, uStreetHalf: NATURE_U.uStreetHalf };
+  const uniforms = { uInfo: { value: infoTex }, uNature: { value: natureTex }, uInfoHalf: { value: half }, uBloom: NATURE_U.uBloom, uStreets: NATURE_U.uStreets, uStreetFrame: NATURE_U.uStreetFrame, uStreetHalf: NATURE_U.uStreetHalf };
   return patchedMaterial({ color: 0xffffff, roughness: 0.9, metalness: 0.0, envMapIntensity: 0.6 }, {
     key: 'terrain2',
     uniforms,

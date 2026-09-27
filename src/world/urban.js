@@ -37,6 +37,13 @@ export class StreetField {
     for (let i = 0; i < N * N; i++) { data[i * 4] = 255; data[i * 4 + 1] = 255; }
     this.data = data;
     this.bestC = new Float32Array(N * N).fill(1e9);   // |centre distance| of the street owning G
+    // street frame at half resolution, full float precision: R = metres along the owning
+    // street (arc length), G = signed metres across it (from its centreline). The terrain
+    // lays its paving courses, kerb joints and lawn stripes in this frame.
+    this.AN = N >> 1;
+    this.acell = (2 * this.half) / this.AN;
+    this.frameData = new Float32Array(this.AN * this.AN * 2);
+    this.bestA = new Float32Array(this.AN * this.AN).fill(1e9);
   }
 
   _range(x0, z0, x1, z1) {
@@ -47,7 +54,8 @@ export class StreetField {
     ];
   }
 
-  segment(ax, az, bx, bz, hw) {
+  segment(ax, az, bx, bz, hw, s0 = 0) {
+    this._frameSegment(ax, az, bx, bz, hw, s0);
     const { half, cell, N, data, bestC } = this;
     const pad = hw + E_RANGE;
     const [i0, i1, j0, j1] = this._range(Math.min(ax, bx) - pad, Math.min(az, bz) - pad, Math.max(ax, bx) + pad, Math.max(az, bz) + pad);
@@ -74,7 +82,41 @@ export class StreetField {
     }
   }
 
-  polyline(pts, hw) { for (let i = 0; i < pts.length - 1; i++) this.segment(pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1], hw); }
+  polyline(pts, hw) {
+    let s = 0;
+    for (let i = 0; i < pts.length - 1; i++) {
+      this.segment(pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1], hw, s);
+      s += Math.hypot(pts[i + 1][0] - pts[i][0], pts[i + 1][1] - pts[i][1]);
+    }
+  }
+
+  _frameSegment(ax, az, bx, bz, hw, s0) {
+    const { half, acell, AN, frameData, bestA } = this;
+    const pad = hw + 8;
+    const i0 = Math.max(0, Math.floor((Math.min(ax, bx) - pad + half) / acell - 0.5)), i1 = Math.min(AN - 1, Math.ceil((Math.max(ax, bx) + pad + half) / acell - 0.5));
+    const j0 = Math.max(0, Math.floor((Math.min(az, bz) - pad + half) / acell - 0.5)), j1 = Math.min(AN - 1, Math.ceil((Math.max(az, bz) + pad + half) / acell - 0.5));
+    const dx = bx - ax, dz = bz - az;
+    const L2 = dx * dx + dz * dz || 1e-9;
+    const L = Math.sqrt(L2);
+    for (let j = j0; j <= j1; j++) {
+      const pz = -half + (j + 0.5) * acell;
+      for (let i = i0; i <= i1; i++) {
+        const px = -half + (i + 0.5) * acell;
+        const tr = ((px - ax) * dx + (pz - az) * dz) / L2;
+        const t = tr < 0 ? 0 : tr > 1 ? 1 : tr;
+        const qx = ax + dx * t - px, qz = az + dz * t - pz;
+        const d = Math.sqrt(qx * qx + qz * qz);
+        const k = j * AN + i;
+        if (d < bestA[k]) {
+          bestA[k] = d;
+          // unclamped along/across stay linear past the segment ends, so the frame
+          // continues smoothly round bends and interpolates exactly
+          frameData[k * 2] = s0 + tr * L;
+          frameData[k * 2 + 1] = ((px - ax) * dz - (pz - az) * dx) / L;
+        }
+      }
+    }
+  }
 
   square(x, z, r) {
     const { half, cell, N, data } = this;
@@ -116,6 +158,17 @@ export class StreetField {
   centre(x, z) { return this._bilinear(x, z, 1) * (2 * E_RANGE / 255) - E_RANGE; }
   /** 0..1 inside paved squares. */
   squareAt(x, z) { return this._bilinear(x, z, 2) / 255; }
+
+  /** Street frame texture (RG32F, nearest: the shader filters it itself, at full precision). */
+  frameTexture() {
+    const t = new THREE.DataTexture(this.frameData, this.AN, this.AN, THREE.RGFormat, THREE.FloatType);
+    t.magFilter = t.minFilter = THREE.NearestFilter;
+    t.generateMipmaps = false;
+    t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping;
+    t.needsUpdate = true;
+    this.bestA = null;
+    return t;
+  }
 
   texture() {
     const t = new THREE.DataTexture(this.data, this.N, this.N, THREE.RGBAFormat, THREE.UnsignedByteType);

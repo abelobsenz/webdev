@@ -5,6 +5,7 @@
 export const NATURE_U = {
   uBloom: { value: 1.0 },          // how much of the flowering canopy is in bloom (0..1)
   uStreets: { value: null },       // town-plan street field (urban.js)
+  uStreetFrame: { value: null },   // street frame: metres along / across the owning street (urban.js)
   uStreetHalf: { value: 7200 },
 };
 
@@ -34,6 +35,31 @@ vec4 streetAt(vec2 p) {
   if (uv.x <= 0.0 || uv.y <= 0.0 || uv.x >= 1.0 || uv.y >= 1.0) return vec4(1.0, 1.0, 0.0, 0.0);
   return texture(uStreets, uv);
 }
+uniform sampler2D uStreetFrame;
+// (along, across) the owning street in metres, bilinear at full float precision. Where the
+// four texels belong to different streets (junctions) it keeps the nearest one: a clean seam
+// where the paving changes direction instead of a smear.
+// gAl / gAc: world-space (x, z) gradients of along / across (unit vectors on a straight street).
+vec2 streetFrameG(vec2 p, out vec2 gAl, out vec2 gAc) {
+  float n = float(textureSize(uStreetFrame, 0).x);
+  float k = n / (2.0 * uStreetHalf);
+  vec2 uv = clamp((p / (2.0 * uStreetHalf) + 0.5) * n - 0.5, vec2(0.0), vec2(n - 1.001));
+  vec2 i = floor(uv), f = uv - i;
+  ivec2 ii = ivec2(min(i, vec2(n - 2.0)));
+  vec2 a = texelFetch(uStreetFrame, ii, 0).rg;
+  vec2 b = texelFetch(uStreetFrame, ii + ivec2(1, 0), 0).rg;
+  vec2 c = texelFetch(uStreetFrame, ii + ivec2(0, 1), 0).rg;
+  vec2 d = texelFetch(uStreetFrame, ii + ivec2(1, 1), 0).rg;
+  vec2 lo = min(min(a, b), min(c, d)), hi = max(max(a, b), max(c, d));
+  vec2 dx = mix(b - a, d - c, f.y) * k, dz = mix(c - a, d - b, f.x) * k;
+  gAl = vec2(dx.x, dz.x); gAc = vec2(dx.y, dz.y);
+  if (max(hi.x - lo.x, hi.y - lo.y) > 14.0) {
+    gAl = vec2(0.0); gAc = vec2(0.0);
+    return f.x < 0.5 ? (f.y < 0.5 ? a : c) : (f.y < 0.5 ? b : d);
+  }
+  return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+}
+vec2 streetFrame(vec2 p) { vec2 g1, g2; return streetFrameG(p, g1, g2); }
 float streetEdge(vec4 s) { return s.r * 32.0 - 16.0; }
 float streetCentre(vec4 s) { return s.g * 32.0 - 16.0; }
 // approx. metres from the nearest walk centreline (a walk is 2.6 m to either side)
@@ -45,6 +71,14 @@ float pavedMask(vec2 p, float urban, float fw) {
   vec4 s = streetAt(p);
   float aa = max(fw, 0.12);
   return max(1.0 - smoothstep(-aa, aa, streetEdge(s)), smoothstep(0.3, 0.7, s.b));
+}
+
+// normal tilt across a bevelled edge at l in [0, L] (-1 at the start, +1 at the end)
+float nBevel(float l, float L, float w) { return (1.0 - smoothstep(0.0, w, L - l)) - (1.0 - smoothstep(0.0, w, l)); }
+// anti-aliased rectangle [a, b], footprint fw (roughly area-preserving)
+float fBoxT(vec2 p, vec2 a, vec2 b, float fw) {
+  vec2 i0 = smoothstep(a - fw, a + fw, p), i1 = 1.0 - smoothstep(b - fw, b + fw, p);
+  return i0.x * i0.y * i1.x * i1.y;
 }
 
 // Worley cells: x = F1 distance, y = F2 - F1 (edge distance), z = cell hash
