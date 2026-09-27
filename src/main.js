@@ -13,6 +13,8 @@ import { World } from './world/world.js';
 import { UI } from './ui/ui.js';
 import { POIS } from './ui/pois.js';
 import { AmbientAudio } from './ui/audio.js';
+import { PerfManager } from './core/perf.js';            // [experience] GPU timing + dynamic resolution
+import { loaderProgress, nextPaint } from './ui/loader.js'; // [experience] loader stages
 
 const smooth = (a, b, x) => { const t = Math.min(Math.max((x - a) / (b - a), 0), 1); return t * t * (3 - 2 * t); };
 const params = new URLSearchParams(location.search);
@@ -68,6 +70,10 @@ class App {
     });
     this.controls.wantLock = false;
     this.audio = new AmbientAudio();
+    // [experience] performance manager: measures GPU time per frame (EXT_disjoint_timer_query_webgl2)
+    // and drives dynamic resolution with hysteresis. It wraps frame() so the timer spans all GPU work.
+    this.perf = new PerfManager(this);
+    { const frame = this.frame.bind(this); this.frame = (dt) => { this.perf.begin(); frame(dt); this.perf.end(); }; }
     this.ui = new UI(this);
     const start = POIS[0];
     if (params.has('cam')) {
@@ -83,6 +89,7 @@ class App {
     this.updateSky(0);
     this.lighting.updateEnvironment(this.skyScene, this.skyState.sunDir, 0, true, this.skyDome.material);
     // warm up shader programs to avoid hitches on first view
+    progress(0.95, 'Compiling light and materials'); await nextPaint(); // [experience] show the last loader stage
     try { this.renderer.compile(this.scene, this.camera); this.renderer.compile(this.skyScene, this.skyCamera); } catch (e) { /* optional */ }
     if (params.has('capture')) {
       // deterministic stepping for automated captures
@@ -232,6 +239,7 @@ class App {
   }
 
   adaptResolution(dt) {
+    if (this.perf) { this.perf.adapt(dt); return; } // [experience] see src/core/perf.js
     if (params.has('capture')) return;
     this.frameTimes.push(dt);
     if (this.frameTimes.length < 90) return;
@@ -252,6 +260,7 @@ const status = document.getElementById('loader-status');
 function progress(p, msg) {
   if (bar) bar.style.transform = `scaleX(${p})`;
   if (status && msg) status.textContent = msg;
+  loaderProgress(p); // [experience]
 }
 
 async function boot() {

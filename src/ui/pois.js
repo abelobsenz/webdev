@@ -108,5 +108,7 @@ export const POIS = [
   },
 ];
 
-// Guided tour order
-export const TOUR = ['approach', 'axis', 'commons', 'crown', 'gardens', 'chorus', 'halcyon', 'lumen', 'cantor', 'gate', 'skyport', 'halo', 'lagoon', 'massif', 'highsky'];
+// Guided tour order: one day in the capital. It starts at the Axis in the late afternoon (where the
+// opening shot ends), follows dusk into night, cuts to the next dawn and runs through the day to a
+// golden-hour arrival from the sea, ending in the high sky. Any POI id can be added; unknown ids are skipped.
+export const TOUR = ['axis', 'crown', 'commons', 'halo', 'chorus', 'lagoon', 'halcyon', 'gardens', 'skyport', 'lumen', 'cantor', 'massif', 'approach', 'gate', 'highsky'];
