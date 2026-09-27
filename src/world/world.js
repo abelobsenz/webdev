@@ -7,6 +7,9 @@ import { buildAxis } from './axis.js';
 import { buildTowers } from './towers.js';
 import { buildLowrise } from './lowrise.js';
 import { TreeField } from './vegetation.js';
+import { planTrees } from './treePlanner.js';
+import { buildClearance } from './clearance.js';
+import { buildNature } from './nature.js';
 import { buildFloatingIslands } from './floating.js';
 import { INNER } from './terrain.js';
 import { buildInfrastructure, createBeacons } from './infrastructure.js';
@@ -114,19 +117,23 @@ export class World {
     this.lowrise = buildLowrise(this.scene, gh, this.towers, this.settings);
     this.updaters.push(this.lowrise);
     progress(0.55); await tick();
-    // Vegetation
-    this.trees = new TreeField(this.scene, this.settings);
-    this.trees.build(this.placeTrees());
-    this.updaters.push({ applyQuality: (s) => this.trees.applyQuality(s), update: (dt, t) => this.trees.update(dt, t, this.app.camera) });
-    progress(0.75); await tick();
-    // Floating gardens
-    this.floating = buildFloatingIslands(FLOATING_ISLANDS, this.scene, this.trees);
-    for (const tl of this.floating.treeLists) this.trees.buildLocal(tl.trees, tl.group);
-    this.updaters.push(this.floating);
-    progress(0.82); await tick();
     // Promenades, the Gate, lotus pads, skyport
     this.infra = buildInfrastructure(this.scene, gh, (x, z) => this.sampler.get(x, z));
     this.colliders.push(...this.infra.colliders);
+    progress(0.7); await tick();
+    // --- nature (vegetation after all architecture, so it can keep clear of it) ---
+    this.clearance = buildClearance(this.scene, (x, z) => this.sampler.get(x, z));
+    this.trees = new TreeField(this.scene, this.settings);
+    this.trees.build(this.placeTrees());
+    this.updaters.push({ applyQuality: (s) => this.trees.applyQuality(s), update: (dt, t) => this.trees.update(dt, t, this.app.camera) });
+    progress(0.78); await tick();
+    // Floating gardens
+    this.floating = buildFloatingIslands(FLOATING_ISLANDS, this.scene, this.trees);
+    for (const tl of this.floating.treeLists || []) this.trees.buildLocal(tl.trees, tl.group);
+    this.updaters.push(this.floating);
+    progress(0.82); await tick();
+    this.nature = buildNature(this);
+    // --- end nature ---
     // City life
     this.traffic = new Traffic(this.scene, this.settings);
     this.updaters.push(this.traffic);
@@ -145,65 +152,8 @@ export class World {
   }
 
   placeTrees() {
-    const rnd = mulberry32(2024);
-    const trees = [];
-    const { N } = this.info;
-    const half = INNER.half;
-    const cell = (2 * half) / N;
-    const free = (x, z, r) => this.lowrise.isFree(x, z, r);
-    const nearTower = (x, z) => this.towers.some((t) => Math.hypot(t.def.x - x, t.def.z - z) < (t.def.radius || 60) * 2.2 + 10);
-    const tint = () => [0.85 + rnd() * 0.3, 0.85 + rnd() * 0.35, 0.8 + rnd() * 0.3];
-    for (let j = 0; j < N; j++) {
-      for (let i = 0; i < N; i++) {
-        const k = j * N + i;
-        const f = this.info.forest[k];
-        const u = this.info.urban[k];
-        const x = -half + (i + rnd()) * cell, z = -half + (j + rnd()) * cell;
-        const rC = Math.hypot(x, z);
-        if (rC < PLAZA_R + 225) continue;
-        const h = this.sampler.get(x, z);
-        if (h < 1.3) continue;
-        let type = -1, s = 0;
-        if (h < 5.5 && rnd() < 0.16) { type = 1; s = 13 + rnd() * 9; }
-        else if (rnd() < f * 0.85) { type = 0; s = 11 + rnd() * 12; }
-        else if (u > 0.3 && rnd() < 0.06) { type = rnd() < 0.5 ? 2 : 0; s = 9 + rnd() * 8; }
-        if (type < 0) continue;
-        if (u > 0.2 && !free(x, z, 4)) continue;
-        if (nearTower(x, z)) continue;
-        trees.push({ x, y: h - 0.5, z, s, type, rot: rnd() * Math.PI * 2, tint: tint() });
-      }
-    }
-    // planted rings on the Axis plaza
-    for (const [rr, n, type] of [[235, 120, 2], [395, 190, 0], [250, 60, 0]]) {
-      for (let k = 0; k < n; k++) {
-        const a = (k / n) * Math.PI * 2;
-        if (Math.abs(((a * 12) / (Math.PI * 2)) % 1 - 0.5) < 0.12) continue; // keep avenues clear
-        const jr = rr + (rnd() - 0.5) * 30;
-        trees.push({ x: Math.cos(a) * jr, y: PLAZA_Y - 0.3, z: Math.sin(a) * jr, s: type === 2 ? 14 + rnd() * 5 : 12 + rnd() * 6, type, rot: rnd() * 6.28, tint: tint() });
-      }
-    }
-    // terraces descending from the plaza
-    for (let k = 0; k < 520; k++) {
-      const a = rnd() * Math.PI * 2, rr = PLAZA_R + 20 + rnd() * 180;
-      const x = Math.cos(a) * rr, z = Math.sin(a) * rr;
-      const y = rr < PLAZA_R + 45 ? PLAZA_Y - 3.5 : rr < PLAZA_R + 92 ? PLAZA_Y - 7 : rr < PLAZA_R + 145 ? PLAZA_Y - 10.5 : PLAZA_Y - 14;
-      trees.push({ x, y, z, s: 9 + rnd() * 9, type: rnd() < 0.3 ? 1 : 0, rot: rnd() * 6.28, tint: tint() });
-    }
-    // gardens on tower canopies and sky plates
-    for (const t of this.towers) {
-      const m = t.mesh; m.updateMatrixWorld();
-      const spots = [...(t.discs || []), ...(t.plates || []).map((p) => ({ x: 0, y: p.y, z: 0, r: p.r }))];
-      for (const d of spots) {
-        const n = Math.floor(d.r * d.r * 0.004) + 2;
-        for (let k = 0; k < n; k++) {
-          const rr = Math.sqrt(rnd()) * d.r * 0.85, a = rnd() * 6.28;
-          const lp = new THREE.Vector3(d.x + Math.cos(a) * rr, d.y, d.z + Math.sin(a) * rr).applyMatrix4(m.matrixWorld);
-          if (t.plates && Math.hypot(lp.x - t.def.x, lp.z - t.def.z) < (t.def.radius || 60) * 0.3) continue;
-          trees.push({ x: lp.x, y: lp.y, z: lp.z, s: 6 + rnd() * 6, type: 0, rot: rnd() * 6.28, tint: tint() });
-        }
-      }
-    }
-    return trees;
+    // species, habitats and clearance rules live in treePlanner.js
+    return planTrees(this);
   }
 
   groundHeight(x, z) {
