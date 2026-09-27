@@ -387,7 +387,7 @@ export class Water {
     renderer.setRenderTarget(this.reflRT);
     renderer.clear();
     this.reflRT.texture.generateMipmaps = false;   // only after the final scene draw
-    if (skyDomeMat) skyDomeMat.uniforms.uEnvMode.value = 1;
+    if (skyDomeMat) skyDomeMat.uniforms.uEnvMode.value = 2;   // mirrored sky: keeps the stars
     renderer.render(skyScene, sc);
     if (skyDomeMat) skyDomeMat.uniforms.uEnvMode.value = 0;
     // rendering agent: volumetric clouds over the mirrored sky (see Clouds.renderReflection)
