@@ -248,15 +248,17 @@ void main() {
   // perceptual falloff: sub-pixel lights lose energy gently (^1.5) so distant motorways
   // still read as threads of light, while close lights stay at their nominal level
   float ratio = min(1.0, proj / uMinPx);
-  I = min(I * 3.5 * ratio * sqrt(ratio), I * 1.2);
-  I *= (0.55 + 0.45 * night);
+  I = min(I * 2.4 * ratio * sqrt(ratio), I * 1.1);
+  I *= (0.5 + 0.5 * night);
+  // distant traffic settles into a faint haze of light instead of a field of dashes
+  I *= 1.0 - 0.8 * smoothstep(2500.0, 11000.0, d);
   I *= dot(extinction(p), vec3(0.3333));
   if (I < 0.004) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
   // screen-space streak along the motion
   vec3 vel = fwd * fr.speed * dir;
   vec4 c0 = projectionMatrix * viewMatrix * vec4(p, 1.0);
   // long-exposure feel at distance: far craft draw threads, near craft only a hint of blur
-  float streak = uStreak * mix(1.0, 16.0, smoothstep(300.0, 5500.0, d));
+  float streak = uStreak * mix(1.0, 5.0, smoothstep(300.0, 5500.0, d));
   vec4 c1 = projectionMatrix * viewMatrix * vec4(p - vel * streak, 1.0);
   if (c0.w <= 0.0) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
   vec2 res = uRes;
@@ -812,7 +814,7 @@ void main() {
     geo.setAttribute('aHoop', new THREE.InstancedBufferAttribute(hp, 2));
     const mat = patchedMaterial({ color: 0xffffff, roughness: 0.28, metalness: 0.55, envMapIntensity: 1.2 }, {
       key: 'lane-hoops',
-      vertex: { pars: 'attribute float aGlow; attribute vec2 aHoop; varying float vGlow; varying vec2 vHoop;', transform: 'vGlow = aGlow; vHoop = aHoop;' },
+      vertex: { pars: 'attribute float aGlow; attribute vec2 aHoop; varying float vGlow; varying vec2 vHoop;', transform: 'vGlow = aGlow; vHoop = aHoop;\n#ifdef USE_INSTANCING\nif (distance(instanceMatrix[3].xyz, cameraPosition) > 2600.0) transformed *= 0.0;\n#endif' },
       fragment: {
         pars: 'varying float vGlow; varying vec2 vHoop;',
         color: 'diffuseColor.rgb = mix(vec3(0.9, 0.89, 0.86), vec3(0.08), step(0.25, vGlow));',
@@ -824,7 +826,7 @@ void main() {
   float dist = distance(vWPos, cameraPosition);
   float far = 1.0 - smoothstep(700.0, 1800.0, dist);
   float ringFar = 1.0 - smoothstep(250.0, 700.0, dist);
-  float ring = step(0.75, vGlow) * (0.1 + 0.5 * uCityLights * (0.3 + 0.7 * chase)) * ringFar;
+  float ring = step(0.75, vGlow) * (0.02 + 0.45 * uCityLights * (0.3 + 0.7 * chase)) * ringFar;
   float pod = step(0.25, vGlow) * step(vGlow, 0.75) * (0.3 + 1.2 * uCityLights) * (0.6 + 0.4 * sin(uTime * 2.0 + vHoop.x * 0.01)) * far;
   totalEmissiveRadiance += col * (ring + pod);
 }`,
@@ -1022,7 +1024,7 @@ void main() {
     // quieter skies in the small hours
     const h = app ? app.hours : 12;
     const lull = (h > 1.5 && h < 5) ? 0.55 : (h > 0.5 && h < 6) ? 0.75 : 1.0;
-    const d = Math.round((this.settings.traffic ?? 1) * lull * 100) / 100;
+    const d = Math.round((this.settings.traffic ?? 1) * lull * 0.7 * 100) / 100;
     if (d !== this.density) {
       this.density = d;
       for (const cls of CLASSES) {
