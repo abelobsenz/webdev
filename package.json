@@ -2,12 +2,14 @@
   "name": "meridian",
   "private": true,
   "version": "1.0.0",
-  "description": "MERIDIAN — an explorable real-time 3D vision of humanity's capital city in the year 5026.",
+  "description": "MERIDIAN \u2014 an explorable real-time 3D vision of humanity's capital city in the year 5026.",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "artifact": "vite build && node scripts/make-artifact.mjs",
+    "capture": "node tools/capture.mjs"
   },
   "dependencies": {
     "three": "0.186.1"
