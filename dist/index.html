@@ -10316,8 +10316,11 @@ void main() {
   if (any(isnan(st)) || any(isinf(st))) st = sh;
   vec2 dv = sh - st;
   float len = length(dv);
-  if (len > 48.0) { st = sh - dv / len * 48.0; len = 48.0; }
+  // unit direction from the full offset, BEFORE capping the length: dividing the uncapped
+  // offset by the capped length gave a "direction" up to ~70x too long, and the quad's
+  // width and end caps scale with it (the tan rectangle seen in orbit)
   vec2 dir = len > 0.5 ? dv / len : vec2(1.0, 0.0);
+  if (len > 48.0) { st = sh - dir * 48.0; len = 48.0; }
   vec2 perp = vec2(-dir.y, dir.x);
   float w = uPx;
   // quad: x = 0 tail .. 1 head (extended by a pixel for a round head), y = -1..1
