@@ -22,7 +22,8 @@ vec3 prefilter(vec3 c) {
   float contrib = max(soft, br - uThreshold) / max(br, 1e-4);
   return c * contrib;
 }
-vec3 s(vec2 o) { return min(texture(tSrc, vUv + o * uTexel).rgb, vec3(6e4)); }
+// sanitise: a NaN/Inf pixel must never bleed through the whole bloom chain
+vec3 s(vec2 o) { vec3 c = texture(tSrc, vUv + o * uTexel).rgb; return (any(isnan(c)) || any(isinf(c))) ? vec3(0.0) : min(max(c, 0.0), vec3(6e4)); }
 void main() {
   vec3 a = s(vec2(-2, 2)), b = s(vec2(0, 2)), c = s(vec2(2, 2));
   vec3 d = s(vec2(-2, 0)), e = s(vec2(0, 0)), f = s(vec2(2, 0));
@@ -194,7 +195,9 @@ void main() {
   vec2 puv = pc.xy / pc.w * 0.5 + 0.5;
   bool valid = pc.w > 0.0 && all(greaterThan(puv, vec2(0.0))) && all(lessThan(puv, vec2(1.0)));
   vec4 h = clamp(texture(tHist, puv), mn, mx);
-  gl_FragColor = mix(h, c, valid ? uBlend : 1.0);
+  if (any(isnan(h)) || any(isinf(h))) h = c;     // never let a bad sample live in the history
+  vec4 o = mix(h, c, valid ? uBlend : 1.0);
+  gl_FragColor = (any(isnan(o)) || any(isinf(o))) ? vec4(0.0, 0.0, 0.0, 1.0) : o;
 }
 `;
 
@@ -411,7 +414,7 @@ void main() {
   } else {
     col = texture(tHDR, uv).rgb;
   }
-  col = min(col, vec3(6e4));
+  col = (any(isnan(col)) || any(isinf(col))) ? vec3(0.0) : min(max(col, 0.0), vec3(6e4));
   if (uAO > 0.0) col *= mix(1.0, texture(tAO, uv).r, uAO);
   // volumetric shafts: remove the in-scatter of shadowed air, add a touch to lit air
   if (uShaftDark > 0.0) {

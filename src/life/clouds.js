@@ -198,7 +198,9 @@ void main() {
   // widen the clamp box a little: the per-pixel noise is high, cloud motion is slow
   vec4 ext = (mx - mn) * 0.25;
   h = clamp(h, mn - ext, mx + ext);
-  gl_FragColor = mix(h, c, valid ? uBlend : 1.0);
+  if (any(isnan(h)) || any(isinf(h))) h = c;     // never let a bad sample live in the history
+  vec4 o = mix(h, c, valid ? uBlend : 1.0);
+  gl_FragColor = (any(isnan(o)) || any(isinf(o))) ? vec4(0.0, 0.0, 0.0, 1.0) : o;
 }
 `;
 
