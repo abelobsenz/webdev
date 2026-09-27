@@ -109,8 +109,11 @@ void main() {
   // city lights along the coasts and in the crater valleys
   float night = 1.0 - smoothstep(-0.08, 0.06, ndl);
   float coastBand = 1.0 - smoothstep(0.0, 0.08, abs(sea + coast - 0.5));
-  float cells = step(0.55, hash13(floor(p * 220.0))) * smoothstep(0.5, 0.85, snoise(p * 22.0) * 0.5 + 0.5);
-  float towns = (coastBand * 0.9 + (1.0 - seaF) * 0.15 * step(0.75, hash13(floor(p * 30.0)))) * cells;
+  // town lights: individual towns where they are resolved, their mean glow where they are not
+  float cellsD = 1.0 - smoothstep(0.11, 0.33, length(fwidth(p * 220.0)));   // cells >= 3 px
+  float cells = mix(0.45, step(0.55, hash13(floor(p * 220.0))), cellsD) * smoothstep(0.5, 0.85, snoise(p * 22.0) * 0.5 + 0.5);
+  float villD = 1.0 - smoothstep(0.11, 0.33, length(fwidth(p * 30.0)));
+  float towns = (coastBand * 0.9 + (1.0 - seaF) * 0.15 * mix(0.25, step(0.75, hash13(floor(p * 30.0))), villD)) * cells;
   towns *= 1.0 + 1.5 * step(0.0, p.x);          // most people live facing home
   col += vec3(1.0, 0.7, 0.42) * towns * night * (1.0 - cl * 0.8) * 0.5;
   gl_FragColor = vec4(col, 1.0);

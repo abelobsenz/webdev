@@ -11,11 +11,20 @@ const TETHER_FRAG = /* glsl */ `
 void main() {
   vec3 sunL = spaceSunlight(uTransmittanceLUT, vWorld, uSunDir) * uSunE;
   float alt = vData.x;
-  vec3 col = vec3(0.6, 0.62, 0.66) * sunL * 0.06 + vec3(0.03, 0.045, 0.07);
-  float beacon = step(0.96, fract(alt / 250.0)) * (0.6 + 0.4 * sin(uTime * 3.0 + alt));
+  float fa = max(fwidth(alt), 1e-3);                     // km of tether per pixel
+  // a thin cylinder catches the most light when the Sun is square to it
+  vec3 tdir = normalize(vWorld);
+  float cs = dot(tdir, uSunDir);
+  float sq = sqrt(max(1.0 - cs * cs, 0.0));
+  vec3 col = vec3(0.6, 0.62, 0.66) * sunL * (0.025 + 0.07 * sq) + vec3(0.03, 0.045, 0.07);
+  // beacons every 250 km (5 km long), energy-conserving once they are under a pixel, slow glow
+  float bd = abs(fract(alt / 250.0 + 0.5) - 0.5) * 250.0;
+  float beacon = clamp(1.0 - bd / max(5.0, fa), 0.0, 1.0) * min(1.0, 5.0 / fa) * (0.75 + 0.25 * sin(uTime * 0.7 + floor(alt / 250.0)));
   col += vec3(1.0, 0.72, 0.4) * beacon * 1.5;
-  // faint glow sheath where the tether carries power
-  col += vec3(0.35, 0.6, 1.0) * 0.08;
+  // the power sheath: a faint blue glow with soft pulses climbing toward the Harbour
+  float pp = fract(alt / 1500.0 - uTime * 0.02) - 0.5;
+  float pulse = mix(0.07, exp(-pp * pp * 600.0), 1.0 - smoothstep(15.0, 60.0, fa));
+  col += vec3(0.35, 0.6, 1.0) * (0.06 + 0.45 * pulse);
   float fade = smoothstep(0.0, 3.0, alt);
   gl_FragColor = vec4(col * vCoverage * fade, 0.0);
 }
