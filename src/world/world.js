@@ -15,6 +15,7 @@ import { TreeField } from './vegetation.js';
 import { planTrees } from './treePlanner.js';
 import { buildClearance } from './clearance.js';
 import { buildNature } from './nature.js';
+import { GroundCover, buildHedges } from './groundCover.js';
 import { buildFloatingIslands } from './floating.js';
 import { INNER } from './terrain.js';
 import { buildInfrastructure, createBeacons } from './infrastructure.js';
@@ -158,6 +159,12 @@ export class World {
     this.updaters.push(this.floating);
     progress(0.82); await tick();
     this.nature = buildNature(this);
+    // living ground cover: 3D grass on the lawns and grassland, flowers in the beds and
+    // drifts, leafy perennials in the verge beds, and clipped hedges along the kerbs
+    this.groundCover = new GroundCover(this, this.settings);
+    this.updaters.push({ applyQuality: (s) => this.groundCover.applyQuality(s), update: (dt, t) => this.groundCover.update(dt, t, this.app.camera) });
+    this.hedges = buildHedges(this);
+    this.updaters.push({ update: () => this.app.camera && this.hedges.update(this.app.camera) });
     // --- end nature ---
     // City life
     this.traffic = new Traffic(this.scene, this.settings, this);   // citylife: world passed for lane clearance + docks
