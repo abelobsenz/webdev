@@ -337,7 +337,10 @@ void main() {
     float hsh = hash13(cell + floor(uTime * 1.7));
     float flash = step(0.9975, hsh) * smoothstep(0.55, 0.9, cA) * nightC;
     flash *= 0.5 + 0.5 * sin(uTime * 40.0 + hsh * 60.0);
-    cloudCol += vec3(0.75, 0.82, 1.0) * flash * 3.0;
+    // only where a storm cell spans a few pixels: from high orbit single-pixel strikes
+    // read as random flashing lights
+    flash *= 1.0 - smoothstep(6.0, 16.0, fpC);
+    cloudCol += vec3(0.75, 0.82, 1.0) * flash * 1.6;
     // faint moonlight
     cloudCol += vec3(0.5, 0.6, 0.8) * 0.004 * max(dot(nC, uMoonDir), 0.0) * nightC;
   }

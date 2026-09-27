@@ -39,7 +39,7 @@ void main() {
   float spots = smoothstep(0.62, 0.72, snoise(p * 7.0 + 3.0) * 0.5 + 0.5) * smoothstep(0.55, 0.2, abs(p.y));
   float fac = smoothstep(0.55, 0.62, snoise(p * 7.0 + 3.0) * 0.5 + 0.5) * (1.0 - spots);
   vec3 col = vec3(1.0, 0.95, 0.88) * limb * (1.0 + 0.12 * g) * (1.0 - 0.75 * spots) * (1.0 + 0.4 * fac * (1.0 - mu));
-  gl_FragColor = vec4(col * uSunE * 2600.0 * uDim, 1.0);
+  gl_FragColor = vec4(col * uSunE * 2600.0 * uDim, 0.0);   // the Sun never occludes its own glare
 }
 `;
 

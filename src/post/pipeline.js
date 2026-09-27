@@ -346,6 +346,8 @@ uniform vec3 uGlare;         // analytic sun glare (HDR colour x strength); zero
 uniform vec2 uGlareUV;       // the Sun's position in uv, may lie well off screen
 uniform float uGlareFov;     // vertical field of view (radians)
 uniform float uGhosts;       // lens ghost strength
+uniform float uGlareR;       // the solar disc's radius (uv height units)
+uniform float uGlareMask;    // 1: hdr alpha marks solid geometry, which hides the Sun and its glare
 uniform vec4 uOcc1;          // occluding spheres for the glare (view-space centre, radius):
 uniform vec4 uOcc2;          //   the Earth and the Moon block rays drawn across their discs
 uniform vec2 uTanHalf;       // tan of the half field of view (x, y)
@@ -468,7 +470,26 @@ void main() {
     float spikes = (pow(abs(cos(a * 3.0 + 0.3)), 90.0) + 0.6 * pow(abs(cos(a * 3.0 + 1.35)), 140.0)) * exp(-th * 30.0) * 0.35;
     vec3 vd = normalize(vec3((uv * 2.0 - 1.0) * uTanHalf, -1.0));
     float occ = max(occludedBy(uOcc1, vd), occludedBy(uOcc2, vd));
-    col += uGlare * (g + spikes) * (1.0 - 0.94 * occ);
+    // the Sun sits behind everything: how much of its disc the scene covers dims the whole
+    // glare, and solid geometry takes almost none of it (the flare is not painted over a
+    // station or a ship that stands in front of the Sun)
+    float sunVis = 1.0, pixK = 1.0;
+    if (uGlareMask > 0.0) {
+      vec2 su = uGlareUV;
+      if (su.x > 0.0 && su.x < 1.0 && su.y > 0.0 && su.y < 1.0) {
+        vec2 rr = vec2(uGlareR * uRes.y / uRes.x, uGlareR);
+        float cov = texture(tHDR, su).a;
+        for (int i = 0; i < 8; i++) {
+          float an = float(i) * 0.7853982;
+          cov += texture(tHDR, su + vec2(cos(an), sin(an)) * rr).a;
+        }
+        // fade the measurement out at the frame edge (taps would clamp to the border)
+        float edge = smoothstep(0.0, 0.02, min(min(su.x, 1.0 - su.x), min(su.y, 1.0 - su.y)));
+        sunVis = 1.0 - clamp(cov / 9.0, 0.0, 1.0) * edge;
+      }
+      pixK = mix(1.0, 0.06, clamp(texture(tHDR, uv).a, 0.0, 1.0));
+    }
+    col += uGlare * (g + spikes) * (1.0 - 0.94 * occ) * sunVis * pixK;
     if (uGhosts > 0.0) {
       vec2 axis = vec2(0.5) - uGlareUV;
       float onScreen = 1.0 - smoothstep(0.55, 0.9, max(abs(uGlareUV.x - 0.5), abs(uGlareUV.y - 0.5)));
@@ -486,7 +507,7 @@ void main() {
       // a faint halo ring round the centre
       float ring = exp(-pow(abs(length((uv - 0.5) * asp) - 0.42) / 0.012, 2.0)) * 0.25;
       gh += vec3(0.6, 0.8, 1.0) * ring * smoothstep(0.6, 0.0, length(uv - uGlareUV));
-      col += uGlare * gh * uGhosts * onScreen;
+      col += uGlare * gh * uGhosts * onScreen * sunVis;
     }
   }
   if (uStreak > 0.0) col += texture(tStreak, uv).rgb * uStreak * vec3(0.55, 0.75, 1.0);
@@ -703,7 +724,7 @@ export class Pipeline {
       uShaftColor: { value: new THREE.Color() }, uShaftDark: { value: 0 }, uShaftLit: { value: 0 }, uStreak: { value: 0 }, uDirt: { value: 0 },
       uHLKnee: { value: 1.5 }, uHLSlope: { value: 1 }, uHLLocal: { value: 0.35 }, tBloomLocal: { value: this.bloomRTs[3].texture }, tAO: { value: black }, uAO: { value: 0 },
       uTime: { value: 0 }, uRes: { value: new THREE.Vector2() }, uVignette: { value: 0.3 }, uGrain: { value: 0.02 }, uCA: { value: 0.0015 },
-      uFlare: { value: 0.0 }, uSun: { value: new THREE.Vector2() }, uSunVis: { value: 0 }, uGlare: { value: new THREE.Vector3() }, uGlareUV: { value: new THREE.Vector2() }, uGlareFov: { value: 1 }, uGhosts: { value: 0 }, uSharpen: { value: 0 }, uOcc1: { value: new THREE.Vector4() }, uOcc2: { value: new THREE.Vector4() }, uTanHalf: { value: new THREE.Vector2(1, 1) },
+      uFlare: { value: 0.0 }, uSun: { value: new THREE.Vector2() }, uSunVis: { value: 0 }, uGlare: { value: new THREE.Vector3() }, uGlareUV: { value: new THREE.Vector2() }, uGlareFov: { value: 1 }, uGhosts: { value: 0 }, uGlareR: { value: 0.005 }, uGlareMask: { value: 0 }, uSharpen: { value: 0 }, uOcc1: { value: new THREE.Vector4() }, uOcc2: { value: new THREE.Vector4() }, uTanHalf: { value: new THREE.Vector2(1, 1) },
       uLift: { value: new THREE.Vector3(0, 0, 0) }, uGain: { value: new THREE.Vector3(1, 1, 1) },
       uSaturation: { value: 1.15 }, uContrast: { value: 1.08 }, uLdrOut: { value: 0 },
     });

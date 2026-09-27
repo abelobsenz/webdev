@@ -352,8 +352,11 @@ export class SpaceMode {
       this.sky.visible = !this.hearth.nearZone || !this.hearth.active;
     }
     r.setRenderTarget(p.hdrRT);
-    r.setClearColor(0x000000, 1);
+    // alpha starts at 0 and only solid geometry writes 1: the final pass reads it as a
+    // coverage mask, so the Sun's glare sits behind stations, ships and planets
+    r.setClearColor(0x000000, 0);
     r.clear();
+    r.setClearColor(0x000000, 1);
     const prevAuto = r.autoClear;
     r.autoClear = false;
     // backdrop: stars, Sun, far swarm, and the Hearth's lensed image
@@ -455,6 +458,9 @@ export class SpaceMode {
     f.uFlare.value = 0;
     f.uGlareUV.value.copy(g.uv);
     f.uGlareFov.value = THREE.MathUtils.degToRad(cam.fov);
+    // the solar disc's radius in uv-height units (at least a pixel and a half)
+    f.uGlareR.value = Math.max(Math.atan(696000 / Math.max(this.sim.sunPos.distanceTo(cam.position), 1)) / (2 * Math.tan(THREE.MathUtils.degToRad(cam.fov) * 0.5)), 1.5 / Math.max(this.size.y, 1));
+    f.uGlareMask.value = 1;
     const E = U.uSunIlluminance.value * g.vis * (this.skyDim ?? 1);
     f.uGlare.value.set(1.0, 0.93, 0.84).multiplyScalar(this.app.settings.bloom ? E * 0.6 : E * 0.2);
     f.uGhosts.value = this.app.settings.bloom ? 0.012 : 0;

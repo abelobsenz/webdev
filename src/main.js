@@ -232,7 +232,7 @@ class App {
     p.downMat.uniforms.uThreshold.value = 1.1 / exposure;
     p.downMat.uniforms.uKnee.value = 0.7 / exposure;
     p.downMat.uniforms.uClamp.value = 6e4;
-    p.finalMat.uniforms.uGlare.value.set(0, 0, 0);
+    p.finalMat.uniforms.uGlare.value.set(0, 0, 0); p.finalMat.uniforms.uGlareMask.value = 0;
     p.finalMat.uniforms.uTime.value = this.elapsed;
     p.renderBloom();
     // rendering agent: auto exposure adapts around the designed time-of-day curve
