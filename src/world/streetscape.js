@@ -50,7 +50,7 @@ function mergeParts(list) {
 
 function lampMaterial() {
   return patchedMaterial({ color: 0xffffff, roughness: 0.38, metalness: 0.85, envMapIntensity: 0.9 }, {
-    key: 'streetlamp',
+    key: 'streetlamp2',
     vertex: {
       pars: 'attribute float aPart; varying float vPart; varying float vLampSeed;',
       transform: /* glsl */ `
@@ -64,13 +64,28 @@ vLampSeed = 0.5;
 `,
     },
     fragment: {
-      pars: 'varying float vPart; varying float vLampSeed;',
-      color: 'diffuseColor.rgb = mix(vec3(0.22, 0.17, 0.12), vec3(0.92, 0.9, 0.86), vPart);',
-      surface: 'roughnessFactor = mix(roughnessFactor, 0.6, vPart); metalnessFactor = mix(metalnessFactor, 0.0, vPart);',
+      pars: 'varying float vPart; varying float vLampSeed; float lpRough; float lpMetal;',
+      color: /* glsl */ `
+{
+  // cast bronze, brushed along the post, a verdigris bloom toward the foot; opal diffuser
+  vec2 rd = vObjPos.xz / max(length(vObjPos.xz), 1e-4);               // seam-free round the post
+  float br = vnoise3(vec3(rd * 1.0, vObjPos.y * 40.0));
+  float pat = smoothstep(0.55, 0.85, vnoise3(vec3(rd * 0.35, vObjPos.y * 3.0) + vLampSeed * 9.0)) * (1.0 - smoothstep(0.2, 1.6, vObjPos.y));
+  vec3 bronze = vec3(0.22, 0.17, 0.12) * (0.85 + 0.3 * br);
+  bronze = mix(bronze, vec3(0.2, 0.3, 0.26), pat * 0.7);
+  diffuseColor.rgb = mix(bronze, vec3(0.92, 0.9, 0.86), vPart);
+  lpRough = mix(0.32 + 0.12 * br + 0.35 * pat, 0.6, vPart);
+  lpMetal = mix(0.85 * (1.0 - pat * 0.8), 0.0, vPart);
+}`,
+      surface: 'roughnessFactor = lpRough; metalnessFactor = lpMetal;',
       emissive: /* glsl */ `
 {
   vec3 warm = mix(vec3(1.0, 0.72, 0.45), vec3(1.0, 0.82, 0.62), vLampSeed);
-  totalEmissiveRadiance += warm * vPart * uCityLights * 2.6;
+  // the diffuser glows brightest in a ring round its centre
+  float rr = length(vObjPos.xz);
+  float rq = (rr - 0.3) / 0.12;
+  float ringG = 0.7 + 0.5 * exp(-rq * rq);
+  totalEmissiveRadiance += warm * vPart * uCityLights * 2.6 * ringG;
 }`,
     },
   });

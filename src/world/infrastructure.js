@@ -25,7 +25,8 @@ function extrudeAlong(path, section, kindFn) {
       if (i > 0) { const q = section[i - 1]; per += Math.hypot(s[0] - q[0], s[1] - q[1]); }
       const p = path[j];
       pos.push(p.x + side.x * s[0] + u2.x * s[1], p.y + side.y * s[0] + u2.y * s[1], p.z + side.z * s[0] + u2.z * s[1]);
-      fac.push(len, per, kindFn ? kindFn(i % n) : 1);
+      const kind = kindFn ? kindFn(i % n) : 1;
+      fac.push(len, kind === 15 ? s[0] : per, kind);
     }
   }
   const cols = n + 1;
@@ -128,7 +129,7 @@ function station(parts, c, t, side, base, entry, groundLo) {
     const s = iu * 2 - 1, a = iv * Math.PI;
     const f = pod(s);
     return P(s * L / 2, Math.cos(a) * W * f, 0.4 + Math.pow(Math.sin(a), 0.85) * H * f).toArray();
-  }, 2, [L, 30]));
+  }, 14, [L, 30]));
   // ribs: bone-white arches, fanning slightly toward the nose
   for (let k = -7; k <= 7; k++) {
     const s = k / 7.6;
@@ -192,7 +193,18 @@ function buildPromenades(groundHeight) {
   const paths = [];
   const lamps = [];
   const stations = [];
-  const deckSection = [[-14, 0], [-14.5, 1.2], [-13.6, 1.4], [-13, 0.2], [13, 0.2], [13.6, 1.4], [14.5, 1.2], [14, 0], [11, -3.2], [-11, -3.2]].reverse();
+  // Deck cross-section [side, up, facade kind], wound so its faces point outward: sculpted
+  // parapets with a glowing crest, a clipped hedge along each side (the lamps stand in it) and
+  // a paved walkway between (kind 15: its facade v is the lateral offset from the deck's axis).
+  // Points repeat where the kind changes so every face has one kind.
+  const deckSection = [
+    [-14.0, 0.0, 1], [-14.5, 1.2, 1], [-14.5, 1.2, 2], [-13.6, 1.4, 2], [-13.6, 1.4, 1], [-13.0, 0.75, 1],
+    [-13.0, 0.75, 3], [-12.8, 1.45, 3], [-11.8, 1.62, 3], [-10.85, 1.45, 3], [-10.6, 0.75, 3], [-10.6, 0.75, 1], [-10.4, 0.2, 1],
+    [-10.4, 0.2, 15], [10.4, 0.2, 15],
+    [10.4, 0.2, 1], [10.6, 0.75, 1], [10.6, 0.75, 3], [10.85, 1.45, 3], [11.8, 1.62, 3], [12.8, 1.45, 3], [13.0, 0.75, 3],
+    [13.0, 0.75, 1], [13.6, 1.4, 1], [13.6, 1.4, 2], [14.5, 1.2, 2], [14.5, 1.2, 1], [14.0, 0.0, 1],
+    [11.0, -3.2, 1], [-11.0, -3.2, 1],
+  ];
   const ss = (a, b, x) => { const t = Math.min(Math.max((x - a) / (b - a), 0), 1); return t * t * (3 - 2 * t); };
   for (const isl of ISLANDS) {
     const ax = promenadeAxis(isl);
@@ -210,13 +222,16 @@ function buildPromenades(groundHeight) {
       const sway = 70 * Math.sin(2 * Math.PI * t) * Math.sin(Math.PI * t);
       const x = dir.x * d + perp.x * sway, z = dir.y * d + perp.y * sway;
       const g0 = groundHeight(x, z);
-      let y = (PLAZA_Y - 0.2) * (1 - t) + (gL + 0.05) * t + 28 * Math.sin(Math.PI * t) + 5 * ss(0, 0.06, t) * (1 - ss(0.78, 1, t));
+      // the walking surface (path + 0.2) starts 35 cm proud of the plaza, a raised
+      // promenade with its own kerb step: starting flush, it rose so gently that deck and
+      // plaza stayed coplanar for tens of metres and z-fought
+      let y = (PLAZA_Y + 0.15) * (1 - t) + (gL + 0.05) * t + 28 * Math.sin(Math.PI * t) + 5 * ss(0, 0.06, t) * (1 - ss(0.78, 1, t));
       if (t < 0.9) y = Math.max(y, g0 + 6);
       else y = Math.max(y, g0 + 0.2 + 5.8 * ss(1, 0.9, t));
       path.push(new THREE.Vector3(x, y, z));
     }
     paths.push(path);
-    parts.push(extrudeAlong(path, deckSection, (i) => (i === 5 || i === 6 ? 3 : (i === 3 || i === 4 || i === 7 || i === 8) ? 2 : 1)));
+    parts.push(extrudeAlong(path, deckSection, (i) => deckSection[i][2]));
     // maglev tube along the outer edge
     // (it swings out from 17 m to 30 m off the deck axis near each end, into its terminal)
     const tube = path.map((p, i) => {
@@ -224,7 +239,7 @@ function buildPromenades(groundHeight) {
       const lat = 17 + 13 * (ss(0.1, 0.0, t) + ss(0.9, 1.0, t));
       return p.clone().addScaledVector(frameAt(path, i).side, lat).add(new THREE.Vector3(0, 2.5, 0));
     });
-    parts.push(sweepTube(tube, () => 3.0, 12, { kind: 4 }));
+    parts.push(sweepTube(tube, () => 3.0, 12, { kind: 13 }));
     // piers with lotus capitals where the deck flies
     for (let k = 6; k < N - 3; k += 10) {
       const p = path[k];
@@ -246,8 +261,9 @@ function buildPromenades(groundHeight) {
     // square's platform, with the pod reaching on into town.
     {
       const e0 = tube[1].clone().setY(0), c0 = e0.clone().addScaledVector(f0.t, -(33 - 5));
-      station(parts, c0, f0.t, f0.side, PLAZA_Y, 1, PLAZA_Y - 4);
-      stations.push({ x: c0.x, z: c0.z, r: 42, y: PLAZA_Y, end: 'plaza', island: isl.id });
+      // on a 30 cm plinth, never flush with the plaza paving (coplanar tops z-fought)
+      station(parts, c0, f0.t, f0.side, PLAZA_Y + 0.3, 1, PLAZA_Y - 4);
+      stations.push({ x: c0.x, z: c0.z, r: 42, y: PLAZA_Y + 0.3, end: 'plaza', island: isl.id });
       const e1 = tube[N - 1].clone().setY(0), c1 = e1.clone().addScaledVector(f1.t, 33 - 5);
       let lo = 1e9, hi = -1e9;
       for (let u = -40; u <= 40; u += 8) for (let v = -18; v <= 18; v += 6) {
@@ -404,17 +420,40 @@ function buildSkyport() {
   return { geo: g, berths };
 }
 
-// Elegant starship hull (used for docked and travelling ships)
-export function shipGeometry(len = 1) {
+// Elegant starship hull (used for docked and travelling ships). The model is built at unit
+// length; its facade coordinates are laid out in metres for a ship of `facadeLen` so the hull
+// plating, the window bands along both flanks and the lantern ring have real proportions
+// whatever the instance scale.
+export function shipGeometry(len = 1, facadeLen = 130) {
   const prof = [];
   for (let i = 0; i <= 24; i++) {
     const t = i / 24;
     const r = 0.11 * Math.pow(Math.sin(Math.PI * Math.pow(t, 0.7)), 0.8) * (1 + 0.25 * Math.exp(-Math.pow((t - 0.75) / 0.08, 2)));
-    prof.push({ r: r + 0.002, y: t - 0.5, kind: t > 0.72 && t < 0.8 ? 2 : t < 0.08 ? 4 : 0 });
+    prof.push({ r: r + 0.002, y: t - 0.5, kind: t > 0.72 && t < 0.8 ? 2 : t < 0.08 ? 4 : 1 });
   }
-  const g = latheFacade(prof, 24, { sx: 1, sz: 0.55 });
+  const seg = 24;
+  const g = latheFacade(prof, seg, { sx: 1, sz: 0.55 });
+  {
+    const P = g.attributes.position, F = g.attributes.aFacade;
+    for (let j = 0; j < prof.length; j++) {
+      for (let i = 0; i <= seg; i++) {
+        const k = j * (seg + 1) + i;
+        const x = P.getX(k), y = P.getY(k), z = P.getZ(k);
+        const r = Math.hypot(x, z / 0.55);
+        const a = (i / seg) * Math.PI * 2;
+        const t = y + 0.5;
+        // window bands along both flanks of the habitable midsection
+        const flank = (i % 12 === 0 || i % 12 === 1 || i % 12 === 11) && t > 0.18 && t < 0.7;
+        F.setXYZ(k, a * r * facadeLen, y * facadeLen, flank ? 0 : F.getZ(k));
+      }
+    }
+  }
   // fins
   const fin = latheFacade([{ r: 0.001, y: -0.5 }, { r: 0.2, y: -0.35 }, { r: 0.12, y: -0.1 }, { r: 0.001, y: 0.05 }].map((p) => ({ ...p, kind: 1 })), 3, { sx: 1, sz: 0.04 });
+  {
+    const F = fin.attributes.aFacade;
+    for (let k = 0; k < F.count; k++) F.setXY(k, F.getX(k) * facadeLen * 0.2, F.getY(k) * facadeLen);
+  }
   const m = mergeClean([g, fin]);
   m.rotateX(Math.PI / 2); // length along +Z
   m.scale(len, len, len);
@@ -480,7 +519,7 @@ export function buildInfrastructure(scene, groundHeight, rawHeight) {
   skyport.castShadow = true; skyport.receiveShadow = true;
   scene.add(skyport);
   // docked ships
-  const shipMat = createFacadeMaterial('pearl', 404, { litFrac: 0.8 });
+  const shipMat = createFacadeMaterial('pearl', 404, { litFrac: 0.8, band: 1e5, colW: 2.6, floorH: 3.2, uplight: 0 });
   const docked = new THREE.InstancedMesh(shipGeometry(1), shipMat, sp.berths.length);
   const m4 = new THREE.Matrix4(), q = new THREE.Quaternion();
   sp.berths.forEach((b, i) => {

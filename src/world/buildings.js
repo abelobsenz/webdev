@@ -19,7 +19,7 @@ import { ST } from './urban.js';
 
 const FH = 3.6;
 const TAU = Math.PI * 2;
-const K = { GLASS: 0, STONE: 1, LANTERN: 2, GARDEN: 3, CONDUIT: 4, PUNCHED: 5, POOL: 6, PV: 7, TIMBER: 8, PAVING: 9, METAL: 10 };
+const K = { GLASS: 0, STONE: 1, LANTERN: 2, GARDEN: 3, CONDUIT: 4, PUNCHED: 5, POOL: 6, PV: 7, TIMBER: 8, PAVING: 9, METAL: 10, FRIT: 12 };
 
 // ------------------------------------------------------------ mesh builder --
 class Builder {
@@ -260,7 +260,8 @@ function ribbon(B, L, R, H, lod) {
     const y = k * FH;
     B.prism(slab, y - 0.35, y, K.STONE, k === n ? K.GARDEN : K.PAVING, { bottom: true });
     if (k < n) {
-      // rail and planter lip every other floor
+      // fritted-glass balustrade under the handrail, planter lip every other floor
+      B.walls(rrect(w - 0.12, d - 0.12, 3.74), y, y + 0.98, K.FRIT);
       B.walls(slab, y + 0.98, y + 1.08, K.METAL);
       if (k % 2 === 0) B.walls(rrect(w - 0.3, d - 0.3, 3.6), y, y + 0.55, K.GARDEN);
     }
@@ -363,6 +364,7 @@ function tower(B, L, R, H, lod) {
   const oval = R() < 0.5;
   const plan = oval ? ellipse(tw / 2, td / 2, 24, 0, -d * 0.06) : rrect(tw, td, Math.min(tw, td) * 0.3, 0, -d * 0.06, 4);
   const plate = oval ? ellipse(tw / 2 + 1.1, td / 2 + 1.1, 24, 0, -d * 0.06) : rrect(tw + 2.2, td + 2.2, Math.min(tw, td) * 0.3 + 1.1, 0, -d * 0.06, 4);
+  const frit = oval ? ellipse(tw / 2 + 1.04, td / 2 + 1.04, 24, 0, -d * 0.06) : rrect(tw + 2.08, td + 2.08, Math.min(tw, td) * 0.3 + 1.04, 0, -d * 0.06, 4);
   const n = Math.max(6, Math.round((H - podium) / FH));
   const top = podium + n * FH;
   B.walls(plan, podium, top, K.GLASS);
@@ -370,6 +372,7 @@ function tower(B, L, R, H, lod) {
     for (let k = 1; k < n; k++) {
       const y = podium + k * FH;
       B.prism(plate, y - 0.28, y, K.STONE, K.PAVING, { bottom: true });
+      B.walls(frit, y, y + 1.0, K.FRIT);
       B.walls(plate, y + 1.0, y + 1.08, K.METAL);
     }
   }

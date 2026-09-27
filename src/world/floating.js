@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { patchedMaterial, aerialShaderMaterial } from './materials.js';
+import { patchedMaterial, aerialShaderMaterial, FACADE_GLSL } from './materials.js';
 import { latheFacade, mergeClean } from './geom.js';
 import { createFacadeMaterial } from './facade.js';
 import { createNoise2D, mulberry32 } from './noise.js';
@@ -78,13 +78,148 @@ function islandGeometry(r, seed) {
   return { geo: g, depth: depth * r };
 }
 
+// Sky-island rock, shaded in the island's own frame (metres): stacked volcanic strata (basalt
+// with columnar joints, ochre tuff, pale ash, oxidised scoria) dipping and warping across the
+// island, erosion flutes and seeps streaking down the faces, moss on every ledge and in the damp
+// upper reaches, roots hanging from under the meadow rim, and a meadow of grass and wildflowers
+// on top. The vertex colours still tint the result. Every layer fades to its own average with
+// the pixel footprint, so the rock reads the same at 10 km as it does at arm's length.
 function rockMaterial() {
   return patchedMaterial({ vertexColors: true, roughness: 0.92, metalness: 0, envMapIntensity: 0.38 }, {
-    key: 'floatrock',
+    key: 'floatrock5',
     vertex: { pars: 'attribute float aGlow; varying float vGlow;', transform: 'vGlow = aGlow;' },
     fragment: {
-      pars: 'varying float vGlow;',
-      color: 'diffuseColor.rgb *= 0.8 + 0.4 * vnoise(vObjPos.xz * 0.2 + vObjPos.y * 0.3);',
+      pars: /* glsl */ `
+${FACADE_GLSL}
+varying float vGlow;
+float rkRough; float rkAO; vec3 rkBump;
+vec3 rkLayer(float id) {
+  float h = hash11(id * 7.13 + 0.37);
+  if (h < 0.34) return vec3(0.25, 0.22, 0.19);      // basalt
+  if (h < 0.56) return vec3(0.4, 0.31, 0.22);       // ochre tuff
+  if (h < 0.7) return vec3(0.44, 0.39, 0.32);       // pale ash
+  if (h < 0.85) return vec3(0.36, 0.26, 0.2);       // oxidised scoria
+  return vec3(0.3, 0.27, 0.23);                     // grey lava
+}
+const vec3 RK_AVG = vec3(0.33, 0.28, 0.22);
+// jointed rock: Voronoi blocks (x = distance to the nearest centre, y = distance to the
+// nearest joint, both in cell units; z = block id, w = second hash for the facet tilt)
+vec4 rkBlocks(vec2 p) {
+  vec2 ip = floor(p), fp = fract(p);
+  float d1 = 8.0, d2 = 8.0; vec2 id = vec2(0.0);
+  for (int j = -1; j <= 1; j++) for (int i = -1; i <= 1; i++) {
+    vec2 o = vec2(float(i), float(j));
+    vec2 r = o + hash22(ip + o) - fp;
+    float d = dot(r, r);
+    if (d < d1) { d2 = d1; d1 = d; id = ip + o; } else if (d < d2) d2 = d;
+  }
+  d1 = sqrt(d1);
+  return vec4(d1, (sqrt(d2) - d1) * 0.5, hash12(id + 5.7), hash12(id + 9.1));
+}
+// strata colour at warped height sy for layers of thickness T, blended across boundaries by
+// the footprint and toward the palette average once layers are below a pixel
+vec3 rkStrata(float sy, float T, float fwy, float seed) {
+  float x = sy / T;
+  float id = floor(x), fr = x - id;
+  float e = clamp(fwy / T, 0.02, 1.0);
+  vec3 a = rkLayer(id + seed), b = rkLayer(id + 1.0 + seed);
+  vec3 c = mix(a, b, smoothstep(1.0 - e, 1.0, fr));
+  return mix(c, RK_AVG, smoothstep(0.25, 0.8, fwy / T));
+}
+`,
+      color: /* glsl */ `
+{
+  vec3 p = vObjPos;
+  vec3 Nw = normalize(vWNrm);
+  float fw = max(length(fwidth(p)), 1e-3);
+  float fwy = max(fwidth(p.y), 1e-3);
+  float d1 = 1.0 - smoothstep(0.3, 1.5, fw);        // metre-scale detail resolvable
+  float d2 = 1.0 - smoothstep(0.04, 0.25, fw);      // hand-scale detail
+  float up = Nw.y;
+  vec3 vc = diffuseColor.rgb;
+  rkRough = 0.9; rkAO = 1.0; rkBump = vec3(0.0);
+  float ang = atan(p.z, p.x);
+  float u = ang * length(p.xz);                        // metres around the island
+  float meadow = smoothstep(0.62, 0.8, up) * smoothstep(-6.0, -2.0, p.y);
+  vec3 c;
+  // ---- rock: the island's own painted tone (warm tuff, darker toward the keel, mossy up
+  //      top) carries the colour; warped, dipping strata modulate it bed by bed
+  float warp = fbm2_3(p.xz * 0.012) * 9.0 + vnoise(p.xz * 0.05) * 2.5 + p.x * 0.05;
+  float sy = p.y + warp;
+  vec3 bed = rkStrata(sy, 7.5, fwy, 3.0) / RK_AVG;
+  vec3 rock = vc * mix(vec3(1.0), bed, 0.38);
+  rock *= mix(1.0, 0.92 + 0.16 * vnoise(vec2(sy * 0.8, 1.7)), 1.0 - smoothstep(0.14, 0.42, fwy));   // beds within beds
+  float thin = vnoise(vec2(sy * 3.1, u * 0.35 + 5.3));
+  // 3D breakup so nothing streaks straight down a face or around it
+  float blot = mix(0.5, vnoise3(p * 0.09), 1.0 - smoothstep(3.0, 9.0, fw)) * 0.6 + mix(0.5, vnoise3(p * 0.37 + 5.0), d1) * 0.4;
+  rock *= 0.86 + 0.28 * blot;
+  // joints: the rock is broken into blocks (a few metres, taller than wide in the basalt
+  // beds), each a shade apart and each face tilted a little, with dark open joints between
+  float lid = floor(sy / 7.5);
+  float basalt = step(hash11((lid + 3.0) * 7.13 + 0.37), 0.34);
+  vec2 bsz = mix(vec2(5.0, 1.9), vec2(1.9, 6.0), basalt);
+  vec4 bk = rkBlocks(vec2(u, sy) / bsz);
+  float dB = 1.0 - smoothstep(bsz.x * 0.12, bsz.x * 0.35, fw);        // blocks >= ~3 px
+  float jw = 0.035, jd = bk.y * min(bsz.x, bsz.y);                    // metres to the joint
+  // only some joints are open: the rest are healed and barely show, so no closed "paving"
+  float open = mix(0.4, smoothstep(0.42, 0.62, vnoise(vec2(u, sy) * 0.27 + bk.z * 3.0)), dB);
+  float joint = clamp(1.0 - jd / max(jw, fw), 0.0, 1.0) * min(1.0, jw / fw) * (1.0 - up * up) * open;
+  rock *= mix(1.0, 0.91 + 0.18 * bk.z, dB) * (0.94 + 0.12 * mix(0.5, vnoise(vec2(u, sy) * 0.9 + bk.w * 7.0), dB));
+  rock *= 1.0 - 0.5 * joint;
+  vec3 tang = vec3(-sin(ang), 0.0, cos(ang));
+  rkBump += (tang * (bk.z - 0.5) + vec3(0.0, bk.w - 0.5, 0.0)) * 0.2 * dB * (1.0 - smoothstep(0.1, 0.4, fw));
+  float crack = joint;
+  // horizontal bedding ledges: lit tops, shaded undersides
+  rkBump.y += (thin - 0.5) * 0.3 * (1.0 - smoothstep(0.035, 0.1, fwy));
+  // dark water stains running down from ledges and the rim, glossier while wet
+  float stN = vnoise(vec2(u * 0.09 + 11.0, p.y * 0.008)) * 0.7 + vnoise(vec2(u * 0.45, p.y * 0.03)) * 0.3;
+  float stain = mix(0.14, smoothstep(0.6, 0.82, stN), 1.0 - smoothstep(1.5, 5.0, fw)) * (1.0 - up) * (1.0 - smoothstep(-3.0, 0.0, p.y) * 0.5);
+  rock *= 1.0 - 0.38 * stain;
+  rkRough = mix(0.92, 0.72, stain);
+  // micro relief of the rock face
+  if (d2 > 0.0) { vec3 nd = vnoised(vec2(u, p.y) * 2.3); rkBump += vec3(-sin(ang) * nd.y, nd.z, cos(ang) * nd.y) * 0.1 * d2; }
+  // moss and ferns on every ledge (upward-facing), thickest near the damp rim; pale lichen
+  // rosettes on the dry faces between the stains
+  float dM = 1.0 - smoothstep(3.0, 9.0, fw);
+  float mossN = mix(0.5, vnoise3(p * 0.11), dM) * 0.6 + mix(0.5, vnoise3(p * 0.7 + 3.0), d1) * 0.4;
+  float moss = smoothstep(0.2, 0.55, up + 0.3 * (mossN - 0.5)) + smoothstep(-22.0, -4.0, p.y) * mix(0.2, smoothstep(0.5, 0.72, mossN), dM) * 0.7;
+  moss = clamp(moss, 0.0, 1.0);
+  vec3 mossC = mix(vec3(0.05, 0.1, 0.03), vec3(0.15, 0.22, 0.07), mossN) * (0.8 + 0.4 * mix(0.5, vnoise3(p * 3.1), d2));
+  float lichen = mix(0.1, smoothstep(0.7, 0.84, vnoise3(p * 0.5 + 9.0)), 1.0 - smoothstep(0.7, 2.2, fw)) * (1.0 - moss) * (1.0 - stain);
+  rock = mix(rock, vec3(0.5, 0.49, 0.42), lichen * 0.22);
+  rock = mix(rock, mossC, moss * 0.85);
+  // hanging roots below the rim: dark strands of varied length
+  float strand = fPulse(u + vnoise(vec2(u * 0.2, p.y * 0.1)) * 2.0, 0.9, 0.0, 0.07 + 0.08 * vnoise(vec2(u * 0.5, 2.0)), fw);
+  float rootLen = 3.0 + 10.0 * vnoise(vec2(floor(u / 0.9) * 0.37, 7.0));
+  float depth = -8.0 - p.y;                            // metres below the root zone's top
+  float roots = strand * (1.0 - smoothstep(rootLen * 0.6, rootLen, depth)) * step(-2.0, depth);
+  roots *= (1.0 - smoothstep(0.1, 0.5, up)) * smoothstep(0.45, 0.7, vnoise(vec2(u * 0.08, 3.0)));   // in clumps
+  rock = mix(rock, vec3(0.15, 0.11, 0.07), roots * 0.55);
+  // ---- meadow: grass, clover and wildflowers
+  vec3 grass = vc * (0.85 + 0.3 * mix(0.5, vnoise(p.xz * 0.35), d1));
+  grass = mix(grass, grass * vec3(1.3, 1.12, 0.78), mix(0.25, smoothstep(0.55, 0.8, vnoise(p.xz * 0.06 + 9.0)), 1.0 - smoothstep(4.0, 12.0, fw)) * 0.45);
+  if (d2 > 0.0) {
+    float blade = vnoise(p.xz * vec2(29.0, 7.0)) * 0.5 + vnoise(p.xz * vec2(8.0, 31.0)) * 0.5;
+    grass *= mix(1.0, 0.8 + 0.4 * blade, 1.0 - smoothstep(0.004, 0.03, fw));
+    rkBump += vec3(vnoised(p.xz * 4.0).y, 0.0, vnoised(p.xz * 4.0 + 3.0).y) * 0.15 * d2;
+  }
+  float fk = hash12(floor(p.xz / 5.0) + 7.0);
+  float fl = smoothstep(0.62, 0.8, vnoise(p.xz * 1.7 + fk * 20.0)) * step(0.45, fk);
+  vec3 flw = fk < 0.6 ? vec3(0.92, 0.88, 0.74) : fk < 0.75 ? vec3(0.85, 0.66, 0.1) : fk < 0.9 ? vec3(0.5, 0.35, 0.78) : vec3(0.82, 0.25, 0.35);
+  grass = mix(grass, flw * 0.8, fl * mix(0.25, 0.8, d1));
+  c = mix(rock, grass, meadow);
+  rkRough = mix(rkRough, 0.9, meadow);
+  rkAO = mix(1.0 - 0.35 * crack * d1 - 0.12 * stain, 1.0, meadow);
+  diffuseColor.rgb = c;
+}`,
+      surface: 'roughnessFactor = rkRough;',
+      normal: /* glsl */ `
+{
+  vec3 wb = rkBump - vWNrm * dot(rkBump, normalize(vWNrm));
+  normal = normalize(normal + (viewMatrix * vec4(wb, 0.0)).xyz);
+}`,
+      // fill light in the rock's shade is not only sky: it has bounced off warm rock and meadow
+      lights: 'reflectedLight.indirectDiffuse *= rkAO * vec3(1.1, 1.0, 0.86); reflectedLight.indirectSpecular *= rkAO;',
       emissive: /* glsl */ `
 {
   float pulse = 0.6 + 0.4 * sin(uTime * 1.2 + vObjPos.y * 0.05 + vObjPos.x * 0.02);

@@ -76,18 +76,26 @@ void main() {
   vec3 N = normalize(vNormalW);
   float u = vRing.x, v = vRing.y;
   float part = vRing.z;
+  // From the ground a ring is kilometres per pixel along its length: every pattern is filtered
+  // by that footprint and settles to its own average (no dotted, crawling lines in the sky).
+  float fu = max(fwidth(u), 1e-4);                 // km per pixel along the ring
+  float fv = max(fwidth(v), 1e-5);                 // band widths per pixel across it
+  float av = abs(v);
   // --- base structure ---
-  float panel = hash12(vec2(floor(u / 1.6), floor(v * 10.0)));
+  float dP = (1.0 - smoothstep(0.5, 1.5, fu / 1.6)) * (1.0 - smoothstep(0.05, 0.15, fv));
+  float panel = mix(0.5, hash12(vec2(floor(u / 1.6), floor(v * 10.0))), dP);
   vec3 alb = uAlbedo * (0.82 + 0.3 * panel);
   // longitudinal decks: habitat band, darker accelerator lanes, bright rims
-  float lane = smoothstep(0.30, 0.34, abs(v)) * (1.0 - smoothstep(0.46, 0.48, abs(v)));
+  float lane = smoothstep(0.30 - fv, 0.34 + fv, av) * (1.0 - smoothstep(0.46 - fv, 0.48 + fv, av));
   alb *= 1.0 - 0.45 * lane;
-  float groove = smoothstep(0.012, 0.0, abs(abs(v) - 0.30)) + smoothstep(0.012, 0.0, abs(abs(v) - 0.12));
+  float gw = 0.012 + fv;
+  float groove = (1.0 - smoothstep(0.0, gw, abs(av - 0.30)) + 1.0 - smoothstep(0.0, gw, abs(av - 0.12))) * (0.012 / gw);
   alb *= 1.0 - 0.25 * groove;
-  float seam = smoothstep(0.03, 0.0, abs(fract(u / 25.0) - 0.5) - 0.47);
+  float sw = 0.75 + fu;                             // 1.5 km seams every 25 km
+  float seam = (1.0 - smoothstep(0.0, sw, abs(fract(u / 25.0 + 0.5) - 0.5) * 25.0)) * (0.75 / sw);
   alb *= 1.0 - 0.12 * seam;
-  float hubPhase = fract(u / uHubSpacing);
-  float hub = smoothstep(0.02, 0.0, abs(hubPhase - 0.5) - 0.01);
+  float hw = uHubSpacing * 0.02 + fu;
+  float hub = (1.0 - smoothstep(0.0, hw, abs(fract(u / uHubSpacing) - 0.5) * uHubSpacing)) * (uHubSpacing * 0.02 / hw);
   alb = mix(alb, uAlbedo * 1.12, hub * 0.6);
   // --- lighting ---
   // physically lit (Lambert, E/pi); the post highlight knee keeps it detailed at night
@@ -96,25 +104,29 @@ void main() {
   float dayBelow = max(dot(rhat, uSunDir), 0.0);
   vec3 earthshine = vec3(0.45, 0.62, 0.95) * dayBelow * uSunIlluminance * 0.12 * max(dot(N, -rhat), 0.0);
   vec3 col = alb * (sunL * ndl * 0.3183 + earthshine * 0.5);
-  // specular glint from the sun on the outer skin
+  // specular glint from the sun on the outer skin, broadened where the panels are unresolved
   vec3 V = normalize(cameraPosition - vWorld);
   vec3 H = normalize(V + uSunDir);
-  col += sunL * pow(max(dot(N, H), 0.0), 120.0) * 0.6;
+  float shin = mix(40.0, 120.0, dP);
+  col += sunL * pow(max(dot(N, H), 0.0), shin) * 0.6 * (shin / 120.0);
   // --- lights ---
-  float habitat = smoothstep(uHabitatWidth, uHabitatWidth - 0.04, abs(v)) * step(part, 0.5);
+  float habitat = (1.0 - smoothstep(uHabitatWidth - 0.04 - fv, uHabitatWidth + fv, av)) * step(part, 0.5);
+  float dL = (1.0 - smoothstep(0.4, 1.4, fu / 0.9)) * (1.0 - smoothstep(0.4, 1.4, fv * 30.0));
   float cell = hash12(vec2(floor(u / 0.9), floor(v * 30.0))) * (0.6 + 0.4 * vnoise(vec2(u * 0.02, v * 3.0)));
-  float lit = step(0.35, cell) * (0.6 + 0.4 * cell);
+  float lit = mix(0.44 * (0.6 + 0.4 * vnoise(vec2(u * 0.02, v * 3.0))), step(0.35, cell) * (0.6 + 0.4 * cell), dL);
   float lights = habitat * lit * (0.55 + 0.45 * uNight);
   vec3 em = uHabitatColor * lights * 0.12;
   em += uHabitatColor * hub * 0.25 * habitat;
   // accelerator streams along the edges with travelling pulses
-  float stream = smoothstep(0.035, 0.0, abs(abs(v) - 0.44));
-  float pulse = pow(fract(u / 37.0 - uTime * uStreamSpeed * sign(v)), 12.0);
+  float stw = 0.035 + fv;
+  float stream = (1.0 - smoothstep(0.0, stw, abs(av - 0.44))) * (0.035 / stw);
+  float pq = fract(u / 37.0 - uTime * uStreamSpeed * 0.4 * sign(v)) - 0.5;
+  float pulse = mix(0.16, exp(-pq * pq * 120.0), 1.0 - smoothstep(2.0, 8.0, fu));
   em += uStreamColor * stream * (0.06 + 0.9 * pulse);
-  // navigation beacons
-  float beaconU = fract(u / 50.0);
-  float beacon = smoothstep(0.004, 0.0, abs(beaconU - 0.5)) * smoothstep(0.03, 0.0, abs(abs(v) - 0.49));
-  float blink = step(0.85, fract(uTime * 0.7 + floor(u / 50.0) * 0.37));
+  // navigation beacons (their light is spread over the pixel once they are smaller than one)
+  float bw = 0.2 + fu;
+  float beacon = (1.0 - smoothstep(0.0, bw, abs(fract(u / 50.0) - 0.5) * 50.0)) * (1.0 - smoothstep(0.0, 0.03 + fv, abs(av - 0.49))) * (0.2 / bw) * (0.03 / (0.03 + fv));
+  float blink = 0.55 + 0.45 * sin(uTime * 0.8 + floor(u / 50.0) * 2.3);
   em += vec3(1.0, 0.25, 0.2) * beacon * blink * 3.0;
   if (part > 0.5) { // rim tubes
     em = uStreamColor * (0.08 + 0.8 * pulse);

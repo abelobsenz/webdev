@@ -4,6 +4,7 @@ import { U } from '../core/uniforms.js';
 import { NOISE_GLSL } from '../shaders/noise.glsl.js';
 import { SUNLIGHT_GLSL, createRibbonMaterial, buildRibbonGeometry } from './lines.js';
 import { R_EARTH, bodyDir, cityToBody } from './sim.js';
+import { FACADE_GLSL } from '../world/materials.js';
 import { HALO_PORTS } from './earthData.js';
 
 // The four orbital rings at planetary scale, with the same radii, widths and
@@ -29,15 +30,25 @@ export function ringBasis(def) {
 
 const VERT = /* glsl */ `
 attribute vec3 aRing;
+uniform vec2 uResolution;
+uniform vec3 uAxisBody;
+uniform float uWidth;
 varying vec3 vRing;
 varying vec3 vWorld;
 varying vec3 vN;
 varying vec3 vRad;
+varying float vWpx;
 void main() {
   vRing = aRing;
   vec4 w = modelMatrix * vec4(position, 1.0);
   vWorld = w.xyz;
   vN = normalize(mat3(modelMatrix) * normal);
+  // the band's width on screen, per vertex (the same estimate as the far-field ribbon), so the
+  // hand-over between the two is a clean edge rather than a per-pixel fwidth threshold
+  float dist = max(length(w.xyz - cameraPosition), 1e-3);
+  float pxPerKm = uResolution.y * 0.5 * projectionMatrix[1][1] / dist;
+  float ca = dot((w.xyz - cameraPosition) / dist, normalize(mat3(modelMatrix) * uAxisBody));
+  vWpx = uWidth * pxPerKm * (sqrt(max(1.0 - ca * ca, 0.0)) + 0.06);
   gl_Position = projectionMatrix * (modelViewMatrix * vec4(position, 1.0));
 }
 `;
@@ -59,8 +70,10 @@ uniform float uLen;
 varying vec3 vRing;
 varying vec3 vWorld;
 varying vec3 vN;
+varying float vWpx;
 ${SUNLIGHT_GLSL}
 ${NOISE_GLSL}
+${FACADE_GLSL}
 
 float aaStep(float e, float x, float w) { return smoothstep(e - w, e + w, x); }
 // lamps every P km, w km long, filtered so a sub-pixel lamp keeps its energy spread over
@@ -74,8 +87,7 @@ float aaLamp(float x, float P, float w) {
 void main() {
   float u = vRing.x, v = vRing.y, part = vRing.z;
   // below ~2 px across, the far-field ribbon takes over (no aliased dotted lines)
-  float fwv = fwidth(v);
-  if (fwv > (part > 1.5 ? 0.03 : 0.45)) discard;
+  if (vWpx < (part > 1.5 ? 33.0 : 2.2)) discard;
   vec3 N = normalize(vN);
   if (!gl_FrontFacing) N = -N;
   vec3 p = vWorld;
@@ -86,91 +98,116 @@ void main() {
   float dayBelow = max(dot(rhat, uSunDir), 0.0);
   vec3 earthshine = vec3(0.35, 0.5, 0.8) * dayBelow * uSunE * 0.09 * max(dot(N, -rhat), 0.0);
   float fu = max(fwidth(u), 1e-4);                 // km per pixel along the ring
-  float detail = 1.0 - smoothstep(0.06, 0.35, fu);  // fade fine patterns well before they alias
+  float fv = fwidth(v);                             // (derivatives taken here, in uniform flow)
+  float fk = max(fu, fv * uWidth);                  // km per pixel, either way
+  // every pattern reaches its exact average while its cell still spans ~3 px
+  #define RDET(c) (1.0 - smoothstep((c) / 9.0, (c) / 3.0, fk))
+  float detail = RDET(0.8);
   float hubPh = fract(u / uHub);
-  float hub = 1.0 - smoothstep(0.012, 0.03, abs(hubPh - 0.5));
+  float hub = 1.0 - smoothstep(0.012, 0.03 + fu / uHub, abs(hubPh - 0.5));
   float nightSide = 1.0 - smoothstep(-0.05, 0.1, dot(rhat, uSunDir));
   vec3 col = vec3(0.0), em = vec3(0.0);
   float topSide = dot(N, rhat);
+  vec3 H = normalize(V + uSunDir);
+  float av = abs(v);
 
   if (part < 0.5) {
     if (topSide > 0.0) {
-      // ---- habitat floor seen from space: parks, towns, lakes, farms under a glass roof ----
+      // ---- habitat floor seen from space: parks, forests, towns, lakes, a patchwork of farms
+      //      under a glass roof on ribs every 2 km ----
       float zi = floor(u / 48.0);
       float zone = hash11(zi * 1.37 + uSeed);
       float zoneN = hash11((zi + 1.0) * 1.37 + uSeed);
       float blend = smoothstep(0.8, 1.0, fract(u / 48.0));
       float z = mix(zone, zoneN, blend);
+      float dF = RDET(1.2), dS = RDET(0.12), dB = RDET(0.5), dL = RDET(0.35);
       vec3 park = vec3(0.05, 0.1, 0.035) * (0.8 + 0.4 * vnoise(vec2(u * 0.4, v * 20.0)));
-      vec3 farm = mix(vec3(0.16, 0.15, 0.07), vec3(0.09, 0.13, 0.05), step(0.5, fract(u * 0.9 + v * 3.0)) * detail + 0.5 * (1.0 - detail));
+      park = mix(park, vec3(0.025, 0.06, 0.02), smoothstep(0.55, 0.7, vnoise(vec2(u * 0.15, v * 7.0) + 3.0)) * 0.8);   // forest
+      // farms: fields of different crops, ploughed in stripes
+      vec2 fc = vec2(floor(u / 1.2), floor((v + 0.5) * 8.0));
+      float crop = hash12(fc + uSeed);
+      vec3 cropC = crop < 0.3 ? vec3(0.17, 0.16, 0.07) : crop < 0.55 ? vec3(0.09, 0.14, 0.05) : crop < 0.75 ? vec3(0.21, 0.18, 0.1) : vec3(0.12, 0.12, 0.06);
+      vec3 farmAvg = vec3(0.145, 0.15, 0.07);
+      float plough = fPulse(u + v * 3.0, 0.12, 0.0, 0.06, fk);
+      vec3 farm = mix(farmAvg, cropC * (0.9 + 0.2 * mix(0.5, plough, dS)), dF);
+      farm *= 1.0 - 0.2 * (1.0 - fPulse(u, 1.2, 0.0, 1.17, fk)) * dF;               // hedgerows between fields
+      // towns: blocks between a grid of streets, a shade apart
       float blk = hash12(floor(vec2(u / 0.5, v * uWidth / 0.5)));
-      vec3 town = mix(vec3(0.22, 0.21, 0.2), vec3(0.34, 0.32, 0.29), blk * detail + 0.5 * (1.0 - detail));
-      vec3 alb = z < 0.38 ? park : (z < 0.62 ? farm : town);
-      float urban = z >= 0.62 ? 1.0 : 0.25;
-      // towns always line the walls, a river runs down the middle
-      float edge = smoothstep(0.34, 0.38, abs(v));
+      float streets = 1.0 - fPulse(u, 0.5, 0.0, 0.44, fk) * fPulse(v * uWidth, 0.5, 0.0, 0.44, fk);
+      vec3 town = mix(vec3(0.19, 0.18, 0.165), mix(vec3(0.14, 0.135, 0.13), vec3(0.24, 0.22, 0.2), blk), dB);
+      town = mix(town, vec3(0.1, 0.1, 0.11), streets * 0.6);
+      town = mix(town, park, 0.3 * mix(0.5, vnoise(vec2(u * 2.0, v * uWidth * 2.0)), dB));   // street trees and yards
+      // the land use changes gradually from zone to zone (no hard-edged blocks)
+      float wPark = 1.0 - smoothstep(0.34, 0.44, z), wTown = smoothstep(0.7, 0.8, z);
+      vec3 alb = mix(mix(farm, park, wPark), town, wTown);
+      float urban = mix(0.25, 1.0, wTown);
+      // towns always line the walls, a river runs down the middle, lakes here and there
+      float edge = smoothstep(0.34, 0.38, av);
       alb = mix(alb, town, edge);
       urban = max(urban, edge);
-      float river = 1.0 - smoothstep(0.018, 0.028, abs(v + 0.02 * sin(u * 0.05)));
-      alb = mix(alb, vec3(0.02, 0.04, 0.06), river);
+      float river = 1.0 - smoothstep(0.018, 0.028 + fv, abs(v + 0.02 * sin(u * 0.05)));
+      float lake = smoothstep(0.72, 0.76, vnoise(vec2(u * 0.08, v * 6.0) + 11.0)) * (1.0 - edge) * (1.0 - wTown);
+      float water = max(river, lake);
+      alb = mix(alb, vec3(0.02, 0.04, 0.06), water);
       alb = mix(alb, uAlbedo * 1.25, hub);
+      // the roof's ribs catch the sun
+      float ribs = (1.0 - fPulse(u, 2.0, 0.0, 1.96, fk)) * 0.6;
+      alb = mix(alb, uAlbedo, ribs);
       vec3 diff = alb / 3.14159 * sunL * ndl;
-      // glass roof: glints
-      vec3 H = normalize(V + uSunDir);
-      // a broad sheen, not a razor glint: a pinpoint 700-power highlight on the curved
-      // roof slid across pixels and twinkled
-      float spec = pow(max(dot(N, H), 0.0), 220.0) * 1.1 + pow(max(dot(N, H), 0.0), 40.0) * 0.18;
+      // glass roof: a bounded glint, stronger over water
+      float spec = pow(max(dot(N, H), 0.0), 80.0) * 0.45 + pow(max(dot(N, H), 0.0), 20.0) * 0.06;
       float F = 0.04 + 0.96 * pow(clamp(1.0 - dot(N, V), 0.0, 1.0), 5.0);
-      col = diff + min(sunL * spec * F * (0.4 + 0.6 * river), vec3(2.5));
+      col = diff + min(sunL * spec * F * (0.4 + 0.6 * water), sunL * 0.6);
       col += vec3(0.02, 0.03, 0.05) * F * uSunE * 0.05;
       // lights
       float cell = hash12(floor(vec2(u / 0.35, v * uWidth / 0.35)));
-      float lit = mix(0.35, step(0.55, cell) * (0.5 + cell), detail);
-      em += uHabitatColor * urban * lit * (0.08 + 0.22 * nightSide) * (1.0 - river);
+      float lit = mix(0.24, step(0.55, cell) * (0.5 + cell), dL);
+      em += uHabitatColor * urban * lit * (0.08 + 0.22 * nightSide) * (1.0 - water);
       em += uHabitatColor * hub * 0.35;
     } else {
       // ---- underside, facing the Earth: structure, radiators, lights ----
+      float dP = RDET(2.4), dR = RDET(6.0), dL = RDET(0.8);
       float panel = hash12(floor(vec2(u / 2.4, v * 8.0)));
-      vec3 alb = uAlbedo * (0.7 + 0.35 * mix(0.5, panel, detail));
-      float rib = 1.0 - smoothstep(0.0, 0.05 + fu * 0.3, abs(fract(u / 6.0) - 0.5) - 0.44);
-      alb *= 1.0 - 0.3 * rib * detail;
-      float trus = 1.0 - smoothstep(0.02, 0.05, abs(abs(v) - 0.25));
+      vec3 alb = uAlbedo * (0.7 + 0.35 * mix(0.5, panel, dP));
+      float rib = 1.0 - fPulse(u, 6.0, 0.0, 5.6, fk);
+      alb *= 1.0 - 0.3 * rib;
+      float trus = 1.0 - smoothstep(0.02, 0.05 + fv, abs(av - 0.25));
       alb *= 1.0 - 0.25 * trus;
       col = alb / 3.14159 * (sunL * ndl + earthshine * 3.0);
-      vec3 H = normalize(V + uSunDir);
-      col += sunL * pow(max(dot(N, H), 0.0), 70.0) * 0.25;
+      col += min(sunL * pow(max(dot(N, H), 0.0), 60.0) * 0.3, sunL * 0.5);
       float cell = hash12(floor(vec2(u / 0.8, v * 24.0)));
-      float lit = mix(0.3, step(0.62, cell) * (0.6 + cell), detail);
-      float band = smoothstep(0.34, 0.3, abs(v));
+      float lit = mix(0.24, step(0.62, cell) * (0.6 + cell), dL);
+      float band = 1.0 - smoothstep(0.3, 0.34, av);
       em += uHabitatColor * band * lit * (0.05 + 0.2 * nightSide);
       em += uHabitatColor * hub * 0.5;
-      // travelling light pulses along the keel
-      float keel = 1.0 - smoothstep(0.004, 0.012, abs(v));
-      float kp = fract(u / 90.0 - uTime * 0.12 * uSpeed) - 0.5;
-      em += uStreamColor * keel * (0.08 + 0.9 * exp(-kp * kp * 160.0));
+      // soft pulses drifting along the keel (their mean once they are under a few pixels)
+      float keel = 1.0 - smoothstep(0.004, 0.012 + fv, av);
+      float kp = fract(u / 90.0 - uTime * 0.04 * uSpeed) - 0.5;
+      float kpulse = mix(0.1, exp(-kp * kp * 300.0), 1.0 - smoothstep(0.6, 1.8, fu));
+      em += uStreamColor * keel * (0.08 + 1.2 * kpulse);
     }
   } else if (part < 1.5) {
     // ---- retaining walls ----
     vec3 alb = uAlbedo * 1.1;
-    float rib = 1.0 - smoothstep(0.0, 0.08 + fu * 0.2, abs(fract(u / 3.0) - 0.5) - 0.42);
-    alb *= 1.0 - 0.3 * rib * detail;
+    float rib = 1.0 - fPulse(u, 3.0, 0.0, 2.76, fk);
+    alb *= 1.0 - 0.3 * rib;
     col = alb / 3.14159 * (sunL * ndl + earthshine * 2.0);
-    vec3 H = normalize(V + uSunDir);
-    col += sunL * pow(max(dot(N, H), 0.0), 90.0) * 0.3;
+    col += min(sunL * pow(max(dot(N, H), 0.0), 70.0) * 0.5, sunL * 0.6);
     float stripe = 1.0 - smoothstep(0.0, 0.06, abs(v - 0.9));
     em += uHabitatColor * stripe * 0.25;
-    // small soft-pulsing marker lamps (not long strips switching on and off)
-    float beacon = aaLamp(u, 25.0, 0.04) * stripe * (0.6 + 0.4 * sin(uTime * 1.2 + floor(u / 25.0) * 1.7));
-    em += vec3(1.0, 0.45, 0.3) * beacon * 0.9;
+    // small marker lamps every 25 km, filtered so they never shrink below their energy
+    float md = abs(fract(u / 25.0 + 0.5) - 0.5) * 25.0;
+    float mw = 0.12;
+    float marker = clamp(1.0 - md / max(mw, fu), 0.0, 1.0) * min(1.0, mw / fu);
+    em += vec3(1.0, 0.45, 0.3) * marker * stripe * (0.75 + 0.25 * sin(uTime * 0.8 + floor(u / 25.0) * 1.7)) * 1.4;
   } else {
     // ---- rotor tubes: the mass stream that holds the ring up ----
     vec3 alb = uAlbedo * 0.6;
     col = alb / 3.14159 * (sunL * ndl + earthshine * 2.0);
-    // soft travelling packets (a hard-edged sawtooth crawled and shimmered)
-    float pp = fract(u / 37.0 - uTime * 0.9 * uSpeed * sign(v)) - 0.5;
-    float pulse = exp(-pp * pp * 120.0);
+    float rp = fract(u / 37.0 - uTime * 0.25 * uSpeed * sign(v)) - 0.5;
+    float pulse = mix(0.13, exp(-rp * rp * 180.0), 1.0 - smoothstep(0.5, 1.5, fu));
     float rim = pow(max(1.0 - abs(dot(N, V)), 0.0), 2.0);
-    em += uStreamColor * (0.12 + 0.7 * pulse * detail + 0.3 * rim);
+    em += uStreamColor * (0.12 + 1.2 * pulse + 0.3 * rim);
   }
   gl_FragColor = vec4(col + em, 1.0);
 }
@@ -307,6 +344,7 @@ export class Rings {
           uStreamColor: { value: new THREE.Color(...def.stream) },
           uHub: { value: def.hub }, uSpeed: { value: def.speed }, uSeed: { value: i * 17.3 + 3.1 },
           uWidth: { value: def.width }, uLen: { value: basis.R * Math.PI * 2 },
+          uResolution: { value: new THREE.Vector2(1920, 1080) }, uAxisBody: { value: basis.n.clone() },
         },
         side: THREE.DoubleSide,
       });
@@ -357,6 +395,7 @@ export class Rings {
 
   setSize(w, h) {
     this.tetherMat.uniforms.uResolution.value.set(w, h);
+    for (const m of this.meshes) m.material.uniforms.uResolution.value.set(w, h);
     for (const f of this.far) f.material.uniforms.uResolution.value.set(w, h);
   }
 

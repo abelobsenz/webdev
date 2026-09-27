@@ -251,9 +251,15 @@ void main() {
     vec3 c = uCelestial * dir;
     vec3 night = vec3(0.0);
     if (uStarBoost > 0.001) {
-    night += starLayer(c, 170.0, 0.014, 1.0);
-    night += starLayer(c, 380.0, 0.006, 0.3);
-    night += starLayer(c, 800.0, 0.003, 0.12);
+    // Point stars stay out of the environment map: flux-conserving stars turn into one bright
+    // texel each at the env's 128 px resolution, and every glossy surface then reflects a dot field.
+    // A mirror would show them at their main-view size, where their mean radiance is negligible.
+    // (uEnvMode 2 = the lagoon's planar reflection, which keeps them.)
+    if (uEnvMode < 0.5 || uEnvMode > 1.5) {
+      night += starLayer(c, 170.0, 0.014, 1.0);
+      night += starLayer(c, 380.0, 0.006, 0.3);
+      night += starLayer(c, 800.0, 0.003, 0.12);
+    }
     night += milkyWay(c);
     night += zodiacal(c, uCelestial * uSunDir);
     night += airglow(dir, muView);
