@@ -234,8 +234,11 @@ void main() {
     float ph = fract(uTime * 1.6 + seed * 7.0); col = aLane.z < 0.5 ? vec3(0.15, 0.35, 1.0) : vec3(1.0, 0.55, 0.1); blink = step(ph, 0.5);
   } else if (type < 7.5) {            // pulse red
     float ph = fract(uTime * 1.6 + seed * 7.0); col = aLane.z < 0.5 ? vec3(1.0, 0.1, 0.08) : vec3(1.0, 0.55, 0.1); blink = step(0.5, ph);
-  } else if (type < 8.5) {            // starship engine
-    col = vec3(0.6, 0.78, 1.0); I *= (0.1 + fr.thrust) * (0.25 + 0.75 * smoothstep(0.3, -0.5, cf));
+  } else if (type < 8.5) {            // starship engine: dark when berthed, glowing under way
+    col = vec3(0.6, 0.78, 1.0); I *= fr.thrust * smoothstep(3.0, 18.0, fr.speed) * (0.25 + 0.75 * smoothstep(0.3, -0.5, cf));
+    // pull the glow toward the viewer by its own size so the flat sprite never slices
+    // through the hull it sits on (that left a hard straight edge across the glow)
+    p += toCam * LC.x * scale * 1.3;
   } else if (type < 9.5) {            // amber beacon (rotating)
     col = vec3(1.0, 0.55, 0.12); blink = 0.25 + 0.75 * pow(max(0.0, sin(uTime * 5.0 + seed * 30.0)), 6.0);
   } else {                             // passenger window glow
@@ -980,7 +983,7 @@ void main() {
   RouteFrame fr = routeAt(aRoute.x, aRoute.y + uTime * aRoute.z);
   vec3 side; mat3 R = routeBasis(fr, 1.0, side);
   float s = aRoute.w;
-  vT = fr.thrust * fr.vis;
+  vT = fr.thrust * fr.vis * smoothstep(3.0, 18.0, fr.speed);   // no exhaust while berthed
   vSeed = aLane.w;
   vUv = uv;
   if (vT < 0.01) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }

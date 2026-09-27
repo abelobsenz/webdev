@@ -60,9 +60,7 @@ export class Fleet {
       const dir = new THREE.Vector3(Math.cos(a), 0, Math.sin(a));
       m.position.copy(dir).multiplyScalar(L + 0.34).add(new THREE.Vector3(0, -2.4, 0));
       m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), new THREE.Vector3(-Math.sin(a), 0, Math.cos(a)));
-      const glow = createGlowMesh(liner.glows, { color: [0.5, 0.75, 1.0], strength: 0.5, scale: KM });
-      m.add(glow);
-      addEngines(m, liner.glows, { scale: 0.55, length: 10, throttle: 0.06 });   // berthed: throats barely lit
+      addEngines(m, liner.glows, { scale: 0.55, length: 10, throttle: 0 });      // berthed: engines off
       el.harbour.add(m);
       this.docked = m;
       this.crafts.push(m);

@@ -301,7 +301,9 @@ export function createEngine({ radius, length, color, core, intensity = 1.7, ape
     st.material.uniforms.uIntensity.value = 1.7 * t;
     st.scale.z = length * (0.35 + 0.65 * Math.min(t, 1.2));
     st.visible = t > 0.02;
+    ap.visible = t > 0.02;                       // engines off: no glow at all
     ap.material.uniforms.uThrust.value = Math.max(0.3, t);
+    ap.material.uniforms.uIntensity.value = apertureIntensity * Math.min(1, t / 0.35);
   };
   return g;
 }
