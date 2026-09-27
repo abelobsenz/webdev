@@ -125,6 +125,7 @@ export class World {
     const raw = (x, z) => this.sampler.get(x, z);
     this.plan = planCity({ ground: raw, towers: this.towers, promenades: this.infra.promenades, urbanMask, stations: this.infra.stations });
     NATURE_U.uStreets.value = this.plan.field.texture();
+    NATURE_U.uStreetFrame.value = this.plan.field.frameTexture();
     progress(0.55); await tick();
     this.lowrise = buildBuildings(this.scene, this.plan, raw, this.settings);
     this.updaters.push({ applyQuality: (s) => this.lowrise.applyQuality(s), update: (dt, t) => this.lowrise.update(dt, t, this.app.camera) });

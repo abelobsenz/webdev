@@ -19,6 +19,7 @@ float aaBand(float x, float P, float w) {
 void main() {
   vec3 sunL = spaceSunlight(uTransmittanceLUT, vWorld, uSunDir) * uSunE;
   float alt = vData.x;
+  float fa = max(fwidth(alt), 1e-3);                     // km of tether per pixel
   // a round cable, not a flat strip: limb darkening across the ribbon and a specular
   // line where the sunlit side faces the viewer
   float x = clamp(vAcross, -1.0, 1.0);
@@ -28,8 +29,11 @@ void main() {
   // sparse marker lights, not dashes
   float beacon = aaBand(alt, 250.0, 0.18) * (0.75 + 0.25 * sin(uTime * 1.5 + alt));
   col += vec3(1.0, 0.72, 0.4) * beacon * 1.5;
-  // faint glow sheath where the tether carries power
-  col += vec3(0.35, 0.6, 1.0) * 0.06 * cyl;
+  // the power sheath: a faint blue glow with soft pulses climbing toward the Harbour
+  // (their mean once a pulse is under a few pixels)
+  float pp = fract(alt / 1500.0 - uTime * 0.02) - 0.5;
+  float pulse = mix(0.07, exp(-pp * pp * 600.0), 1.0 - smoothstep(15.0, 60.0, fa));
+  col += vec3(0.35, 0.6, 1.0) * (0.06 + 0.3 * pulse) * cyl;
   float fade = smoothstep(0.0, 3.0, alt);
   gl_FragColor = vec4(col * vCoverage * fade, 0.0);
 }
