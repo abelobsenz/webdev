@@ -25,7 +25,8 @@ void main() {
   vec3 col = sk_background(d, px);
   col += sk_swarm(cameraPosition, d, px) * uSunE * 0.06 * uSwarmFar;
   col += sk_sun(cameraPosition, d, px, uSunE) * uShowSun;
-  gl_FragColor = vec4(col, 1.0);
+  // alpha 0: the backdrop is not an occluder (alpha marks solid geometry for the glare mask)
+  gl_FragColor = vec4(col, 0.0);
 }
 `;
 

@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { buildLiner, buildTender, buildRefinery } from '../craft/craftGeometry.js';
 import { createCraftMaterial, updateCraftMaterial, createGlowMesh } from '../craft/craftMaterial.js';
+import { createEngine } from '../craft/plumes.js';
 import { R_EARTH, R_MOON, GEO_ALT, MERIDIAN_LON, bodyDir } from './sim.js';
 
 // MERIDIAN's ships in the orbital view (km units; the craft are built in metres).
@@ -30,6 +31,21 @@ function craftMesh(geo, opts) {
   return mesh;
 }
 
+/** Plasma-throat + exhaust-column engines at a craft's nozzles (metres, craft frame). */
+function addEngines(mesh, glows, { scale = 0.6, length = 14, color = 0x7fd8ff, core = 0xeefaff, throttle = 1 } = {}) {
+  const list = [];
+  glows.forEach((g, i) => {
+    const r = g.r * scale;                         // nozzle radius (metres, craft frame)
+    const e = createEngine({ radius: r, length: r * length, color, core, seed: i * 0.37 + 0.11 });
+    e.position.copy(g.p);
+    e.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, -1), g.dir);
+    e.setThrottle(throttle);
+    mesh.add(e);
+    list.push(e);
+  });
+  return list;
+}
+
 export class Fleet {
   constructor(space) {
     this.space = space;
@@ -44,8 +60,7 @@ export class Fleet {
       const dir = new THREE.Vector3(Math.cos(a), 0, Math.sin(a));
       m.position.copy(dir).multiplyScalar(L + 0.34).add(new THREE.Vector3(0, -2.4, 0));
       m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), new THREE.Vector3(-Math.sin(a), 0, Math.cos(a)));
-      const glow = createGlowMesh(liner.glows, { color: [0.5, 0.75, 1.0], strength: 1.2, scale: KM });
-      m.add(glow);
+      addEngines(m, liner.glows, { scale: 0.55, length: 10, throttle: 0 });      // berthed: engines off
       el.harbour.add(m);
       this.docked = m;
       this.crafts.push(m);
@@ -53,17 +68,18 @@ export class Fleet {
     // on approach: a slow pass along the harbour's orbit, engines at cruise
     {
       const m = craftMesh(liner.geo, { accent: [1.0, 0.72, 0.45], lit: 0.5 });
-      const glow = createGlowMesh(liner.glows, { color: [0.55, 0.8, 1.0], strength: 7, scale: KM });
+      const glow = createGlowMesh(liner.glows, { color: [0.55, 0.8, 1.0], strength: 2.5, scale: KM });
       m.add(glow);
+      this.approachEngines = addEngines(m, liner.glows, { scale: 0.55, length: 16, throttle: 1 });
       this.approach = new THREE.Group();
       this.approach.add(m);
       space.scene.add(this.approach);
       this.approachShip = m;
       this.crafts.push(m);
-      space.addBody('liner', [this.approach], () => this.approach.getWorldPosition(_v), 2.2, { solid: true });
+      space.addBody('liner', [this.approach], () => this.approach.getWorldPosition(_v), 2.2, { solid: true, hint: 0.45 });
     }
     // ---- tenders near the Halo
-    const tender = buildTender(320);
+    const tender = buildTender(620);
     this.tenders = [];
     this.tenderGroup = new THREE.Group();
     for (let i = 0; i < 3; i++) {
@@ -80,13 +96,14 @@ export class Fleet {
         m.add(pivot);
         return { pivot, axis: A.axis };
       });
-      m.add(createGlowMesh(tender.glows, { color: [0.6, 1.0, 0.85], strength: 3, scale: KM }));
+      m.add(createGlowMesh(tender.glows, { color: [0.6, 1.0, 0.85], strength: 1.2, scale: KM }));
+      addEngines(m, tender.glows, { scale: 0.7, length: 9, color: 0x8affd8, core: 0xf0fff8, throttle: 0.45 });
       this.tenderGroup.add(m);
-      this.tenders.push({ mesh: m, arms, phase: i * 2.1, offset: new THREE.Vector3((i - 1) * 3.2, 1.2 * Math.sin(i * 2.0), (i - 1) * 1.4 + 1.5) });
+      this.tenders.push({ mesh: m, arms, phase: i * 2.1, offset: new THREE.Vector3((i - 1) * 1.15, 0.35 * Math.sin(i * 2.0), (i - 1) * 0.45 - Math.abs(i - 1) * 0.5) });
       this.crafts.push(m);
     }
     space.scene.add(this.tenderGroup);
-    space.addBody('tenders', [this.tenderGroup], () => this.tenderGroup.getWorldPosition(_v), 6, { solid: true });
+    space.addBody('tenders', [this.tenderGroup], () => this.tenderGroup.getWorldPosition(_v), 6, { solid: true, hint: 0.25 });
     // ---- Selene Works over the Moon's near side
     const ref = buildRefinery(1);
     this.refinery = new THREE.Group();
@@ -97,12 +114,13 @@ export class Fleet {
     wm.onBeforeRender = rm.onBeforeRender;
     rm.add(wm);
     this.wheel = wm;
-    rm.add(createGlowMesh(ref.glows, { color: [1.0, 0.62, 0.35], strength: 2.4, scale: KM }));
+    rm.add(createGlowMesh(ref.glows, { color: [1.0, 0.62, 0.35], strength: 1.2, scale: KM }));
+    addEngines(rm, ref.glows, { scale: 0.55, length: 9, color: 0xff9a55, core: 0xfff0dc, throttle: 0.55 });   // the process vent
     this.refinery.add(rm);
     this.refineryMesh = rm;
     this.crafts.push(rm);
     space.scene.add(this.refinery);
-    space.addBody('selene', [this.refinery], () => this.refinery.getWorldPosition(_v), 6, { solid: true });
+    space.addBody('selene', [this.refinery], () => this.refinery.getWorldPosition(_v), 6, { solid: true, hint: 0.35 });
     this.moonAlt = 2600;
   }
 
@@ -121,7 +139,7 @@ export class Fleet {
       const up = bodyDir(0, MERIDIAN_LON + 0.5, _v2).applyQuaternion(q);
       const east = _v3.set(0, 1, 0).cross(up).normalize();
       const north = _v4.copy(up).cross(east);
-      if (outPos) outPos.copy(up).multiplyScalar(R_EARTH + 620 + 14).addScaledVector(north, 26);
+      if (outPos) outPos.copy(up).multiplyScalar(R_EARTH + 620 + 6).addScaledVector(north, 48);
       if (outQuat) outQuat.setFromRotationMatrix(_m2.makeBasis(east, up, north));
     } else if (name === 'selene') {
       const toEarth = _v2.copy(sim.moonPos).negate().normalize();
@@ -144,14 +162,15 @@ export class Fleet {
       this.approach.position.copy(local).applyMatrix4(el.harbour.matrixWorld);
       _q.setFromRotationMatrix(_m.extractRotation(el.harbour.matrixWorld));
       this.approach.quaternion.copy(_q).multiply(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), new THREE.Vector3(-Math.sin(1.1), 0, Math.cos(1.1))));
-      this.approachShip.children[0].material.uniforms.uStrength.value = 7 * (1 - 0.7 * ease);
+      this.approachShip.children[0].material.uniforms.uStrength.value = 2.5 * (1 - 0.7 * ease);
+      for (const e of this.approachEngines) e.setThrottle(1.15 - 0.85 * ease);   // braking as it nears
     }
     // tenders: station-keeping above and beside the Halo, cradles breathing open and closed
     {
       this.pose('tenders', sim, this.tenderGroup.position, this.tenderGroup.quaternion);
       for (const t of this.tenders) {
         const w = realTime * 0.05 + t.phase;
-        t.mesh.position.copy(t.offset).add(new THREE.Vector3(Math.sin(w) * 0.2, Math.sin(w * 0.7) * 0.1, Math.cos(w) * 0.2));
+        t.mesh.position.copy(t.offset).add(new THREE.Vector3(Math.sin(w) * 0.06, Math.sin(w * 0.7) * 0.03, Math.cos(w) * 0.06));
         t.mesh.rotation.set(0.1 * Math.sin(w * 0.5), w * 0.2, 0.05 * Math.sin(w * 0.3));
         const open = 0.5 + 0.5 * Math.sin(realTime * 0.25 + t.phase);
         for (const a of t.arms) a.pivot.quaternion.setFromAxisAngle(a.axis, -0.15 + 0.55 * open);
@@ -173,7 +192,7 @@ export function fleetTargets(space) {
   });
   return {
     liner: { ...P('liner'), minDist: 1.2, maxDist: 20000, defaultDist: 6.5, view: { az: 0.8, el: 0.25 } },
-    tenders: { ...P('tenders'), minDist: 0.4, maxDist: 20000, defaultDist: 4.2, view: { az: 0.6, el: 0.3 } },
+    tenders: { ...P('tenders'), minDist: 0.5, maxDist: 20000, defaultDist: 3.0, view: { az: 2.9, el: 0.22 } },
     selene: { ...P('selene'), minDist: 4, maxDist: 60000, defaultDist: 17, view: { az: 0.9, el: 0.18 } },
   };
 }

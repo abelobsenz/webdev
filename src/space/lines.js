@@ -44,10 +44,12 @@ void main() {
   vData = aData;
   vAcross = aSide;
   vec4 w = modelMatrix * vec4(position, 1.0);
-  vec4 wn = modelMatrix * vec4(aNext, 1.0);
   vWorld = w.xyz;
-  vec4 c0 = projectionMatrix * viewMatrix * w;
-  vec4 c1 = projectionMatrix * viewMatrix * wn;
+  // project camera-relative (double-precision modelViewMatrix): world km in float32 put
+  // metres of jitter on a tether seen from the Harbour
+  vec4 mv0 = modelViewMatrix * vec4(position, 1.0);
+  vec4 c0 = projectionMatrix * mv0;
+  vec4 c1 = projectionMatrix * (modelViewMatrix * vec4(aNext, 1.0));
   // pull segment ends that lie behind the camera onto the near side
   const float EPS = 1e-3;
   if (c0.w < EPS && c1.w > EPS) c0 = mix(c0, c1, (EPS - c0.w) / (c1.w - c0.w));
@@ -58,7 +60,7 @@ void main() {
   vec2 dir = s1 - s0;
   dir = length(dir) > 1e-5 ? normalize(dir) : vec2(1.0, 0.0);
   vec2 perp = vec2(-dir.y, dir.x);
-  float dist = max(length(w.xyz - cameraPosition), 1e-3);
+  float dist = max(length(mv0.xyz), 1e-3);
   float pxPerKm = uResolution.y * 0.5 * projectionMatrix[1][1] / dist;
   float wpx = uWidthKm * pxPerKm;
   if (dot(uBandAxis, uBandAxis) > 0.5) {

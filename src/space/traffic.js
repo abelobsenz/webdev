@@ -90,16 +90,33 @@ void main() {
   vCol = iC;
   float vis0, vis1;
   vec3 head = shipPos(uT, vis0);
-  vec3 tail = shipPos(uT - uStreak, vis1);
+  // the tail follows the ship's instantaneous velocity (a tiny step back, extrapolated),
+  // never a second sample a whole streak-time earlier: across a cycle wrap (a transfer
+  // just begun, a shuttle restarting its climb) that sample lay on the far side of the
+  // planet and the "streak" joined two unrelated points
+  float hs = max(uStreak * 0.02, 0.05);
+  vec3 prev = shipPos(uT - hs, vis1);
+  vec3 vel = (head - prev) / hs;
+  float jump = length(head - prev);
+  vec3 tail = head - vel * uStreak;
+  if (vis1 < 0.5 || jump > 60.0 * hs + 5.0) tail = head;   // the step itself crossed a wrap
   vec4 ch = projectionMatrix * viewMatrix * vec4(head, 1.0);
   vec4 ct = projectionMatrix * viewMatrix * vec4(tail, 1.0);
-  if (ch.w < 1e-3) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
-  if (ct.w < 1e-3) ct = ch;
-  vec2 sh = ch.xy / ch.w * uRes * 0.5;
+  // cull anything the quad could not honestly draw: heads behind the camera or outside
+  // this depth slice (each streak is drawn once, by the slice holding its head),
+  // off-screen heads (a streak never reaches further than 48 px from its head) and
+  // non-finite positions. A ship passing within metres of the camera otherwise produced
+  // a quad spanning the whole screen for a frame.
+  vec2 sh = ch.xy / max(ch.w, 1e-6) * uRes * 0.5;
+  bool bad = !(ch.w > 1e-3) || ch.z < -ch.w || ch.z > ch.w || any(isnan(sh)) || any(isinf(sh))
+          || any(greaterThan(abs(sh), uRes * 0.5 + 64.0));
+  if (bad) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
+  if (!(ct.w > 1e-3)) ct = ch;
   vec2 st = ct.xy / ct.w * uRes * 0.5;
+  if (any(isnan(st)) || any(isinf(st))) st = sh;
   vec2 dv = sh - st;
   float len = length(dv);
-  if (len > 90.0) { st = sh - dv / len * 90.0; len = 90.0; }
+  if (len > 48.0) { st = sh - dv / len * 48.0; len = 48.0; }
   vec2 dir = len > 0.5 ? dv / len : vec2(1.0, 0.0);
   vec2 perp = vec2(-dir.y, dir.x);
   float w = uPx;
@@ -112,6 +129,8 @@ void main() {
   vAcross = position.y;
   float dist = -(viewMatrix * vec4(head, 1.0)).z;
   vFade = vis0 * clamp(2.5e5 / max(dist, 1.0), 0.15, 1.0) * clamp(30.0 / max(len, 1.0) + 0.35, 0.35, 1.0);
+  // ships closer than a few km are real hulls, not specks: fade the streak out
+  vFade *= smoothstep(0.4, 4.0, dist);
 }
 `;
 
@@ -122,7 +141,7 @@ varying vec3 vCol;
 varying float vFade;
 void main() {
   float a = exp(-vAcross * vAcross * 3.0) * (0.2 + 0.8 * vAlong * vAlong);
-  gl_FragColor = vec4(vCol * a * vFade * 1.5, 0.0);
+  gl_FragColor = vec4(vCol * a * vFade * 0.9, 0.0);
 }
 `;
 
@@ -137,7 +156,8 @@ export class Traffic {
     const A = [], B = [], C = [];
     const cols = [[1.0, 0.86, 0.66], [0.66, 0.85, 1.0], [1.0, 0.55, 0.35], [0.9, 0.95, 1.0]];
     const push = (a, b, c) => { A.push(...a); B.push(...b); C.push(...c); };
-    const nRing = Math.floor(N * 0.56), nXfer = Math.floor(N * 0.14), nPort = Math.floor(N * 0.1), nMoon = Math.floor(N * 0.1);
+    // the Harbour keeps a modest local swarm (a denser one read as confetti around the station)
+    const nRing = Math.floor(N * 0.62), nXfer = Math.floor(N * 0.14), nPort = Math.floor(N * 0.1), nMoon = Math.floor(N * 0.1);
     const nGeo = N - nRing - nXfer - nPort - nMoon;
     const widths = rings.defs.map((d) => d.width);
     for (let i = 0; i < nRing; i++) {
@@ -186,7 +206,7 @@ export class Traffic {
     this.geoDir = bodyDir(0, MERIDIAN_LON);
   }
 
-  setSize(w, h) { this.uniforms.uRes.value.set(w, h); this.uniforms.uPx.value = Math.max(1.1, h / 800); }
+  setSize(w, h) { this.uniforms.uRes.value.set(w, h); this.uniforms.uPx.value = Math.max(1.5, h / 700); }
 
   update(sim, realTime, dt, space) {
     const u = this.uniforms;

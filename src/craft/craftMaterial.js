@@ -199,11 +199,13 @@ void main() {
   vec3 earthshine = vec3(0.35, 0.5, 0.85) * uSunE * 0.3 * eSize * eSize * max(dot(N, eDir), 0.0) * max(dot(-eDir, uSunView) * 0.5 + 0.5, 0.0);
   float ndl = max(dot(N, uSunView), 0.0);
   vec3 H = normalize(V + uSunView);
-  float sp = pow(max(dot(N, H), 0.0), mix(80.0, 12.0, rough)) * mix(0.6, 0.3, rough);
+  // flat hull facets reflecting the Sun: a soft sheen with a bounded peak (a sharp lobe
+  // turned whole faceted plates white for a frame as a ship turned)
+  float sp = pow(max(dot(N, H), 0.0), mix(60.0, 10.0, rough)) * mix(0.5, 0.25, rough);
   vec3 F0 = mix(vec3(0.04), alb, metal);
   float fres = pow(1.0 - max(dot(N, V), 0.0), 5.0);
   vec3 Fr = F0 + (1.0 - F0) * fres * (1.0 - rough);
-  vec3 col = alb * (1.0 - metal * 0.8) / 3.14159 * (sunL * ndl + earthshine) + min((F0 + (1.0 - F0) * fres * 0.3) * sp * sunL * ndl, sunL * 0.6);
+  vec3 col = alb * (1.0 - metal * 0.8) / 3.14159 * (sunL * ndl + earthshine) + min((F0 + (1.0 - F0) * fres * 0.3) * sp * sunL * ndl, sunL * 0.5);
   col += Fr * craftEnv(vView, reflect(-V, N), max(rough, 0.12)) * 0.8;
   col += alb * 0.004 + em;
   gl_FragColor = vec4(col, 1.0);
@@ -264,7 +266,7 @@ void main() {
   float r2 = dot(vQ, vQ);
   if (r2 > 1.0) discard;
   float core = exp(-r2 * 14.0), halo = exp(-r2 * 3.0) * 0.25;
-  float flick = 0.92 + 0.08 * sin(uTime * 37.0 + vQ.x * 3.0);
+  float flick = 0.97 + 0.03 * sin(uTime * 9.0 + vQ.x * 3.0);
   gl_FragColor = vec4(uColor * (core * (0.5 + 1.5 * vFace) + halo) * uStrength * flick, 0.0);
 }
 `;

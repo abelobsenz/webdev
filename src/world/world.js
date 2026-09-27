@@ -20,6 +20,7 @@ import { Traffic } from '../life/traffic.js';
 import { Chorus } from '../life/chorus.js';
 import { Clouds } from '../life/clouds.js';
 import { People } from '../life/people.js';
+import { Skiffs } from '../life/skiffs.js';
 
 const nU = createNoise2D(71);
 
@@ -146,11 +147,14 @@ export class World {
     // City life
     this.traffic = new Traffic(this.scene, this.settings, this);   // citylife: world passed for lane clearance + docks
     this.updaters.push(this.traffic);
+    // courier skiffs with bending exhaust trails
+    this.skiffs = new Skiffs(this.scene, this);
+    this.updaters.push({ applyQuality: (s) => this.skiffs.applyQuality(s), update: (dt, t) => this.skiffs.update(dt, t, this.app.camera) });
     this.chorus = new Chorus(this.scene, this.settings);
     this.updaters.push(this.chorus);
     this.clouds = new Clouds(this.scene);
     this.updaters.push({ update: (dt) => this.clouds.update(dt, this.app.camera) });
-    this.people = new People(this.scene, this.settings);
+    this.people = new People(this.scene, this.settings, this);
     this.updaters.push({ applyQuality: (s) => this.people.applyQuality(s), update: (dt, t) => this.people.update(dt, t, this.app.camera) });
     // aircraft beacons on every summit
     const beacons = [...this.axis.beacons, ...this.infra.beacons];

@@ -25,6 +25,9 @@ void main() {
   vec4 w = modelMatrix * vec4(position, 1.0);
   vWorld = w.xyz;
   vN = normalize(mat3(modelMatrix) * normal);
+  // camera-relative projection (modelViewMatrix is composed in double precision on the
+  // CPU): world coordinates 42,000 km out, in float32, jittered vertices by metres each
+  // frame and made coincident parts z-fight as the Harbour turned
   gl_Position = projectionMatrix * (modelViewMatrix * vec4(position, 1.0));
 }
 `;
@@ -85,7 +88,9 @@ void main() {
   vec3 pointL = uPointColor * max(dot(N, pDir), 0.0);
   vec3 cellP = vLocal / uPattern;
   float fw = max(max(fwidth(cellP.x), fwidth(cellP.y)), fwidth(cellP.z));
-  float detail = 1.0 - smoothstep(0.11, 0.33, fw);                   // pattern cells >= 3 px
+  // fine cell patterns fade to their average well before they reach a pixel, so lit
+  // windows on moving or spinning hulls never sparkle frame to frame
+  float detail = 1.0 - smoothstep(0.07, 0.3, fw * 4.0);
   float n = hash13(floor(cellP * vec3(1.0, 1.0, 1.0)));
   // surface coordinates in metres: round the station's axis on walls, its plan on end faces
   vec3 ln = normalize(vLN);
@@ -159,10 +164,12 @@ void main() {
   }
   float ndl = max(dot(N, uSunDir), 0.0);
   vec3 H = normalize(V + uSunDir);
-  float sp = pow(max(dot(N, H), 0.0), mix(80.0, 12.0, rough)) * mix(0.6, 0.3, rough);
+  // glints stay physically shaped but bounded: flat kilometre-scale panels used to flare
+  // the whole screen white for an instant as the view swept through the mirror angle
+  float sp = pow(max(dot(N, H), 0.0), mix(70.0, 10.0, rough)) * mix(0.55, 0.25, rough);
   vec3 spec = mix(vec3(0.04), alb, metal) * sp;
   vec3 Hp = normalize(V + pDir);
-  float spp = pow(max(dot(N, Hp), 0.0), mix(80.0, 12.0, rough)) * mix(0.6, 0.3, rough);
+  float spp = pow(max(dot(N, Hp), 0.0), mix(70.0, 10.0, rough)) * mix(0.55, 0.25, rough);
   float diffK = k == 6.0 ? 0.03 : (1.0 - metal * 0.7);
   vec3 col = alb * diffK / 3.14159 * (sunL * ndl + earthshine + pointL) + min(spec * sunL * ndl, sunL * 0.6) + min(mix(vec3(0.04), alb, metal) * spp * pointL, pointL * 0.6);
   vec3 F0 = mix(vec3(0.04), alb, metal);
@@ -170,7 +177,8 @@ void main() {
   col += (F0 + (1.0 - F0) * fres * (1.0 - rough)) * hullEnv(vWorld, reflect(-V, N), max(rough, 0.12)) * 0.8;
   col += alb * 0.004;
   col += em;
-  // (no random blinking hull cells: they read as flashing quads once bloomed)
+  // (no random blinking hull cells: they read as flashing white quads once bloomed;
+  //  the stations carry explicit beacon lamps instead)
   float a = 1.0;
   if (uBehindMask > 0.5) {
     vec4 hb = texture(uHearthTex, gl_FragCoord.xy / uHearthRes);

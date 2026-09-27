@@ -26,7 +26,7 @@ void main() {
   vec4 w = modelMatrix * vec4(position, 1.0);
   vWorld = w.xyz;
   vN = normalize(mat3(modelMatrix) * normal);
-  gl_Position = projectionMatrix * viewMatrix * w;
+  gl_Position = projectionMatrix * (modelViewMatrix * vec4(position, 1.0));
 }
 `;
 
@@ -159,7 +159,7 @@ void main() {
 `;
 const ATMO_VERT = /* glsl */ `
 varying vec3 vWorld;
-void main() { vec4 w = modelMatrix * vec4(position, 1.0); vWorld = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }
+void main() { vec4 w = modelMatrix * vec4(position, 1.0); vWorld = w.xyz; gl_Position = projectionMatrix * (modelViewMatrix * vec4(position, 1.0)); }
 `;
 
 const RING_VERT = /* glsl */ `
@@ -172,7 +172,7 @@ void main() {
   vec4 w = modelMatrix * vec4(position, 1.0);
   vWorld = w.xyz;
   vN = normalize(mat3(modelMatrix) * normal);
-  gl_Position = projectionMatrix * viewMatrix * w;
+  gl_Position = projectionMatrix * (modelViewMatrix * vec4(position, 1.0));
 }
 `;
 const RING_FRAG = /* glsl */ `
@@ -195,7 +195,7 @@ void main() {
   vec3 sunL = uSunE * sh * vec3(1.0, 0.97, 0.93);
   float u = vRing.x, v = vRing.y;
   float fu = fwidth(u);
-  float detail = 1.0 - smoothstep(0.15, 1.0, fu);
+  float detail = 1.0 - smoothstep(0.06, 0.35, fu);
   float panel = hash12(floor(vec2(u / 1.2, v * 6.0)));
   vec3 alb = vec3(0.42, 0.42, 0.44) * (0.8 + 0.3 * mix(0.5, panel, detail));
   vec3 col = alb / 3.14159 * sunL * max(dot(N, uSunDir), 0.0);

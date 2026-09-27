@@ -108,6 +108,19 @@ export function terrainHeight(x, z) {
   }
   land = Math.max(land, shelf);
 
+  // --- the plaza berm: the island rises in a landscaped slope to meet the Axis plaza's
+  //     planted terrace (12.5 m), so the plaza's rim sits in the land instead of standing
+  //     proud of the low east shore as a wall ---
+  {
+    const rp = Math.hypot(x, z);
+    if (rp < 900) {
+      const reach = 170 + 60 * (0.5 + 0.5 * nD(x * 0.003 + 7, z * 0.003 - 3));
+      const t = smoothstep(606, 606 + reach, rp);
+      const berm = 12.3;
+      land = Math.max(land, berm + (land - berm) * t);
+    }
+  }
+
   // --- northern volcanic massif: broad eroded domes carved by radial ridges ---
   let mountain = -1e9;
   if (z < -7000) {

@@ -232,7 +232,7 @@ class App {
     p.downMat.uniforms.uThreshold.value = 1.1 / exposure;
     p.downMat.uniforms.uKnee.value = 0.7 / exposure;
     p.downMat.uniforms.uClamp.value = 6e4;
-    p.finalMat.uniforms.uGlare.value.set(0, 0, 0);
+    p.finalMat.uniforms.uGlare.value.set(0, 0, 0); p.finalMat.uniforms.uGlareMask.value = 0;
     p.finalMat.uniforms.uTime.value = this.elapsed;
     p.renderBloom();
     // rendering agent: auto exposure adapts around the designed time-of-day curve
@@ -241,7 +241,9 @@ class App {
       const lp = this._lastExpPose || (this._lastExpPose = { pos: this.camera.position.clone(), h: this.hours });
       const jump = lp.pos.distanceTo(this.camera.position) > 300 || Math.abs(lp.h - this.hours) > 0.2;
       lp.pos.copy(this.camera.position); lp.h = this.hours;
-      p.renderExposure(dt, (0.2 / exposure) * (1 - 0.45 * U.uNight.value), jump);
+      p.adaptMat.uniforms.uRange.value = 1.2;
+      p.renderExposure(dt, (0.2 / exposure) * (1 - 0.45 * U.uNight.value), jump || !!(this.space && this.space._cityReset));
+      if (this.space) this.space._cityReset = false;
     }
     this.updateGrade();
     // sun rays

@@ -6,6 +6,7 @@ import { latticeRadius, AXIS } from '../world/axis.js';
 import { mulberry32 } from '../world/noise.js';
 import { U } from '../core/uniforms.js';
 import { RouteBank, ROUTE_GLSL, SAMPLES, circlePath, beltPath, smoothClosed } from './routes.js';
+import { streakGeometry, PL_NOISE, PL_STREAK } from '../craft/plumes.js';
 import { Clearance } from './clearance.js';
 import { PART, LIGHTS, airCarGeometry, ferryGeometry, cargoDroneGeometry, serviceGeometry, arkGeometry, linerGeometry } from './vehicles.js';
 
@@ -258,8 +259,11 @@ void main() {
     float ph = fract(uTime * 1.6 + seed * 7.0); col = aLane.z < 0.5 ? vec3(0.15, 0.35, 1.0) : vec3(1.0, 0.55, 0.1); blink = step(ph, 0.5);
   } else if (type < 7.5) {            // pulse red
     float ph = fract(uTime * 1.6 + seed * 7.0); col = aLane.z < 0.5 ? vec3(1.0, 0.1, 0.08) : vec3(1.0, 0.55, 0.1); blink = step(0.5, ph);
-  } else if (type < 8.5) {            // starship engine
-    col = vec3(0.6, 0.78, 1.0); I *= (0.1 + fr.thrust) * (0.25 + 0.75 * smoothstep(0.3, -0.5, cf));
+  } else if (type < 8.5) {            // starship engine: dark when berthed, glowing under way
+    col = vec3(0.6, 0.78, 1.0); I *= fr.thrust * smoothstep(3.0, 18.0, fr.speed) * (0.25 + 0.75 * smoothstep(0.3, -0.5, cf));
+    // pull the glow toward the viewer by its own size so the flat sprite never slices
+    // through the hull it sits on (that left a hard straight edge across the glow)
+    p += toCam * LC.x * scale * 1.3;
   } else if (type < 9.5) {            // amber beacon (rotating)
     col = vec3(1.0, 0.55, 0.12); blink = 0.25 + 0.75 * pow(max(0.0, sin(uTime * 5.0 + seed * 30.0)), 6.0);
   } else {                             // passenger window glow
@@ -982,45 +986,47 @@ void main() {
     trail.renderOrder = 4;
     trail.name = 'ship-trails';
     this.group.add(trail);
-    // plumes: a camera-facing flame along the engine axis
+    // plumes: the bundle's five-plane pressure-barrel exhaust column, one instance per
+    // ship, oriented and throttled from the route frame (white-hot spine, Mach diamonds,
+    // shear filaments, blackbody cooling down the tail)
+    const sg = streakGeometry();
     const pg = new THREE.InstancedBufferGeometry();
-    pg.setAttribute('position', new THREE.Float32BufferAttribute([0, -1, 0, 1, -1, 0, 1, 1, 0, 0, 1, 0], 3));
-    pg.setIndex([0, 1, 2, 0, 2, 3]);
+    pg.index = sg.index;
+    pg.setAttribute('position', sg.attributes.position);
+    pg.setAttribute('uv', sg.attributes.uv);
     pg.setAttribute('aRoute', tg.attributes.aRoute);
     pg.setAttribute('aLane', tg.attributes.aLane);
     pg.instanceCount = ships.length;
     const plumeMat = new THREE.ShaderMaterial({
-      uniforms: { uTime: U.uTime, uRoutes: { value: this.tex } },
+      uniforms: { uTime: U.uTime, uRoutes: { value: this.tex }, uColor: { value: new THREE.Color(0x7fd8ff) }, uCore: { value: new THREE.Color(0xeefaff) } },
       vertexShader: /* glsl */ `
 uniform float uTime;
 ${ROUTE_GLSL}
 attribute vec4 aRoute; attribute vec4 aLane;
-varying vec2 vUv; varying float vT;
+varying vec2 vUv; varying float vT; varying float vSeed;
 void main() {
   RouteFrame fr = routeAt(aRoute.x, aRoute.y + uTime * aRoute.z);
   vec3 side; mat3 R = routeBasis(fr, 1.0, side);
   float s = aRoute.w;
+  vT = fr.thrust * fr.vis * smoothstep(3.0, 18.0, fr.speed);   // no exhaust while berthed
+  vSeed = aLane.w;
+  vUv = uv;
+  if (vT < 0.01) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
   vec3 e = fr.pos + R * vec3(0.0, 0.0, -0.53 * s);
-  float len = s * (0.15 + 1.1 * fr.thrust) * fr.vis;
-  vec3 axis = -R[2];
-  vec3 toCam = normalize(cameraPosition - e);
-  vec3 across = normalize(cross(axis, toCam) + 1e-5);
-  vec3 p = e + axis * position.x * len + across * position.y * s * 0.06 * (1.0 + position.x * 0.8);
-  vUv = position.xy; vT = fr.thrust * fr.vis;
+  float rad = s * 0.075;
+  float len = s * (0.35 + 1.5 * fr.thrust);
+  vec3 p = e + (R[0] * position.x + R[1] * position.y) * rad + R[2] * position.z * len;
   gl_Position = projectionMatrix * viewMatrix * vec4(p, 1.0);
 }`,
       fragmentShader: /* glsl */ `
-uniform float uTime;
-varying vec2 vUv; varying float vT;
+uniform float uTime; uniform vec3 uColor; uniform vec3 uCore;
+varying vec2 vUv; varying float vT; varying float vSeed;
+${PL_NOISE}
+${PL_STREAK}
 void main() {
-  float x = vUv.x, y = abs(vUv.y);
-  float w = mix(0.5, 1.0, x);
-  float core = exp(-y * y / (w * w) * 9.0);
-  float diamonds = 0.7 + 0.3 * cos(x * 38.0 - uTime * 60.0);
-  float fade = pow(max(1.0 - x, 0.0), 1.6);
-  vec3 col = mix(vec3(0.95, 0.97, 1.0), vec3(0.4, 0.55, 1.0), smoothstep(0.0, 0.5, x));
-  col = mix(col, vec3(0.75, 0.45, 1.0), smoothstep(0.4, 1.0, x) * 0.6);
-  gl_FragColor = vec4(col * core * diamonds * fade * vT * 14.0, 1.0);
+  vec3 c = plStreak(vUv, uTime, 1.7 * clamp(vT * 1.2, 0.0, 1.4), vSeed, uColor, uCore);
+  if (c.r + c.g + c.b < 1e-4) discard;
+  gl_FragColor = vec4(c * 2.2, 1.0);
 }`,
       transparent: true, depthWrite: false, blending: THREE.CustomBlending, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor, side: THREE.DoubleSide,
     });

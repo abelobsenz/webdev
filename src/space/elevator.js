@@ -8,23 +8,32 @@ import { R_EARTH, GEO_ALT, COUNTERWEIGHT_ALT, MERIDIAN_LON, bodyDir } from './si
 
 const CLIMB_PERIOD = 53400;         // s: surface to GEO at ~2,400 km/h
 const TETHER_FRAG = /* glsl */ `
+float aaBand(float x, float P, float w) {
+  // lamps every P km, w km long: a filtered band whose energy stays constant once it is
+  // thinner than a pixel, so beacons never pop in and out as the view moves
+  float d = abs(fract(x / P + 0.5) - 0.5) * P;
+  float fw = max(fwidth(x), 1e-5);
+  float W = max(w, fw);
+  return clamp(1.0 - d / W, 0.0, 1.0) * min(1.0, w / fw);
+}
 void main() {
   vec3 sunL = spaceSunlight(uTransmittanceLUT, vWorld, uSunDir) * uSunE;
   float alt = vData.x;
   float fa = max(fwidth(alt), 1e-3);                     // km of tether per pixel
-  // a thin cylinder catches the most light when the Sun is square to it
-  vec3 tdir = normalize(vWorld);
-  float cs = dot(tdir, uSunDir);
-  float sq = sqrt(max(1.0 - cs * cs, 0.0));
-  vec3 col = vec3(0.6, 0.62, 0.66) * sunL * (0.025 + 0.07 * sq) + vec3(0.03, 0.045, 0.07);
-  // beacons every 250 km (5 km long), energy-conserving once they are under a pixel, slow glow
-  float bd = abs(fract(alt / 250.0 + 0.5) - 0.5) * 250.0;
-  float beacon = clamp(1.0 - bd / max(5.0, fa), 0.0, 1.0) * min(1.0, 5.0 / fa) * (0.75 + 0.25 * sin(uTime * 0.7 + floor(alt / 250.0)));
+  // a round cable, not a flat strip: limb darkening across the ribbon and a specular
+  // line where the sunlit side faces the viewer
+  float x = clamp(vAcross, -1.0, 1.0);
+  float cyl = sqrt(max(1.0 - x * x, 0.0));
+  float spec = exp(-((x - 0.35) * 5.0) * ((x - 0.35) * 5.0));
+  vec3 col = vec3(0.6, 0.62, 0.66) * sunL * (0.035 + 0.05 * cyl + 0.04 * spec) + vec3(0.03, 0.045, 0.07) * (0.5 + 0.5 * cyl);
+  // sparse marker lights, not dashes
+  float beacon = aaBand(alt, 250.0, 0.18) * (0.75 + 0.25 * sin(uTime * 1.5 + alt));
   col += vec3(1.0, 0.72, 0.4) * beacon * 1.5;
   // the power sheath: a faint blue glow with soft pulses climbing toward the Harbour
+  // (their mean once a pulse is under a few pixels)
   float pp = fract(alt / 1500.0 - uTime * 0.02) - 0.5;
   float pulse = mix(0.07, exp(-pp * pp * 600.0), 1.0 - smoothstep(15.0, 60.0, fa));
-  col += vec3(0.35, 0.6, 1.0) * (0.06 + 0.45 * pulse);
+  col += vec3(0.35, 0.6, 1.0) * (0.06 + 0.3 * pulse) * cyl;
   float fade = smoothstep(0.0, 3.0, alt);
   gl_FragColor = vec4(col * vCoverage * fade, 0.0);
 }
@@ -233,6 +242,8 @@ export class Elevator {
       m.uniforms.uTime.value = realTime;
       m.uniforms.uEarthPos.value.set(0, 0, 0);
     }
-    for (const r of this.harbourRings) r.rotation.y = r.userData.dir * r.userData.omega * (sim.t % 1e6);
+    // habitat rings turn at their real 1 g rate in real time: driven by warped sim time
+    // they spun many times per second and strobed
+    for (const r of this.harbourRings) r.rotation.y = r.userData.dir * r.userData.omega * (realTime % 1e5);
   }
 }

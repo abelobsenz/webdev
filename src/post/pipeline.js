@@ -346,6 +346,18 @@ uniform vec3 uGlare;         // analytic sun glare (HDR colour x strength); zero
 uniform vec2 uGlareUV;       // the Sun's position in uv, may lie well off screen
 uniform float uGlareFov;     // vertical field of view (radians)
 uniform float uGhosts;       // lens ghost strength
+uniform float uGlareR;       // the solar disc's radius (uv height units)
+uniform float uGlareMask;    // 1: hdr alpha marks solid geometry, which hides the Sun and its glare
+uniform vec4 uOcc1;          // occluding spheres for the glare (view-space centre, radius):
+uniform vec4 uOcc2;          //   the Earth and the Moon block rays drawn across their discs
+uniform vec2 uTanHalf;       // tan of the half field of view (x, y)
+float occludedBy(vec4 s, vec3 d) {
+  if (s.w <= 0.0) return 0.0;
+  float dc = length(s.xyz);
+  float ang = acos(clamp(dot(d, s.xyz / dc), -1.0, 1.0));
+  float angR = asin(clamp(s.w / dc, 0.0, 1.0));
+  return 1.0 - smoothstep(angR - 0.0015, angR + 0.004, ang);
+}
 uniform vec3 uLift;
 uniform vec3 uGain;
 uniform float uSaturation;
@@ -354,6 +366,8 @@ uniform float uLdrOut;
 varying vec2 vUv;
 
 // AgX (Troy Sobotka) — polynomial approximation (Benjamin Wrensch)
+uniform float uSharpen;
+vec3 shv(vec3 c) { c = (any(isnan(c)) || any(isinf(c))) ? vec3(0.0) : min(max(c, 0.0), vec3(6e4)); return c / (1.0 + c); }
 vec3 agxDefaultContrastApprox(vec3 x) {
   vec3 x2 = x * x; vec3 x4 = x2 * x2;
   return 15.5 * x4 * x2 - 40.14 * x4 * x + 31.96 * x4 - 6.868 * x2 * x + 0.4298 * x2 + 0.1191 * x - 0.00232;
@@ -420,6 +434,19 @@ void main() {
     col = texture(tHDR, uv).rgb;
   }
   col = (any(isnan(col)) || any(isinf(col))) ? vec3(0.0) : min(max(col, 0.0), vec3(6e4));
+  if (uSharpen > 0.0) {
+    // contrast-adaptive sharpening in a compressed (x / (1 + x)) domain, clamped to the
+    // 4-neighbourhood so highlights never ring: restores the crispness MSAA + resolve lose
+    vec2 tx = 1.0 / vec2(textureSize(tHDR, 0));
+    vec3 a = shv(texture(tHDR, uv + vec2(tx.x, 0.0)).rgb), b = shv(texture(tHDR, uv - vec2(tx.x, 0.0)).rgb);
+    vec3 c = shv(texture(tHDR, uv + vec2(0.0, tx.y)).rgb), d = shv(texture(tHDR, uv - vec2(0.0, tx.y)).rgb);
+    vec3 y = col / (1.0 + col);
+    vec3 mn = min(min(min(a, b), min(c, d)), y), mx = max(max(max(a, b), max(c, d)), y);
+    float contrast = max(max(mx.r - mn.r, mx.g - mn.g), mx.b - mn.b);
+    float w = uSharpen * (1.0 - smoothstep(0.15, 0.6, contrast));          // ease off on hard edges
+    vec3 ys = clamp(y + (y - 0.25 * (a + b + c + d)) * w * 1.6, mn, mx);
+    col = ys / max(1.0 - ys, 1e-4);
+  }
   if (uAO > 0.0) col *= mix(1.0, texture(tAO, uv).r, uAO);
   // volumetric shafts: remove the in-scatter of shadowed air, add a touch to lit air
   if (uShaftDark > 0.0) {
@@ -441,7 +468,28 @@ void main() {
     float g = 0.55 / (1.0 + t1 * t1) + 0.04 / (1.0 + t2 * t2) + 0.004 / (1.0 + t3 * t3);
     float a = atan(dv.y, dv.x);
     float spikes = (pow(abs(cos(a * 3.0 + 0.3)), 90.0) + 0.6 * pow(abs(cos(a * 3.0 + 1.35)), 140.0)) * exp(-th * 30.0) * 0.35;
-    col += uGlare * (g + spikes);
+    vec3 vd = normalize(vec3((uv * 2.0 - 1.0) * uTanHalf, -1.0));
+    float occ = max(occludedBy(uOcc1, vd), occludedBy(uOcc2, vd));
+    // the Sun sits behind everything: how much of its disc the scene covers dims the whole
+    // glare, and solid geometry takes almost none of it (the flare is not painted over a
+    // station or a ship that stands in front of the Sun)
+    float sunVis = 1.0, pixK = 1.0;
+    if (uGlareMask > 0.0) {
+      vec2 su = uGlareUV;
+      if (su.x > 0.0 && su.x < 1.0 && su.y > 0.0 && su.y < 1.0) {
+        vec2 rr = vec2(uGlareR * uRes.y / uRes.x, uGlareR);
+        float cov = texture(tHDR, su).a;
+        for (int i = 0; i < 8; i++) {
+          float an = float(i) * 0.7853982;
+          cov += texture(tHDR, su + vec2(cos(an), sin(an)) * rr).a;
+        }
+        // fade the measurement out at the frame edge (taps would clamp to the border)
+        float edge = smoothstep(0.0, 0.02, min(min(su.x, 1.0 - su.x), min(su.y, 1.0 - su.y)));
+        sunVis = 1.0 - clamp(cov / 9.0, 0.0, 1.0) * edge;
+      }
+      pixK = mix(1.0, 0.06, clamp(texture(tHDR, uv).a, 0.0, 1.0));
+    }
+    col += uGlare * (g + spikes) * (1.0 - 0.94 * occ) * sunVis * pixK;
     if (uGhosts > 0.0) {
       vec2 axis = vec2(0.5) - uGlareUV;
       float onScreen = 1.0 - smoothstep(0.55, 0.9, max(abs(uGlareUV.x - 0.5), abs(uGlareUV.y - 0.5)));
@@ -459,7 +507,7 @@ void main() {
       // a faint halo ring round the centre
       float ring = exp(-pow(abs(length((uv - 0.5) * asp) - 0.42) / 0.012, 2.0)) * 0.25;
       gh += vec3(0.6, 0.8, 1.0) * ring * smoothstep(0.6, 0.0, length(uv - uGlareUV));
-      col += uGlare * gh * uGhosts * onScreen;
+      col += uGlare * gh * uGhosts * onScreen * sunVis;
     }
   }
   if (uStreak > 0.0) col += texture(tStreak, uv).rgb * uStreak * vec3(0.55, 0.75, 1.0);
@@ -676,7 +724,7 @@ export class Pipeline {
       uShaftColor: { value: new THREE.Color() }, uShaftDark: { value: 0 }, uShaftLit: { value: 0 }, uStreak: { value: 0 }, uDirt: { value: 0 },
       uHLKnee: { value: 1.5 }, uHLSlope: { value: 1 }, uHLLocal: { value: 0.35 }, tBloomLocal: { value: this.bloomRTs[3].texture }, tAO: { value: black }, uAO: { value: 0 },
       uTime: { value: 0 }, uRes: { value: new THREE.Vector2() }, uVignette: { value: 0.3 }, uGrain: { value: 0.02 }, uCA: { value: 0.0015 },
-      uFlare: { value: 0.0 }, uSun: { value: new THREE.Vector2() }, uSunVis: { value: 0 }, uGlare: { value: new THREE.Vector3() }, uGlareUV: { value: new THREE.Vector2() }, uGlareFov: { value: 1 }, uGhosts: { value: 0 },
+      uFlare: { value: 0.0 }, uSun: { value: new THREE.Vector2() }, uSunVis: { value: 0 }, uGlare: { value: new THREE.Vector3() }, uGlareUV: { value: new THREE.Vector2() }, uGlareFov: { value: 1 }, uGhosts: { value: 0 }, uGlareR: { value: 0.005 }, uGlareMask: { value: 0 }, uSharpen: { value: 0 }, uOcc1: { value: new THREE.Vector4() }, uOcc2: { value: new THREE.Vector4() }, uTanHalf: { value: new THREE.Vector2(1, 1) },
       uLift: { value: new THREE.Vector3(0, 0, 0) }, uGain: { value: new THREE.Vector3(1, 1, 1) },
       uSaturation: { value: 1.15 }, uContrast: { value: 1.08 }, uLdrOut: { value: 0 },
     });
@@ -860,7 +908,7 @@ export class Pipeline {
    * (1x1 float texture read by the composite). expectedLum = the average scene
    * luminance the designed exposure curve expects at this time of day.
    */
-  renderExposure(dt, expectedLum, reset = false) {
+  renderExposure(dt, expectedLum, reset = false, rangeUp = null) {
     this.timer.begin('exposure');
     const r = this.renderer;
     const fs = this.fs;
@@ -874,7 +922,7 @@ export class Pipeline {
     a.uDt.value = dt;
     a.uReset.value = (reset || this.expReset) ? 1 : 0;
     a.uStrength.value = this.settings.autoExposure === false ? 0 : 0.65;
-    a.uRangeUp.value = 0.7 - 0.5 * U.uNight.value;
+    a.uRangeUp.value = rangeUp ?? (0.7 - 0.5 * U.uNight.value);
     fs.material = this.adaptMat;
     fs.render(r, next);
     this.expIdx = 1 - this.expIdx;
@@ -1012,6 +1060,8 @@ export class Pipeline {
     this.timer.begin('composite+fxaa');
     const fxaa = !!this.settings.fxaa;
     const f = this.finalMat.uniforms;
+    f.uSharpen.value = this.settings.sharpen || 0;
+    f.uCA.value = 0.0015 * (this.settings.caScale ?? 1);
     f.uLdrOut.value = fxaa ? 1 : 0;
     this.fs.material = this.finalMat;
     this.fs.render(this.renderer, fxaa ? this.ldrRT : null);

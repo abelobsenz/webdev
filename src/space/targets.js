@@ -45,7 +45,7 @@ TARGET_INFO.liner = {
 TARGET_INFO.tenders = {
   key: '9', name: 'Reclamation Tenders', district: 'Above the Halo · 624 km',
   lore: 'Nothing in orbit is thrown away. The tenders drift along the Halo gathering dead satellites, spent tethers and the dust of old collisions in their three-armed cradles, and carry it all to the ring foundries to be made into something new. Low orbit has been clean for eight hundred years.',
-  facts: [['Length', '320 m'], ['Fleet', '4,200'], ['Recovered yearly', '1.6 Mt']],
+  facts: [['Length', '620 m'], ['Fleet', '4,200'], ['Recovered yearly', '1.6 Mt']],
 };
 TARGET_INFO.selene = {
   key: '0', name: 'Selene Works', district: 'Above the near side · 2,600 km',

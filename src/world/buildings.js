@@ -557,7 +557,7 @@ export function buildBuildings(scene, plan, ground, settings) {
     meshes, placements, chunks: list, tris,
     isFree: (x, z, r) => !placements.some((p) => Math.hypot(p.x - x, p.z - z) < r + Math.max(p.sx, p.sz) * 0.6),
     nearDist: 750,
-    applyQuality(s) { this.nearDist = s.lowrise >= 1 ? 850 : s.lowrise >= 0.75 ? 600 : 380; },
+    applyQuality(s) { this.nearDist = s.lowriseNear ?? (s.lowrise >= 1 ? 850 : s.lowrise >= 0.75 ? 600 : 380); },
     update(dt, t, camera) {
       if (!camera) return;
       const cp = camera.position;

@@ -76,6 +76,13 @@ ${NOISE_GLSL}
 ${FACADE_GLSL}
 
 float aaStep(float e, float x, float w) { return smoothstep(e - w, e + w, x); }
+// lamps every P km, w km long, filtered so a sub-pixel lamp keeps its energy spread over
+// the pixel instead of popping on and off as the view moves
+float aaLamp(float x, float P, float w) {
+  float d = abs(fract(x / P + 0.5) - 0.5) * P;
+  float fw = max(fwidth(x), 1e-5);
+  return clamp(1.0 - d / max(w, fw), 0.0, 1.0) * min(1.0, w / fw);
+}
 
 void main() {
   float u = vRing.x, v = vRing.y, part = vRing.z;
@@ -292,16 +299,25 @@ void main() {
 
 const TETHER_FRAG = /* glsl */ `
 uniform vec3 uColor;
+float aaBand(float x, float P, float w) {
+  // lamps every P km, w km long: a filtered band whose energy stays constant once it is
+  // thinner than a pixel, so beacons never pop in and out as the view moves
+  float d = abs(fract(x / P + 0.5) - 0.5) * P;
+  float fw = max(fwidth(x), 1e-5);
+  float W = max(w, fw);
+  return clamp(1.0 - d / W, 0.0, 1.0) * min(1.0, w / fw);
+}
 void main() {
   vec3 sunL = spaceSunlight(uTransmittanceLUT, vWorld, uSunDir) * uSunE;
   float alt = vData.x;
-  vec3 col = vec3(0.55, 0.58, 0.62) * sunL * 0.05 + vec3(0.02, 0.03, 0.05);
-  float fa = max(fwidth(alt), 1e-3);                     // km per pixel along the tether
-  float bd = abs(fract(alt / 40.0 + 0.5) - 0.5) * 40.0;
-  float beacon = clamp(1.0 - bd / max(1.4, fa), 0.0, 1.0) * min(1.0, 1.4 / fa) * (0.75 + 0.25 * sin(uTime * 0.8 + floor(alt / 40.0)));
-  float cp = fract(alt / 90.0 - uTime * 0.03 + vData.y * 0.31) - 0.5;
-  float climb = mix(0.06, exp(-cp * cp * 900.0), 1.0 - smoothstep(0.8, 3.0, fa));
-  col += uColor * beacon * 1.2 + vec3(0.8, 0.9, 1.0) * climb * 6.0;
+  float x = clamp(vAcross, -1.0, 1.0);
+  float cyl = sqrt(max(1.0 - x * x, 0.0));
+  float spec = exp(-((x - 0.35) * 5.0) * ((x - 0.35) * 5.0));
+  vec3 col = vec3(0.55, 0.58, 0.62) * sunL * (0.03 + 0.04 * cyl + 0.035 * spec) + vec3(0.02, 0.03, 0.05) * (0.5 + 0.5 * cyl);
+  float beacon = aaBand(alt, 40.0, 0.12) * (0.75 + 0.25 * sin(uTime * 1.5 + alt));
+  // climber pulses run on real time (in sim time they raced up the cable at warp)
+  float climb = aaBand(alt + uTime * 0.6 - vData.y * 28.0, 90.0, 0.4);
+  col += uColor * beacon * 1.2 + vec3(0.8, 0.9, 1.0) * climb * 3.0 * cyl;
   float fade = smoothstep(0.0, 12.0, alt) * (1.0 - smoothstep(560.0, 618.0, alt) * 0.5);
   gl_FragColor = vec4(col * vCoverage * fade, 0.0);
 }
