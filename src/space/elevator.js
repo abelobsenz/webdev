@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { createRibbonMaterial, buildRibbonGeometry } from './lines.js';
 import { createHullMaterial, tag, merge, beam, KIND } from './hull.js';
 import { R_EARTH, GEO_ALT, COUNTERWEIGHT_ALT, MERIDIAN_LON, bodyDir } from './sim.js';
+import { HarbourStation } from './harbour.js';
+import { stationFrame } from './stations.js';
 
 // Meridian's space elevator: the tether (surface -> Halo -> Geostationary
 // Harbour -> counterweight), its climbers, and the stations along it.
@@ -203,13 +205,11 @@ export class Elevator {
     const qStation = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), up);
     this.hullMats = [];
     const mkMat = (o) => { const m = createHullMaterial(o); this.hullMats.push(m); return m; };
-    const harbour = buildHarbour();
-    const hMat = mkMat({ pattern: 0.045, accent: [0.55, 0.85, 1.0] });
-    this.harbour = new THREE.Group();
+    // the Geostationary Harbour (src/space/harbour.js), drawn with the ships' builder and material
+    this.station = new HarbourStation();
+    this.harbour = this.station.group;
     this.harbour.position.copy(up).multiplyScalar(R_EARTH + GEO_ALT);
-    this.harbour.quaternion.copy(qStation);
-    this.harbour.add(new THREE.Mesh(harbour.body, hMat));
-    this.harbourRings = harbour.rings.map((r) => { const m = new THREE.Mesh(r.geo, hMat); m.userData = r; this.harbour.add(m); return m; });
+    this.harbour.quaternion.copy(stationFrame(up));
     this.group.add(this.harbour);
     // Halo junction: where the tether passes through the ring
     const jParts = [tag(new THREE.CylinderGeometry(2.2, 2.2, 5, 24), KIND.HAB), tag(new THREE.TorusGeometry(4.6, 0.5, 10, 64).rotateX(Math.PI / 2), KIND.HAB),
@@ -224,12 +224,12 @@ export class Elevator {
     this.counter.position.copy(up).multiplyScalar(R_EARTH + COUNTERWEIGHT_ALT + 10);
     this.counter.quaternion.copy(qStation);
     this.group.add(this.counter);
-    for (const o of [this.harbour, this.junction, this.counter]) o.traverse((c) => { c.frustumCulled = false; c.renderOrder = 3; });
+    for (const o of [this.junction, this.counter]) o.traverse((c) => { c.frustumCulled = false; c.renderOrder = 3; });
   }
 
   setSize(w, h) { this.tetherMat.uniforms.uResolution.value.set(w, h); this.climbMat.uniforms.uPx.value = Math.max(2, h / 400); }
 
-  update(sim, realTime) {
+  update(sim, realTime, dt, space) {
     const tu = this.tetherMat.uniforms;
     tu.uSunDir.value.copy(sim.sunDir); tu.uTime.value = realTime; tu.uSimT.value = sim.t % 1e6;
     this.climbMat.uniforms.uClimbT.value = sim.t % CLIMB_PERIOD;
@@ -238,8 +238,7 @@ export class Elevator {
       m.uniforms.uTime.value = realTime;
       m.uniforms.uEarthPos.value.set(0, 0, 0);
     }
-    // habitat rings turn at their real 1 g rate in real time: driven by warped sim time
-    // they spun many times per second and strobed
-    for (const r of this.harbourRings) r.rotation.y = r.userData.dir * r.userData.omega * (realTime % 1e5);
+    // the Harbour's rings turn at their real 1 g rate in real time; its wings track the Sun
+    if (space) this.station.update(sim, realTime, space);
   }
 }

@@ -1,6 +1,9 @@
 import * as THREE from 'three';
 import { U } from '../core/uniforms.js';
-import { Fleet, fleetTargets } from './fleet.js';
+import { Fleet, fleetTargets, NAURU_LON } from './fleet.js';
+import { CRAFT_FRAME } from './craftMesh.js';
+import { LAMP_UNIFORMS } from './lamps.js';
+import { stationFrame } from './stations.js';
 import { FullscreenPass, FS_VERT } from '../core/fullscreen.js';
 import { SpaceSim, R_EARTH, R_MOON, GEO_ALT, COUNTERWEIGHT_ALT, MERIDIAN_LON, bodyDir, cityToBody } from './sim.js';
 import { EarthBake, maskReady } from './earthBake.js';
@@ -84,9 +87,12 @@ export class SpaceMode {
       minDist: 800, maxDist: 60000, defaultDist: 3400, view: { az: 2.6, el: 0.62 },
       lookOffset: (rig, o) => o.copy(merid).applyQuaternion(sim.earthQuat).multiplyScalar(Math.min(rig.distance * 0.35, 3000)),
     });
+    // the Halo at the Nauru port, in the port's local frame (x west, y up, z north)
+    const nauru = bodyDir(0, NAURU_LON);
+    const nauruQ = stationFrame(nauru);
     T('halo', {
-      position: (o) => o.copy(bodyDir(0, MERIDIAN_LON + 0.5)).multiplyScalar(R_EARTH + 620).applyQuaternion(sim.earthQuat),
-      frame: earthFrame, minDist: 150, maxDist: 60000, defaultDist: 2600, view: { az: 1.2, el: 0.35 },
+      position: (o) => o.copy(nauru).multiplyScalar(R_EARTH + 620).applyQuaternion(sim.earthQuat),
+      frame: (q) => q.copy(sim.earthQuat).multiply(nauruQ), minDist: 40, maxDist: 60000, defaultDist: 260, view: { az: 2.2, el: 0.28 },
     });
     T('geo', {
       position: (o) => o.copy(merid).multiplyScalar(R_EARTH + GEO_ALT).applyQuaternion(sim.earthQuat),
@@ -199,6 +205,7 @@ export class SpaceMode {
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
     if (this.fadeRT) this.fadeRT.setSize(w, h);
+    LAMP_UNIFORMS.uRes.value.set(w, h);
     if (this.modules) for (const m of this.modules) if (m.setSize) m.setSize(w, h);
   }
 
@@ -327,6 +334,9 @@ export class SpaceMode {
     SKY_UNIFORMS.uSwarmT.value = this.realTime;
     SKY_UNIFORMS.uSkyTime.value = this.realTime;
     SKY_UNIFORMS.uSkyStars.value = THREE.MathUtils.lerp(0.55, 0.2, this.litEstimate || 0);
+    CRAFT_FRAME.sunDir.copy(sim.sunDir);
+    CRAFT_FRAME.time = this.realTime;
+    LAMP_UNIFORMS.uTime.value = this.realTime;
     for (const m of this.modules) if (m.update) m.update(sim, this.realTime, dt, this);
   }
 
