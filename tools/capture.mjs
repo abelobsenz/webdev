@@ -15,6 +15,10 @@ const args = process.argv.slice(2);
 const distIdx = args.indexOf('--dist');
 let dist = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'dist', 'index.html');
 if (distIdx >= 0) { dist = path.resolve(args[distIdx + 1]); args.splice(distIdx, 2); }
+// --query "quality=high&t=18" appends URL parameters (e.g. to force a quality preset)
+const qIdx = args.indexOf('--query');
+let extraQuery = '';
+if (qIdx >= 0) { extraQuery = '&' + args[qIdx + 1]; args.splice(qIdx, 2); }
 const [viewsFile, prefix = 'shot', W = '960', H = '540'] = args;
 const views = JSON.parse(fs.readFileSync(viewsFile, 'utf8'));
 
@@ -26,7 +30,7 @@ const logs = [];
 page.on('console', (m) => { if (m.type() === 'error' || m.type() === 'warning') logs.push(`${m.type()}: ${m.text().slice(0, 1500)}`); });
 page.on('pageerror', (e) => logs.push(`pageerror: ${e.message}`));
 const t0 = Date.now();
-await page.goto(`file://${dist}?capture`);
+await page.goto(`file://${dist}?capture${extraQuery}`);
 try {
   await page.waitForFunction(() => document.body.classList.contains('ready') || document.getElementById('loader')?.classList.contains('error'), null, { timeout: 300000, polling: 500 });
 } catch { logs.push('timeout waiting for ready'); }
