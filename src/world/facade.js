@@ -8,7 +8,8 @@ import { patchedMaterial, FACADE_GLSL } from './materials.js';
  *  2 = lantern / crown (glows)  3 = garden deck (planted)      4 = energy conduit
  *  5 = punched windows in stone 6 = water (pools)              7 = solar glass
  *  8 = timber (pergolas, fins)  9 = paved deck / terrace       10 = dark metal (frames, rails)
- *  11 = radiator / dark ceramic 12 = fritted-glass balustrade
+ *  11 = radiator / dark ceramic 12 = fritted-glass balustrade   13 = maglev guideway tube (r 3 m)
+ *  14 = maglev terminal glazing (the station seed-pod)       15 = promenade walkway (v = metres across)
  *
  * Windows are not a flat checkerboard: each opening has a frame of real depth
  * (parallax offset of the reveal), a painted or anodised window frame with glazing
@@ -184,6 +185,8 @@ const FACADE_COLOR = /* glsl */ `
   vec2 f = vFacade.xy;
   vec2 fw = max(fwidth(f), vec2(1e-4));
   fwW = max(fwidth(vWPos.xz), vec2(1e-4));             // world footprint (derivatives only in uniform flow)
+  vec2 fwO = max(fwidth(vObjPos.xz), vec2(1e-4));
+  float fDegen = step(fw.y * 20.0, fw.x);              // flat lathe faces: v is constant
   float fwm = max(fw.x, fw.y);
   float colW = uColW, floorH = uFloorH;
   fCell = floor(vec2(f.x / colW, f.y / floorH));
@@ -420,21 +423,39 @@ const FACADE_COLOR = /* glsl */ `
     fAO = 1.0 - 0.3 * exp(-max(f.y, 0.0) * 0.35);
   } else if (fKind < 1.5) {
     if (N.y < -0.55) {
-      // soffits (slab undersides, canopies, overhangs): timber slats or plaster, recessed downlights
+      // soffits (slab undersides, canopies, overhangs). Lathe discs carry a degenerate facade
+      // coordinate on their flat faces, so those use the object's own plan instead.
+      vec2 sf2 = fDegen > 0.5 ? vObjPos.xz : f;
+      float sfw = fDegen > 0.5 ? max(fwO.x, fwO.y) : fwm;
       vec3 sc;
+      float grid = 2.4;
+      #ifdef LOWRISE
       if (fSty.z < 0.5) {
-        float sl = filteredPulse(f.x, 0.11, 0.085, fw.x);
-        vec3 wood = mix(vec3(0.46, 0.3, 0.17), vec3(0.6, 0.42, 0.26), mix(0.5, hash11(floor(f.x / 0.11) + FSEED), fDetail));
+        float sl = fPulse(sf2.x, 0.11, 0.0, 0.085, sfw);
+        vec3 wood = mix(vec3(0.46, 0.3, 0.17), vec3(0.6, 0.42, 0.26), mix(0.5, hash11(floor(sf2.x / 0.11) + FSEED), fDetail));
         sc = mix(vec3(0.12, 0.08, 0.05), wood, sl);
-      } else sc = vec3(0.84, 0.82, 0.78) * (0.95 + 0.05 * vnoise(f * 2.0));
-      vec2 dq = mod(f, 2.4) - 1.2;
+      } else sc = vec3(0.84, 0.82, 0.78) * (0.95 + 0.05 * vnoise(sf2 * 2.0));
+      #else
+      {
+        // megastructure soffits: a coffered ceiling of 7.2 m bays between deep beams
+        grid = 7.2;
+        vec2 cq = mod(sf2, 7.2);
+        float beam = 1.0 - fPulse(sf2.x, 7.2, 0.6, 7.2, sfw) * fPulse(sf2.y, 7.2, 0.6, 7.2, sfw);
+        vec2 ce = min(cq - 0.6, 7.2 - cq);
+        float lip = (1.0 - smoothstep(0.0, 0.25 + sfw, min(ce.x, ce.y))) * (1.0 - beam);
+        sc = uRib * mix(0.8, 1.0, beam) * (1.0 - 0.25 * lip) * (0.96 + 0.04 * vnoise(sf2 * 0.7));
+        fAO *= 1.0 - 0.3 * lip;
+        fBump += vec2(fBevel(clamp(cq.x - 0.6, 0.0, 6.6), 6.6, 0.25), fBevel(clamp(cq.y - 0.6, 0.0, 6.6), 6.6, 0.25)) * (1.0 - beam) * 0.4 * (1.0 - smoothstep(0.1, 0.5, sfw)) * (1.0 - fDegen);
+      }
+      #endif
+      vec2 dq = mod(sf2, grid) - grid * 0.5;
       float dd = length(dq);
-      float disc = fDot(dd, 0.07, fwm, 5.76);
-      float bezel = max(fDot(dd, 0.1, fwm, 5.76) - disc, 0.0);
+      float disc = fDot(dd, 0.07 * grid / 2.4, sfw, grid * grid);
+      float bezel = max(fDot(dd, 0.1 * grid / 2.4, sfw, grid * grid) - disc, 0.0);
       c = mix(sc, vec3(0.7), bezel * 0.6);
       c = mix(c, vec3(0.95), disc);
-      float dlOn = step(0.25, hash12(floor(f / 2.4) + FSEED));
-      fEmit += vec3(1.0, 0.8, 0.58) * lights * dlOn * (disc * 3.0 + sc * exp(-dd * dd * 3.0) * 0.1);
+      float dlOn = step(0.25, hash12(floor(sf2 / grid) + FSEED));
+      fEmit += vec3(1.0, 0.8, 0.58) * lights * dlOn * (disc * 3.0 + sc * exp(-dd * dd * 3.0 / (grid * grid / 5.76)) * (grid > 3.0 ? 0.04 : 0.1));
       fRough = 0.72;
     } else {
       c = fStone(f, fw, stoneBase, FSEED, 3.0, 0.03);
@@ -551,7 +572,7 @@ const FACADE_COLOR = /* glsl */ `
     // radiator / dark ceramic
     c = vec3(0.1, 0.09, 0.085) * (0.9 + 0.2 * vnoise(f * 0.5));
     fRough = 0.7;
-  } else {
+  } else if (fKind < 12.5) {
     // fritted-glass balustrade: dense frit at the foot fading to clear glass, fin joints
     float fp = 0.022;
     vec2 fq = mod(f, fp) - fp * 0.5;
@@ -564,6 +585,174 @@ const FACADE_COLOR = /* glsl */ `
     fRough = mix(0.08, 0.5, frit); fMetal = mix(0.85, 0.0, frit);
     fGlass = (1.0 - frit) * (1.0 - joint) * 0.8;
     fEmit += vec3(1.0, 0.8, 0.6) * frit * lights * 0.012 * step(0.6, hash12(floor(f / 4.0) + FSEED));
+  } else if (fKind > 14.5 && fKind < 15.5) {
+    // promenade walkway (f = metres along, metres across from the axis): pale limestone in
+    // running bond, a central band of dark granite between bronze guide lines, basalt setts and
+    // a slot drain along both kerbs
+    float lat = f.y, al = f.x, alat = abs(lat);
+    float fl = fw.y;
+    float row = floor(al / 0.6);
+    float xr = lat + mod(row, 2.0) * 0.45;
+    float sid = hash12(vec2(floor(xr / 0.9), row) + FSEED);
+    float jf = max(1.0 - fPulse(al, 0.6, 0.0, 0.592, fw.x), 1.0 - fPulse(xr, 0.9, 0.0, 0.892, fl));
+    vec3 lime = stoneBase * vec3(0.9, 0.88, 0.84) * mix(1.0, 0.9 + 0.18 * sid, fDetail);
+    lime *= mix(1.0, 0.93 + 0.14 * vnoise(f * 3.0 + sid * 11.0), 1.0 - smoothstep(0.02, 0.1, fwm));
+    vec3 field = mix(lime, lime * 0.5, jf);
+    float centre = 1.0 - smoothstep(1.2 - fl, 1.2 + fl, alat);
+    float gid = hash12(vec2(floor(al / 1.2), step(0.0, lat)) + FSEED + 3.0);
+    float gj = max(1.0 - fPulse(al, 1.2, 0.0, 1.19, fw.x), 1.0 - fPulse(lat + 1.2, 1.2, 0.0, 1.19, fl));
+    vec3 gran = vec3(0.2, 0.2, 0.21) * mix(1.0, 0.85 + 0.3 * gid, fDetail) * (1.0 - 0.4 * gj);
+    float bronze = 1.0 - smoothstep(0.03 - fl, 0.03 + fl, abs(alat - 1.26));
+    float border = smoothstep(9.55 - fl, 9.55 + fl, alat);
+    float sett = max(1.0 - fPulse(al, 0.2, 0.0, 0.19, fw.x), 1.0 - fPulse(lat, 0.2, 0.0, 0.19, fl));
+    vec3 basalt = vec3(0.24, 0.24, 0.25) * mix(1.0, 0.85 + 0.3 * hash12(floor(f / 0.2)), fDetail) * (1.0 - 0.4 * sett);
+    float drain = 1.0 - smoothstep(0.025 - fl, 0.025 + fl, abs(alat - 9.5));
+    c = mix(field, gran, centre);
+    c = mix(c, basalt, border);
+    c = mix(c, vec3(0.04), drain);
+    c = mix(c, vec3(0.6, 0.43, 0.24), bronze);
+    fRough = mix(mix(0.6, 0.3, centre), 0.3, bronze);
+    fMetal = bronze * 0.9;
+    fBump += vec2(fBevel(mod(al, 0.6), 0.592, 0.01), fBevel(mod(xr, 0.9), 0.892, 0.01)) * 0.35 * (1.0 - centre) * (1.0 - border) * (1.0 - smoothstep(0.005, 0.02, fwm));
+    fEmit += vec3(1.0, 0.72, 0.42) * bronze * lights * 0.35;
+  } else if (fKind > 13.5 && fKind < 14.5) {
+    // maglev terminal glazing (the seed-pod, 66 x 23 x 12.5 m): clear panes on a fine diagrid,
+    // and through them the platform: stone floor, lit platform edges, the guideway trench and,
+    // every so often, a train standing at the platform. The pod's own shape is known from the
+    // facade coordinates (u = metres along, v = 0..30 across the arch), so the ray starts at
+    // the right place in the station's cross-section.
+    float s = f.x / 33.0 - 1.0;
+    float arc = clamp(f.y / 30.0, 0.0, 1.0) * 3.14159;
+    float pf = pow(max(0.0, 1.0 - pow(abs(s), 2.4)), 0.42);
+    float hP = 0.4 + pow(max(sin(arc), 0.0), 0.85) * 12.5 * pf;
+    float latP = cos(arc) * 11.5 * pf;
+    vec3 T = fT;
+    vec3 sideD = normalize(vec3(-T.z, 0.0, T.x) + vec3(1e-5, 0.0, 0.0));
+    vec3 d = -V;
+    float dl = dot(d, sideD), dh = d.y;
+    float dayK = (1.0 - uNight) * uSunIlluminance * (0.035 + 0.1 * max(uSunDir.y, 0.0));
+    vec3 inner = mix(vec3(0.55, 0.66, 0.8), vec3(0.62, 0.64, 0.66), 0.4) * (1.0 - uNight) * 1.2 + vec3(0.02, 0.03, 0.05);
+    float trainIn = step(0.45, fract(uTime / 95.0 + FSEED * 0.37));
+    float tHit = 1e9;
+    // a train standing at the platform
+    if (trainIn > 0.5 && abs(latP) > 1.9 && dl * latP < 0.0) {
+      float tl = (sign(latP) * 1.9 - latP) / dl;
+      float hh = hP + dh * tl;
+      float al = s * 33.0 + dot(d, T) * tl;
+      if (tl > 0.0 && hh > 0.3 && hh < 3.7 && abs(al) < 27.0) {
+        float win = (1.0 - smoothstep(0.35, 0.5, abs(hh - 2.3))) * step(0.3, fract(al / 2.4));
+        vec3 body = vec3(0.9, 0.9, 0.88) * (dayK + 0.12 + 0.35 * lights);
+        inner = mix(body, vec3(1.0, 0.82, 0.62) * (0.15 + 1.4 * lights) + vec3(0.04) * dayK, win);
+        tHit = tl;
+      }
+    }
+    // the platform floor, its lit edges and the guideway trench
+    if (tHit > 1e8 && dh < -1e-4) {
+      float tf = -hP / dh;
+      float lf = latP + dl * tf;
+      float af = s * 33.0 + dot(d, T) * tf;
+      float trench = 1.0 - smoothstep(2.5, 2.7, abs(lf));
+      float edge = (1.0 - smoothstep(0.04, 0.12, abs(abs(lf) - 2.8))) ;
+      float pav = fPulse(af, 1.2, 0.0, 1.18, 0.02 + tf * 0.002) * fPulse(lf, 1.2, 0.0, 1.18, 0.02 + tf * 0.002);
+      vec3 fl = vec3(0.78, 0.76, 0.72) * (0.8 + 0.2 * pav) * (dayK * 0.8 + 0.1 + 0.6 * lights);
+      fl = mix(fl, vec3(0.05, 0.05, 0.06) * (dayK + 0.2), trench);
+      fl += vec3(0.6, 0.9, 1.0) * edge * (0.15 + 1.6 * lights);
+      fl *= 1.0 - 0.5 * smoothstep(9.0, 11.5, abs(lf));                    // the walls of the pod shade the floor's edge
+      inner = fl;
+    }
+    // the glazing: clear panes on a fine diagrid of bronze-white mullions
+    float fws = fwm;
+    float dg1 = fPulse(f.x + f.y, 2.2, 0.0, 0.07, fws), dg2 = fPulse(f.x - f.y, 2.2, 0.0, 0.07, fws);
+    float mullM = max(dg1, dg2);
+    c = mix(uGlass * 0.12, uRib * 0.85, mullM);
+    fRough = mix(0.04, 0.35, mullM);
+    fMetal = mix(0.92, 0.2, mullM);
+    fGlass = 1.0 - mullM;
+    fFres = 0.08 + 0.92 * pow(clamp(1.0 - vt.z, 0.0, 1.0), 5.0);
+    fEmit += inner * fGlass * (1.0 - fFres) * 0.9;
+    fEmit += uLightCol * mullM * lights * 0.04;
+  } else {
+
+    // maglev guideway tube (radius 3 m): a glazed barrel on ring frames over a structural keel.
+    // Through the glass: the far wall and its ceiling light line, the guideway beam, and the
+    // pods running inside, all traced against the tube's own axis (it is rebuilt from the
+    // radial normal and the along-the-line tangent).
+    const float R = 3.0;
+    float ringF = fPulse(f.y, 7.5, 0.0, 0.32, fw.y);
+    float mull = fPulse(f.x, R * 6.28318 / 6.0, 0.0, 0.1, fw.x);
+    float keel = 1.0 - smoothstep(-0.62, -0.42, N.y);
+    float frameM = max(max(ringF, mull), keel);
+    vec3 A = fB;
+    vec3 C0 = vWPos - N * R;
+    vec3 d = -V;
+    vec3 p0 = vWPos - C0;
+    vec3 dp = d - A * dot(d, A);
+    float dd = max(dot(dp, dp), 1e-6);
+    float tFar = max(-2.0 * dot(p0, dp) / dd, 0.0);
+    float dayK = (1.0 - uNight) * uSunIlluminance * (0.035 + 0.1 * max(uSunDir.y, 0.0));
+    vec3 inner;
+    {
+      // far wall: glass to the sky beyond, its frames, the keel, the ceiling light line
+      vec3 Q = vWPos + d * tFar;
+      vec3 qn = normalize(Q - C0 - A * dot(Q - C0, A));
+      float sQ = f.y + dot(Q - vWPos, A);
+      float fwq = fwm * (1.0 + tFar * 0.6) + 0.04;       // seen through the glass, at a slant: blur generously
+      float farFrame = max(fPulse(sQ, 7.5, 0.0, 0.32, fwq), 1.0 - smoothstep(-0.66, -0.38, qn.y));
+      // what lies beyond the far wall: sky above the horizon, the lagoon and the land below it
+      vec3 skyish = mix(vec3(0.07, 0.16, 0.18), mix(vec3(0.55, 0.66, 0.8), vec3(0.62, 0.64, 0.66), 0.4) * 1.2, smoothstep(-0.12, 0.08, d.y)) * (1.0 - uNight) + vec3(0.02, 0.03, 0.05);
+      inner = mix(skyish, uRib * 0.7 * dayK, farFrame);
+      float strip = 1.0 - smoothstep(0.93, 0.975, qn.y);
+      inner += vec3(0.85, 0.92, 1.0) * (1.0 - strip) * (0.3 + 2.2 * lights) * (1.0 - farFrame);
+      // the guideway beam along the floor of the tube, its coil line glowing
+      float yb = C0.y - R * 0.5;
+      if (d.y < -1e-4) {
+        float tB = (yb - vWPos.y) / d.y;
+        vec3 Bp = vWPos + d * tB;
+        vec3 bl = Bp - C0;
+        float lat = length(bl - A * dot(bl, A) - vec3(0.0, bl.y, 0.0));
+        float bm = (1.0 - smoothstep(1.15, 1.3 + fwm * 4.0, lat)) * step(0.0, tB) * step(tB, tFar);
+        if (bm > 0.0) {
+          float coil = 1.0 - smoothstep(0.08, 0.12 + fwm * 4.0, lat);
+          vec3 beam = vec3(0.34, 0.35, 0.37) * (dayK + 0.1 + 0.6 * lights);
+          beam = mix(beam, vec3(0.4, 0.8, 1.0) * (0.15 + 1.5 * lights), coil);
+          inner = mix(inner, beam, bm);
+          tFar = mix(tFar, tB, step(0.5, bm));
+        }
+      }
+      // pods: 26 m capsules every 420 m, gliding at 60 m/s, radius 2.1 on the axis
+      float b = dot(p0, dp), cc = dot(p0, p0) - 2.1 * 2.1;
+      float disc = b * b - dd * cc;
+      if (disc > 0.0) {
+        float tP = (-b - sqrt(disc)) / dd;
+        float sP = f.y + tP * dot(d, A);
+        float dir = hash11(floor(FSEED) + 3.0) < 0.5 ? 1.0 : -1.0;
+        float ph = fract((sP - dir * uTime * 60.0) / 420.0) * 420.0;
+        if (tP > 0.0 && tP < tFar && ph < 26.0) {
+          vec3 Pp = vWPos + d * tP;
+          vec3 pn = normalize(Pp - C0 - A * dot(Pp - C0, A));
+          float nose = smoothstep(0.0, 3.0, ph) * (1.0 - smoothstep(23.0, 26.0, ph));
+          float win = (1.0 - smoothstep(0.18, 0.28, abs(pn.y - 0.2))) * step(0.25, fract(ph / 2.2)) * nose;
+          vec3 pod = vec3(0.9, 0.9, 0.88) * (dayK + 0.08 + 0.3 * lights) * (0.55 + 0.45 * max(pn.y, 0.0));
+          pod = mix(pod, mix(vec3(0.03, 0.04, 0.05) * (dayK + 0.2), vec3(1.0, 0.8, 0.58) * (0.6 + 1.6 * lights), 0.5 + 0.5 * lights), win);
+          pod += vec3(0.9, 0.95, 1.0) * (1.0 - smoothstep(0.0, 0.6, ph)) * (1.0 + 4.0 * lights);   // headlight ring
+          inner = pod;
+        }
+      }
+    }
+    // exterior: ring frames and mullions in bone-white composite, keel with panel joints,
+    // the glazing dark and coated, showing what is inside
+    vec3 frameC2 = uRib * (0.92 + 0.06 * vnoise(f * vec2(0.8, 0.2))) * (1.0 - 0.25 * fPulse(f.y, 7.5, 3.6, 3.64, fw.y) * keel);
+    vec3 glassT = uGlass * 0.14;
+    c = mix(glassT, frameC2, frameM);
+    fRough = mix(0.05, 0.4, frameM);
+    fMetal = mix(0.92, 0.0, frameM);
+    fGlass = 1.0 - frameM;
+    fFres = 0.08 + 0.92 * pow(clamp(1.0 - vt.z, 0.0, 1.0), 5.0);
+    fEmit += inner * fGlass * (1.0 - fFres) * 0.85;
+    fBump += vec2(fBevel(mod(f.x, R * 6.28318 / 6.0), R * 6.28318 / 6.0, 0.06) * 0.0, fBevel(mod(f.y, 7.5), 0.32, 0.06)) * ringF * 0.6 * fDetail;
+    // navigation marker lights on the keel every 30 m, blinking in sequence along the line
+    float mk = keel * fDot(length(vec2(mod(f.y, 30.0) - 15.0, 0.0)), 0.12, fwm, 30.0 * 0.3) * (1.0 - smoothstep(-0.95, -0.85, N.y));
+    fEmit += vec3(1.0, 0.75, 0.4) * mk * (0.2 + 3.0 * lights) * (0.6 + 0.4 * step(0.5, fract(uTime * 0.8 - f.y / 240.0)));
   }
   #ifdef LOWRISE
   // wall-washer sconces between the ground-floor openings of stone houses
@@ -576,6 +765,9 @@ const FACADE_COLOR = /* glsl */ `
     float sconceOn = step(0.3, hash12(vec2(floor((f.x + colW) / (2.0 * colW)), FSEED)));
     fEmit += (c * wash * 0.55 + vec3(1.2) * sconce) * vec3(1.0, 0.76, 0.5) * lights * sconceOn * (1.0 - fGlass);
   }
+  #endif
+  #ifdef FDEBUG_K
+  fDbg = vec3(fKind / 13.0, fract(fKind * 0.37), step(0.5, abs(N.y)));
   #endif
   diffuseColor.rgb = c * fAO;
   #ifdef FDEBUG
@@ -708,7 +900,7 @@ export const FACADE_HOOKS = {
     normal: FACADE_NORMAL,
     emissive: FACADE_EMISSIVE,
     lights: FACADE_LIGHTS,
-    end: '#if defined(FDEBUG_W) || defined(FDEBUG_L)\ngl_FragColor = vec4(fDbg, 1.0);\n#endif',
+    end: '#if defined(FDEBUG_W) || defined(FDEBUG_L) || defined(FDEBUG_K)\ngl_FragColor = vec4(fDbg, 1.0);\n#endif',
   },
 };
 
