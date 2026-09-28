@@ -16,6 +16,7 @@ export const GARDEN_SURFACE = { circumference:7920, meridian:3280, pane:20, cour
 const VERT = /* glsl */ `
 attribute float aKind;
 attribute vec2 aSurface;
+uniform float uResY;
 varying vec2 vSurface;
 varying vec3 vWorld;
 varying vec3 vN;
@@ -27,6 +28,20 @@ void main() {
   vSurface = aSurface;
   vLocal = position;
   vLN = normal;
+#ifdef USE_INSTANCING
+  // repeated structures (the Halo's hub arches): local pattern space stays per instance
+  vec4 ip = instanceMatrix * vec4(position, 1.0);
+#ifdef INSTANCE_SIZE
+  // an instance smaller than a pixel or so collapses (its lamps carry it further out)
+  vec3 io = (modelViewMatrix * vec4(instanceMatrix[3].xyz, 1.0)).xyz;
+  float ipx = INSTANCE_SIZE * uResY * 0.5 * projectionMatrix[1][1] / max(length(io), 1e-3);
+  if (ipx < 1.5) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); vWorld = vec3(0.0); vN = vec3(0.0, 1.0, 0.0); return; }
+#endif
+  vec4 w = modelMatrix * ip;
+  vWorld = w.xyz;
+  vN = normalize(mat3(modelMatrix) * (mat3(instanceMatrix) * normal));
+  gl_Position = projectionMatrix * (modelViewMatrix * ip);
+#else
   vec4 w = modelMatrix * vec4(position, 1.0);
   vWorld = w.xyz;
   vN = normalize(mat3(modelMatrix) * normal);
@@ -34,6 +49,7 @@ void main() {
   // CPU): world coordinates 42,000 km out, in float32, jittered vertices by metres each
   // frame and made coincident parts z-fight as the Harbour turned
   gl_Position = projectionMatrix * (modelViewMatrix * vec4(position, 1.0));
+#endif
 }
 `;
 
@@ -226,6 +242,7 @@ export function createHullMaterial({ pattern = 0.06, accent = [0.5, 0.85, 1.0], 
       uPointPos: { value: new THREE.Vector3(1e9, 0, 0) }, uPointColor: { value: new THREE.Color(0, 0, 0) },
       uPattern: { value: pattern }, uAccent: { value: new THREE.Color(...accent) },
       uBehindMask: { value: behindMask ? 1 : 0 }, uHearthTex: { value: null }, uHearthRes: { value: new THREE.Vector2(1, 1) }, uHearthDepth: { value: 1e12 },
+      uResY: { value: 1080 },
     },
     side: THREE.DoubleSide,
   });

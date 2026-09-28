@@ -12,6 +12,10 @@ import { buildHarbour, HS } from '../src/space/harbour.js';
 import { buildLiner } from '../src/craft/craftGeometry.js';
 import { buildFreighter, buildShuttle } from '../src/craft/craftClasses.js';
 import { CORRIDORS } from '../src/space/stations.js';
+import { buildHaloArch, haloArchAngles, ringBasis } from '../src/space/rings.js';
+import { RINGS } from '../src/sky/celestial.js';
+import { HALO_PORTS } from '../src/space/earthData.js';
+import { bodyDir } from '../src/space/sim.js';
 
 const V = (x, y, z) => new THREE.Vector3(x, y, z), results = {};
 const closed = (name, g, tolerance = 1e-3) => {
@@ -253,6 +257,37 @@ for (const c of plans) {
     const t = Math.max(c.dot(d), 0), off = c.clone().sub(d.clone().multiplyScalar(t)).length();
     assert.ok(off > 8, `yard/store stand ${off.toFixed(1)} km off a corridor axis`);
   }
+}
+// ---- the Halo's hub arches: closed, clear of the glass vault everywhere, seated on the wall
+// crests outboard of the glass, below the 6 km transfer altitude, and never near a port
+{
+  const def = RINGS[0], arch = buildHaloArch(def), P = arch.profile;
+  closed('halo-arch', arch.geo, 1e-6);
+  const p = arch.geo.attributes.position;
+  let vault = Infinity, top = -Infinity, feetInner = Infinity, footBottom = Infinity;
+  for (let i = 0; i < p.count; i++) {
+    const x = p.getX(i), y = p.getY(i);
+    if (Math.abs(x) <= P.hw) vault = Math.min(vault, y - P.rf(x));
+    top = Math.max(top, y);
+    if (y < P.wall + 0.6) feetInner = Math.min(feetInner, Math.abs(x) - P.hw);   // near the crest
+    footBottom = Math.min(footBottom, y);
+  }
+  assert.ok(vault > 0.2, `arch clears the vault's analytic profile by ${(vault * 1000).toFixed(0)} m`);
+  assert.ok(feetInner > 0.01, 'no arch vertex reaches inside the glass edge at the wall crest');
+  assert.ok(Math.abs(footBottom - P.wall) < 1e-6, 'corbels sit exactly on the wall crest');
+  assert.ok(top < 6.0 - 0.3, `arch crest ${top.toFixed(2)} km stays under the 6 km transfer paths`);
+  // positive control: the original tube hugging the vault 360 m up at 0.24 radius sagged to 47 m
+  assert.ok(P.clear - 0.36 > 0.05);
+  const basis = ringBasis(def);
+  const ports = HALO_PORTS.map((q) => bodyDir(0, THREE.MathUtils.degToRad(q.lon)));
+  const foundry = bodyDir(0, THREE.MathUtils.degToRad(166.9) + 0.009);
+  const angles = haloArchAngles(def, basis, [...ports.map((d) => [d, 32]), [foundry, 12]]);
+  for (const th of angles) {
+    const d = basis.a.clone().multiplyScalar(Math.cos(th)).addScaledVector(basis.b, Math.sin(th));
+    for (const q of ports) assert.ok(Math.acos(Math.min(1, d.dot(q))) * basis.R > 32, 'no arch within 32 km of a port station');
+  }
+  assert.ok(angles.length > 280 && angles.length < 314, `${angles.length} hub arches`);
+  results.haloArches = angles.length; results.archVaultClearanceMetres = +(vault * 1000).toFixed(0); results.archCrestKm = +top.toFixed(2);
 }
 results.movementClearanceMetres = clearances;
 results.yardClampContactErrorMetres = +clampErr.toFixed(3);

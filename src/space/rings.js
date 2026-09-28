@@ -6,6 +6,9 @@ import { SUNLIGHT_GLSL, createRibbonMaterial, buildRibbonGeometry } from './line
 import { R_EARTH, MERIDIAN_LON, bodyDir, cityToBody } from './sim.js';
 import { FACADE_GLSL } from '../world/materials.js';
 import { HALO_PORTS } from './earthData.js';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { createHullMaterial, KIND } from './hull.js';
+import { createLamps, LAMP } from './lamps.js';
 
 // The four orbital rings at planetary scale, with the same radii, widths and
 // orientations as RINGS in src/sky/celestial.js (defined there in Meridian's
@@ -353,6 +356,106 @@ export function buildRing(def, basis, segs, roof = false) {
   return g;
 }
 
+// ------------------------------------------------------------ hub arches ----
+// The Halo's vault is carried at every hub (140 km) by a great arch: a plated rib that stands
+// on a corbel on each wall crest, rises clear of the glass and follows the vault 360 m above
+// it, banded in bronze. Built once in km (local x across the ring, y up from the deck, z along
+// it) and instanced round the ring; hubs within reach of a port station or the foundry are
+// left open. Kinds map the craft builder onto the station material.
+export function haloArchProfile(def) {
+  const w = def.width, hw = w / 2, wall = Math.max(1.2, w * 0.07), wt = Math.max(0.15, w * 0.012), rise = w * 0.085;
+  const rf = (sAx) => wall + rise * Math.sqrt(Math.max(0, 1 - Math.pow(Math.abs(2 * sAx / w), 4)));
+  const leg = hw + wt * 0.78, r = 0.16, clear = 0.42;
+  const half = [[leg, wall + 0.2], [leg, wall + 1.1], [leg - 0.25, wall + 1.7], [leg - 0.9, wall + 1.96]];
+  const pts = [];
+  for (const [x, y] of half) pts.push([x, y]);
+  for (let x = hw - 1.5; x >= -(hw - 1.5) - 1e-9; x -= (Math.abs(x) > hw - 5 ? 0.25 : 0.5)) pts.push([x, rf(x) + clear]);
+  for (const [x, y] of half.slice().reverse()) pts.push([-x, y]);
+  return { pts, rf, wall, hw, wt, leg, r, clear, crest: rf(0) + clear + r };
+}
+export function buildHaloArch(def) {
+  const P = haloArchProfile(def);
+  // a box girder swept along the arch: 0.9 km along the ring, 0.32 km deep. Its back plated,
+  // the faces seen along the ring glazed, the soffit over the glass dark. Closed by end caps
+  // buried in the corbels.
+  const W = 0.9, D = 0.32;
+  // tapered section: 1.0 km across at the soffit, 0.56 km across the back, so the glazed flanks
+  // lean 34 degrees toward space and catch the sunlight that falls on the vault
+  const half = (v) => (v > 0 ? 0.5 : 0.28);
+  const pos = [], nor = [], kind = [], idx = [];
+  const pts = P.pts.map(([x, y]) => new THREE.Vector2(x, y));
+  const nrm = pts.map((p, i) => {
+    const a = pts[Math.max(i - 1, 0)], b = pts[Math.min(i + 1, pts.length - 1)];
+    const t = b.clone().sub(a).normalize();
+    return new THREE.Vector2(-t.y, t.x);            // left of the path: up over the crest
+  });
+  const quadStrip = (corner, normalFn, k) => {
+    const base = pos.length / 3;
+    for (let i = 0; i < pts.length; i++) for (const c of corner) {
+      const [u, v] = c, p = pts[i], n = nrm[i];
+      pos.push(p.x + n.x * v * D / 2, p.y + n.y * v * D / 2, u * half(v));
+      const nn = normalFn(i); nor.push(nn[0], nn[1], nn[2]); kind.push(k);
+    }
+    for (let i = 0; i < pts.length - 1; i++) { const a0 = base + i * 2, a1 = a0 + 1, b0 = a0 + 2, b1 = a0 + 3; idx.push(a0, b0, a1, a1, b0, b1); }
+  };
+  // (the path runs from +x to -x, so its left normal points down, into the vault)
+  quadStrip([[-1, 1], [1, 1]], (i) => [nrm[i].x, nrm[i].y, 0], KIND.TRUSS);          // soffit, over the glass
+  quadStrip([[1, -1], [-1, -1]], (i) => [-nrm[i].x, -nrm[i].y, 0], KIND.PLATE);      // plated back, facing space
+  // the faces seen along the ring are inhabited: galleries of windows looking down the vault
+  // (bare metal there read black, mirroring empty space)
+  const flank = (i, sz) => { const lean = half(1) - half(-1), l = Math.hypot(lean, D); return [-nrm[i].x * lean / l, -nrm[i].y * lean / l, sz * D / l]; };
+  quadStrip([[1, 1], [1, -1]], (i) => flank(i, 1), KIND.HAB);                          // +z flank
+  quadStrip([[-1, -1], [-1, 1]], (i) => flank(i, -1), KIND.HAB);                       // -z flank
+  for (const [i, sgn] of [[0, -1], [pts.length - 1, 1]]) {
+    const p = pts[i], n = nrm[i], t = new THREE.Vector2(n.y, -n.x).multiplyScalar(sgn);
+    const base = pos.length / 3;
+    for (const [u, v] of [[-1, 1], [1, 1], [1, -1], [-1, -1]]) { pos.push(p.x + n.x * v * D / 2, p.y + n.y * v * D / 2, u * half(v)); nor.push(t.x, t.y, 0); kind.push(KIND.PLATE); }
+    idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
+  }
+  // wind every triangle to face its normal
+  const A = new THREE.Vector3(), Bv = new THREE.Vector3(), C = new THREE.Vector3(), N = new THREE.Vector3();
+  for (let k = 0; k < idx.length; k += 3) {
+    A.fromArray(pos, idx[k] * 3); Bv.fromArray(pos, idx[k + 1] * 3); C.fromArray(pos, idx[k + 2] * 3);
+    N.crossVectors(Bv.sub(A), C.sub(A));
+    if (N.x * nor[idx[k] * 3] + N.y * nor[idx[k] * 3 + 1] + N.z * nor[idx[k] * 3 + 2] < 0) { const t = idx[k + 1]; idx[k + 1] = idx[k + 2]; idx[k + 2] = t; }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+  g.setAttribute('aKind', new THREE.Float32BufferAttribute(kind, 1));
+  g.setAttribute('aSurface', new THREE.Float32BufferAttribute(new Float32Array(kind.length * 2), 2));
+  g.setIndex(idx);
+  // corbels on the wall crests (outboard of the glass, cantilevered past the wall's outer face)
+  const parts = [g];
+  for (const sd of [-1, 1]) {
+    const c = new THREE.BoxGeometry(0.56, 0.3, 1.1).translate(sd * P.leg, P.wall + 0.15, 0).toNonIndexed();
+    c.deleteAttribute('uv');
+    c.setAttribute('aKind', new THREE.Float32BufferAttribute(new Float32Array(c.attributes.position.count).fill(KIND.PLATE), 1));
+    c.setAttribute('aSurface', new THREE.Float32BufferAttribute(new Float32Array(c.attributes.position.count * 2), 2));
+    parts.push(c);
+  }
+  const geo = mergeGeometries(parts.map((q) => (q.index ? q.toNonIndexed() : q)), false);
+  geo.computeBoundingSphere();
+  // lamps along both upper edges of the crest, and on the corbels (arch-local km)
+  const lamps = [];
+  for (const x of [-12, -6, 0, 6, 12]) for (const z of [-W / 2, W / 2]) lamps.push({ x, y: P.rf(x) + P.clear + D / 2 + 0.04, z });
+  for (const sd of [-1, 1]) lamps.push({ x: sd * P.leg, y: P.wall + 0.36, z: 0 });
+  return { geo, lamps, profile: { ...P, crest: P.rf(0) + P.clear + D / 2, depth: D, girder: W } };
+}
+
+/** Hub angles round a ring (u = R th), skipping hubs near the given exclusion directions. */
+export function haloArchAngles(def, basis, exclude) {
+  const R = basis.R, n = Math.floor((2 * Math.PI * R) / def.hub);
+  const out = [];
+  for (let k = 0; k < n; k++) {
+    const th = (def.hub * (k + 0.5)) / R;
+    const dir = basis.a.clone().multiplyScalar(Math.cos(th)).addScaledVector(basis.b, Math.sin(th));
+    if (exclude.some(([d, km]) => Math.acos(THREE.MathUtils.clamp(dir.dot(d), -1, 1)) * R < km)) continue;
+    out.push(th);
+  }
+  return out;
+}
+
 const FAR_FRAG = /* glsl */ `
 uniform vec3 uAlb;
 uniform vec3 uHab;
@@ -471,6 +574,39 @@ export class Rings {
         lines.push({ pts, along, id: id++ });
       }
     }
+    // the Halo's hub arches (instanced), and their crest lamps
+    {
+      const def = RINGS[0], basis = this.bases[0];
+      const arch = buildHaloArch(def);
+      const nauru = bodyDir(0, THREE.MathUtils.degToRad(166.9));
+      const exclude = [...HALO_PORTS.map((p) => [bodyDir(0, THREE.MathUtils.degToRad(p.lon)), 32]), [bodyDir(0, THREE.MathUtils.degToRad(166.9) + 0.009), 12], [nauru, 32]];
+      const angles = haloArchAngles(def, basis, exclude);
+      this.archMat = createHullMaterial({ pattern: 0.08, accent: [1.0, 0.72, 0.45] });
+      this.archMat.defines = { INSTANCE_SIZE: arch.profile.crest.toFixed(3) };
+      const im = new THREE.InstancedMesh(arch.geo, this.archMat, angles.length);
+      this.archAll = [];
+      const m = new THREE.Matrix4(), X = new THREE.Vector3(), Y = new THREE.Vector3(), Z = new THREE.Vector3();
+      const lamps = [];
+      angles.forEach((th, i) => {
+        Y.copy(basis.a).multiplyScalar(Math.cos(th)).addScaledVector(basis.b, Math.sin(th));
+        Z.copy(basis.a).multiplyScalar(-Math.sin(th)).addScaledVector(basis.b, Math.cos(th));
+        X.crossVectors(Y, Z);
+        // local x must run along the ring's axis n (X = Y x Z is +/- n)
+        m.makeBasis(X, Y, Z).setPosition(Y.clone().multiplyScalar(basis.R));
+        im.setMatrixAt(i, m);
+        this.archAll.push({ m: m.clone(), c: Y.clone().multiplyScalar(basis.R + 3) });
+        for (const l of arch.lamps) lamps.push({ p: new THREE.Vector3(l.x, l.y, l.z).applyMatrix4(m), r: 0.1, color: l.y > 4 ? LAMP.WHITE : LAMP.AMBER, i: 2.6, breathe: 0.2, phase: (i * 0.37) % 1 });
+      });
+      im.instanceMatrix.needsUpdate = true;
+      im.frustumCulled = false;
+      im.renderOrder = 3;
+      this.arches = im;
+      this.archAngles = angles;
+      this.archData = arch;
+      this.group.add(im);
+      this.archLamps = createLamps(lamps, { minPx: 1.2 });
+      this.group.add(this.archLamps);
+    }
     this.tetherMat = createRibbonMaterial({ widthKm: 0.02, minPx: 1.1, frag: TETHER_FRAG, uniforms: { uColor: { value: new THREE.Color(1.0, 0.75, 0.45) } } });
     this.tethers = new THREE.Mesh(buildRibbonGeometry(lines), this.tetherMat);
     this.tethers.frustumCulled = false;
@@ -479,12 +615,13 @@ export class Rings {
   }
 
   setSize(w, h) {
+    if (this.archMat) this.archMat.uniforms.uResY.value = h;
     this.tetherMat.uniforms.uResolution.value.set(w, h);
     for (const m of this.meshes) m.material.uniforms.uResolution.value.set(w, h);
     for (const f of this.far) f.material.uniforms.uResolution.value.set(w, h);
   }
 
-  update(sim, realTime) {
+  update(sim, realTime, dt, space) {
     for (const m of this.meshes) {
       const u = m.material.uniforms;
       u.uSunDir.value.copy(sim.sunDir);
@@ -493,6 +630,19 @@ export class Rings {
     }
     const tu = this.tetherMat.uniforms;
     tu.uSunDir.value.copy(sim.sunDir); tu.uTime.value = realTime; tu.uSimT.value = sim.t % 1e6;
+    if (this.archMat) {
+      const au = this.archMat.uniforms; au.uSunDir.value.copy(sim.sunDir); au.uTime.value = realTime; au.uEarthPos.value.set(0, 0, 0);
+      // only the arches that can cover a pixel or two are submitted (camera in the body frame)
+      if (space && space.camera) {
+        const cam = this._archCam || (this._archCam = new THREE.Vector3());
+        const iq = this._archQ || (this._archQ = new THREE.Quaternion());
+        cam.copy(space.camera.position).applyQuaternion(iq.copy(sim.earthQuat).invert());
+        const reach = this.archData.profile.crest * (space.size.y * 0.5) / Math.tan(THREE.MathUtils.degToRad(space.camera.fov) * 0.5) / 1.5;
+        let n = 0;
+        for (const a of this.archAll) if (a.c.distanceToSquared(cam) < reach * reach) this.arches.setMatrixAt(n++, a.m);
+        if (n !== this.arches.count || n) { this.arches.count = n; this.arches.instanceMatrix.needsUpdate = true; }
+      }
+    }
     for (const f of this.far) {
       const fu = f.material.uniforms;
       fu.uSunDir.value.copy(sim.sunDir); fu.uTime.value = realTime;
