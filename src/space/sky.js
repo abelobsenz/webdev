@@ -44,7 +44,31 @@ export function swarmRings() {
   return out;
 }
 
+// The bright planets, placed on the ecliptic round the June-solstice Sun (ecliptic longitude 90):
+// Venus an evening star, Mercury low in the morning, Mars, Jupiter and Saturn in the night sky.
+// [ecliptic longitude, latitude (deg), brightness, colour]
+const PLANETS = [
+  [128, 1.8, 7.0, [1.0, 0.97, 0.9]],      // Venus
+  [72, -1.2, 0.8, [0.95, 0.88, 0.8]],     // Mercury
+  [212, 1.1, 1.3, [1.0, 0.58, 0.38]],     // Mars
+  [296, -0.4, 3.2, [1.0, 0.93, 0.8]],     // Jupiter
+  [331, 1.6, 1.0, [1.0, 0.9, 0.68]],      // Saturn
+];
+function planetDirs() {
+  const eps = THREE.MathUtils.degToRad(23.4);
+  const e1 = new THREE.Vector3(0, 0, 1);                              // the vernal equinox (inertial)
+  const e2 = new THREE.Vector3(Math.cos(eps), Math.sin(eps), 0);      // ecliptic longitude 90
+  const n = new THREE.Vector3().crossVectors(e1, e2);                  // ecliptic north
+  return PLANETS.map(([lon, lat, w]) => {
+    const l = THREE.MathUtils.degToRad(lon), b = THREE.MathUtils.degToRad(lat);
+    const v = e1.clone().multiplyScalar(Math.cos(l) * Math.cos(b)).addScaledVector(e2, Math.sin(l) * Math.cos(b)).addScaledVector(n, Math.sin(b)).normalize();
+    return new THREE.Vector4(v.x, v.y, v.z, w);
+  });
+}
+
 export const SKY_UNIFORMS = {
+  uPlanets: { value: planetDirs() },
+  uPlanetCol: { value: PLANETS.map((p) => new THREE.Vector3(...p[3])) },
   uSkySunDir: { value: new THREE.Vector3(1, 0, 0) },
   uSkySunPos: { value: new THREE.Vector3(1.496e8, 0, 0) },
   uSkyStars: { value: 1.0 },

@@ -14,9 +14,10 @@ import { R_MOON } from './sim.js';
 // Facade kinds (aFacade.z): the craft kinds (0 glass, 1 pearl hull, 2 lantern, 3 garden,
 // 4 conduit, 7 panel, 8 bronze, 9 deck, 10 dark, 11 radiator, 12 glazed roof, 13
 // conservatory) plus 20 stone facade, 21 roof garden, 22 paving, 23 landing pad, 24
-// courtyard, 25 tiled roof, 26 reflecting pool, 27 dressed stone wall.
+// courtyard, 25 tiled roof, 26 reflecting pool, 27 dressed stone wall, 28 mass-driver coil
+// (facade x = metres along the guideway).
 
-export const LK = { GLASS: 0, HULL: 1, LANTERN: 2, GARDEN: 3, CONDUIT: 4, PANEL: 7, BRONZE: 8, DECK: 9, DARK: 10, RADIATOR: 11, ROOF: 12, CONSERVATORY: 13, STONE: 20, ROOFG: 21, PAVE: 22, PAD: 23, COURT: 24, TILE: 25, POOL: 26, WALL: 27 };
+export const LK = { GLASS: 0, HULL: 1, LANTERN: 2, GARDEN: 3, CONDUIT: 4, PANEL: 7, BRONZE: 8, DECK: 9, DARK: 10, RADIATOR: 11, ROOF: 12, CONSERVATORY: 13, STONE: 20, ROOFG: 21, PAVE: 22, PAD: 23, COURT: 24, TILE: 25, POOL: 26, WALL: 27, COIL: 28 };
 
 const VERT = /* glsl */ `
 attribute vec3 aFacade;
@@ -149,7 +150,7 @@ void main() {
     win *= 1.0 - plinth;
     float meanWin = 0.36 * (1.0 - plinth);
     float wv = mix(meanWin, win, det);
-    alb = vec3(0.7, 0.67, 0.6) * (0.94 + 0.08 * mix(0.5, hash12(floor(f / vec2(16.0, 14.4)) + 2.0), detP));
+    alb = vec3(0.62, 0.595, 0.535) * (0.94 + 0.08 * mix(0.5, hash12(floor(f / vec2(16.0, 14.4)) + 2.0), detP));
     alb = mix(alb, vec3(0.06, 0.07, 0.08), wv * 0.9);
     alb *= 1.0 - 0.12 * plinth;
     rough = mix(0.7, 0.1, wv); metal = 0.0;
@@ -164,7 +165,7 @@ void main() {
   } else if (k < 22.5) {
     // paving: pale setts in a running bond, a darker gutter band every 20 m
     float sett = max(gridLine(f.x, 1.2, 0.03, fw.x), gridLine(f.y + 0.6 * step(0.5, fract(f.x / 2.4)), 0.8, 0.03, fw.y)) * (1.0 - smoothstep(0.02, 0.06, px));
-    alb = vec3(0.4, 0.38, 0.34) * (1.0 - 0.18 * sett) * mix(1.0, 0.94 + 0.1 * vnoise(f * 0.05), 1.0 - smoothstep(3.0, 9.0, px));
+    alb = vec3(0.3, 0.285, 0.255) * (1.0 - 0.18 * sett) * mix(1.0, 0.94 + 0.1 * vnoise(f * 0.05), 1.0 - smoothstep(3.0, 9.0, px));
     rough = 0.75;
   } else if (k < 23.5) {
     // landing pad: dark composite, a painted ring every 50 m, the central target
@@ -191,13 +192,23 @@ void main() {
   } else if (k < 26.5) {
     // reflecting pool: dark water mirroring the sky
     alb = vec3(0.01, 0.02, 0.025); rough = 0.05; metal = 0.0;
-  } else {
+  } else if (k < 27.5) {
     // dressed stone: ashlar courses of 0.6 m, blocks 1.4 m, weathered a shade apart
     float crs = gridLine(f.y, 0.6, 0.03, fw.y) * det;
     float jnt = gridLine(f.x + 0.7 * step(0.5, fract(f.y / 1.2)), 1.4, 0.03, fw.x) * det;
     alb = vec3(0.5, 0.48, 0.43) * (0.93 + 0.1 * mix(0.5, hash12(floor(f / vec2(1.4, 0.6))), det)) * (1.0 - 0.2 * max(crs, jnt));
     alb *= mix(1.0, 0.95 + 0.08 * vnoise(f * 0.03), 1.0 - smoothstep(6.0, 20.0, px));
     rough = 0.8;
+  } else {
+    // mass-driver coil: bronze windings glowing in a slow wave that runs out along the
+    // guideway (2.4 km long, every 5 s), and a brighter launch pulse that follows it out
+    // every 40 s; both smooth in time, no coil ever switches on or off
+    float s = vFac.x;
+    float wave = 0.5 + 0.5 * sin(s / 380.0 - uTime * 1.25);
+    float front = fract(uTime / 40.0) * 38000.0;
+    float launch = exp(-pow((s - front) / 700.0, 2.0));
+    alb = vec3(0.5, 0.36, 0.22); rough = 0.35; metal = 0.9;
+    em = uAccent * (0.3 + 1.5 * wave * wave + 5.0 * launch);
   }
   // light: the Sun (to the Moon's horizon), the Earth, the lunar sky
   vec3 toE = uEarthView - vView;

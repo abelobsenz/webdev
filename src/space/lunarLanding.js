@@ -3,6 +3,7 @@ import { CB } from '../craft/craftGeometry.js';
 import { LK } from './lunarMaterial.js';
 import { LAMP } from './lamps.js';
 import { BAY, surfaceY, surfaceUp } from './lunarSite.js';
+import { buildLandingLife, marketHall } from './lunarLandingLife.js';
 
 // Medii Landing: the Moon's surface port beneath the Tranquillity Exchange. Metres, site
 // frame (x west, y up, z north), origin at the foot of the Lift.
@@ -170,6 +171,7 @@ export function buildMediiLanding() {
   const B = new CB();
   const lamps = [];
   const plan = [];                  // footprints (u, v rectangles, metres) for the overlap checks
+  const courts = [];                // courtyard interiors (for their trees)
   const foot = (kind, u, v, w, d, alongU = true) => plan.push(alongU ? { kind, u0: u - w / 2, u1: u + w / 2, v0: v - d / 2, v1: v + d / 2 } : { kind, u0: u - d / 2, u1: u + d / 2, v0: v - w / 2, v1: v + w / 2 });
   const rnd = mulberry(4270);
   const at = (u, v, h) => { const [x, z] = UV(u, v); return new THREE.Vector3(x, gy(x, z) + h, z); };
@@ -177,6 +179,12 @@ export function buildMediiLanding() {
 
   const T_LIFT = 7.0, T_MID = 5.5, T_LOW = 4.0, T_STRAND = 2.5;
   const V_LOW = 1550, V_STRAND = 2900, V_MID = 550, U_TOWN = 1700;
+  const DOMES = [[-650, -1150, 210], [-1250, -1000, 150], [-150, -1050, 130], [-1250, -1450, 110], [-300, -1470, 95]];
+  const PADS = [[-1350, -2500], [-500, -2900], [350, -2500]];
+  const S = {
+    B, UV, gy, at, lamp, lamps, plan, foot, courts, shoreV, rnd, prism, gable, ROT_UV, DOMES, PADS, U_TOWN,
+    T: { LIFT: T_LIFT, MID: T_MID, LOW: T_LOW, STRAND: T_STRAND }, V: { MID: V_MID, LOW: V_LOW, STRAND: V_STRAND },
+  };
   // --- terraces ---
   slabUV(B, -U_TOWN, U_TOWN, V_STRAND, (u) => shoreV(u), T_STRAND, { bot: -6 });       // the Strand: its sea wall on the coast
   slabUV(B, -U_TOWN, U_TOWN, V_LOW, V_STRAND, T_LOW);
@@ -245,14 +253,16 @@ export function buildMediiLanding() {
     B.pop();
     return H;
   };
-  const block = (uc, vc, bw, bd, h0, tall) => {
+  const block = (uc, vc, bw, bd, h0, tall, market = false) => {
     // kerbed plinth with the courtyard garden on top
     const [x, z] = UV(uc, vc);
     B.at(x, gy(x, z) + h0, z, 0, ROT_UV, 0);
     B.box(0, 0.1, 0, bw, 0.8, bd, LK.COURT);
     B.pop();
     const k0 = h0 + 0.5;
+    if (market) { marketHall(S, uc, vc, bw, bd, k0); return; }
     if (rnd() < 0.12) {
+      courts.push({ uc, vc, hu: bw / 2, hv: bd / 2, top: k0, garden: true });
       // a garden square: a pavilion and a pool among the trees
       const [px, pz] = UV(uc, vc);
       B.at(px, gy(px, pz) + k0, pz, 0, ROT_UV, 0);
@@ -262,6 +272,7 @@ export function buildMediiLanding() {
       return;
     }
     const depth = 13 + Math.round(rnd() * 3);
+    courts.push({ uc, vc, hu: bw / 2 - depth, hv: bd / 2 - depth, top: k0, garden: false });
     const baseSt = tall ? 4 : 3;
     // front and back rows along u, full width; the two ends between them
     for (const side of [-1, 1]) {
@@ -283,18 +294,20 @@ export function buildMediiLanding() {
       }
     }
   };
-  const rowBlocks = (v0, v1, h0, uMin, uMax, tallNear) => {
+  const rowBlocks = (v0, v1, h0, uMin, uMax, tallNear, marketRow = false) => {
     for (let v = v0 + 9; v + 110 <= v1 - 9; v += 128) {
+      // the covered markets face the Strand either side of the Boulevard
+      const mRow = marketRow && v + 128 + 110 > v1 - 9;
       for (const sgn of [-1, 1]) {
         for (let u = uMin; u + 150 <= uMax; u += 170) {
           const uc = sgn * (u + 75);
-          block(uc, v + 55, 150, 110, h0, Math.abs(uc) < tallNear);
+          block(uc, v + 55, 150, 110, h0, Math.abs(uc) < tallNear, mRow && u === uMin);
         }
       }
     }
   };
   rowBlocks(V_MID, V_LOW, T_MID, 40, U_TOWN - 10, 700);
-  rowBlocks(V_LOW, V_STRAND, T_LOW, 40, U_TOWN - 10, 500);
+  rowBlocks(V_LOW, V_STRAND, T_LOW, 40, U_TOWN - 10, 500, true);
   // wings beside the Lift terrace
   for (let v = -250 + 9; v + 110 <= V_MID - 9; v += 128) for (const sgn of [-1, 1]) for (let u = 760; u + 150 <= U_TOWN - 10; u += 170) block(sgn * (u + 75), v + 55, 150, 110, T_MID, false);
 
@@ -415,7 +428,6 @@ export function buildMediiLanding() {
   }
 
   // --- the domes of the old settlement, linked by glazed arcades ---
-  const DOMES = [[-650, -1150, 210], [-1250, -1000, 150], [-150, -1050, 130], [-1250, -1450, 110], [-300, -1470, 95]];
   for (const [u, v, R] of DOMES) {
     foot('dome', u, v, 2 * R + 12, 2 * R + 12);
     const [x, z] = UV(u, v);
@@ -455,7 +467,6 @@ export function buildMediiLanding() {
   arcade(0, 1); arcade(0, 2); arcade(0, 4); arcade(1, 3); arcade(2, 4);
 
   // --- landing fields: plinths, blast walls open toward their roads, service roads ---
-  const PADS = [[-1350, -2500], [-500, -2900], [350, -2500]];
   PADS.forEach(([u, v], idx) => {
     foot('pad', u, v, 552, 552);
     const [x, z] = UV(u, v);
@@ -465,7 +476,15 @@ export function buildMediiLanding() {
     B.push(new THREE.Matrix4().makeRotationX(-Math.PI / 2));
     B.lathe([[250, -3, LK.WALL], [250, 1.2, LK.WALL], [248, 1.2, LK.WALL], [248, 0.6, LK.WALL]], 72);
     B.pop();
+    // the pad: a closed puck filling the drum's recess, its top the marked surface
     disc(B, 248, 1.2, LK.PAD, UP, 72, 6);
+    disc(B, 248, 0.6, LK.WALL, DOWN, 72, 2);
+    for (let i = 0; i < 72; i++) {
+      const a0 = i / 72 * Math.PI * 2, a1 = (i + 1) / 72 * Math.PI * 2, am = (a0 + a1) / 2;
+      const q = [[a0, 0.6], [a1, 0.6], [a1, 1.2], [a0, 1.2]].map(([a, y]) => B.v(Math.cos(a) * 248, y, Math.sin(a) * 248, a * 248, y, LK.WALL));
+      const n = new THREE.Vector3(Math.cos(am), 0, Math.sin(am));
+      B.tri(q[0], q[1], q[2], n); B.tri(q[0], q[2], q[3], n);
+    }
     // blast walls: three quarters of a ring, open to the road (local +z = toward the town)
     arcWall(B, 268, 276, Math.PI * 0.5 + 0.2, Math.PI * 2.5 - 0.2, -2, 9, LK.WALL, 48);
     for (let i = 0; i < 24; i++) {
@@ -528,12 +547,16 @@ export function buildMediiLanding() {
     const up4 = new THREE.Vector3(0, 4.6, 0);
     beam(P(0).add(up4), P(L).add(up4), 5, 1.2, LK.CONDUIT);
     // coil collars: square frames closing round the beam
+    // (the coils glow in a slow wave that runs out along the guideway, and a launch pulse
+    // follows it now and then: their facade coordinate carries the distance along the beam)
     for (let s = 1500; s < L - 200; s += 150) {
       const c = P(s);
       const m = new THREE.Matrix4().lookAt(c, P(s + 10), UP).setPosition(c);
       B.push(m);
-      B.box(0, 6.2, 0, 20, 2, 2.2, LK.BRONZE); B.box(0, -5, 0, 20, 2, 2.2, LK.BRONZE);
-      B.box(-9, 0.6, 0, 2, 13.2, 2.2, LK.BRONZE); B.box(9, 0.6, 0, 2, 13.2, 2.2, LK.BRONZE);
+      const i0 = B.pos.length / 3;
+      B.box(0, 6.2, 0, 20, 2, 2.2, LK.COIL); B.box(0, -5, 0, 20, 2, 2.2, LK.COIL);
+      B.box(-9, 0.6, 0, 2, 13.2, 2.2, LK.COIL); B.box(9, 0.6, 0, 2, 13.2, 2.2, LK.COIL);
+      for (let i = i0; i < B.pos.length / 3; i++) { B.fac[i * 3] = s; B.fac[i * 3 + 1] = s; }
       B.pop();
     }
     // pylons: from below the ground to the beam's underside, standing radially
@@ -584,6 +607,9 @@ export function buildMediiLanding() {
     }
   }
 
+  // trees, the colonnade, roads and hamlets, the ferry (lunarLandingLife.js)
+  const life = buildLandingLife(S);
+
   const geo = B.geometry();
-  return { geo, lamps, liftTop, radius: 38, gateKm: 36, plan };
+  return { geo, lamps, liftTop, radius: 38, gateKm: 36, plan, trees: life.trees };
 }

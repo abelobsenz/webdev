@@ -12,6 +12,7 @@ import { R_EARTH, MERIDIAN_LON, bodyDir } from './sim.js';
 
 export const R_TOP = 6460;
 export const R_CLOUD = R_EARTH + 8;
+export const R_CIRRUS = R_EARTH + 12.5;
 
 const VERT = /* glsl */ `
 varying vec3 vWorld;
@@ -33,8 +34,8 @@ uniform sampler2D uMultiScatLUT;
 uniform mat3 uToBody;
 uniform vec3 uSunDir;
 uniform float uSunE;
-uniform float uCloudPh;       // 0..1 flow phase
-uniform float uCloudP;        // flow period (s)
+uniform float uCloudRot;      // the weather's slow eastward drift (rad)
+uniform float uCloudTexel;    // km per weather texel
 uniform float uTime;          // real seconds
 uniform float uSimDay;        // fraction of day for lightning seeds
 uniform vec4 uRingN[4];       // ring axis (inertial) + radius
@@ -55,6 +56,7 @@ ${SPACE_UTIL_GLSL}
 
 const float RC = ${R_CLOUD.toFixed(1)};
 const float RTOP = ${R_TOP.toFixed(1)};
+const float RCI = ${R_CIRRUS.toFixed(1)};
 
 float earthShadow(vec3 p, vec3 s) {
   float b = dot(p, s);
@@ -90,34 +92,112 @@ float ringShadow(vec3 p, vec3 s) {
   return lit;
 }
 
-float zonalOmega(float lat) {
-  float al = abs(lat);
-  float u = -6.0 + 22.0 * smoothstep(0.26, 0.78, al) - 20.0 * smoothstep(0.96, 1.3, al);
-  return u / (6.371e6 * max(cos(lat), 0.25));
+// ---- clouds ---------------------------------------------------------------------------
+// The baked weather (earthBake.js: potential, stratiform share, open cells, cirrus) drifts
+// slowly east as one field; the land's bias (clear deserts, cloudy rainforest) stays put.
+// Every scale below the bake's ~60 km is added here as fractal detail, and each octave that
+// falls below a few pixels is replaced by its effect on the mean: it widens the threshold the
+// edge is drawn at, so a field of puffs becomes, with range, the soft grey veil of its mean
+// cover and never sparkles or turns to confetti. Covered parts carry an optical depth: thin
+// cloud is translucent and grey, thick cloud opaque and bright (reflectance tau / (tau + 13)).
+vec4 weatherAt(vec3 b, float fp) {
+  float lod = max(log2(max(fp, 1e-3) / uCloudTexel), 0.0);
+  return textureLod(uClouds, rotY(b, -uCloudRot), lod);
 }
-
-// Cloud density in the body frame, flowing with the zonal winds
-float cloudDensity(vec3 b, float lod, float fp) {
+// the land's own bias from the surface bake at this point
+float landBias(vec3 b) {
+  float land = smoothstep(0.49, 0.53, textureLod(uSurfA, b, 3.0).a);
+  float arid = textureLod(uSurfB, b, 3.0).b;
   float lat = asin(clamp(b.y, -1.0, 1.0));
-  float w = zonalOmega(lat) * uCloudP;
-  float ph0 = uCloudPh, ph1 = fract(uCloudPh + 0.5);
-  vec4 c0 = textureLod(uClouds, rotY(b, -w * ph0), lod);
-  vec4 c1 = textureLod(uClouds, rotY(b, -w * ph1), lod);
-  float k = abs(2.0 * ph0 - 1.0);           // 1 at the ends of phase 0 -> use c1
-  float pot = mix(c0.r, c1.g, k);
-  float bias = mix(c0.b, c1.b, k) - 0.5;
-  pot += bias;
+  return land * (-0.26 * arid + 0.06 * (1.0 - arid) * exp(-lat * lat / 0.04));
+}
+// fractal detail from ~60 km down to ~0.6 km: the mesoscale octaves gather the cumulus into
+// clusters and streets with clear sea between, the cumulus octaves (3-6 km) make the puffs:
+// x the resolved sum, y the RMS amplitude of the octaves still below a few pixels
+vec2 cloudDetail(vec3 q, float fp, float streets) {
+  float s = 0.0, u = 0.0, wl = 60.0;
+  // cumulus lines up in streets along the (zonal) wind: the coarse octaves drawn out east-west
+  vec3 x = q * (6371.0 / 60.0) * vec3(1.0, 1.0 + 1.4 * streets, 1.0);
+  for (int i = 0; i < 7; i++) {
+    float a = i == 0 ? 0.75 : i == 1 ? 0.8 : i == 2 ? 0.8 : i == 3 ? 0.8 : i == 4 ? 0.7 : i == 5 ? 0.55 : 0.4;
+    // (the street octaves are filtered by their short, north-south wavelength)
+    float wf = i <= 2 ? wl / (1.0 + 1.4 * streets) : wl;
+    float f = 1.0 - smoothstep(wf * 0.08, wf * 0.22, fp);
+    if (f > 0.0) s += a * f * snoise(x);
+    u += a * a * (1.0 - f) * (1.0 - f);
+    x = x * 2.13 + vec3(3.1, 7.7, 1.3);
+    if (i == 2) x.y /= 1.0 + 1.4 * streets;
+    wl /= 2.13;
+  }
+  return vec2(s, sqrt(u));
+}
+// convection cells (~30 km): x = distance to the nearest centre, y = F2 - F1 (0 on the lanes)
+vec2 cellF(vec3 p) {
+  vec3 base = floor(p - 0.5);
+  float f1 = 9.0, f2 = 9.0;
+  for (int i = 0; i < 2; i++) for (int j = 0; j < 2; j++) for (int k = 0; k < 2; k++) {
+    vec3 c = base + vec3(float(i), float(j), float(k));
+    vec3 o = c + 0.2 + 0.6 * hash33(c);
+    float d = length(p - o);
+    if (d < f1) { f2 = f1; f1 = d; } else if (d < f2) f2 = d;
+  }
+  return vec2(f1, f2 - f1);
+}
+const float CU_A = 0.11;     // detail amplitude of cumuliform cloud
+// Low and middle cloud at body direction b, footprint fp (km per pixel): x = cover, y = tau
+vec2 lowCloud(vec3 b, float fp, float bias, bool fine) {
+  vec4 w = weatherAt(b, fp);
+  vec3 q = rotY(b, -uCloudRot);
+  float P = w.r + bias;
+  float S = w.g, O = w.b;
+  float A = mix(CU_A, 0.035, S);
+  vec2 dt = vec2(0.0, 1.8);
 #if QUALITY > 0
-  if (fp < 18.0) {
-    float det = snoise(b * 900.0 + vec3(uCloudPh * 3.0, 0.0, 0.0)) * 0.5 + snoise(b * 2300.0) * 0.25;
-    pot += det * 0.06 * smoothstep(18.0, 4.0, fp);
+  if (fine) dt = cloudDetail(q, fp, 1.0 - S);
+#endif
+  float Pd = P + A * dt.x;
+  float edge = 0.012 + 0.3 * A * dt.y;
+  // cells: open (cloud in the lanes round clear hearts) and closed (bright hearts, dark lanes)
+  float cellRes = 0.0, lane = 0.0, heart = 0.62;
+#if QUALITY > 0
+  if (fine && (O > 0.02 || S > 0.3)) {
+    cellRes = 1.0 - smoothstep(3.0, 8.0, fp);
+    if (cellRes > 0.0) {
+      vec2 cf = cellF(q * (6371.0 / 42.0));
+      float brk = snoise(q * (6371.0 / 14.0) + 4.0);
+      // broad, broken, uneven rings of cumulus on the walls of the open cells round their clear
+      // hearts (the hearts themselves shrunk by the fine detail); closed cells with soft seams
+      lane = (1.0 - smoothstep(0.16, 0.46 + 0.12 * brk, cf.y)) * smoothstep(-0.8, 0.2, brk);
+      heart = smoothstep(0.02, 0.3, cf.y);
+    }
   }
 #endif
-  float dens = smoothstep(0.5, 0.66, pot);
-  float ci = mix(c0.a, c1.a, k);
-  dens = max(dens, smoothstep(0.45, 0.85, ci) * 0.45);
-  return dens;
+  Pd += O * (mix(0.35, lane, cellRes) - 0.35) * 0.35;
+  edge += O * 0.08 * (1.0 - cellRes);
+  float cover = smoothstep(0.5 - edge, 0.5 + edge, Pd);
+  float thick = clamp((Pd - 0.5) / 0.3, 0.0, 1.0);
+  float tau = mix(mix(8.0, 5.0, S), 48.0, thick * (0.5 + 0.5 * thick)) * mix(1.0, mix(0.72, 1.12, mix(0.75, heart, cellRes)), S * (1.0 - O));
+  return vec2(cover, tau);
 }
+// High ice cloud on its own shell: thin, fibrous, drawn out along the wind. x = cover, y = tau
+vec2 cirrusCloud(vec3 b, float fp, bool fine) {
+  float c = weatherAt(b, fp).a;
+  float e = 0.1;
+#if QUALITY > 0
+  if (fine) {
+    vec3 q = rotY(b, -uCloudRot);
+    // fibres drawn out along the wind, each filtered by its short (north-south) wavelength:
+    // ~20, ~3 and ~1 km across
+    float f0 = 1.0 - smoothstep(2.4, 6.0, fp), f1 = 1.0 - smoothstep(0.35, 0.9, fp), f2 = 1.0 - smoothstep(0.12, 0.3, fp);
+    float fib = snoise(q * vec3(40.0, 320.0, 40.0) + 9.0) * 0.5 * f0 + snoise(q * vec3(260.0, 2200.0, 260.0)) * 0.3 * f1 + snoise(q * vec3(800.0, 6400.0, 800.0) + 3.0) * 0.2 * f2;
+    c += fib * 0.22 * smoothstep(0.05, 0.35, c);
+    e += 0.08 * (1.0 - f0) + 0.04 * (1.0 - f1);
+  }
+#endif
+  float cover = smoothstep(0.36 - e, 0.7 + e, c) * 0.9;
+  return vec2(cover, mix(0.4, 2.6, smoothstep(0.4, 1.0, c)));
+}
+float cloudR(float tau) { return tau / (tau + 13.0); }
 
 vec3 integrateAtmo(vec3 ro, vec3 rd, float t0, float t1, bool ground, vec3 sun, out vec3 T) {
   vec3 L = vec3(0.0);
@@ -354,7 +434,7 @@ void main() {
   float Hd = H;
 #if QUALITY > 0
   float coastW = exp(-abs(H) * 10.0) * smoothstep(14.0, 2.0, fp);
-  if (coastW > 0.01) Hd += (snoise(b * 1500.0) * 0.6 + snoise(b * 4100.0) * 0.4) * 0.05 * coastW;
+  if (coastW > 0.01) Hd += (snoise(b * 1500.0) * 0.6 * (1.0 - smoothstep(1.0, 2.5, fp)) + snoise(b * 4100.0) * 0.4 * (1.0 - smoothstep(0.4, 1.0, fp))) * 0.05 * coastW;
 #endif
   float ew = max(fwidth(Hd), 1e-4);
   float landF = smoothstep(-ew, ew, Hd);
@@ -386,13 +466,16 @@ void main() {
   float mu = dot(n, sun);
   vec3 sunT = sampleTransmittance(uTransmittanceLUT, Rg + 0.3, mu) * smoothstep(-0.03, 0.02, mu);
   float rsh = ringShadow(pG, sun);
-  // cloud shadow: density where the sun ray leaves the cloud shell
+  // cloud shadows where the sun ray crosses each shell (the cirrus's falls further off): a
+  // cloud takes away the light it reflects, so thin cloud barely shades and thick cloud does
   float csh = 1.0;
+  float biasG = landBias(b);
   {
     vec2 ts = sphereHits(pG, sun, RC);
-    vec3 ps = pG + sun * max(ts.y, 0.0);
-    float cs = cloudDensity(uToBody * normalize(ps), 2.5, 30.0);
-    csh = 1.0 - 0.82 * cs;
+    vec2 cs = lowCloud(uToBody * normalize(pG + sun * max(ts.y, 0.0)), max(fp, 0.4), biasG, fp < 8.0);
+    vec2 ti = sphereHits(pG, sun, RCI);
+    vec2 ci = cirrusCloud(uToBody * normalize(pG + sun * max(ti.y, 0.0)), max(fp, 0.4), false);
+    csh = (1.0 - 0.95 * cs.x * cloudR(cs.y)) * (1.0 - ci.x * cloudR(ci.y) * 1.5);
   }
   float shadow = rsh * csh;
   vec3 skyAmb = uSunE * vec3(0.05, 0.085, 0.16) * smoothstep(-0.28, 0.35, mu) * (0.35 + 0.65 * clamp(mu + 0.3, 0.0, 1.0));
@@ -405,7 +488,7 @@ void main() {
   {
     // sea-surface roughness from the wind (Cox-Munk, ~7 m/s): a broad smooth glint, gently
     // varied by weather systems, with calm slicks streaking it where they are resolved
-    float wind = snoise(b * 7.0 + vec3(0.0, uCloudPh * 0.6, 0.0)) * 0.5 + 0.5;
+    float wind = snoise(rotY(b, -uCloudRot) * 7.0) * 0.5 + 0.5;
     float al = mix(0.17, 0.25, wind);
 #if QUALITY > 0
     float slick = smoothstep(0.55, 0.8, snoise(b * vec3(90.0, 260.0, 90.0) + wind * 3.0) * 0.5 + 0.5) * (1.0 - smoothstep(2.0, 8.0, fp));
@@ -448,49 +531,99 @@ void main() {
 #endif
   // brighter from afar, where a city is a pixel's mean, calmer close up so districts keep their
   // structure (a smooth function of range: nothing pops)
-  float rangeK = mix(0.6, 1.7, smoothstep(3.0, 30.0, fp));
-  vec3 emis = ((vec3(1.0, 0.58, 0.26) * lw * 7.0 + vec3(0.62, 0.88, 1.0) * lc * 6.5) * micro + vec3(0.72, 0.86, 1.0) * ln * 0.95) * rangeK;
+  float rangeK = mix(0.7, 1.35, smoothstep(3.0, 30.0, fp));
+  vec3 emis = ((vec3(1.0, 0.6, 0.28) * lw * 4.2 + vec3(0.66, 0.88, 1.0) * lc * 3.6) * micro + vec3(0.72, 0.86, 1.0) * ln * 1.05) * rangeK;
+  // a soft shoulder, so a metro's heart stays warm-white instead of clipping to a white splat
+  // (and stays under the bloom's threshold: no metro flares into a star)
+  {
+    float le = max(emis.r, max(emis.g, emis.b));
+    emis *= 1.0 / (1.0 + le / 0.75);
+  }
   emis += meridianNight(b, fp);
 
-  // clouds
+  // clouds: the low and middle deck (8 km) and the cirrus above it (12.5 km), each on its own
+  // shell, so they part in parallax at a slant and the cirrus shadows the deck beneath it
   vec2 tC = sphereHits(ro, rd, RC);
   vec3 pC = ro + rd * max(tC.x, 0.0);
   vec3 nC = normalize(pC);
   vec3 bC = uToBody * nC;
-  float fpC = max(tC.x, 0.0) * uPixAng;
-  float cA = tC.x < tC.y ? cloudDensity(bC, 0.0, fpC) : 0.0;
+  float fpC = max(max(tC.x, 0.0) * uPixAng, 1e-3);
+  float muVC = max(abs(dot(rd, nC)), 0.04);
+  vec2 lcl = tC.x < tC.y ? lowCloud(bC, fpC, landBias(bC), true) : vec2(0.0);
+  // what the deck hides of what lies below: the covered share times its direct-beam opacity
+  float cA = lcl.x * (1.0 - exp(-lcl.y * 0.5 / muVC));
+  // relief: the tops' height read from the optical depth, so towers catch the Sun on one side;
+  // resolved only where it spans a few pixels
+  float hTop = lcl.x * sqrt(clamp(lcl.y / 48.0, 0.0, 1.0));
+  vec3 dcx = dFdx(pC), dcy = dFdy(pC);
+  float dax = dFdx(hTop), day = dFdy(hTop);
+  vec3 cr1 = cross(dcy, nC), cr2 = cross(nC, dcx);
+  float cdet = dot(dcx, cr1);
+  vec3 cgrad = abs(cdet) > 1e-9 ? (dax * cr1 + day * cr2) / cdet : vec3(0.0);
+  cgrad *= (1.0 - smoothstep(0.6, 3.0, fpC)) * 3.0;               // tops ~3 km proud
+  float cgl = length(cgrad);
+  if (cgl > 2.0) cgrad *= 2.0 / cgl;
+  vec3 nRel = normalize(nC - cgrad);
   vec3 cloudCol = vec3(0.0);
   {
     float muC = dot(nC, sun);
     vec3 sunTc = sampleTransmittance(uTransmittanceLUT, RC, muC) * earthShadow(pC * 1.0005, sun);
-    // self shadowing: density a little toward the Sun
+    // self shadowing: the deck a little toward the Sun (nearer when close, so cells shade cells)
     vec3 st = normalize(sun - nC * muC + 1e-5);
-    float cs = cloudDensity(uToBody * normalize(nC + st * 0.006), 1.0, 30.0);
-    float shade = exp(-2.2 * max(cs - cA * 0.35, 0.0));
-    float wrap = clamp((muC + 0.12) / 1.12, 0.0, 1.0);
+    float off = clamp(fpC * 3.0, 1.5, 38.0);
+    vec2 cs = lowCloud(uToBody * normalize(nC + st * (off / 6371.0)), max(off * 0.5, fpC), 0.0, false);
+    float shade = exp(-2.4 * max(cs.x * cloudR(cs.y) - lcl.x * cloudR(lcl.y) * 0.4, 0.0));
+    float wrap = clamp((dot(nRel, sun) + 0.15) / 1.15, 0.0, 1.0) * smoothstep(-0.06, 0.02, muC);
     float rs = ringShadow(pC, sun);
+    // the cirrus overhead shades the deck
+    vec2 ti = sphereHits(pC, sun, RCI);
+    vec2 cio = cirrusCloud(uToBody * normalize(pC + sun * max(ti.y, 0.0)), 4.0, false);
+    float cish = 1.0 - cio.x * cloudR(cio.y) * 1.5;
     vec3 amb = uSunE * vec3(0.06, 0.09, 0.15) * smoothstep(-0.25, 0.3, muC);
-    cloudCol = vec3(0.92) / S_PI * (uSunE * sunTc * wrap * (0.35 + 0.65 * shade) * rs + amb * (0.7 + 0.3 * shade));
+    // reflectance from the optical depth: thin cloud grey, thick cloud white
+    float Rc = cloudR(lcl.y) / max(1.0 - exp(-lcl.y * 0.5 / muVC), 0.05);
+    Rc = clamp(Rc, 0.0, 0.92);
+    cloudCol = vec3(Rc) / S_PI * (uSunE * sunTc * wrap * (0.3 + 0.7 * shade) * rs * cish + amb * (0.7 + 0.3 * shade));
     // city glow on cloud undersides, lightning in the deep convection
     float nightC = 1.0 - smoothstep(-0.10, 0.06, muC);
     // lights below glow through the deck and light it from beneath, softened by scattering
     vec4 LU = textureLod(uLights, bC, 3.0);
     float under = LU.r * 1.2 + LU.g * 0.8 + LU.b * 0.3;
     cloudCol += mix(vec3(1.0, 0.62, 0.34), vec3(0.8, 0.85, 0.95), 0.3) * under * 1.1 * nightC;
+    // lightning: storm cells brighten in soft, brief pulses (no hard on/off), only where a
+    // cell spans a few pixels; from high orbit single-pixel strikes read as blinking lights
     vec3 cell = floor(bC * 260.0);
-    float hsh = hash13(cell + floor(uTime * 1.7));
-    float flash = step(0.9975, hsh) * smoothstep(0.55, 0.9, cA) * nightC;
-    flash *= 0.5 + 0.5 * sin(uTime * 40.0 + hsh * 60.0);
-    // only where a storm cell spans a few pixels: from high orbit single-pixel strikes
-    // read as random flashing lights
-    flash *= 1.0 - smoothstep(6.0, 16.0, fpC);
-    cloudCol += vec3(0.75, 0.82, 1.0) * flash * 1.6;
+    float hsh = hash13(cell);
+    float pulse = smoothstep(0.93, 1.0, sin(uTime * (0.35 + 0.5 * hsh) + hsh * 60.0)) * step(0.985, hash13(cell + 7.0));
+    float flash = pulse * smoothstep(0.6, 1.0, lcl.x * clamp(lcl.y / 40.0, 0.0, 1.0)) * nightC * (1.0 - smoothstep(6.0, 16.0, fpC));
+    cloudCol += vec3(0.75, 0.82, 1.0) * flash * 1.2;
     // faint moonlight
     cloudCol += vec3(0.5, 0.6, 0.8) * 0.004 * max(dot(nC, uMoonDir), 0.0) * nightC;
   }
-  emis *= 1.0 - cA * 0.8;
+  // cirrus
+  vec2 tI = sphereHits(ro, rd, RCI);
+  vec3 pI = ro + rd * max(tI.x, 0.0);
+  vec3 nI = normalize(pI);
+  float fpI = max(max(tI.x, 0.0) * uPixAng, 1e-3);
+  float muVI = max(abs(dot(rd, nI)), 0.04);
+  vec2 ic = tI.x < tI.y ? cirrusCloud(uToBody * nI, fpI, true) : vec2(0.0);
+  float iA = ic.x * (1.0 - exp(-ic.y / muVI));
+  vec3 ciCol;
+  {
+    float muI = dot(nI, sun);
+    vec3 sunTi = sampleTransmittance(uTransmittanceLUT, RCI, muI) * earthShadow(pI * 1.0005, sun);
+    // ice crystals scatter forward: cirrus toward the Sun shines
+    float fwd = pow(max(dot(rd, sun), 0.0), 6.0);
+    float nightI = 1.0 - smoothstep(-0.10, 0.06, muI);
+    float Ri = clamp(cloudR(ic.y * 3.0) / max(1.0 - exp(-ic.y / muVI), 0.05), 0.0, 0.9);
+    ciCol = vec3(0.93, 0.96, 1.0) * Ri / S_PI * (uSunE * sunTi * clamp((muI + 0.1) / 1.1, 0.0, 1.0) * (0.9 + 2.0 * fwd) * ringShadow(pI, sun)
+          + uSunE * vec3(0.07, 0.1, 0.16) * smoothstep(-0.25, 0.3, muI));
+    ciCol += vec3(0.5, 0.6, 0.8) * 0.003 * max(dot(nI, uMoonDir), 0.0) * nightI;
+  }
+  emis *= (1.0 - cA * 0.85) * (1.0 - iA * 0.3);
   col += emis * uLightGain * night;
   col = mix(col, cloudCol, cA);
+  col = mix(col, ciCol, iA);
 
   // atmosphere
   vec3 T;
@@ -504,9 +637,12 @@ void main() {
     gl_FragDepth = clamp(clip.z / clip.w * 0.5 + 0.5, 0.0, 1.0);
   } else {
     // limb: clouds that poke above the horizon, then the glowing air
-    float lc = cA * step(tC.x, tC.y);
-    float a = max(lc, 1.0 - dot(T, vec3(1.0 / 3.0)));
-    gl_FragColor = vec4(cloudCol * lc * T + L, a);
+    float lcv = cA * step(tC.x, tC.y);
+    float li = iA * step(tI.x, tI.y);
+    vec3 cc = ciCol * li + cloudCol * lcv * (1.0 - li);
+    float ca = li + lcv * (1.0 - li);
+    float a = max(ca, 1.0 - dot(T, vec3(1.0 / 3.0)));
+    gl_FragColor = vec4(cc * T + L, a);
     gl_FragDepth = gl_FragCoord.z;
   }
   gl_FragColor.rgb *= uReady;
@@ -526,8 +662,8 @@ export class Earth {
       uToBody: { value: new THREE.Matrix3() },
       uSunDir: { value: new THREE.Vector3(1, 0, 0) },
       uSunE: U.uSunIlluminance,
-      uCloudPh: { value: 0 },
-      uCloudP: { value: 3 * 86400 },
+      uCloudRot: { value: 0 },
+      uCloudTexel: { value: (Math.PI / 2 / bake.clouds.width) * 6371 },
       uTime: { value: 0 },
       uSimDay: { value: 0 },
       uRingN: { value: [0, 1, 2, 3].map(() => new THREE.Vector4(0, 1, 0, 1)) },
@@ -566,7 +702,8 @@ export class Earth {
     const u = this.uniforms;
     u.uToBody.value.setFromMatrix4(sim.earthMat).transpose();
     u.uSunDir.value.copy(sim.sunDir);
-    u.uCloudPh.value = ((sim.t / u.uCloudP.value) % 1 + 1) % 1;
+    // the weather drifts east at ~6 m/s as one field
+    u.uCloudRot.value = ((sim.t * 6 / 6.371e6) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2);
     u.uTime.value = realTime;
     u.uMoonDir.value.copy(sim.moonPos).normalize();
     u.uReady.value = this.bake.ready ? 1 : 0;
