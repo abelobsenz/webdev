@@ -1,19 +1,22 @@
 import { Kit } from './cityKit.js';
 import { createFacadeMaterial } from '../facade.js';
+import { signalLights } from '../wardLandmarks.js';
 import * as thalassa from './thalassa.js';
+import * as anchorage from './anchorage.js';
+import * as orison from './orison.js';
 
 // The island cities that plan and build their own cores (see cityKit.js for the construction
 // rules). skyline.js asks each for the ground it reserves (and the gate where the island's
 // regional roads start) before the island plan is drawn, then lets it build.
-const CITIES = { thalassa };
+const CITIES = { thalassa, anchorage, orison };
 
 function builder(mod) {
   return (parts, c, rnd, lights) => {
-    const kit = new Kit(c.name), placed = [];
-    mod.build({ kit, c, rnd, lights, placed, parts });
+    const kit = new Kit(c.name), placed = [], signals = [];
+    mod.build({ kit, c, rnd, lights, placed, parts, signals });
     const geos = kit.finish();
     parts.push(...geos);
-    return { placed, trees: kit.trees, keepout: kit.keepout };
+    return { placed, trees: kit.trees, keepout: kit.keepout, signals };
   };
 }
 export const ISLAND_CITY_BUILDERS = Object.fromEntries(Object.entries(CITIES).map(([id, mod]) => [id, builder(mod)]));
@@ -28,4 +31,11 @@ export function createGiltMaterial(pal, seed) {
   u.uLightCol.value.setRGB(1.0, 0.78, 0.45);
   m.metalness = 0.55; m.roughness = 0.28;
   return m;
+}
+
+/** The cities' night signals ({x, y, z, c, s}: harbour lights, beacons) as one point sprite set. */
+export function islandCitySignals(list) {
+  const pts = signalLights(list);
+  if (pts) pts.name = 'island city signals';
+  return pts;
 }

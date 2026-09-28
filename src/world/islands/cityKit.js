@@ -365,6 +365,21 @@ export class Kit {
     // sweepLoop offsets toward the right of travel; a clockwise loop has its inside on the right
     return this.geometry(sweepLoop(loop, () => [{ a: [0, y - 0.02], b: [t, y - 0.02], kind }, { a: [t, y - 0.02], b: [t, y + h], kind }, { a: [t, y + h], b: [0, y + h], kind }, { a: [0, y + h], b: [0, y - 0.02], kind }], { closed: true, closeSection: false }), meta);
   }
+  /**
+   * A parapet along an open path (a terrace edge left open where a way or a stair arrives):
+   * the wall stands on the right of travel from y to y + h, t thick, both ends capped.
+   */
+  parapetRun(path, y, h = 1.0, t = 0.35, { kind = K.STONE, meta = { role: 'parapet', supported: true } } = {}) {
+    if (path.length < 2) return this;
+    return this.geometry(sweepLoop(path, () => [{ a: [0, y - 0.02], b: [t, y - 0.02], kind }, { a: [t, y - 0.02], b: [t, y + h], kind }, { a: [t, y + h], b: [0, y + h], kind }, { a: [0, y + h], b: [0, y - 0.02], kind }], { closed: false, closeSection: true, capEnds: true, capKind: kind }), meta);
+  }
+  /** A rectangle's parapet in the frame P(u, v) (u0..u1 by v0..v1) with an opening from vg0 to vg1 on its u0 side. */
+  parapetOpen(P, u0, u1, v0, v1, vg0, vg1, y, h = 1.0, t = 0.5) {
+    // clockwise in plan (P preserves orientation, so the inside lies on the right of travel)
+    const path = [P(u0, vg1), P(u0, v1), P(u1, v1), P(u1, v0), P(u0, v0), P(u0, vg0)];
+    const ccw = area2(path) > 0;
+    return this.parapetRun(ccw ? path.slice().reverse() : path, y, h, t);
+  }
 
   /**
    * A closed ribbon: sections [{l: [x, z], r: [x, z], y, yb}] with its walking top (kind top,

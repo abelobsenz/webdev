@@ -223,7 +223,11 @@ export function planDistrict(D) {
         const bvs = bst ? bst.vs.filter((v) => v > va + 1e-6 && v < vb - 1e-6) : [];
         const backPts = [corners[3], ...bvs.map((v) => P(edge(i + 1, v, -1), v)), corners[2]];
         const q = [...frontPts.map((f) => f.p), ...backPts.reverse()];
-        plots.push({ block: b, pos, q, corners, frontPts, va, vb, row: si, dir, front: [corners[0], corners[1]], frontY: fy, frontAt: st ? (s) => heightOn(st, va + (vb - va) * s) : null, depth: Math.min(Math.abs(ba - fa), Math.abs(bb - fb)), width: vb - va, uFront: [fa, fb], uBack: [ba, bb] });
+        // where the street curves into the plot its edge lies behind the corners' chord: how far
+        // (a house's front, and any column before it, keeps at least this far back of the chord)
+        let frontSag = 0;
+        for (const v of fvs) frontSag = Math.max(frontSag, (edge(si, v, dir) - (fa + ((fb - fa) * (v - va)) / (vb - va))) * dir);
+        plots.push({ block: b, pos, q, corners, frontPts, frontSag, va, vb, row: si, dir, front: [corners[0], corners[1]], frontY: fy, frontAt: st ? (s) => heightOn(st, va + (vb - va) * s) : null, depth: Math.min(Math.abs(ba - fa), Math.abs(bb - fb)), width: vb - va, uFront: [fa, fb], uBack: [ba, bb] });
       }
     }
   }

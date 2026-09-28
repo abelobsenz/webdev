@@ -31,15 +31,20 @@ export function stoa(kit, F, L, D, y, h, { tier = 3, colTier = 1, roof = K.STONE
 }
 
 /** A round temple (tholos): stepped crepidoma, peristyle, cella drum, dome and lantern. */
-export function tholos(kit, x, z, y, R, { cols = 12, colH, tier = 3, colTier = 1, gilt = false, domeKind = K.STONE } = {}) {
+export function tholos(kit, x, z, y, R, { cols = 12, colH, tier = 3, colTier = 1, gilt = false, domeKind = K.STONE, giltDome = false } = {}) {
   const ch = colH ?? R * 1.4;
   kit.at(x, z, tier).lathe(x, z, [[R + 1.8, y - 0.25, K.STONE], [R + 1.8, y + 0.35, K.STONE], [R + 1.1, y + 0.35, K.PAVING], [R + 1.1, y + 0.7, K.STONE], [R + 0.4, y + 0.7, K.PAVING], [R + 0.4, y + 1.05, K.STONE], [0, y + 1.05, K.PAVING]], 32, { meta: { role: 'tholos base', supported: true } });
   const y1 = y + 1.05;
   const cr = Math.max(0.3, R * 0.07);
   for (let k = 0; k < cols; k++) { const a = (k / cols) * TAU; kit.at(x, z, colTier).column(x + Math.cos(a) * R, z + Math.sin(a) * R, y1, ch, cr, { meta: { role: 'column', supported: true } }); }
   // cella and entablature
-  kit.at(x, z, tier).lathe(x, z, [[R * 0.62, y1 - 0.1, K.PUNCHED], [R * 0.62, y1 + ch, K.STONE], [R + cr * 1.6, y1 + ch - 0.02, K.STONE], [R + cr * 1.6, y1 + ch + R * 0.12, K.STONE], [R * 0.7, y1 + ch + R * 0.12, K.STONE], [R * 0.7, y1 + ch + R * 0.22, K.STONE],
-    ...Array.from({ length: 7 }, (_, i) => { const t = ((i + 1) / 8) * Math.PI / 2; return [Math.max(0.05, R * 0.7 * Math.cos(t)), y1 + ch + R * 0.22 + Math.sin(t) * R * 0.55, domeKind]; }), [0.05, y1 + ch + R * 0.22 + R * 0.58, domeKind]], 32, { meta: { role: 'tholos dome', supported: true } });
+  const dome = Array.from({ length: 7 }, (_, i) => { const t = ((i + 1) / 8) * Math.PI / 2; return [Math.max(0.05, R * 0.7 * Math.cos(t)), y1 + ch + R * 0.22 + Math.sin(t) * R * 0.55, domeKind]; });
+  if (giltDome) {
+    // the cella and entablature end in a flat roof on which the gilt dome stands
+    kit.at(x, z, tier).lathe(x, z, [[R * 0.62, y1 - 0.1, K.PUNCHED], [R * 0.62, y1 + ch, K.STONE], [R + cr * 1.6, y1 + ch - 0.02, K.STONE], [R + cr * 1.6, y1 + ch + R * 0.12, K.STONE], [R * 0.7, y1 + ch + R * 0.12, K.STONE], [R * 0.7, y1 + ch + R * 0.22, K.STONE], [0, y1 + ch + R * 0.22, K.STONE]], 32, { meta: { role: 'tholos cella', supported: true } });
+    kit.at(x, z, tier, 'gilt').lathe(x, z, [[R * 0.7, y1 + ch + R * 0.22 - 0.02, domeKind], ...dome, [0, y1 + ch + R * 0.22 + R * 0.58, domeKind]], 32, { meta: { role: 'tholos dome', supported: true } });
+  } else kit.at(x, z, tier).lathe(x, z, [[R * 0.62, y1 - 0.1, K.PUNCHED], [R * 0.62, y1 + ch, K.STONE], [R + cr * 1.6, y1 + ch - 0.02, K.STONE], [R + cr * 1.6, y1 + ch + R * 0.12, K.STONE], [R * 0.7, y1 + ch + R * 0.12, K.STONE], [R * 0.7, y1 + ch + R * 0.22, K.STONE],
+    ...dome, [0.05, y1 + ch + R * 0.22 + R * 0.58, domeKind]], 32, { meta: { role: 'tholos dome', supported: true } });
   const top = y1 + ch + R * 0.22 + R * 0.55, apex = y1 + ch + R * 0.22 + R * 0.58;
   if (gilt) kit.at(x, z, tier, 'gilt').lathe(x, z, [[R * 0.12, apex - 0.25, K.LANTERN], [R * 0.12, top + R * 0.25, K.LANTERN], [0.02, top + R * 0.5, K.LANTERN]], 12, { meta: { role: 'finial', supported: true } });
   return top;

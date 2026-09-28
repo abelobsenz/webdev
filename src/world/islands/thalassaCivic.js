@@ -31,20 +31,20 @@ export function civicOf(L, i, j, quad) {
  * run, at most 6 m over the quay), flights up from the quay against its wall every fifth bay,
  * and arcaded merchant ranges on it behind a promenade, their arcades to the sea.
  */
-export function harbourFront(kit, L, rnd, occ, place) {
+export function harbourFront(kit, L, rnd, occ, place, { depth: D0 = 46, rise = 5.7 } = {}) {
   const hb = L.hb, Sd = hb.Sd;
   const inland = (p, d) => [p[0] - Sd[0] * d, p[1] - Sd[1] * d];
   for (const run of hb.runs) {
     if (run.length < 3) continue;
     // the esplanade: a terrace behind the quay's back edge, as deep as the city allows (up to
     // 46 m) and never more than 6 m above the quay; one level along its whole run
-    const depth = run.map(() => 46);
+    const depth = run.map(() => D0);
     for (let k = 0; k < run.length; k++) {
       for (;;) {
         const k1 = Math.min(run.length - 1, k + 1), k0 = Math.max(0, k - 1);
         const q = [run[k0].r, run[k1].r, inland(run[k1].r, depth[k]), inland(run[k0].r, depth[k])];
         if (depth[k] < 12) break;
-        if (occ.free(q, -0.1) && groundRange(q, 3).max < hb.yq + 5.7) break;
+        if (occ.free(q, -0.1) && groundRange(q, 3).max < hb.yq + rise) break;
         depth[k] -= 4;
       }
     }
@@ -78,6 +78,7 @@ function esplanade(kit, L, rnd, occ, place, run, ks, depth) {
     const e1 = [[m[0] - e[0] * hw, m[1] - e[1] * hw], [m[0] + e[0] * hw, m[1] + e[1] * hw]];
     const e0 = e1.map((p) => [p[0] + Sd[0] * runLen, p[1] + Sd[1] * runLen]);
     stairBlock(kit, e0, e1, hb.yq, top, hw, hb.yq - 0.02);
+    occ.add([e0[0], e0[1], e1[1], e1[0]], 'stair');
     stairs.add(j);
   }
   // arcaded ranges on the esplanade, set back behind a promenade, the arcades to the sea

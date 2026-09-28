@@ -90,7 +90,7 @@ const rect4 = (p, r) => [[p[0] - r, p[1] - r], [p[0] + r, p[1] - r], [p[0] + r, 
  */
 export function thalassaHouse(kit, p, rnd, { front = 0, extraFloors = 0, onVia = false } = {}) {
   const M = plotMap(p.corners || p.q), W = p.width, D = p.depth, y = p.top;
-  const fr = Math.max(front, 1.0 + rnd() * 2.2), side = 0.8 + rnd() * 1.0, back = 3.5 + rnd() * 4.5;
+  const fr = Math.max(front, (p.frontSag || 0) + 0.7, 1.0 + rnd() * 2.2), side = 0.8 + rnd() * 1.0, back = 3.5 + rnd() * 4.5;
   let sA = side / W, sB = 1 - side / W, tA = fr / D, tB = 1 - back / D;
   if (tB - tA < 8 / D || sB - sA < 6 / W) return null;
   const roofKind = () => { const r = rnd(); return r < 0.3 ? K.GARDEN : r < 0.42 ? K.PV : K.PAVING; };
@@ -161,6 +161,45 @@ export function thalassaHouse(kit, p, rnd, { front = 0, extraFloors = 0, onVia =
     kit.at(...centroid(q0), 1).parapet(quadOf(M, sA, sB, tA, t2), h0, 0.95, 0.3);
   } else roofKit(kit, rnd, q0, h0, {});
   return { quads: out };
+}
+
+/**
+ * A plot too steep for one terrace, laid out as garden terraces stepping down the fall line
+ * (the way the island's hillsides are farmed): n strips across the plot from its front edge (the
+ * street's own sections) to its back, each a fill terrace just clearing the highest ground
+ * under it, its walls of stone, its top planted, and a row of olive trees along each. The
+ * strips share their edges exactly, with the plot's sides and with each other.
+ * Returns false (building nothing) when the plot cannot be stepped.
+ */
+export function stepTerraces(kit, p, rnd, { stepRise = 2.8, minDepth = 4.5, maxFill = 8.5, tree = null, treeS = [4.2, 1.4], spacing = 7.5, top: kind = K.GARDEN } = {}) {
+  const Q = p.corners || p.q, M = plotMap(Q), D = p.depth, W = p.width;
+  if (p.gmin == null || p.gmin < 1.6 || D < 2 * minDepth || W < 8) return false;
+  const G = p.gmax - p.gmin, n = Math.max(2, Math.min(Math.floor(D / minDepth), Math.ceil(G / stepRise)));
+  const fp = p.frontPts ? p.frontPts.map((f) => f.p) : [Q[0], Q[1]];
+  const back = p.q.slice(fp.length);                       // back-right .. back-left (the plot's own)
+  const polys = [];
+  for (let k = 0; k < n; k++) {
+    const t0 = k / n, t1 = (k + 1) / n;
+    const front = k === 0 ? fp : [M(0, t0), M(1, t0)];
+    const rear = k === n - 1 ? back : [M(1, t1), M(0, t1)];
+    polys.push({ q: [...front, ...rear], t0, t1 });
+  }
+  // every strip must be buildable (else the plot is left to its trees)
+  for (const s of polys) { const g = groundRange(s.q, 2); s.g = g; s.top = g.max + 0.3; if (s.top - g.min > maxFill) return false; }
+  for (const s of polys) {
+    kit.at(...centroid(s.q), 3).prism(s.q, s.g.min - 1.0, s.top, { wall: K.STONE, top: kind, meta: { role: 'garden terrace' } });
+    if (tree === null) continue;
+    // olive trees in a row down the middle of the strip, their crowns clear of the plot's sides
+    const dk = (s.t1 - s.t0) * D, margin = kit.crownR(tree, treeS[0] + treeS[1]) + 0.9, span = W - 2 * margin;
+    if (dk < 3.6 || span < 0) continue;
+    const m = Math.max(1, Math.floor(span / spacing) + 1);
+    for (let j = 0; j < m; j++) {
+      if (rnd() < 0.18) continue;
+      const sj = (margin + (m > 1 ? (span * j) / (m - 1) : span / 2)) / W, [x, z] = M(sj, (s.t0 + s.t1) / 2 + (rnd() - 0.5) * 0.12 * (s.t1 - s.t0));
+      kit.tree(x, s.top, z, tree, treeS[0] + rnd() * treeS[1], rnd);
+    }
+  }
+  return true;
 }
 
 /**

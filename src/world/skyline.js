@@ -9,7 +9,7 @@ import { buildMassifTowns } from './massifTowns.js';
 import { buildOuterLOD } from './outerLod.js';
 import { islandPrism, islandFoundation, islandRoad, footprintGround, rectangle, circleFootprint, buildIslandPlan, pointSegmentDistance, islandRoadHeight, someCircleNear } from './islandPlan.js';
 import { buildIslandLandscape } from './islandLandmarks.js';
-import { ISLAND_CITY_BUILDERS, islandCityReserve, createGiltMaterial } from './islands/index.js';
+import { ISLAND_CITY_BUILDERS, islandCityReserve, createGiltMaterial, islandCitySignals } from './islands/index.js';
 import { buildIslandCountryside } from './islands/countryside.js';
 import { vesperLagoon, vesperCathedral } from './islands/vesper.js';
 import { australArcology } from './islands/austral.js';
@@ -523,7 +523,7 @@ export function buildSkyline(scene, { audit = false } = {}) {
   COUNTRYSIDE.length = 0;
   ROAD_CLEARANCE.clear();
   SKYLINE_KEEPOUT.length = 0;
-  const auditParts = [], plans = [], cityTrees = [];
+  const auditParts = [], plans = [], cityTrees = [], citySignals = [];
   const oc = outerCities();
   const meshes = [];
   const lights = [];
@@ -571,7 +571,7 @@ export function buildSkyline(scene, { audit = false } = {}) {
     if(c.id==='vesper')obstacles.push({x:c.coast.x-c.d[0]*520,z:c.coast.z-c.d[1]*520,r:125});
     if(!island&&c.id==='anchorage')for(const sign of [-1,1])obstacles.push({x:c.coast.x-c.d[0]*420+c.side[0]*sign*95,z:c.coast.z-c.d[1]*420+c.side[1]*sign*95,r:60});
     const plan=buildIslandPlan(reserve?.gate?{...c,gate:reserve.gate}:c,obstacles), city={...c,plan};
-    if(island){const placed=island(parts,city,mulberry32(2026 + i * 17),lights);cityTrees.push(...placed.trees);for(const k of placed.keepout)SKYLINE_KEEPOUT.push(k);countryside(parts,city,mulberry32(3026 + i * 17),lights,placed.placed,{thalassa:70,anchorage:90,orison:60}[c.id]*3);}
+    if(island){const placed=island(parts,city,mulberry32(2026 + i * 17),lights);cityTrees.push(...placed.trees);citySignals.push(...placed.signals);for(const k of placed.keepout)SKYLINE_KEEPOUT.push(k);countryside(parts,city,mulberry32(3026 + i * 17),lights,placed.placed,{thalassa:70,anchorage:90,orison:60}[c.id]*3);}
     else builders[c.style](parts, city, mulberry32(2026 + i * 17), lights);
     const footprint=FOOTPRINTS.find(f=>f.c.id===c.id);
     plan.circles.push(...footprint.placed);
@@ -583,6 +583,9 @@ export function buildSkyline(scene, { audit = false } = {}) {
     footprint.plan=plan;plans.push(plan);
     add(parts, c.palette, 900 + i, `${c.name} (island city)`, c.light);
   });
+  // the island cities' harbour lights and tower beacons
+  const signals = islandCitySignals(citySignals);
+  if (signals) scene.add(signals);
   // the massif terrace towns live in massifTowns.js
   const mt = buildMassifTowns(scene, oc.massif, lights,{audit});
   for(const part of mt.auditParts)auditParts.push(part);

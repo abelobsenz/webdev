@@ -15,6 +15,8 @@ import { renderedHeight } from '../src/world/outerCities.js';
 import { auditSolids, solidGeometry } from './island-kit-audit.mjs';
 
 const quick = process.argv.includes('--quick');
+// --city <Name>: audit one city only (the skyline is still built whole)
+const only = process.argv.includes('--city') ? process.argv[process.argv.indexOf('--city') + 1] : null;
 const t0 = Date.now();
 const res = buildSkyline(new THREE.Scene(), { audit: true });
 const kitParts = res.auditParts.filter((p) => p.geometry.userData.islandKit);
@@ -24,6 +26,7 @@ const byCity = new Map();
 for (const p of kitParts) { const k = p.geometry.userData.islandKit; if (!byCity.has(k)) byCity.set(k, []); byCity.get(k).push(p.geometry); }
 
 for (const [city, geos] of byCity) {
+  if (only && city !== only) continue;
   const r = { solids: 0, triangles: 0, closureFailures: [], tiers: [0, 0, 0, 0], roles: {} };
   for (const g of geos) {
     const a = auditSolids(g, { limit: 10 });
@@ -109,6 +112,8 @@ for (const [city, geos] of byCity) {
     const a = solids[ids[x]], b = solids[ids[y]], key = Math.min(ids[x], ids[y]) * 1e6 + Math.max(ids[x], ids[y]);
     if (seen.has(key)) continue; seen.add(key);
     if (a.box[0] > b.box[2] || b.box[0] > a.box[2] || a.box[1] > b.box[3] || b.box[1] > a.box[3]) continue;
+    // a declared structural joint (a sky arch framed into the towers it spans) is intended
+    if (a.meta.joint || b.meta.joint) continue;
     // stacked (one rests on the other, its foot at most 0.3 m into it) is construction
     const yo = Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0);
     if (yo <= 0.3) continue;

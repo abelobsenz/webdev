@@ -155,3 +155,43 @@ export function buildHarbour(kit, opts) {
   }
   return { secs, runs: allSecs, yq, E, Sd, O, Q, frontOff, moles, sLand, gap, proj };
 }
+
+/**
+ * Transit sheds along the quay (call after the harbour front, whose flights are in occ): long
+ * halls of white stone with a glazed barrel vault, parallel to the sea wall, landward of the
+ * line of the quay lamps so the working apron stays open, with a service way behind them clear
+ * of the flights up to the esplanade. Each shed fills a stretch of quay `len` long where it
+ * fits; stretches that do not fit are left open.
+ */
+export function quaySheds(kit, hb, occ, place, { len = 66, gap = 16, depths = [22, 20, 18, 16], h = 9.5, rise = 5, lead = 12 } = {}) {
+  const { Q, frontOff, yq } = hb, ang = Math.atan2(hb.E[1], hb.E[0]);
+  const tOf = (p) => (p[0] - hb.O[0]) * hb.Sd[0] + (p[1] - hb.O[1]) * hb.Sd[1];
+  let built = 0;
+  for (const run of hb.runs) {
+    if (run.length < 4) continue;
+    const a = run[0].s + lead, b = run.at(-1).s - lead;
+    for (let s = a; s + len <= b; ) {
+      const span = run.filter((q) => q.s >= s - 13 && q.s <= s + len + 13);
+      const backs = span.map((q) => tOf(q.r)), dMax = frontOff - Math.min(...backs);
+      // the shed's sea face stands 2 m landward of the lamps (at 45 % of the quay's depth)
+      const tf = frontOff - (0.45 * dMax + 2.2), tLand = Math.max(...backs) + 3;
+      let ok = false;
+      for (const d of depths) {
+        const tb = tf - d;
+        if (tb < tLand) continue;
+        const q = [Q(s, tf), Q(s + len, tf), Q(s + len, tb), Q(s, tb)];
+        if (occ.query(q, 2, (it) => it.tag !== 'quay').length) continue;
+        const c = centroid(q), W = d;
+        kit.at(c[0], c[1], 3).prism(q, yq - 0.25, yq + h, { wall: K.PUNCHED, top: K.STONE, vBase: yq, meta: { role: 'transit shed', supported: true } });
+        kit.at(c[0], c[1], 3).vault(c[0], c[1], len - 1.2, W - 1.2, ang, yq + h - 0.02, rise, { kind: K.GLASS, end: K.STONE, seg: 12, meta: { role: 'shed vault', supported: true } });
+        // a cornice band where the vault springs (near detail)
+        kit.at(c[0], c[1], 1).parapet(q, yq + h - 0.02, 0.7, 0.55, { meta: { role: 'shed cornice', supported: true } });
+        if (place) place(q, 'shed'); else occ.add(q, 'shed');
+        built++; ok = true;
+        break;
+      }
+      s += ok ? len + gap : 12;
+    }
+  }
+  return built;
+}

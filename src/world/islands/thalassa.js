@@ -1,8 +1,9 @@
 import { K, TAU, H, rect, circlePoly, groundRange, Field, Occupancy, lerp2, centroid, pointInPoly, convexOverlap, segDist, offsetConvex } from './cityKit.js';
-import { planDistrict, levelPlots, buildStreets, steps, upperHull, STEP_SEAT } from './district.js';
+import { planDistrict, levelPlots, buildStreets, buildLane, steps, upperHull, STEP_SEAT } from './district.js';
 import { colonnade, stoa, tholos, archGate, lighthouse, obelisk, fountain, exedra } from './civic.js';
 import { buildHarbour } from './harbour.js';
-import { terrace, thalassaHouse, plotMap } from './typology.js';
+import { harbourLights } from './gridCity.js';
+import { terrace, thalassaHouse, plotMap, stepTerraces } from './typology.js';
 import { harbourFront, civicPlaces, civicOf } from './thalassaCivic.js';
 import { SP } from '../treeGeometry.js';
 import { mulberry32 } from '../noise.js';
@@ -45,7 +46,7 @@ export function layout(c) {
   const DV = 10, VMAX = 1300, VS = [];
   for (let v = -VMAX; v <= VMAX; v += DV) VS.push(v);
   const mid = VS.indexOf(0);
-  const rowU = [], UTOP = 2660;
+  const rowU = [], UTOP = 3180;
   let u = 190;
   const rowsU = [];
   while (u < UTOP) { rowsU.push(u); u += 72; }
@@ -86,7 +87,7 @@ export function layout(c) {
     { id: 'harbour agora', u0: 150, u1: 330, v0: -170, v1: -12 },
     { id: 'gymnasium', u0: 150, u1: 330, v0: 12, v1: 150 },
     { id: 'nymphaeum', u0: 1150, u1: 1240, v0: -60, v1: 60 },
-    { id: 'upper agora', u0: 2380, u1: UTOP + 40, v0: -230, v1: 230 },
+    { id: 'upper agora', u0: UTOP - 280, u1: UTOP + 40, v0: -230, v1: 230 },
   ];
   const L = { c, S, A0, a, b, P, UV, Lv, F, Fs, rows, cols, half, UTOP, civic, VS };
   // the acropolis square round the summit, and the temple a little behind its centre
@@ -147,7 +148,7 @@ export function reserve(c) {
 }
 
 // =================================================================================== build
-export function build({ kit, c, rnd, placed }) {
+export function build({ kit, c, rnd, placed, signals }) {
   const L = layout(c), { P, UV } = L, plan = c.plan;
   const occ = new Occupancy(48);
   const circleOf = (q, r) => { const [x, z] = centroid(q); return { x, z, r: r ?? Math.max(...q.map((p) => Math.hypot(p[0] - x, p[1] - z))) + 1 }; };
@@ -159,11 +160,11 @@ export function build({ kit, c, rnd, placed }) {
     P, rows: L.rows, cols: L.cols, rnd, grade: 0.07,
     plotWidths: (r) => 13 + r() * 9,
     civic: (i, j, quad) => civicOf(L, i, j, quad),
-    blockOk: (i, j, quad) => {
+    blockOk: (i, j, quad, vv) => {
       for (const [x, z] of quad) { const [u, v] = UV(x, z); if (Math.abs(v) > L.half(u, Math.sign(v) || 1) || u > L.UTOP) return false; if (H(x, z) < 2.6) return false; }
       if (!roadFree(quad)) return false;
       const g = groundRange(quad, 8);
-      if (g.max - g.min >= 18) { slopes.push(quad); return false; }
+      if (g.max - g.min >= 18) { slopes.push({ q: quad, i, ...vv }); return false; }
       return true;
 
     },
@@ -180,6 +181,7 @@ export function build({ kit, c, rnd, placed }) {
     T.top = groundRange(q, 4).max + 0.5;
   }
   harbourWorks(kit, L, rnd, place);
+  harbourLights(signals, L, 40);
   buildVia(kit, L, via, rnd, place);
   sacredWay(kit, L, rnd, place, plan);
   temple(kit, L, rnd, place);
@@ -188,8 +190,14 @@ export function build({ kit, c, rnd, placed }) {
   for (const ln of dp.lanes) placed.push(circleOf([ln.a[0], ln.a[1], ln.b[1], ln.b[0]]));
   // the houses: each plot's terrace (with its entry flight), then its house, its garden tree;
   // plots too steep to fill become wooded slope (stone pines and cypresses on the ground)
+  let stepped = 0;
   for (const p of dp.plots) {
-    if (!p.ok) { if (p.gmin > 2) plantSlope(kit, p, rnd); place(p.q, 'grove'); continue; }
+    if (!p.ok) {
+      // too steep for one terrace: olive terraces stepping down the plot, or its trees alone
+      if (p.gmin > 2 && stepTerraces(kit, p, rnd, { tree: SP.rainTree })) { stepped++; place(p.q, 'plot'); continue; }
+      if (p.gmin > 2) plantSlope(kit, p, rnd);
+      place(p.q, 'grove'); continue;
+    }
     const need = terrace(kit, p);
     if (need === null) { gardenTerrace(kit, p, rnd); place(p.q, 'plot'); continue; }
     const res = thalassaHouse(kit, p, rnd, { front: need, extraFloors: L.rows[p.row]?.main ? 1 : 0 });
@@ -197,10 +205,14 @@ export function build({ kit, c, rnd, placed }) {
     place(p.q, 'plot');
   }
   harbourFront(kit, L, rnd, occ, place);
-  for (const q of slopes) if (occ.free(q, -0.5)) { plantSlope(kit, { q }, rnd, 4); place(q, "grove"); }
+  // blocks too steep for houses: olive terraces along the contours (or wooded where too steep)
+  let terraced = 0;
+  for (const blk of slopes) if (occ.free(blk.q, -0.5)) { if (terraceBlock(kit, L, blk, rnd)) terraced++; else plantSlope(kit, { q: blk.q }, rnd, 4); place(blk.q, 'grove'); }
+  L.terraced = terraced;
   civicPlaces(kit, L, rnd, place, occ, dp);
-  gate(kit, L, place);
-  if (typeof process !== 'undefined' && process.env?.ISLAND_DEBUG) console.log('thalassa', { crossings: L.crossings, templeTop: L.temple.top, seaGate: L.seaGate, quay: L.hb.frontOff });
+  gate(kit, L, place, dp);
+  if (signals && L.templeLight) signals.push(L.templeLight);
+  if (typeof process !== 'undefined' && process.env?.ISLAND_DEBUG) console.log('thalassa', { plots: dp.plots.length, steep: dp.plots.filter((p) => !p.ok).length, stepped, slopes: slopes.length, terraced: L.terraced, trees: kit.trees.length, crossings: L.crossings, templeTop: L.temple.top, seaGate: L.seaGate, quay: L.hb.frontOff });
 }
 
 // ------------------------------------------------------------------------- the via
@@ -456,6 +468,7 @@ function temple(kit, L, rnd, place) {
   kit.at(tx, tz, 3).lathe(tx, tz, [[R * 0.66, y1 - 0.1, K.PUNCHED], [R * 0.66, y1 + ch, K.STONE], [R + 2.4, y1 + ch - 0.02, K.STONE], [R + 2.4, y1 + ch + 3.2, K.STONE], [R * 0.8, y1 + ch + 3.2, K.STONE], [R * 0.8, y1 + ch + 10, K.STONE], [R * 0.84, y1 + ch + 10, K.STONE], [R * 0.84, y1 + ch + 11, K.STONE],
     ...Array.from({ length: 9 }, (_, i) => { const t = ((i + 1) / 10) * Math.PI / 2; return [Math.max(0.05, R * 0.8 * Math.cos(t)), y1 + ch + 11 + Math.sin(t) * R * 0.62, K.STONE]; }), [0, y1 + ch + 11 + R * 0.62, K.STONE]], 48, { meta: { role: 'temple', supported: true } });
   const dt = y1 + ch + 11 + R * 0.62 - 0.25;
+  L.templeLight = { x: tx, y: dt + 4, z: tz, c: [1, 0.85, 0.6], s: 4 };
   kit.at(tx, tz, 3, 'gilt').lathe(tx, tz, [[R * 0.13, dt, K.LANTERN], [R * 0.13, dt + 6, K.LANTERN], [R * 0.17, dt + 6.2, K.LANTERN], [R * 0.17, dt + 7, K.LANTERN], [0.05, dt + 13, K.LANTERN]], 16, { meta: { role: 'temple lantern', supported: true } });
   // the altar and two great braziers on the forecourt
   const [ax, az] = P(T.u0 + 30, 0);
@@ -515,6 +528,49 @@ function gardenTree(kit, p, res, rnd) {
   if (rnd() < 0.7) kit.tree(x, p.top, z, SP.araucaria, 8 + rnd() * 5, rnd, { lean: 0 });
   else kit.tree(x, p.top, z, SP.palm, 6 + rnd() * 3, rnd);
 }
+/**
+ * A block too steep for houses, farmed as olive terraces: strips along the contour between its
+ * two row streets (kept clear of the streets' curving edges and of the lanes at its ends), each
+ * strip cut into lengths short enough to keep its fill low; every cell a fill terrace with stone
+ * walls and a planted top, a row of olive trees along it. Cells that would stand too high on
+ * their ground are left as hillside. Returns false when nothing could be terraced.
+ */
+function terraceBlock(kit, L, blk, rnd) {
+  const { P, rows } = L, { i, va, vb } = blk;
+  if (va === undefined || !rows[i + 1]) return false;
+  const e = (k, v, side) => rows[k].U(v) + (side * rows[k].w) / 2;
+  const a = va + 0.6, b = vb - 0.6, f0 = e(i, a, 1), f1 = e(i, b, 1), k0 = e(i + 1, a, -1), k1 = e(i + 1, b, -1);
+  // how far each street's edge bulges into the block past the chord between its ends
+  let sf = 0, sb = 0;
+  for (let v = a; v <= b + 1e-6; v += 2) {
+    const t = (v - a) / (b - a);
+    sf = Math.max(sf, e(i, v, 1) - (f0 + (f1 - f0) * t));
+    sb = Math.max(sb, k0 + (k1 - k0) * t - e(i + 1, v, -1));
+  }
+  const C = [P(f0 + sf + 0.6, a), P(f1 + sf + 0.6, b), P(k1 - sb - 0.6, b), P(k0 - sb - 0.6, a)];
+  const D = Math.min(k0 - f0, k1 - f1) - sf - sb - 1.2, W = b - a;
+  if (D < 10 || W < 10) return false;
+  const M = plotMap(C), g = groundRange(C, 4);
+  const n = Math.max(2, Math.min(Math.floor(D / 5), Math.ceil((g.max - g.min) / 3.2))), m = Math.max(1, Math.round(W / 24));
+  let built = 0;
+  for (let k = 0; k < n; k++) for (let j = 0; j < m; j++) {
+    const s0 = j / m, s1 = (j + 1) / m, t0 = k / n, t1 = (k + 1) / n;
+    const q = [M(s0, t0), M(s1, t0), M(s1, t1), M(s0, t1)], r = groundRange(q, 2), top = r.max + 0.3;
+    if (top - r.min > 8.5 || r.min < 2) continue;
+    kit.at(...centroid(q), 3).prism(q, r.min - 1.0, top, { wall: K.STONE, top: K.GARDEN, meta: { role: 'garden terrace' } });
+    built++;
+    const dk = (t1 - t0) * D, wl = (s1 - s0) * W;
+    if (dk < 4) continue;
+    const cnt = Math.max(1, Math.floor(wl / 8.5));
+    for (let q2 = 0; q2 < cnt; q2++) {
+      if (rnd() < 0.22) continue;
+      const [x, z] = M(s0 + ((s1 - s0) * (q2 + 0.5)) / cnt, (t0 + t1) / 2 + (rnd() - 0.5) * 0.12 * (t1 - t0));
+      kit.tree(x, top, z, SP.rainTree, 4.2 + rnd() * 1.6, rnd);
+    }
+  }
+  return built > 0;
+}
+
 /** A plot too steep to build: stone pines and cypresses rooted on the drawn ground. */
 function plantSlope(kit, p, rnd, many = 0) {
   const M = plotMap(p.corners || p.q), n = many ? many + Math.floor(rnd() * many) : 1 + Math.floor(rnd() * 2.5);
@@ -529,8 +585,25 @@ function plantSlope(kit, p, rnd, many = 0) {
 
 // -------------------------------------------------------------------------- harbour
 
-function gate(kit, L, place) {
-  const g = L.gate, q = circlePoly(g.x, g.z, 16, 16);
+/**
+ * The city gate where the island's roads begin: an octagonal square with one side square to
+ * the end of its row street, and the street carried on to it (ramps, flights where steep).
+ */
+function gate(kit, L, place, dp) {
+  const g = L.gate;
+  const st = dp?.streets.filter((s) => s.i === g.row).sort((a, b) => a.v0 - b.v0)[0];
+  let q = circlePoly(g.x, g.z, 16, 16);
+  if (st) {
+    const end = st.pts[0], c = end.c, d = Math.hypot(c[0] - g.x, c[1] - g.z), n = [(c[0] - g.x) / d, (c[1] - g.z) / d], t = [-n[1], n[0]];
+    const ap = 16, hw = st.w / 2;
+    q = circlePoly(g.x, g.z, ap / Math.cos(Math.PI / 8), 8, Math.atan2(n[1], n[0]) + Math.PI / 8);
+    if (d - ap > 3) {
+      let a0 = [g.x + n[0] * ap + t[0] * hw, g.z + n[1] * ap + t[1] * hw], a1 = [g.x + n[0] * ap - t[0] * hw, g.z + n[1] * ap - t[1] * hw];
+      if (Math.hypot(a0[0] - end.l[0], a0[1] - end.l[1]) > Math.hypot(a0[0] - end.r[0], a0[1] - end.r[1])) [a0, a1] = [a1, a0];
+      buildLane(kit, { a: [a0, a1], b: [end.l, end.r], ya: g.top, yb: st.y[0], w: st.w });
+      place([a0, a1, end.r, end.l], 'street');
+    }
+  }
   kit.at(g.x, g.z, 3).prism(q, g.gmin - 1, g.top, { top: K.PAVING, meta: { role: 'city gate' } });
   place(q, 'plaza');
 }
