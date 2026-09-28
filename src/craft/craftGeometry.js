@@ -112,7 +112,9 @@ export class CB {
       [[0, 0, -1], [[-hx, -hy, -hz], [-hx, hy, -hz], [hx, hy, -hz], [hx, -hy, -hz]]],
     ];
     for (const [n, q] of F) {
-      const ids = q.map(([x, y, z]) => this.v(cx + x, cy + y, cz + z, (n[0] ? z : x) + cz, y + cy, k));
+      // facade coordinates in the face's own plane (top and bottom faces took the constant
+      // y before, so every plate, fin and radiator read as one flat colour there)
+      const ids = q.map(([x, y, z]) => this.v(cx + x, cy + y, cz + z, n[0] ? z + cz : x + cx, n[1] ? z + cz : y + cy, k));
       const h = new THREE.Vector3(...n);
       this.tri(ids[0], ids[1], ids[2], h); this.tri(ids[0], ids[2], ids[3], h);
     }

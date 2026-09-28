@@ -2,6 +2,9 @@ import * as THREE from 'three';
 import { R_EARTH, GEO_ALT, MERIDIAN_LON, bodyDir } from './sim.js';
 import { HALO_PORTS } from './earthData.js';
 import { CORRIDORS, stationFrame } from './stations.js';
+import { createCraftMaterial, updateCraftMaterial } from '../craft/craftMaterial.js';
+import { buildCourier, buildShuttle, buildTug } from '../craft/craftClasses.js';
+import { CRAFT_FRAME } from './craftMesh.js';
 
 // Orbital traffic as designed corridors, positioned on the GPU from the simulation clock
 // (so time warp drives it consistently) and drawn as short motion streaks.
@@ -80,6 +83,7 @@ vec3 shipPos(vec4 A, vec4 B, float t, out float vis) {
     vec3 m = (a + b) * 0.5;
     vec3 side = normalize(cross(b - a, vec3(0.0, 1.0, 0.0)));
     vec3 c = m + side * length(b - a) * 0.22 + vec3(0.0, 1.0, 0.0) * B.x;
+    b += normalize(c - b) * 2300.0;   // arrive in lunar orbit, never through the Moon's centre
     vec3 p = mix(mix(a, c, s), mix(c, b, s), s);
     return p + side * A.z * sin(3.14159 * s);
   } else {
@@ -169,6 +173,20 @@ void main() {
   gl_FragColor = vec4(vCol * a * vFade * 0.8, 0.0);
 }
 `;
+
+const HULL_MAX = 8;          // hulls per class
+const HULL_D = 8.0;          // km: hulls drawn inside this range (the streak has faded by 1.5 km)
+const KM_HULL = 0.001;
+const _a = new THREE.Vector3(), _b = new THREE.Vector3(), _c = new THREE.Vector3(), _d = new THREE.Vector3();
+const _up = new THREE.Vector3(0, 1, 0);
+const fract = (x) => x - Math.floor(x);
+const ss = (a, b, x) => { const t = Math.min(Math.max((x - a) / (b - a), 0), 1); return t * t * (3 - 2 * t); };
+
+function ringPoint(u, k, th, dr, ax, v) {
+  const R = u.uRR.value[k] + dr;
+  return v.copy(u.uRA.value[k]).multiplyScalar(Math.cos(th) * R).addScaledVector(u.uRB.value[k], Math.sin(th) * R).addScaledVector(u.uRN.value[k], ax);
+}
+const endFade = (ph, a, b) => ss(0, a, ph) * (1 - ss(1 - b, 1, ph));
 
 function rnd(seed) { let s = seed >>> 0; return () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; }; }
 
@@ -282,6 +300,156 @@ export class Traffic {
     this.geoDir = bodyDir(0, MERIDIAN_LON);
     this.geoQ = stationFrame(this.geoDir);
     this._q = new THREE.Quaternion();
+    this.buildHulls(space);
+  }
+
+  // ---- hull LOD: the streaks fade out inside ~6 km, so the nearest ships become real closed
+  // hulls there (couriers on the ring lanes, shuttles on the port columns, transfers and the
+  // Moon run, tugs in the Harbour corridors), placed from shipPosJS, the CPU mirror of the
+  // shader paths. One instanced mesh per class, instance matrices relative to a local origin
+  // at the nearest hull so they stay exact in float32; nothing is drawn when none are near.
+  buildHulls(space) {
+    this.hullGroup = new THREE.Group();
+    this.hullGroup.userData.world = new THREE.Vector3();
+    const classes = [buildCourier(44), buildShuttle(110), buildTug(80)];
+    const accents = [[0.55, 0.85, 1.0], [0.55, 0.9, 1.0], [1.0, 0.72, 0.42]];
+    this.hullSets = classes.map((c, i) => {
+      const mat = createCraftMaterial({ accent: accents[i], lit: 0.5 });
+      const im = new THREE.InstancedMesh(c.geo, mat, HULL_MAX);
+      im.count = 0;
+      im.frustumCulled = false;
+      im.renderOrder = 3;
+      im.onBeforeRender = (r, sc, cam) => {
+        updateCraftMaterial(mat, cam, CRAFT_FRAME.sunDir, this.hullGroup.userData.world, CRAFT_FRAME.time);
+        mat.uniformsNeedUpdate = true;
+      };
+      this.hullGroup.add(im);
+      return im;
+    });
+    // hull class per ship, from its path type (and a Harbour tug for every corridor ship)
+    this.hullClass = new Uint8Array(this.count);
+    for (let i = 0; i < this.count; i++) {
+      const t = this.iA[i * 4];
+      this.hullClass[i] = t < 0.5 ? 0 : t < 3.5 ? 1 : 2;
+    }
+    space.scene.add(this.hullGroup);
+    // placed while the slices are planned, from the camera as it will render this frame (the
+    // rig moves after the modules update: a stale camera missed ships under time warp)
+    this.hullBody = space.addBody('trafficHulls', [this.hullGroup], null, 0, {
+      solid: true,
+      interval: (camPos) => {
+        const r = this.updateHulls(this.uniforms.uT.value, camPos);
+        if (!r) return [1, 0];                      // nothing near: no slice
+        const d = this.hullGroup.position.distanceTo(camPos);
+        return [d - r, d + r];
+      },
+    });
+    this._near = [];
+    this._pos = new THREE.Vector3(); this._prev = new THREE.Vector3();
+    this._m = new THREE.Matrix4(); this._s = new THREE.Vector3(KM_HULL, KM_HULL, KM_HULL);
+    this._x = new THREE.Vector3(); this._y = new THREE.Vector3(); this._z = new THREE.Vector3();
+  }
+
+  /** CPU mirror of shipPos (TRAFFIC_GLSL): world km into out, returns the visibility. */
+  shipPosJS(i, t, out) {
+    const A = this.iA, B = this.iB, u = this.uniforms, o = i * 4;
+    const type = A[o];
+    if (type < 0.5) {
+      const k = Math.round(A[o + 1]);
+      ringPoint(u, k, A[o + 2] + A[o + 3] * t / u.uRR.value[k], B[o], B[o + 1], out);
+      return 1;
+    } else if (type < 1.5) {
+      const ph = fract(t / B[o + 2] + B[o + 3]);
+      let s = ph / 0.6;
+      const vis = s > 1 ? 0 : endFade(s, 0.06, 0.06);
+      s = Math.min(s, 1);
+      const e = s * s * (3 - 2 * s);
+      const pa = ringPoint(u, Math.round(A[o + 1]), A[o + 3], 6, 0, _a);
+      const pb = ringPoint(u, Math.round(A[o + 2]), B[o], 6, 0, _b);
+      const ra = pa.length(), rb = pb.length();
+      out.copy(pa).multiplyScalar((1 - e) / ra).addScaledVector(pb, e / rb).normalize();
+      out.multiplyScalar(ra + (rb - ra) * e + Math.sin(Math.PI * e) * B[o + 1]);
+      return vis;
+    } else if (type < 2.5) {
+      const lon = A[o + 1];
+      const ph = fract(t / A[o + 3] + B[o]);
+      const e = ph * ph * (3 - 2 * ph);
+      const s = B[o + 1] > 0 ? e : 1 - e;
+      _a.set(Math.cos(lon), 0, -Math.sin(lon)).applyMatrix3(u.uEarthRot.value);
+      _b.set(-Math.sin(lon), 0, -Math.cos(lon)).applyMatrix3(u.uEarthRot.value);
+      out.copy(_a).multiplyScalar(R_EARTH + 8 + s * 602).addScaledVector(_b, A[o + 2]);
+      return endFade(ph, 0.05, 0.05);
+    } else if (type < 3.5) {
+      const ph = fract(t / (3.2 * 86400) + A[o + 1]);
+      const s = A[o + 3] > 0 ? ph : 1 - ph;
+      const a = u.uGeo.value, b = _b.copy(u.uMoon.value);
+      const side = _d.subVectors(b, a).cross(_up);
+      const L = _c.subVectors(b, a).length();
+      side.normalize();
+      const c = _c.addVectors(a, b).multiplyScalar(0.5).addScaledVector(side, L * 0.22).addScaledVector(_up, B[o]);
+      b.addScaledVector(_a.subVectors(c, b).normalize(), 2300);
+      // quadratic Bezier a -> c -> b
+      out.copy(a).multiplyScalar((1 - s) * (1 - s)).addScaledVector(c, 2 * s * (1 - s)).addScaledVector(b, s * s);
+      out.addScaledVector(side, A[o + 2] * Math.sin(Math.PI * s));
+      return endFade(ph, 0.02, 0.02);
+    }
+    const arr = A[o + 1] < 0.5;
+    const dl = arr ? u.uCorrA.value : u.uCorrD.value;
+    const dW = _a.copy(u.uHX.value).multiplyScalar(dl.x).addScaledVector(u.uHY.value, dl.y).addScaledVector(u.uHZ.value, dl.z);
+    const e1 = _b.crossVectors(dW, u.uHY.value).normalize();
+    const e2 = _c.crossVectors(e1, dW);
+    const ph = fract(t / A[o + 3] + A[o + 2]);
+    const s = arr ? (1 - ph) * (1 - ph) : ph * ph;
+    out.copy(u.uGeo.value).addScaledVector(dW, B[o + 3] + s * B[o + 2]).addScaledVector(e1, B[o]).addScaledVector(e2, B[o + 1]);
+    return arr ? endFade(ph, 0.03, 0.08) : endFade(ph, 0.06, 0.03);
+  }
+
+  /** Picks the ships within HULL_D of the camera and places their hulls; returns the radius
+   *  of the hull cluster round its origin, 0 when none are near. */
+  updateHulls(t, cp) {
+    const near = this._near;
+    near.length = 0;
+    {
+      const p = this._pos;
+      for (let i = 0; i < this.count; i++) {
+        const vis = this.shipPosJS(i, t, p);
+        if (vis < 0.5) continue;
+        const d2 = p.distanceToSquared(cp);
+        if (d2 > HULL_D * HULL_D) continue;
+        near.push(i);
+        if (near.length >= HULL_MAX * 3) break;
+      }
+    }
+    const sets = this.hullSets;
+    for (const im of sets) im.count = 0;
+    if (!near.length) return 0;
+    const O = this.hullGroup.position;
+    this.shipPosJS(near[0], t, O);
+    this.hullGroup.userData.world.copy(O);
+    let rad = 0.2;
+    const hs = 0.5;
+    for (const i of near) {
+      const im = sets[this.hullClass[i]];
+      if (im.count >= HULL_MAX) continue;
+      const p = this._pos, q = this._prev;
+      this.shipPosJS(i, t, p);
+      this.shipPosJS(i, t - hs, q);
+      // heading along the velocity (a step across a path wrap keeps the radial-up fallback)
+      const z = this._z.subVectors(p, q);
+      if (!(z.lengthSq() > 1e-12) || z.length() > 60 * hs + 5) z.set(0, 1, 0).cross(p);
+      if (!(z.lengthSq() > 1e-12)) z.set(0, 0, 1);
+      z.normalize();
+      const y = this._y.copy(p).normalize();
+      const x = this._x.crossVectors(y, z);
+      if (x.lengthSq() < 1e-8) x.set(1, 0, 0).cross(z);
+      x.normalize();
+      y.crossVectors(z, x);
+      this._m.makeBasis(x, y, z).scale(this._s).setPosition(p.x - O.x, p.y - O.y, p.z - O.z);
+      im.setMatrixAt(im.count++, this._m);
+      rad = Math.max(rad, p.distanceTo(O) + 0.6);
+    }
+    for (const im of sets) if (im.count) im.instanceMatrix.needsUpdate = true;
+    return rad;
   }
 
   setSize(w, h) { this.uniforms.uRes.value.set(w, h); this.uniforms.uPx.value = Math.max(1.3, h / 760); }
