@@ -141,6 +141,11 @@ export function terrainHeight(x, z) {
       const hills = fbm(nC, x * 0.0009, z * 0.0009, 3);
       const t = dome / 2000;
       mountain = dome * (0.52 + 0.62 * rg * (0.6 + 0.4 * t)) * (0.78 + 0.22 * valleys) + 40 * hills - 60;
+      // spurs, gullies and knolls below the old 100 m mesh: they read from the gondolas and
+      // the hill roads, and stay gentle enough for the terrace towns
+      const relief = smoothstep(30, 450, dome);
+      const spur = ridged(nC, mx * 0.0024 + 3.7, mz * 0.0024 - 1.3, 3);
+      mountain += relief * (18 * (spur - 0.35) + 5 * nA(x * 0.0071 + 5.3, z * 0.0071 - 2.1) + 2.5 * nB(x * 0.016, z * 0.016));
       mountain = mountain * smoothstep(-7300, -9800, z) - 80 * (1 - smoothstep(-7300, -9800, z));
     }
   }
@@ -157,10 +162,21 @@ export function terrainHeight(x, z) {
   }
   // Distant islands on the horizon
   for (const [ix, iz, ir, ih] of FAR_ISLANDS) {
-    const d = Math.hypot(x - ix, z - iz);
-    if (d < ir * 2.5) {
+    const dx = x - ix, dz = z - iz, d0 = Math.hypot(dx, dz);
+    if (d0 < ir * 2.5) {
+      const ca = dx / (d0 + 1e-6), sa = dz / (d0 + 1e-6);
+      // a lobed coast of headlands and bays instead of a round dome
+      const d = d0 / (1 + 0.2 * nB(ca * 1.6 + ix * 1e-3, sa * 1.6 + iz * 1e-3) + 0.08 * nC(x * 0.0011, z * 0.0011));
       const rg = ridged(nA, x * 0.0004, z * 0.0004, 4);
-      mountain = Math.max(mountain, ih * Math.exp(-Math.pow(d / ir, 1.8)) * (0.7 + 0.5 * rg) - 30);
+      let isl = ih * Math.exp(-Math.pow(d / ir, 1.8)) * (0.7 + 0.5 * rg) - 30;
+      // ravines cut down the flanks with spurs between, and knolls
+      const flank = smoothstep(4, 60, isl) * (1 - smoothstep(ih * 0.55, ih * 0.9, isl));
+      isl += flank * (20 * (ridged(nD, x * 0.0019 + ix * 1e-3, z * 0.0019, 3) - 0.35) + 5 * nA(x * 0.008, z * 0.008));
+      // sea cliffs on the ocean side, never on the harbour side that faces the capital
+      const away = (dx * ix + dz * iz) / ((d0 + 1e-6) * Math.hypot(ix, iz));
+      const cliff = smoothstep(0.1, 0.5, away) * smoothstep(0.05, 0.4, nC(ca * 2.3 + 9, sa * 2.3 - 4) + 0.3);
+      isl += cliff * 30 * smoothstep(-6, -1, isl);
+      mountain = Math.max(mountain, isl);
     }
   }
   land = smax(land, mountain, 60);
@@ -259,49 +275,230 @@ export function buildInnerGeometry(heights) {
   return g;
 }
 
-/** Polar ring from the inner grid out to the horizon (mountains, far islands). */
-export async function buildOuterGeometry(progress) {
-  const A = 1024, R = 210;
-  const r0 = 6900, r1 = 46000;
-  const cols = A + 1;
-  const pos = new Float32Array(cols * (R + 1) * 3);
-  const nrm = new Float32Array(cols * (R + 1) * 3);
-  const radii = [];
-  for (let j = 0; j <= R; j++) radii.push(r0 * Math.pow(r1 / r0, j / R));
+// ---------------------------------------------------------------- outer ring --
+// The outer terrain is a polar grid of log-spaced rings from under the inner grid to the
+// horizon. Every coarse cell that holds land or shallows is also subdivided K x K (about
+// 25 m cells at 12 km, 60 m at 30 km). Subdivided cells are grouped in chunks that swap
+// between their fine and coarse triangulations by distance (OuterLod), all in one draw call.
+// A fine vertex on an edge its cell shares with a coarse cell (or with another chunk) lies
+// exactly on the coarse edge, so the surface is watertight whichever way each chunk is drawn.
+// outerSurfaceHeight() interpolates the fine surface exactly: everything on the outer land is
+// placed with it (outerCities.renderedHeight).
+export const OUTER = { A: 1024, R: 210, r0: 6900, r1: 46000, K: 4, CA: 16, CR: 15, NEAR: 10000 };
+const OCOLS = OUTER.A + 1;
+let OLAYOUT = null;
+function outerLayout() {
+  if (OLAYOUT) return OLAYOUT;
+  const { A, R, r0, r1 } = OUTER;
+  const n = OCOLS * (R + 1);
+  const radii = new Float64Array(R + 1), H = new Float64Array(n), P = new Float64Array(n * 2), sq = new Float64Array(n);
   for (let j = 0; j <= R; j++) {
-    const r = radii[j];
-    const e = Math.max(r * 0.004, 12);
+    const r = (radii[j] = r0 * Math.pow(r1 / r0, j / R));
     for (let i = 0; i <= A; i++) {
-      const a = (i / A) * Math.PI * 2;
-      const x = Math.cos(a) * r, z = Math.sin(a) * r;
+      const a = (i / A) * Math.PI * 2, x = Math.cos(a) * r, z = Math.sin(a) * r, k = j * OCOLS + i;
+      sq[k] = Math.max(Math.abs(x), Math.abs(z));
       // pull the seam slightly under the inner grid to hide cracks
-      const inside = Math.max(Math.abs(x), Math.abs(z)) < INNER.half - 30;
-      const h = terrainHeight(x, z) - (inside ? 4 : 0);
-      const k = (j * cols + i) * 3;
-      pos[k] = x; pos[k + 1] = h; pos[k + 2] = z;
-      const hx = terrainHeight(x + e, z), hz = terrainHeight(x, z + e);
-      let nx = h - hx, ny = e, nz = h - hz;
-      const l = Math.hypot(nx, ny, nz);
-      nrm[k] = nx / l; nrm[k + 1] = ny / l; nrm[k + 2] = nz / l;
+      H[k] = terrainHeight(x, z) - (sq[k] < INNER.half - 30 ? 4 : 0);
+      P[k * 2] = x; P[k * 2 + 1] = z;
     }
-    if (j % 20 === 0) { progress && progress(j / R); await yieldFrame(); }
   }
-  const idx = new Uint32Array(A * R * 6);
-  let p = 0;
+  // cells worth subdividing: land or shallows, clear of the inner grid's overlap
+  const fine = new Uint8Array(A * R);
   for (let j = 0; j < R; j++) {
     for (let i = 0; i < A; i++) {
-      const a = j * cols + i, b = a + 1, c = a + cols, d = c + 1;
-      idx[p++] = a; idx[p++] = b; idx[p++] = c; idx[p++] = b; idx[p++] = d; idx[p++] = c;
+      const k = j * OCOLS + i;
+      const hi = Math.max(H[k], H[k + 1], H[k + OCOLS], H[k + OCOLS + 1]);
+      const lo = Math.min(sq[k], sq[k + 1], sq[k + OCOLS], sq[k + OCOLS + 1]);
+      if (hi > -8 && lo > INNER.half + 150) fine[j * A + i] = 1;
     }
   }
-  const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-  g.setAttribute('normal', new THREE.BufferAttribute(nrm, 3));
-  g.setIndex(new THREE.BufferAttribute(idx, 1));
-  g.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, 0), r1 * 1.1);
-  return g;
+  OLAYOUT = { radii, H, P, fine };
+  return OLAYOUT;
+}
+const oCellFine = (i, j) => (j < 0 || j >= OUTER.R ? 0 : OLAYOUT.fine[j * OUTER.A + ((i + OUTER.A) % OUTER.A)]);
+const oChunk = (i, j) => Math.floor(((i + OUTER.A) % OUTER.A) / OUTER.CA) + Math.floor(j / OUTER.CR) * (OUTER.A / OUTER.CA);
+const oCoarse = (i, j) => { const k = j * OCOLS + i; return [OLAYOUT.P[k * 2], OLAYOUT.H[k], OLAYOUT.P[k * 2 + 1]]; };
+const oLerp = (p, q, t) => [p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t, p[2] + (q[2] - p[2]) * t];
+const oRadius = (J) => OUTER.r0 * Math.pow(OUTER.r1 / OUTER.r0, J / (OUTER.R * OUTER.K));
+/** Fine vertex (I, J) of the subdivided polar grid, as drawn. */
+function outerFineVertex(I, J) {
+  const { A, R, K } = OUTER;
+  const i = Math.floor(I / K), j = Math.min(Math.floor(J / K), R), fi = I - i * K, fj = J - j * K;
+  if (fi === 0 && fj === 0) return oCoarse(i, j);
+  const same = (i1, j1, i2, j2) => oCellFine(i1, j1) && oCellFine(i2, j2) && oChunk(i1, j1) === oChunk(i2, j2);
+  if (fj === 0) {
+    if (!same(i, j - 1, i, j)) return oLerp(oCoarse(i, j), oCoarse(i + 1, j), fi / K);       // on a ring edge
+  } else if (fi === 0) {
+    if (!same(i - 1, j, i, j)) {                                                               // on a spoke edge
+      const t = (oRadius(J) - OLAYOUT.radii[j]) / (OLAYOUT.radii[j + 1] - OLAYOUT.radii[j]);
+      return oLerp(oCoarse(i, j), oCoarse(i, j + 1), t);
+    }
+  }
+  const a = (I / (A * K)) * Math.PI * 2, r = oRadius(J);
+  const x = Math.cos(a) * r, z = Math.sin(a) * r;
+  return [x, terrainHeight(x, z), z];
+}
+function oBary(a, b, c, d, x, z) {
+  // cells split into (a, b, c) and (b, d, c): interpolate on the plane of the triangle that
+  // contains the point
+  const bary = (p, q, s) => {
+    const v0x = q[0] - p[0], v0z = q[2] - p[2], v1x = s[0] - p[0], v1z = s[2] - p[2], v2x = x - p[0], v2z = z - p[2];
+    const den = v0x * v1z - v1x * v0z || 1e-9;
+    const u = (v2x * v1z - v1x * v2z) / den, v = (v0x * v2z - v2x * v0z) / den;
+    return [1 - u - v, u, v];
+  };
+  const w1 = bary(a, b, c);
+  if (w1[0] >= -1e-4 && w1[1] >= -1e-4 && w1[2] >= -1e-4) return a[1] * w1[0] + b[1] * w1[1] + c[1] * w1[2];
+  const w2 = bary(b, d, c);
+  return b[1] * w2[0] + d[1] * w2[1] + c[1] * w2[2];
+}
+/** Height of the outer mesh surface exactly as its near (fine) LOD draws it. */
+export function outerSurfaceHeight(x, z) {
+  outerLayout();
+  const { A, R, K, r0, r1 } = OUTER;
+  const r = Math.hypot(x, z);
+  let th = Math.atan2(z, x);
+  if (th < 0) th += Math.PI * 2;
+  const fi = (th / (Math.PI * 2)) * A, fj = (Math.log(Math.max(r, r0) / r0) / Math.log(r1 / r0)) * R;
+  const i = Math.min(Math.floor(fi), A - 1), j = Math.min(Math.floor(fj), R - 1);
+  if (OLAYOUT.fine[j * A + i]) {
+    const I = Math.min(Math.max(Math.floor(fi * K), i * K), i * K + K - 1), J = Math.min(Math.max(Math.floor(fj * K), j * K), j * K + K - 1);
+    return oBary(outerFineVertex(I, J), outerFineVertex(I + 1, J), outerFineVertex(I, J + 1), outerFineVertex(I + 1, J + 1), x, z);
+  }
+  return oBary(oCoarse(i, j), oCoarse(i + 1, j), oCoarse(i, j + 1), oCoarse(i + 1, j + 1), x, z);
 }
 
+/** Swaps each land chunk of the outer mesh between its fine and coarse cells by distance. */
+export class OuterLod {
+  constructor(geo, statics, chunks) {
+    this.geo = geo; this.statics = statics; this.chunks = chunks;
+    this.rebuild();
+  }
+  update(camera) {
+    const p = camera.position, N = OUTER.NEAR;
+    let changed = false;
+    for (const c of this.chunks) {
+      const d = Math.hypot(Math.max(Math.hypot(p.x - c.x, p.z - c.z) - c.rad, 0), Math.max(p.y - c.top, 0));
+      const want = c.near ? d < N * 1.12 : d < N;
+      if (want !== c.near) { c.near = want; changed = true; }
+    }
+    if (changed) this.rebuild();
+  }
+  rebuild() {
+    const idx = this.geo.index, arr = idx.array;
+    let n = this.statics;
+    for (const c of this.chunks) { const s = c.near ? c.fine : c.coarse; arr.set(s, n); n += s.length; }
+    this.geo.setDrawRange(0, n);
+    idx.clearUpdateRanges();
+    idx.addUpdateRange(this.statics, n - this.statics);
+    idx.needsUpdate = true;
+  }
+}
+
+/**
+ * Polar ring from the inner grid out to the horizon (mountains, far islands). Returns the
+ * main-view geometry (userData.lod: an OuterLod, update(camera) it every frame) with
+ * userData.coarse, the plain coarse ring for the reflection pass.
+ */
+export async function buildOuterGeometry(progress) {
+  const L = outerLayout();
+  const { A, R, K, r1 } = OUTER;
+  const FC = A * K + 1, FR = R * K + 1;
+  // vertex slots: every coarse vertex, then the fine vertices of subdivided cells
+  const fmap = new Int32Array(FC * FR).fill(-1);
+  let nv = OCOLS * (R + 1);
+  for (let j = 0; j < R; j++) for (let i = 0; i < A; i++) {
+    if (!L.fine[j * A + i]) continue;
+    for (let J = j * K; J <= j * K + K; J++) for (let I = i * K; I <= i * K + K; I++) if (fmap[J * FC + I] < 0) fmap[J * FC + I] = nv++;
+  }
+  const pos = new Float32Array(nv * 3), nrm = new Float32Array(nv * 3);
+  const setN = (k, nx, ny, nz) => {
+    const l = Math.hypot(nx, ny, nz);
+    if (!(l > 1e-9) || ny <= 0) { nrm[k] = 0; nrm[k + 1] = 1; nrm[k + 2] = 0; return; }
+    nrm[k] = nx / l; nrm[k + 1] = ny / l; nrm[k + 2] = nz / l;
+  };
+  for (let j = 0; j <= R; j++) {
+    const e = Math.max(L.radii[j] * 0.004, 12);
+    for (let i = 0; i <= A; i++) {
+      const q = j * OCOLS + i, k = q * 3, x = L.P[q * 2], z = L.P[q * 2 + 1], h = L.H[q];
+      pos[k] = x; pos[k + 1] = h; pos[k + 2] = z;
+      setN(k, h - terrainHeight(x + e, z), e, h - terrainHeight(x, z + e));
+    }
+    if (j % 30 === 0) { progress && progress((0.3 * j) / R); await yieldFrame(); }
+  }
+  // fine vertices: heights cached so the normals come from the fine surface itself
+  const AK = A * K;
+  const fy = new Float32Array(FC * FR).fill(NaN);
+  const yAt = (I, J) => {
+    I = (I + AK) % AK;
+    const q = J * FC + I;
+    if (Number.isNaN(fy[q])) fy[q] = outerFineVertex(I, J)[1];
+    return fy[q];
+  };
+  const pAt = (I, J) => { const a = (I / AK) * Math.PI * 2, r = oRadius(J); return [Math.cos(a) * r, yAt(I, J), Math.sin(a) * r]; };
+  for (let J = 0; J < FR; J++) {
+    for (let I = 0; I < FC; I++) {
+      const v = fmap[J * FC + I];
+      if (v < 0) continue;
+      const p = outerFineVertex(I, J), k = v * 3;
+      pos[k] = p[0]; pos[k + 1] = p[1]; pos[k + 2] = p[2];
+      fy[J * FC + (I % AK)] = p[1];
+      const u0 = pAt(I - 1, J), u1 = pAt(I + 1, J), w0 = pAt(I, Math.max(J - 1, 0)), w1 = pAt(I, Math.min(J + 1, FR - 1));
+      const ux = u1[0] - u0[0], uy = u1[1] - u0[1], uz = u1[2] - u0[2];
+      const vx = w1[0] - w0[0], vy = w1[1] - w0[1], vz = w1[2] - w0[2];
+      setN(k, uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx);
+    }
+    if (J % 120 === 0) { progress && progress(0.3 + (0.7 * J) / FR); await yieldFrame(); }
+  }
+  // index lists: coarse cells that are never subdivided, then per land chunk its fine and
+  // coarse triangulations
+  const statics = [], full = new Uint32Array(A * R * 6), chunkMap = new Map();
+  let fp = 0;
+  for (let j = 0; j < R; j++) {
+    for (let i = 0; i < A; i++) {
+      const a = j * OCOLS + i, b = a + 1, c = a + OCOLS, d = c + 1;
+      full[fp++] = a; full[fp++] = b; full[fp++] = c; full[fp++] = b; full[fp++] = d; full[fp++] = c;
+      if (!L.fine[j * A + i]) { statics.push(a, b, c, b, d, c); continue; }
+      const id = oChunk(i, j);
+      let ch = chunkMap.get(id);
+      if (!ch) chunkMap.set(id, (ch = { fine: [], coarse: [], minX: 1e9, maxX: -1e9, minZ: 1e9, maxZ: -1e9, top: -1e9 }));
+      ch.coarse.push(a, b, c, b, d, c);
+      for (let J = j * K; J < j * K + K; J++) {
+        for (let I = i * K; I < i * K + K; I++) {
+          const fa = fmap[J * FC + I], fb = fmap[J * FC + I + 1], fc = fmap[(J + 1) * FC + I], fd = fmap[(J + 1) * FC + I + 1];
+          ch.fine.push(fa, fb, fc, fb, fd, fc);
+        }
+      }
+      for (const q of [a, b, c, d]) {
+        ch.minX = Math.min(ch.minX, L.P[q * 2]); ch.maxX = Math.max(ch.maxX, L.P[q * 2]);
+        ch.minZ = Math.min(ch.minZ, L.P[q * 2 + 1]); ch.maxZ = Math.max(ch.maxZ, L.P[q * 2 + 1]);
+        ch.top = Math.max(ch.top, L.H[q]);
+      }
+    }
+  }
+  const chunks = [...chunkMap.values()].map((c) => ({
+    x: (c.minX + c.maxX) / 2, z: (c.minZ + c.maxZ) / 2, rad: Math.hypot(c.maxX - c.minX, c.maxZ - c.minZ) / 2,
+    top: c.top + 60, near: false, fine: new Uint32Array(c.fine), coarse: new Uint32Array(c.coarse),
+  }));
+  const total = statics.length + chunks.reduce((s, c) => s + Math.max(c.fine.length, c.coarse.length), 0);
+  const idx = new Uint32Array(total);
+  idx.set(statics);
+  const posA = new THREE.BufferAttribute(pos, 3), nrmA = new THREE.BufferAttribute(nrm, 3);
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', posA);
+  g.setAttribute('normal', nrmA);
+  g.setIndex(new THREE.BufferAttribute(idx, 1).setUsage(THREE.DynamicDrawUsage));
+  g.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, 0), r1 * 1.1);
+  g.userData.lod = new OuterLod(g, statics.length, chunks);
+  // the reflection pass keeps the plain coarse ring (the fine vertices go unreferenced there)
+  const gc = new THREE.BufferGeometry();
+  gc.setAttribute('position', posA);
+  gc.setAttribute('normal', nrmA);
+  gc.setIndex(new THREE.BufferAttribute(full, 1));
+  gc.boundingSphere = g.boundingSphere.clone();
+  g.userData.coarse = gc;
+  return g;
+}
 
 // ------------------------------------------------------------ shared data --
 /**

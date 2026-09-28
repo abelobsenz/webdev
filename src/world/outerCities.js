@@ -1,4 +1,4 @@
-import { terrainHeight, FAR_ISLANDS, MASSIF, INNER } from './terrain.js';
+import { terrainHeight, FAR_ISLANDS, MASSIF, INNER, OUTER, outerSurfaceHeight } from './terrain.js';
 
 // The outer cities of Greater Meridian: five island cities on the far islands (21-36 km out)
 // and three terrace towns on the lower slopes of the northern massif. Each has an identity,
@@ -28,37 +28,14 @@ let CACHE = null;
 
 // ------------------------------------------------------- rendered terrain --
 // The outer terrain is a polar grid (terrain.js, buildOuterGeometry): 1024 bearings by 210
-// rings spaced geometrically from 6.9 to 46 km. Out at the far islands its cells are 150-250 m
-// across, so the surface actually drawn can sit metres off terrainHeight() between vertices.
-// renderedHeight() interpolates exactly as the mesh does, so quays, podiums and buildings
-// placed with it neither float nor sink.
-const OA = 1024, OR = 210, OR0 = 6900, OR1 = 46000;
-const vtx = (i, j) => {
-  const a = (i / OA) * Math.PI * 2, r = OR0 * Math.pow(OR1 / OR0, j / OR);
-  const x = Math.cos(a) * r, z = Math.sin(a) * r;
-  const inside = Math.max(Math.abs(x), Math.abs(z)) < INNER.half - 30;
-  return [x, terrainHeight(x, z) - (inside ? 4 : 0), z];
-};
+// rings spaced geometrically from 6.9 to 46 km, with every land cell subdivided 4 x 4 near
+// the viewer (25 m cells at 12 km, 60 m at 30 km). The surface drawn can sit metres off
+// terrainHeight() between vertices, so renderedHeight() interpolates exactly as the near mesh
+// does: quays, podiums and buildings placed with it neither float nor sink.
 export function renderedHeight(x, z) {
   const r = Math.hypot(x, z);
-  if (Math.max(Math.abs(x), Math.abs(z)) < INNER.half - 60 || r < OR0 || r > OR1) return terrainHeight(x, z);
-  let th = Math.atan2(z, x);
-  if (th < 0) th += Math.PI * 2;
-  const fi = (th / (Math.PI * 2)) * OA, fj = (Math.log(r / OR0) / Math.log(OR1 / OR0)) * OR;
-  const i = Math.floor(fi), j = Math.floor(fj);
-  const a = vtx(i, j), b = vtx(i + 1, j), c = vtx(i, j + 1), d = vtx(i + 1, j + 1);
-  // the mesh splits each cell into (a, b, c) and (b, d, c): interpolate on the plane of the
-  // triangle that contains the point
-  const bary = (p, q, s) => {
-    const v0x = q[0] - p[0], v0z = q[2] - p[2], v1x = s[0] - p[0], v1z = s[2] - p[2], v2x = x - p[0], v2z = z - p[2];
-    const den = v0x * v1z - v1x * v0z || 1e-9;
-    const u = (v2x * v1z - v1x * v2z) / den, v = (v0x * v2z - v2x * v0z) / den;
-    return [1 - u - v, u, v];
-  };
-  const w1 = bary(a, b, c);
-  if (w1[0] >= -1e-4 && w1[1] >= -1e-4 && w1[2] >= -1e-4) return a[1] * w1[0] + b[1] * w1[1] + c[1] * w1[2];
-  const w2 = bary(b, d, c);
-  return b[1] * w2[0] + d[1] * w2[1] + c[1] * w2[2];
+  if (Math.max(Math.abs(x), Math.abs(z)) < INNER.half - 60 || r < OUTER.r0 || r > OUTER.r1) return terrainHeight(x, z);
+  return outerSurfaceHeight(x, z);
 }
 
 /** Where a ray from (cx, cz) toward bearing a crosses the rendered height h (last crossing). */

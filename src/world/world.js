@@ -98,7 +98,13 @@ export class World {
     this.outer = new THREE.Mesh(outerGeo, this.terrainMat);
     this.outer.receiveShadow = true;
     this.outer.frustumCulled = false;
+    this.outer.layers.set(1);             // near-detail outer land (chunked LOD): main view only
     this.scene.add(this.outer);
+    this.outerCoarse = new THREE.Mesh(outerGeo.userData.coarse, this.terrainMat);
+    this.outerCoarse.frustumCulled = false;
+    this.outerCoarse.layers.set(2);       // plain coarse ring for the water reflection pass
+    this.scene.add(this.outerCoarse);
+    this.updaters.push({ update: () => outerGeo.userData.lod.update(this.app.camera) });
 
     this.water = new Water(this.info.tex, this.settings);
     this.scene.add(this.water.mesh);
