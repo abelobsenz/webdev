@@ -22,6 +22,7 @@ import { Hearth, RS } from './hearth.js';
 import { Traffic } from './traffic.js';
 import { Lanes } from './lanes.js';
 import { WorkingStations } from './workingStations.js';
+import { GeoRoads, geoRoadTargets } from './geoRoads.js';
 
 const smooth = (a, b, x) => { const t = Math.min(Math.max((x - a) / (b - a), 0), 1); return t * t * (3 - 2 * t); };
 const easeInOut = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
@@ -105,6 +106,7 @@ export class SpaceMode {
     T('moon', { position: (o) => o.copy(sim.moonPos), frame: (q) => q.copy(sim.moonQuat), minDist: R_MOON + 250, maxDist: 400000, defaultDist: 7400, view: { az: 1.05, el: 0.22 } });
     T('sun', { position: (o) => o.copy(sim.sunPos), frame: identity, minDist: 3e6, maxDist: 1.2e8, defaultDist: 3.2e7, view: { az: 2.2, el: 0.55 } });
     for (const [k, o] of Object.entries(fleetTargets(this))) T(k, o);
+    for (const [k, o] of Object.entries(geoRoadTargets(this))) T(k, o);
     // unlisted targets (no key): the junction on the Halo and the counterweight
     const meridQ = stationFrame(merid);
     T('junction', {
@@ -233,6 +235,9 @@ export class SpaceMode {
     this.modules.push(this.fleet);
     this.works = new WorkingStations(this);
     this.modules.push(this.works);
+    // the Harbour's neighbourhood on the geostationary arc: yard, store, ship movements
+    this.geoRoads = new GeoRoads(this);
+    this.modules.push(this.geoRoads);
     for (const b of this.bodies) if (!b.local) b.remote = true;
     // post: crossfade helper
     this.fadeRT = new THREE.WebGLRenderTarget(1, 1, { type: THREE.UnsignedByteType, depthBuffer: false });

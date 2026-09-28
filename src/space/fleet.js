@@ -128,12 +128,7 @@ export class Fleet {
     const H = el.harbour;
     const corr = CORRIDORS;
     this.corridors = corr;
-    const freighter = buildFreighter(1100);
-    this._addVoyager('freighter', freighter, H, {
-      hold: corr.dA.clone().multiplyScalar(19).add(V(0, -2.5, 0)), start: corr.dD.clone().multiplyScalar(17).add(V(0, 2, 0)),
-      dA: corr.dA, dD: corr.dD, S: 2600, bulge: V(0, 9, 0), T: 1500, offset: 0.6,
-      engine: { scale: 0.62, length: 17, color: 0x7fd8ff }, glow: [0.55, 0.8, 1.0], accent: [0.55, 0.85, 1.0],
-    });
+    // (freighters now dock at the arm heads: src/space/geoRoads.js movements)
     this._addVoyager('approach', liner, H, {
       hold: corr.dA.clone().multiplyScalar(27).add(V(3.5, 4, 0)), start: corr.dD.clone().multiplyScalar(26).add(V(0, -3.5, 2.5)),
       dA: corr.dA.clone().add(V(0.05, -0.1, 0.12)).normalize(), dD: corr.dD.clone().add(V(0, -0.08, -0.1)).normalize(), S: 3000, bulge: V(0, 10, 0), T: 2100, offset: 0.3,
