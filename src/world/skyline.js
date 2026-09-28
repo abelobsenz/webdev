@@ -7,6 +7,10 @@ import { outerCities, renderedHeight } from './outerCities.js';
 import { terrainHeight } from './terrain.js';
 import { buildMassifTowns } from './massifTowns.js';
 
+/** Everything built on the island land (districts, landmarks, villas, lighthouses) as keep-out
+ *  circles {x, z, r}, filled by buildSkyline(): ground cover grows only outside them. */
+export const SKYLINE_KEEPOUT = [];
+
 // The outer cities of Greater Meridian, seen from the lagoon and the wards at 20-40 km.
 //   Thalassa   a white city in terraces following the contours of its island, a temple of
 //              the sea on the summit
@@ -253,6 +257,7 @@ function countryside(parts, c, rnd, lights, placed, n) {
     placed.push({ x, z, r: big ? 58 : 22 });
     made++;
   }
+  for (const p of placed) SKYLINE_KEEPOUT.push(p);
   // the lighthouse on the far shore
   const a = c.toward + Math.PI;
   const e = [Math.cos(a), Math.sin(a)];
@@ -260,6 +265,7 @@ function countryside(parts, c, rnd, lights, placed, n) {
     const x = c.ix + e[0] * s, z = c.iz + e[1] * s;
     if (renderedHeight(x, z) < 3) continue;
     const g = groundMin(x, z, 9);
+    SKYLINE_KEEPOUT.push({ x, z, r: 16 });
     parts.push(latheFacade([{ r: 9, y: g - 4, kind: 1 }, { r: 9, y: g + 3, kind: 1 }, { r: 4.6, y: g + 3, kind: 1 }, { r: 3.4, y: g + 36, kind: 1 }, { r: 4.4, y: g + 37, kind: 10 }, { r: 2.8, y: g + 38, kind: 2 }, { r: 2.8, y: g + 43, kind: 2 }, { r: 0.05, y: g + 47, kind: 10 }], 12).translate(x, 0, z));
     lights.push({ x, y: g + 41, z, c: [1.0, 0.95, 0.8], s: 2.4 });
     break;

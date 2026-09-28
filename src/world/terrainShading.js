@@ -235,9 +235,7 @@ const COLOR = /* glsl */ `
       float gb = 1.0 - smoothstep(0.004, 0.03, fw);
       float blade = vnoise(wp.xz * vec2(31.0, 7.0)) * 0.5 + vnoise(wp.xz * vec2(9.0, 37.0)) * 0.5;
       grass *= mix(1.0, 0.8 + 0.4 * blade, gb);
-      vec2 fcell = floor(wp.xz * 3.0);
-      float wfl = step(0.972, hash12(fcell)) * (1.0 - forestD) * (1.0 - smoothstep(0.03, 0.1, fw));
-      grass = mix(grass, flowerPalette(hash12(fcell + 7.0)) * 0.85, wfl);
+      // (no painted flower cells: the wildflowers are real, in the ground cover)
       hg += vnoised(wp.xz * 5.0).yz * 0.05 * nearF;
       // tussocks and hummocks (~1.5 m and ~6 m): lumpy turf that reads in relief at mid range
       float tuF = 1.0 - smoothstep(0.4, 1.6, fw);
@@ -269,31 +267,15 @@ const COLOR = /* glsl */ `
         floorC = mix(floorC, floorC * (leafC / avgL), ld * 0.6);
       }
     }
-    // Painted canopy only where no real trees are planted (the outer massif, outside the
-    // surveyed grid), and never as a function of distance: the ground is the same texture
-    // from any range, it only gains detail as you approach.
-    float canopyW = info.z >= 0.0 ? 0.0 : forestD;
-    vec3 veg = mix(grass, floorC, forestD * (1.0 - canopyW) * 0.9);
-    if (canopyW > 0.01) {
-      float S = mix(10.0, 7.5, mountainZone);
-      vec4 cr = crownField(wp.xz, S);
-      float res = 1.0 - smoothstep(0.22, 0.55, fw / S);
-      float id = cr.w;
-      vec3 base = mix(vec3(0.045, 0.12, 0.03), vec3(0.11, 0.21, 0.05), fract(id * 7.31));
-      base = mix(base, vec3(0.17, 0.25, 0.07), step(0.87, id));                        // pale emergents
-      base = mix(base, vec3(0.15, 0.18, 0.13), step(0.955, fract(id * 13.1)) * 0.85);  // silvery cecropia
-      float bloomSel = step(0.935, fract(id * 31.7)) * uBloom * (1.0 - 0.6 * mountainZone);
-      base = mix(base, flowerPalette(fract(id * 53.9)) * 0.8, bloomSel);
-      base = mix(base, base * vec3(0.75, 0.93, 1.08) + vec3(0.0, 0.008, 0.014), cloudF);
-      vec3 crownC = base * (0.3 + 0.7 * cr.z) * (0.85 + 0.3 * vnoise(wp.xz * 0.9) * res);
-      float grp = vnoise(wp.xz / 31.0);
-      vec3 avg = mix(vec3(0.05, 0.115, 0.03), vec3(0.085, 0.165, 0.042), m2) * mix(vec3(1.0), vec3(0.8, 0.95, 1.06), cloudF);
-      vec3 canC = mix(avg, crownC, res) * (0.8 + 0.4 * mix(0.5, grp, 1.0 - smoothstep(8.0, 20.0, fw)));
-      hg += cr.xy * res;
-      ao *= mix(1.0, 0.55 + 0.45 * cr.z, res * canopyW);
-      ao *= mix(1.0, 0.8, canopyW * (1.0 - res));                                   // unresolved canopy self-shadowing
-      veg = mix(veg, canC, canopyW);
-    }
+    // Inside the surveyed grid the forest floor lies under real trees. Beyond it there is no
+    // painted canopy (it read as flat cells of colour up close): woodland is deeper, shaded,
+    // lusher grass with a little litter in it, continuous at every range, the same grassland
+    // as the city's and carpeted with the same 3D grass near the viewer.
+    float outerL = info.z >= 0.0 ? 0.0 : 1.0;
+    vec3 veg = mix(grass, floorC, forestD * 0.9 * (1.0 - outerL));
+    vec3 wood = mix(grass * vec3(0.7, 0.84, 0.72), floorC, 0.18) * (0.9 + 0.2 * mix(0.5, vnoise(wp.xz / 23.0), 1.0 - smoothstep(4.0, 12.0, fw)));
+    veg = mix(veg, wood, forestD * outerL * 0.8);
+    ao *= 1.0 - 0.12 * forestD * outerL;
     c = mix(c, veg, wVeg);
   }
 
