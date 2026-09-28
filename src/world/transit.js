@@ -548,9 +548,12 @@ export function buildTransit(scene, world, { audit = false } = {}) {
         const sp = p.clone().add(V(Math.cos(a) * 3.2, 0, Math.sin(a) * 3.2));
         parts.push(shelter.translate(sp.x, Y, sp.z));
         // the stair tower on the bridge deck, 9 m along the canal from the platform
-        const tp = p.clone().addScaledVector(t, 9);
+        // The stair tower stands in the canal like the guideway's piers: founded on the canal
+        // bed and clear of the bridge's parapet (it used to hang off the deck edge over the
+        // water), with its door at deck height beside the bridge.
+        const tp = p.clone().addScaledVector(t, q.b.hw + 0.6 + 3.0);
         const deck = 9 + 0.35 + Math.min(3.2, 22 * 0.06 + 0.8);
-        parts.push(latheFacade([{ r: 2.8, y: deck - 0.3, kind: 1 }, { r: 2.8, y: deck + 0.5, kind: 1 }, { r: 2.4, y: deck + 0.5, kind: 0 }, { r: 2.4, y: Y + 3.4, kind: 0 }, { r: 2.9, y: Y + 3.8, kind: 1 }, { r: 0.2, y: Y + 4.5, kind: 2 }], 16).translate(tp.x, 0, tp.z));
+        parts.push(latheFacade([{ r: 3.0, y: -7.5, kind: 1 }, { r: 3.0, y: 1.4, kind: 1 }, { r: 2.8, y: 1.4, kind: 1 }, { r: 2.8, y: deck + 0.5, kind: 1 }, { r: 2.4, y: deck + 0.5, kind: 0 }, { r: 2.4, y: Y + 3.4, kind: 0 }, { r: 2.9, y: Y + 3.8, kind: 1 }, { r: 0.2, y: Y + 4.5, kind: 2 }], 16).translate(tp.x, 0, tp.z));
         parts.push(sweepTube([tp.clone().setY(Y + 1.2).addScaledVector(t, -2.2), sp.clone().setY(Y + 1.2).addScaledVector(t, 3.2)], () => 1.3, 8, { kind: 0 }));
         stops.push(i);
       }

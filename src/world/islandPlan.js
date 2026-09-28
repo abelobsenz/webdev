@@ -390,8 +390,11 @@ export function islandDistrictRoads(c,s){
 
 /** A conservative occupancy plan, shared by site builders, farming and island woods. */
 export function buildIslandPlan(c, obstacles = []) {
-  // A city that plans its own core (islands/) hands the regional roads a gate on its edge.
-  const rnd = mulberry32(8271 + c.island * 197), sites = [], routes = [], circles = [], start = c.gate ? [c.gate.x, c.gate.z] : [c.deep.x - c.d[0] * 22, c.deep.z - c.d[1] * 22];
+  // The regional roads leave the harbour from the footbridge landing; Vesper's landing is on
+  // its lagoon quay (islands/vesper.js), so its roads leave from the quay's landward edge. A city
+  // that plans its own core (islands/) hands the regional roads a gate on its edge instead.
+  const out = c.id === 'vesper' ? 61.3 : 22;
+  const rnd = mulberry32(8271 + c.island * 197), sites = [], routes = [], circles = [], start = c.gate ? [c.gate.x, c.gate.z] : [c.deep.x - c.d[0] * out, c.deep.z - c.d[1] * out];
   const W = (u, v) => [c.ix + c.d[0] * u + c.side[0] * v, c.iz + c.d[1] * u + c.side[1] * v];
   const R = c.coast.s;
   const desires = {

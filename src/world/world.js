@@ -25,6 +25,9 @@ import { GroundCover, buildHedges } from './groundCover.js';
 import { buildFloatingIslands } from './floating.js';
 import { INNER } from './terrain.js';
 import { renderedHeight } from './outerCities.js';
+import { planInnerCivic, buildInnerCivic } from './innerCivic.js';
+import { planShorePromenades, buildShoreJetties } from './innerShore.js';
+
 import { buildInfrastructure, createBeacons } from './infrastructure.js';
 import { Traffic } from '../life/traffic.js';
 import { Chorus, CHORUS_STEM_COLLIDERS } from '../life/chorus.js';
@@ -149,6 +152,10 @@ export class World {
     // the rim bridgeheads (podium, deck start and maglev station) keep the rim towns clear
     const heads = this.wardBridgePaths.filter((b) => b.head).map((b) => ({ x: b.head.x, z: b.head.z, r: Math.hypot(b.head.hw, b.head.hd) + 6, end: 'rim', head: b.head }));
     this.plan = planCity({ ground: raw, towers: this.towers, promenades: [...this.infra.promenades, ...this.wardBridgePaths.map((b) => b.path)], urbanMask, stations: [...this.infra.stations, ...heads] });
+    // the inner islands' civic buildings: their squares (and the lanes to any in a park) are
+    // planned before the street field is baked and the streetscape furnishes the squares
+    planInnerCivic(this.plan, this.towers, raw);
+    this.shoreWalks = planShorePromenades(this.plan, raw, this.towers, [...this.infra.stations, ...heads].map((s) => ({ x: s.x, z: s.z, r: s.r || 40 })));
     NATURE_U.uStreets.value = this.plan.field.texture();
     NATURE_U.uStreetFrame.value = this.plan.field.frameTexture();
     progress(0.55); await tick();
@@ -158,6 +165,11 @@ export class World {
     const bridgeAvoid = (x, z, r) => this.wardBridgePaths.some((b) => (b.head && Math.hypot(b.head.x - x, b.head.z - z) < r + 75) || b.path.slice(0, 30).some((p) => Math.hypot(p.x - x, p.z - z) < r + 22));
     this.rimCourts = buildRimForecourts(this.scene, this.towers, raw, bridgeAvoid, { streets: this.plan.streets, lots: this.plan.lots });
     this.updaters.push({ update: () => this.app.camera && this.rimCourts.update(this.app.camera) });
+    // the inner islands' civic buildings stand at the heart of their civic squares (the square's
+    // benches ring them, so they are marked before the streetscape furnishes the squares)
+    this.civic = buildInnerCivic(this.scene, this.plan, raw, this.colliders);
+    this.jetties = buildShoreJetties(this.scene, this.shoreWalks, raw);
+    this.updaters.push({ update: () => this.app.camera && this.civic.update(this.app.camera) });
     this.streetscape = buildStreetscape(this.scene, this.plan, raw, [...this.infra.promLamps, ...this.rimCourts.lamps]);
     this.colliders.push(...(this.streetscape.colliders || []));   // square fountains, obelisks, kiosks
     // Greater Meridian: the Outer Wards (platforms, their towns, landmarks, bridges, stations)

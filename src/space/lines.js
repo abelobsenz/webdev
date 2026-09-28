@@ -48,17 +48,27 @@ void main() {
   // project camera-relative (double-precision modelViewMatrix): world km in float32 put
   // metres of jitter on a tether seen from the Harbour
   vec4 mv0 = modelViewMatrix * vec4(position, 1.0);
+  vec4 mv1 = modelViewMatrix * vec4(aNext, 1.0);
   vec4 c0 = projectionMatrix * mv0;
-  vec4 c1 = projectionMatrix * (modelViewMatrix * vec4(aNext, 1.0));
+  vec4 c1 = projectionMatrix * mv1;
   // pull segment ends that lie behind the camera onto the near side
   const float EPS = 1e-3;
   if (c0.w < EPS && c1.w > EPS) c0 = mix(c0, c1, (EPS - c0.w) / (c1.w - c0.w));
   else if (c1.w < EPS && c0.w > EPS) c1 = mix(c0, c1, (EPS - c0.w) / (c1.w - c0.w));
-  // keep the direction stable when one end is behind the camera
-  vec2 s0 = c0.xy / max(abs(c0.w), 1e-6) * uResolution * 0.5;
-  vec2 s1 = c1.xy / max(abs(c1.w), 1e-6) * uResolution * 0.5;
-  vec2 dir = s1 - s0;
-  dir = length(dir) > 1e-5 ? normalize(dir) : vec2(1.0, 0.0);
+  // The line's direction on screen, measured where the segment's own line lies in front of
+  // the camera. Two ends behind the camera, projected through |w|, pointed anywhere: a
+  // tether passing a few km from the camera fanned out into a broad grey band.
+  vec3 T = mv1.xyz - mv0.xyz;
+  vec3 A = mv0.xyz;
+  float g = max(1e-4, 1e-3 * length(A));
+  if (A.z > -g && abs(T.z) > 1e-9) A += T * ((-g - A.z) / T.z);
+  float fl = T.z > 0.0 ? -1.0 : 1.0;                  // step toward the front, sign kept below
+  vec3 Bp = A + T * (fl * 1e-3);
+  vec4 pa = projectionMatrix * vec4(A, 1.0), pb = projectionMatrix * vec4(Bp, 1.0);
+  vec2 s0 = pa.xy / max(pa.w, 1e-9) * uResolution * 0.5;
+  vec2 s1 = pb.xy / max(pb.w, 1e-9) * uResolution * 0.5;
+  vec2 dir = (s1 - s0) * fl;
+  dir = length(dir) > 1e-9 ? normalize(dir) : vec2(1.0, 0.0);
   vec2 perp = vec2(-dir.y, dir.x);
   float dist = max(length(mv0.xyz), 1e-3);
   float pxPerKm = uResolution.y * 0.5 * projectionMatrix[1][1] / dist;

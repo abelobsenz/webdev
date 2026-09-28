@@ -10,6 +10,9 @@ import { buildOuterLOD } from './outerLod.js';
 import { islandPrism, islandFoundation, islandRoad, footprintGround, rectangle, circleFootprint, buildIslandPlan, pointSegmentDistance, islandRoadHeight, someCircleNear } from './islandPlan.js';
 import { buildIslandLandscape } from './islandLandmarks.js';
 import { ISLAND_CITY_BUILDERS, islandCityReserve, createGiltMaterial } from './islands/index.js';
+import { buildIslandCountryside } from './islands/countryside.js';
+import { vesperLagoon, vesperCathedral } from './islands/vesper.js';
+import { australArcology } from './islands/austral.js';
 
 /** Everything built on the island land (districts, landmarks, villas, lighthouses) as keep-out
  *  circles {x, z, r}, filled by buildSkyline(): ground cover grows only outside them. */
@@ -250,49 +253,12 @@ function building(parts, rnd, Lq, lu, lv, top, H, wall = 5, roof = 9) {
   }
 }
 
-/** Villas, farmsteads and a far-shore lighthouse over the rest of the island. */
+/** The island's footprint record and its far-shore lighthouse. The farms, villas, fields
+ *  and lanes of the countryside are laid after the island's roads are graded, by
+ *  islands/countryside.js (see buildSkyline). */
 function countryside(parts, c, rnd, lights, placed, n) {
   FOOTPRINTS.push({ c, placed });
-  let made = 0, tries = 0;
   c.plan.holdings=[];c.plan.holdingPaths=[];
-  while (made < n && tries++ < n * 30) {
-    const a = rnd() * TAU, r = Math.sqrt(rnd()) * c.coast.s * 1.1;
-    const x = c.ix + Math.cos(a) * r, z = c.iz + Math.sin(a) * r;
-    const big = rnd() < 0.35;             // a farmstead (house, barn, yard) or a villa
-    const w = big ? 92 : 34, dd = big ? 64 : 26, rot = rnd() * TAU;
-    const cs = Math.cos(rot), sn = Math.sin(rot);
-    const Lq = (u0, v0, u1, v1) => [[u0, v0], [u1, v0], [u1, v1], [u0, v1]].map(([u, v]) => [x + (u - w / 2) * cs - (v - dd / 2) * sn, z + (u - w / 2) * sn + (v - dd / 2) * cs]);
-    const q = Lq(0, 0, w, dd);
-    const hs = q.map(([px, pz]) => renderedHeight(px, pz)).concat(renderedHeight(x, z));
-    const fg=footprintGround(q);
-    const gMin = fg.min, gMax = fg.max;
-    if (gMin < 4 || gMax - gMin > (big ? 10 : 6)) continue;
-    if (circleGridHit(placed, x, z, big ? 60 : 24) || (c.plan && (!c.plan.free(x, z, big ? 62 : 26) || c.plan.sites.some(s=>Math.hypot(s.x-x,s.z-z)<700)))) continue;
-    if(c.plan.holdingPaths.some(([a,b])=>pointSegmentDistance(x,z,a,b)<(big?60:24)+3))continue;
-    let access=null;
-    for(let side=0;side<q.length;side++){
-      const qa=q[side],qb=q[(side+1)%q.length],gate=[(qa[0]+qb[0])/2,(qa[1]+qb[1])/2];
-      for(const route of c.plan.routes)for(let j=1;j<route.points.length;j++){
-        const a=route.points[j-1],b=route.points[j],dx=b[0]-a[0],dz=b[1]-a[1],t=Math.max(0,Math.min(1,((gate[0]-a[0])*dx+(gate[1]-a[1])*dz)/(dx*dx+dz*dz||1))),p=[a[0]+dx*t,a[1]+dz*t],distance=Math.hypot(p[0]-gate[0],p[1]-gate[1]);
-        if(distance>420||(access&&distance>=access.distance))continue;
-        if(someCircleNear(placed,Math.min(p[0],gate[0])-2,Math.min(p[1],gate[1])-2,Math.max(p[0],gate[0])+2,Math.max(p[1],gate[1])+2,o=>pointSegmentDistance(o.x,o.z,p,gate)<o.r+2))continue;
-        access={p,gate,distance};
-      }
-    }
-    if(!access)continue;
-    const top = gMax + 0.85;
-    islandFoundation(parts,q,{top,kind:3,name:`${c.id} countryside holding`});             // a planted terrace: fields or garden
-    if (big) {
-      parts.push(prism4(Lq(3, 3, 19, 15), top - 1, top + 8, 5, 1));
-      parts.push(prism4(Lq(24, 4, 43, 30), top - 1, top + 10, 8, 10));
-    } else {
-      parts.push(prism4(Lq(4, 5, 20, 17), top - 1, top + 7, 5, 9));
-      parts.push(prism4(Lq(12, 11, 26, 20), top - 1, top + 4, 0, 3));
-    }
-    const holding={x,z,r:Math.hypot(w,dd)/2+2,q,top,type:'countryside holding'};
-    placed.push(holding);c.plan.holdings.push(holding);c.plan.holdingPaths.push([access.p,access.gate]);
-    made++;
-  }
   for (const p of placed) SKYLINE_KEEPOUT.push(p);
   // the lighthouse on the far shore
   const a = c.toward + Math.PI;
@@ -431,17 +397,13 @@ function buildOrison(parts, c, rnd, lights) {
 }
 
 function buildVesper(parts, c, rnd, lights) {
-  harbour(parts, c, rnd, lights, { moleReach: 280, lighthouseH: 62 });
   const placed = [];
-  // the cathedral: a long nave, a crossing dome and a spire
-  const cx = c.coast.x - c.d[0] * 520, cz = c.coast.z - c.d[1] * 520;
-  const g = groundMin(cx, cz, 70);
-  parts.push(block(cx, g, cz, 34, 130, 42, Math.atan2(c.d[0], c.d[1])));
-  parts.push(latheFacade([{ r: 16, y: g + 32, kind: 5 }, { r: 16, y: g + 44, kind: 5 }, { r: 15, y: g + 52, kind: 1 }, { r: 8, y: g + 64, kind: 1 }, { r: 2, y: g + 68, kind: 2 }, { r: 0.1, y: g + 74, kind: 1 }], 24).translate(cx, 0, cz));
-  const sx = cx + c.d[0] * 70, sz = cz + c.d[1] * 70;
-  parts.push(latheFacade([{ r: 9, y: g - 4, kind: 5 }, { r: 9, y: g + 70, kind: 5 }, { r: 7, y: g + 74, kind: 2 }, { r: 6, y: g + 90, kind: 2 }, { r: 5, y: g + 92, kind: 1 }, { r: 0.1, y: g + 260, kind: 1 }], 8).translate(sx, 0, sz));
-  lights.push({ x: sx, y: g + 92, z: sz, c: [1.0, 0.8, 0.55], s: 3 });
-  placed.push({ x: cx + c.d[0] * 20, z: cz + c.d[1] * 20, r: 100 });
+  // the Lagoon: a round harbour basin closed by a crescent quay of domed houses, with the
+  // lighthouse and the harbour light on the bastions of its mouth (islands/vesper.js)
+  vesperLagoon(parts, c, rnd, lights, placed);
+  // the cathedral: a basilica with a crossing dome and a campanile spire, facing the harbour
+  const cathedral = vesperCathedral(parts, c, lights, [c.coast.x - c.d[0] * 520, c.coast.z - c.d[1] * 520]);
+  placed.push({ x: cathedral.P0[0], z: cathedral.P0[1], r: 122 });
   // the white town of domes round the harbour
   urbanGrid(parts, c, rnd, { ox: c.coast.x - c.d[0] * 850, oz: c.coast.z - c.d[1] * 850, ra: 850, rs: 1600, size: 64, street: 10,
     cell: (P, u0, v0, u1, v1, top) => {
@@ -452,7 +414,29 @@ function buildVesper(parts, c, rnd, lights) {
       return true;
     },
     lot: (Lq, lu, lv, top) => building(parts, rnd, Lq, lu, lv, top, 6 + rnd() * 12, 5, 9) }, placed);
-  countryside(parts, c, rnd, lights, placed, 60 * 3);
+  // the cathedral's steps meet a real street square in front of one of its stylobate's sides,
+  // so the flight climbs straight to its door
+  {
+    const q = cathedral.q, obstacles = parts.filter((g) => g.userData.islandFoundation && !g.userData.islandFoundation.name.startsWith('Vesper cathedral')).map((g) => { const f = g.userData.islandFoundation.q, cx = f.reduce((s, p) => s + p[0] / f.length, 0), cz = f.reduce((s, p) => s + p[1] / f.length, 0); return { cx, cz, r: Math.max(...f.map((p) => Math.hypot(p[0] - cx, p[1] - cz))) }; });
+    let best = null;
+    for (const g of parts) {
+      if (!g.userData.islandStreet) continue;
+      const pts = g.userData.islandRoad.points;
+      for (let i = 0; i < pts.length; i++) for (let e = 0; e < 4; e++) {
+        const A = q[e], B = q[(e + 1) % 4], L = Math.hypot(B[0] - A[0], B[1] - A[1]), tx = (B[0] - A[0]) / L, tz = (B[1] - A[1]) / L;
+        const cxq = q.reduce((s, p) => s + p[0] / 4, 0), czq = q.reduce((s, p) => s + p[1] / 4, 0);
+        let nx = -tz, nz = tx; if (nx * (A[0] - cxq) + nz * (A[1] - czq) < 0) { nx = -nx; nz = -nz; }
+        const p = pts[i], along = (p[0] - A[0]) * tx + (p[1] - A[1]) * tz, out = (p[0] - A[0]) * nx + (p[1] - A[1]) * nz;
+        if (along < 16 || along > L - 16 || out < 12 || out > 140) continue;
+        const door = [A[0] + tx * along, A[1] + tz * along];
+        if (obstacles.some((o) => pointSegmentDistance(o.cx, o.cz, p, door) < o.r + 9)) continue;
+        if (!best || out < best.out) best = { from: p, door, out };
+      }
+    }
+    if (!best) throw new Error('Vesper cathedral needs a street square to one of its sides');
+    c.plan.coreEntrances.push({ from: best.from, to: best.door, top: cathedral.top, width: 16, q, kind: 'cathedral approach' });
+  }
+  countryside(parts, c, rnd, lights, placed, 0);
 }
 
 function buildAustral(parts, c, rnd, lights) {
@@ -489,21 +473,17 @@ function buildAustral(parts, c, rnd, lights) {
     parts.push(latheFacade([{r:1.2,y:g+1.2,kind:1},{r:1,y:g+12,kind:1},{r:12,y:g+13,kind:3},{r:12,y:g+14,kind:1},{r:.1,y:g+17,kind:3}],20).translate(x,0,z));
   }
 
-  for (let k = 0; k < 14; k++) {
-    const a = (k / 14) * TAU + rnd() * 0.2, r = 520 + rnd() * 300;
-    const x = sx + Math.cos(a) * r, z = sz + Math.sin(a) * r;
-    const h = renderedHeight(x, z);
-    if (h < 3 || h > 300) continue;
-    const Rt = 20 + rnd() * 16;
-    if(!c.plan.isRoadFree(x,z,Rt*1.3))continue;
-    parts.push(tower(rnd, x, groundMin(x, z, Rt * 1.25) - 4, z, 150 + rnd() * 170, Rt, rnd()));
-    placed.push({ x, z, r: Rt * 1.3 });
-  }
+  // the arcology round the spire: five terraced Petals with sky bridges into the spire, and
+  // the ring of tower-gardens carrying the Sky Ring (islands/austral.js)
+  australArcology(parts, c, rnd, lights, placed, [sx, sz], g, tower);
   // the arcology's garden-roofed quarters round the spire
   urbanGrid(parts, c, rnd, { ox: sx, oz: sz, ra: 1050, rs: 1400, size: 96, street: 16,
     lot: (Lq, lu, lv, top, t) => building(parts, rnd, Lq, lu, lv, top, (14 + rnd() * 40) * (1.3 - t), rnd() < 0.4 ? 0 : 5, 3) }, placed);
   for(const e of spireApproaches){
-    const from=clearStreetArrival(parts,e.A,e.B,14,{exclude:n=>n.startsWith('Austral spire'),accept:p=>(p[0]-sx)*e.dx+(p[1]-sz)*e.dz>300});
+    // prefer a street on the avenue's own axis, so the flight climbs straight to its threshold
+    const lateral=p=>Math.abs(-(p[0]-sx)*e.dz+(p[1]-sz)*e.dx);let from;
+    try{from=clearStreetArrival(parts,e.A,e.B,14,{exclude:n=>n.startsWith('Austral spire'),accept:p=>(p[0]-sx)*e.dx+(p[1]-sz)*e.dz>300&&lateral(p)<3});}
+    catch{from=clearStreetArrival(parts,e.A,e.B,14,{exclude:n=>n.startsWith('Austral spire'),accept:p=>(p[0]-sx)*e.dx+(p[1]-sz)*e.dz>300});}
     c.plan.coreEntrances.push({from,to:e.B,top:g+1.5,width:14,q:e.threshold,kind:'spire approach'});
   }
   countryside(parts, c, rnd, lights, placed, 70 * 3);
@@ -513,6 +493,8 @@ function buildAustral(parts, c, rnd, lights) {
 // every island city's footprint (districts, landmarks, villas, farms, lighthouse) for
 // whatever grows or is built round them later (the island woods)
 const FOOTPRINTS = [];
+// the cultivated countryside of every island (islands/countryside.js)
+const COUNTRYSIDE = [];
 const ROAD_CLEARANCE = new Map(), ROAD_CELL=128;
 function reserveRoad(points,width){
   for(let i=1;i<points.length;i++){const a=points[i-1],b=points[i],seg={a,b,r:width/2};
@@ -522,6 +504,7 @@ function reserveRoad(points,width){
 const circleGridHit = (list, x, z, r) => someCircleNear(list, x - r, z - r, x + r, z + r, (p) => Math.hypot(p.x - x, p.z - z) < p.r + r);
 /** Is a circle (x, z, r) clear of the island cities, their harbours and countryside? */
 export function islandCityFree(x, z, r = 0) {
+  for (const cs of COUNTRYSIDE) if (!cs.free(x, z, r)) return false;
   for(let ix=Math.floor((x-r)/ROAD_CELL);ix<=Math.floor((x+r)/ROAD_CELL);ix++)for(let iz=Math.floor((z-r)/ROAD_CELL);iz<=Math.floor((z+r)/ROAD_CELL);iz++)for(const s of ROAD_CLEARANCE.get(ix+','+iz)||[])if(pointSegmentDistance(x,z,s.a,s.b)<r+s.r+1)return false;
   for (const { c, placed, plan } of FOOTPRINTS) {
     if (Math.hypot(x - c.ix, z - c.iz) > c.coast.s * 1.3 + 2000) continue;
@@ -537,13 +520,14 @@ export function islandCityFree(x, z, r = 0) {
 const ISLAND_LOD = [{ dist: 0, cast: true }, { dist: 2000, cast: true }, { dist: 4500, cast: true }, { dist: 8500, cast: false }];
 export function buildSkyline(scene, { audit = false } = {}) {
   FOOTPRINTS.length = 0;
+  COUNTRYSIDE.length = 0;
   ROAD_CLEARANCE.clear();
   SKYLINE_KEEPOUT.length = 0;
   const auditParts = [], plans = [], cityTrees = [];
   const oc = outerCities();
   const meshes = [];
   const lights = [];
-  let tris = 0;
+  let tris = 0, countrysideTris = 0;
   const builders = { terraced: buildThalassa, port: buildAnchorage, needles: buildOrison, domes: buildVesper, spire: buildAustral };
   const add = (parts, pal, seed, name, light) => {
     if(audit)for(const geometry of parts)auditParts.push({name,geometry});
@@ -593,6 +577,9 @@ export function buildSkyline(scene, { audit = false } = {}) {
     plan.circles.push(...footprint.placed);
     buildIslandLandscape(parts,city,plan,lights,SKYLINE_KEEPOUT);
     for(const g of parts){const road=g.userData.islandClearance;if(road)reserveRoad(road.points,road.width);}
+    // farms, villas, fields, lanes, shrines and the observatory over the rest of the island
+    const cs=buildIslandCountryside(scene,city,plan,parts,{audit:audit?auditParts:null,keepouts:SKYLINE_KEEPOUT,palette:c.palette,seed:1900+i});
+    meshes.push(...cs.meshes);countrysideTris+=cs.tris;COUNTRYSIDE.push(cs);plan.countryside={stats:cs.stats,records:cs.records};
     footprint.plan=plan;plans.push(plan);
     add(parts, c.palette, 900 + i, `${c.name} (island city)`, c.light);
   });
@@ -601,5 +588,5 @@ export function buildSkyline(scene, { audit = false } = {}) {
   for(const part of mt.auditParts)auditParts.push(part);
   meshes.push(...mt.meshes);
   tris += mt.tris;
-  return { meshes, tris, lights, cities: oc, isFree: islandCityFree, plans, auditParts, cityTrees };
+  return { meshes, tris, countrysideTris, lights, cities: oc, isFree: islandCityFree, plans, auditParts, cityTrees };
 }

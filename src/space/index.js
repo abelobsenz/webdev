@@ -22,6 +22,7 @@ import { Hearth, RS } from './hearth.js';
 import { Traffic } from './traffic.js';
 import { Lanes } from './lanes.js';
 import { WorkingStations } from './workingStations.js';
+import { GeoRoads, geoRoadTargets } from './geoRoads.js';
 
 const smooth = (a, b, x) => { const t = Math.min(Math.max((x - a) / (b - a), 0), 1); return t * t * (3 - 2 * t); };
 const easeInOut = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
@@ -105,6 +106,7 @@ export class SpaceMode {
     T('moon', { position: (o) => o.copy(sim.moonPos), frame: (q) => q.copy(sim.moonQuat), minDist: R_MOON + 250, maxDist: 400000, defaultDist: 7400, view: { az: 1.05, el: 0.22 } });
     T('sun', { position: (o) => o.copy(sim.sunPos), frame: identity, minDist: 3e6, maxDist: 1.2e8, defaultDist: 3.2e7, view: { az: 2.2, el: 0.55 } });
     for (const [k, o] of Object.entries(fleetTargets(this))) T(k, o);
+    for (const [k, o] of Object.entries(geoRoadTargets(this))) T(k, o);
     // unlisted targets (no key): the junction on the Halo and the counterweight
     const meridQ = stationFrame(merid);
     T('junction', {
@@ -113,7 +115,7 @@ export class SpaceMode {
     });
     T('counter', {
       position: (o) => o.copy(merid).multiplyScalar(R_EARTH + COUNTERWEIGHT_ALT + 10).applyQuaternion(sim.earthQuat),
-      frame: (q) => q.copy(sim.earthQuat).multiply(meridQ), minDist: 20, maxDist: 400000, defaultDist: 90, view: { az: 0.8, el: -0.25 },
+      frame: (q) => q.copy(sim.earthQuat).multiply(meridQ), minDist: 20, maxDist: 400000, defaultDist: 105, view: { az: 0.8, el: 1.12 },   // the Earth below, the cable falling to it
     });
     T('hearth', {
       position: (o) => o.copy(sim.hearthPos),
@@ -131,6 +133,12 @@ export class SpaceMode {
       frame:q=>q.copy(sim.moonQuat).multiply(lunarFrame),
       minDist:.12,maxDist:20000,defaultDist:11,view:{az:.55,el:.45},
     });
+    // Medii Landing, on the lunar surface beneath the Exchange (src/space/lunarLanding.js)
+    T('lunarLanding', {
+      position:o=>o.set(R_MOON+0.02,0,0).applyQuaternion(sim.moonQuat).add(sim.moonPos),
+      frame:q=>q.copy(sim.moonQuat).multiply(lunarFrame),
+      minDist:.25,maxDist:20000,defaultDist:15,view:{az:2.35,el:.3},
+    });
     const terraceLocal=new THREE.Vector3(Math.cos(.2),0,Math.sin(.2)).multiplyScalar(9.174).addScaledVector(new THREE.Vector3(-Math.sin(.2),0,Math.cos(.2)),.32).setY(-1.07);
     T('harbourTerrace',{
       position:o=>o.copy(terraceLocal).applyQuaternion(meridQ).addScaledVector(merid,R_EARTH+GEO_ALT).applyQuaternion(sim.earthQuat),
@@ -147,7 +155,7 @@ export class SpaceMode {
     T('foundry', {
       position:o=>o.copy(foundryUp).multiplyScalar(R_EARTH+627).add(_v2.set(0,42,0)).applyQuaternion(sim.earthQuat),
       frame:q=>q.copy(sim.earthQuat).multiply(stationFrame(foundryUp)),
-      minDist:8,maxDist:30000,defaultDist:31,view:{az:2.55,el:.35},
+      minDist:8,maxDist:30000,defaultDist:48,view:{az:.4,el:.55},   // the works against the Halo wall that carries them
     });
     const solarOffset=new THREE.Vector3(0,.025*1.496e8,.004*1.496e8);
     T('solarCollector', {
@@ -233,6 +241,9 @@ export class SpaceMode {
     this.modules.push(this.fleet);
     this.works = new WorkingStations(this);
     this.modules.push(this.works);
+    // the Harbour's neighbourhood on the geostationary arc: yard, store, ship movements
+    this.geoRoads = new GeoRoads(this);
+    this.modules.push(this.geoRoads);
     for (const b of this.bodies) if (!b.local) b.remote = true;
     // post: crossfade helper
     this.fadeRT = new THREE.WebGLRenderTarget(1, 1, { type: THREE.UnsignedByteType, depthBuffer: false });

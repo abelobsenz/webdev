@@ -96,4 +96,23 @@ TARGET_INFO.lunarReceiving = {
   facts:[['Fluid vessels','4'],['Ferry length','770 m'],['Role','Water, oxygen and metal receiving']],
 };
 
-export const TARGET_ORDER = ['earth', 'meridian', 'halo', 'geo', 'moon', 'sun', 'hearth', 'liner', 'tenders', 'selene', 'foundry', 'lunarport', 'lunarReceiving', 'solarCollector', 'solarService', 'hearthworks', 'harbourTerrace', 'lunarCourt'];
+TARGET_INFO.lunarLanding = {
+  key:'',name:'Medii Landing',district:'The Moon · Bay of the Middle · 0° N 0° E',
+  lore:'Where the Lift from the Tranquillity Exchange comes down, on the shore of the Bay of the Middle. The town steps down to its harbour in four terraces of courtyard houses; behind the Lift stand the five glass domes of the first settlement, now its gardens. Three landing fields lie beyond them, and to the west the mass driver climbs away over the plain toward its launch gate, 36 km out. The Earth never moves from the top of its sky.',
+  facts:[['Lift','380 km to the Exchange'],['Mass driver','36 km, 1.7 km/s'],['Residents','210,000']],
+};
+
+export const TARGET_ORDER = ['earth', 'meridian', 'halo', 'geo', 'moon', 'sun', 'hearth', 'liner', 'tenders', 'selene', 'foundry', 'lunarport', 'lunarReceiving', 'solarCollector', 'solarService', 'hearthworks', 'harbourTerrace', 'lunarCourt', 'lunarLanding'];
+
+// The Harbour's neighbourhood on the geostationary arc (src/space/geoRoads.js).
+TARGET_INFO.concordYard = {
+  key:'',name:'Concord Yard',district:'Geostationary arc · 16 km east of the Harbour',
+  lore:'Where the liners are grown. The next Concord-class ship lies in nine portal frames, two thirds plated, her bow still an open cage of ribs; the gantry lowers one plate at a time and her scoop ring waits in the bow frame. The yard crews live in the glazed wheel astern. Stock arrives from the Harbour by tug and waits on the keel deck.',
+  facts:[['Dock','3.2 km'],['Frames','9'],['Launches','one liner a year']],
+};
+TARGET_INFO.waterStore = {
+  key:'',name:'Harbour Water Store',district:'Tether · 12.5 km below the Harbour',
+  lore:'Water and oxygen climb the tether from the Pacific and are held here, in twenty-four tanks round a hollow cage. The climbers pass straight through its bore; the store grips only the central ribbon. Tankers berth at the upper collars and carry the stock out to the ships at the arm heads.',
+  facts:[['Tanks','24'],['Held','2.1 Mt of water'],['Crew wheel','1.1 km']],
+};
+TARGET_ORDER.push('concordYard', 'waterStore');

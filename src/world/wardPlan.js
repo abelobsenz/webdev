@@ -335,6 +335,16 @@ export function buildWardPlan(ctx, design) {
       // buildings and support still undergo the same exact checks above/below.
       if (!L.civic && land[(Math.min(N - 1, Math.max(0, Math.floor((z + half) / cell))) * N + Math.min(N - 1, Math.max(0, Math.floor((x + half) / cell)))) * 4] < enc(1.5)) return false;
     }
+    // the samples above are a lot's half-width apart and can straddle a narrow garden path:
+    // walk the podium every 1.5 m for any path running under it
+    if (!L.civic) {
+      const nu = Math.ceil(L.w / 1.5), nv = Math.ceil(L.d / 1.5), inside = enc(0);
+      for (let a = 0; a <= nu; a++) for (let q = 0; q <= nv; q++) {
+        const lx = (a / nu - 0.5) * (L.w + 0.6), lz = (q / nv - 0.5) * (L.d + 0.6);
+        const x = L.lx + lx * c + lz * s, z = L.lz - lx * s + lz * c;
+        if (land[(Math.min(N - 1, Math.max(0, Math.floor((z + half) / cell))) * N + Math.min(N - 1, Math.max(0, Math.floor((x + half) / cell)))) * 4] < inside) return false;
+      }
+    }
     L.y = y0;
     const rad = Math.hypot(L.w, L.d) * 0.5;
     for (const e of excl) {

@@ -3,6 +3,7 @@ import { loftSections, latheFacade, sweepTube, mergeClean } from './geom.js';
 import { createFacadeMaterial } from './facade.js';
 import { mulberry32 } from './noise.js';
 import { CROWN_BUILDERS } from './crowns.js';
+import { podiumDetail } from './podiums.js';
 
 const TAU = Math.PI * 2;
 
@@ -56,10 +57,17 @@ function helixTower(t, rnd, env = {}) {
   ], 12));
   // podium: a terraced base on a stepped plinth that reaches the lowest ground round the rim;
   // closed underneath and to the centre on top
+  // (a ring is repeated wherever the kind changes, so no face blends two kinds): a paved shelf on
+  // the footing, the drum wall under a cornice, a terrace walk round its top (podiums.js adds the
+  // arcade, parapet and steps), the planted berm, the glazed lobby storey and the planted roof
   parts.push(latheFacade([
-    { r: 0, y: -drop, kind: 1 }, { r: R * 2.85, y: -drop, kind: 1 }, { r: R * 2.85, y: -5, kind: 1 }, { r: R * 2.6, y: -5, kind: 1 },
-    { r: R * 2.6, y: 4, kind: 1 }, { r: R * 2.3, y: 6, kind: 3 }, { r: R * 2.0, y: 7, kind: 3 },
-    { r: R * 1.9, y: 14, kind: 0 }, { r: R * 1.75, y: 16, kind: 3 }, { r: 0, y: 16.5, kind: 3 },
+    { r: 0, y: -drop, kind: 1 }, { r: R * 2.85, y: -drop, kind: 1 }, { r: R * 2.85, y: -5, kind: 1 },
+    { r: R * 2.85, y: -5, kind: 9 }, { r: R * 2.6, y: -5, kind: 9 }, { r: R * 2.6, y: -5, kind: 1 },
+    { r: R * 2.6, y: 3.45, kind: 1 }, { r: R * 2.6 + 0.4, y: 3.45, kind: 1 }, { r: R * 2.6 + 0.4, y: 4, kind: 1 },
+    { r: R * 2.6 + 0.4, y: 4, kind: 9 }, { r: R * 2.6 - 5.5, y: 4, kind: 9 },
+    { r: R * 2.6 - 5.5, y: 4, kind: 3 }, { r: R * 2.3 - 1, y: 6, kind: 3 }, { r: R * 2.0, y: 7, kind: 3 },
+    { r: R * 2.0, y: 7, kind: 0 }, { r: R * 1.9, y: 14, kind: 0 },
+    { r: R * 1.9, y: 14, kind: 3 }, { r: R * 1.75, y: 16, kind: 3 }, { r: 0, y: 16.5, kind: 3 },
   ], 64));
   const collide = (y) => {
     if (y < -5) return R * 2.85;
@@ -69,7 +77,8 @@ function helixTower(t, rnd, env = {}) {
     if (y < H * 0.9) return R * helixScale(Math.min(y / (H * 0.93), 1)) * 1.05 + 2.4;
     return 4;
   };
-  return { geo: mergeClean(parts), top: H * 1.06, collide };
+  const podium = [{ r: R * 2.85, top: -5, bottom: -drop, walk: true }, { r: R * 2.6, top: 4, bottom: -5, walk: true }];
+  return { geo: mergeClean(parts), top: H * 1.06, collide, podium };
 }
 
 // -------------------------------------------------------------- canopy ----
@@ -91,10 +100,13 @@ function canopyTower(t, rnd, env = {}) {
   prof.push({ r: 0, y: H * 1.052, kind: 1 });
   parts.push(latheFacade(prof, 64));
   // root plinth: the trunk flare sits in a low planted drum that reaches the lowest ground round the
-  // rim; closed underneath, the trunk's open foot is buried inside it
+  // rim; closed underneath, the trunk's open foot is buried inside it. The wall stands under a
+  // cornice with a paved walk round its top (podiums.js adds the arcade, parapet and steps)
   parts.push(latheFacade([
-    { r: 0, y: -drop, kind: 1 }, { r: R * 2.9, y: -drop, kind: 1 }, { r: R * 2.9, y: 3, kind: 1 },
-    { r: R * 2.75, y: 4.2, kind: 3 }, { r: R * 2.3, y: 4.6, kind: 3 }, { r: 0, y: 4.6, kind: 3 },
+    { r: 0, y: -drop, kind: 1 }, { r: R * 2.9 - 0.4, y: -drop, kind: 1 }, { r: R * 2.9 - 0.4, y: 2.45, kind: 1 },
+    { r: R * 2.9, y: 2.45, kind: 1 }, { r: R * 2.9, y: 3, kind: 1 },
+    { r: R * 2.9, y: 3, kind: 9 }, { r: R * 2.9 - 4.5, y: 3, kind: 9 },
+    { r: R * 2.9 - 4.5, y: 3, kind: 3 }, { r: R * 2.3, y: 4.6, kind: 3 }, { r: 0, y: 4.6, kind: 3 },
   ], 64));
   // garden discs on branches: placement retried until disc volumes, branches and the spire stay clear
   const discs = [], placed = [];
@@ -154,7 +166,8 @@ function canopyTower(t, rnd, env = {}) {
     if (y < trunkTop) return R * 1.3;
     return R * 0.65;
   };
-  return { geo: mergeClean(parts), top: H * 1.05, discs, collide };
+  const podium = [{ r: R * 2.9 - 0.4, top: 3, bottom: -drop, walk: true }];
+  return { geo: mergeClean(parts), top: H * 1.05, discs, collide, podium };
 }
 
 // ============================================== lens / lattice / shell: shared construction ====
@@ -802,6 +815,11 @@ export function buildTowers(list, groundHeight, scene) {
     const mesh = new THREE.Mesh(res.geo, mat);
     mesh.position.set(t.x, baseY, t.z);
     mesh.rotation.y = res.rot ?? rnd() * TAU;
+    if (res.podium) {
+      // built in world axes against the real ground, turned into the tower's frame
+      const pod = podiumDetail(res.podium, env.at, { stairs: t.ward ? 0 : 4, seed: t.seed, sea: -baseY });
+      if (pod) (res.near ||= []).push({ geo: pod.rotateY(-mesh.rotation.y), y: 0 });
+    }
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     mesh.name = t.name || `tower-${t.seed}`;

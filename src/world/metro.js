@@ -14,6 +14,7 @@ import { buildBuildings } from './buildings.js';
 import { buildStreetscape } from './streetscape.js';
 import { buildWardBridges } from './bridges.js';
 import { buildWardLandmarks, wardBridgeLayout } from './wardLandmarks.js';
+import { GUARDED_WARDS } from './wardsA/ids.js';
 
 // Greater Meridian: the Outer Wards. Seven sea districts stand on built platforms in a
 // ring 11-17 km out from the Axis, each designed as a city of its own (wards.js): its own
@@ -763,6 +764,14 @@ function buildPlatform(rec, P) {
   }
   // ---- quay lamps and walks
   const quayLamps = [], quayWalks = [];
+  // Nothing stands on the quay under a bridge's last span (the deck clears the quay by only a
+  // few metres at its landing) or in a lighthouse's plinth.
+  const guarded = GUARDED_WARDS.includes(rec.w.id);
+  const underDeck = (x, z) => guarded && rec.landings.some((L) => {
+    const dx = x - L.E[0], dz = z - L.E[1], out = -(dx * L.t[0] + dz * L.t[1]), lat = dx * L.side[0] + dz * L.side[1];
+    return out > -6 && out < 46 && Math.abs(lat) < (L.kind === 'ring' ? 11 : 19);
+  });
+  const atLighthouse = (x, z) => guarded && rec.ctx.features.lighthouses.some((h) => Math.hypot(h.x - x, h.z - z) < 9.5);
   {
     const q = sea.clone().combine(levels[0].grid, (s, t) => Math.max(s, -t));
     for (const loop of q.contours(-4, 0.5)) {
@@ -778,7 +787,7 @@ function buildPlatform(rec, P) {
         acc = 0;
         const f = fr[i];
         const x = f.p[0] - f.n[0] * 2.2, z = f.p[1] - f.n[1] * 2.2;
-        if (q.sample(x, z) > -1.2 || seaGapAt(f.p[0], f.p[1]) > 0.1) continue;
+        if (q.sample(x, z) > -1.2 || seaGapAt(f.p[0], f.p[1]) > 0.1 || underDeck(x, z) || atLighthouse(x, z)) continue;
         quayLamps.push({ lx: x, lz: z, yaw: Math.atan2(f.n[0], f.n[1]), cls: 4, y: QUAY_Y });
         k++;
       }
@@ -799,7 +808,7 @@ function buildPlatform(rec, P) {
         const f = fr[i];
         const x = f.p[0] - f.n[0] * 1.3, z = f.p[1] - f.n[1] * 1.3;
         if (q.sample(x, z) > -0.9 || q.sample(f.p[0] - f.n[0] * 2.4, f.p[1] - f.n[1] * 2.4) > -0.5) continue;
-        if (seaGapAt(f.p[0], f.p[1]) > 0 || inSpan(f.p[0], f.p[1])) continue;
+        if (seaGapAt(f.p[0], f.p[1]) > 0 || inSpan(f.p[0], f.p[1]) || atLighthouse(x, z)) continue;
         if (quayLamps.some((l) => Math.abs(l.lx - x) < 4 && Math.abs(l.lz - z) < 4)) continue;
         acc = 0;
         moorings.push({ x: ox + f.p[0], z: oz + f.p[1], yaw: Math.atan2(f.n[0], f.n[1]) });
@@ -1129,6 +1138,8 @@ export function planWard(rec, towers, prof = {}) {
       for (const L of rec.landings) {
         const s = L.station;
         if (s) raw.sites.push({ box: { x: s.x, z: s.z, hw: 41, hd: 18, rot: s.rot }, margin: 3 });
+        // the deck's end and abutment on the terrace edge (streets still pass: no blockStreets)
+        if (GUARDED_WARDS.includes(w.id)) raw.sites.push({ box: { x: L.E[0] + L.t[0] * 3, z: L.E[1] + L.t[1] * 3, hw: 6, hd: L.kind === 'ring' ? 9 : 17, rot: L.b }, margin: 1, name: 'bridge abutment' });
         if (!L.own) raw.plazas.push({ x: L.x + L.t[0] * (L.kind === 'ring' ? 26 : 40), z: L.z + L.t[1] * (L.kind === 'ring' ? 26 : 40), hw: L.kind === 'ring' ? 30 : 50, hd: L.kind === 'ring' ? 34 : 44, rot: L.b, kind: 'landing' });
       }
       return raw;

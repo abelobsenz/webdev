@@ -909,7 +909,10 @@ export function buildStreetscape(scene, plan, ground, extraLamps = []) {
     const innerEdge = band ? band[0] : q.r - 3;
     // centrepiece
     let Rc = 0;
-    if (!deck) {
+    if (q.landmarkR) {                  // a civic building stands here (innerCivic.js): ring it
+      Rc = q.landmarkR + 0.6;
+      occ.add(q.x, q.z, Rc);
+    } else if (!deck) {
       const civic = kind === 'civic';
       const R = civic ? Math.min(11, q.r * 0.3, innerEdge - 6.5) : 3.5;
       const Rout = civic ? R + 0.6 : 3.5;
