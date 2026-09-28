@@ -551,7 +551,7 @@ export function buildSkyline(scene, { audit = false } = {}) {
     // Distance tiers (see outerLod.js): stairs, entries and small furniture only up
     // close; the street ribbons to a few km; the connecting and regional roads to the
     // edge of the shadow range; buildings, terraces and landmarks everywhere.
-    // Parts built with islands/kit.js name their own tier, LOD cell and material.
+    // Parts built with islands/cityKit.js name their own tier, LOD cell and material.
     const items = [], gilt = [];
     for (const g of parts) {
       if (!g || !g.attributes.position.count) continue;

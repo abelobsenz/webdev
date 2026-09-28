@@ -1,4 +1,4 @@
-import { K, TAU, H, rect, circlePoly, groundRange, Field, Occupancy, lerp2, centroid, pointInPoly, convexOverlap, segDist, offsetConvex } from './kit.js';
+import { K, TAU, H, rect, circlePoly, groundRange, Field, Occupancy, lerp2, centroid, pointInPoly, convexOverlap, segDist, offsetConvex } from './cityKit.js';
 import { planDistrict, levelPlots, buildStreets, steps, upperHull, STEP_SEAT } from './district.js';
 import { colonnade, stoa, tholos, archGate, lighthouse, obelisk, fountain, exedra } from './civic.js';
 import { buildHarbour } from './harbour.js';

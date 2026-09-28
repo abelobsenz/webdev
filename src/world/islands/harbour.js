@@ -1,4 +1,4 @@
-import { K, H, rect, circlePoly, groundRange, lerp2, centroid } from './kit.js';
+import { K, H, rect, circlePoly, groundRange, lerp2, centroid } from './cityKit.js';
 import { lighthouse } from './civic.js';
 
 // The harbour of an island city, built to the coast as it is drawn:
@@ -32,10 +32,12 @@ function coastLine(A0, a, b, span, depth) {
  */
 export function buildHarbour(kit, opts) {
   const { A0, a, span = 360, mouth = 320, width = 46, moleW = 16, lightH = 38, place, mouthHalf = 44, heads = true } = opts;
+  // the quay may reach further along the coast one way than the other (s in [-sNeg, sPos])
+  const sNeg = opts.sNeg ?? span, sPos = opts.sPos ?? span, fitNeg = opts.fitNeg ?? sNeg, fitPos = opts.fitPos ?? sPos;
   const b = [-a[1], a[0]];
-  const { pts, P } = coastLine(A0, a, b, span + 200, 2.6);
+  const { pts, P } = coastLine(A0, a, b, Math.max(sNeg, sPos) + 200, 2.6);
   // fit the coast: u = c0 + c1 v through the shore points within the span
-  const near = pts.filter((p) => Math.abs(p.v) <= span + 40);
+  const near = pts.filter((p) => p.v >= -fitNeg - 40 && p.v <= fitPos + 40);
   const n = near.length, sv = near.reduce((s, p) => s + p.v, 0), su = near.reduce((s, p) => s + p.u, 0), svv = near.reduce((s, p) => s + p.v * p.v, 0), suv = near.reduce((s, p) => s + p.u * p.v, 0);
   const c1 = (n * suv - sv * su) / (n * svv - sv * sv || 1), c0 = (su - c1 * sv) / n;
   // the coast frame: e along the coast (toward +v), s seaward (toward -u); the quay's sea wall
@@ -60,9 +62,9 @@ export function buildHarbour(kit, opts) {
   const sc = proj(P(opts.gapU ?? 60, 0)), gh = opts.gapHalf ?? 0;
   const sA = sc - gh, sB = sc + gh;
   const sList = [];
-  for (let s = -span; s < sA - 3; s += 12) sList.push(s);
+  for (let s = -sNeg; s < sA - 3; s += 12) sList.push(s);
   if (gh > 0) sList.push(sA, null, sB); else sList.push(sA);
-  for (let s = Math.ceil((sB + 3) / 12) * 12; s <= span + 0.01; s += 12) sList.push(s);
+  for (let s = Math.ceil((sB + 3) / 12) * 12; s <= sPos + 0.01; s += 12) sList.push(s);
   const parts = [[]];
   for (const s of sList) { if (s === null) { parts.push([]); continue; } const f = Q(s, frontOff); let back = null; for (let t = frontOff - 4; t > -width * 2; t -= 2) { if (H(...Q(s, t)) > yq - 0.45) { back = t + 2; break; } } parts.at(-1).push({ s, t: Math.max(back ?? -width, frontOff - width), l: f }); }
   const allSecs = [];
@@ -124,7 +126,8 @@ export function buildHarbour(kit, opts) {
   const moles = [];
   for (const sg of [-1, 1]) {
     const hw0 = moleW / 2 + 1.5;
-    const root = Q(sg * (span - hw0 - 4), frontOff);
+    const root = Q(sg < 0 ? -(sNeg - hw0 - 4) : sPos - hw0 - 4, frontOff);
+    if (opts.moles && !opts.moles.includes(sg)) continue;
     const tip = [M[0] + b[0] * sg * mouthHalf, M[1] + b[1] * sg * mouthHalf];
     // the root must lie on the same side of the axis as the tip
     const side = (root[0] - A0[0]) * b[0] + (root[1] - A0[1]) * b[1];

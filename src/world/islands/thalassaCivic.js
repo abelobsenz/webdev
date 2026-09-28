@@ -1,4 +1,4 @@
-import { K, H, rect, circlePoly, groundRange, centroid, pointInPoly, Occupancy, lerp2 } from './kit.js';
+import { K, H, rect, circlePoly, groundRange, centroid, pointInPoly, Occupancy, lerp2 } from './cityKit.js';
 import { stairBlock } from './district.js';
 import { colonnade, stoa, fountain, exedra, obelisk } from './civic.js';
 import { arcadedRange } from './typology.js';

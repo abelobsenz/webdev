@@ -1,8 +1,8 @@
-import { Kit } from './kit.js';
+import { Kit } from './cityKit.js';
 import { createFacadeMaterial } from '../facade.js';
 import * as thalassa from './thalassa.js';
 
-// The island cities that plan and build their own cores (see kit.js for the construction
+// The island cities that plan and build their own cores (see cityKit.js for the construction
 // rules). skyline.js asks each for the ground it reserves (and the gate where the island's
 // regional roads start) before the island plan is drawn, then lets it build.
 const CITIES = { thalassa };

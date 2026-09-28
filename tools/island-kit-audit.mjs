@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { auditGeometry } from './geometry-audit.mjs';
 
-// Per-solid topology for geometries built with src/world/islands/kit.js: every recorded
+// Per-solid topology for geometries built with src/world/islands/cityKit.js: every recorded
 // index range is extracted as its own geometry and must be watertight, consistently wound,
 // outward (positive volume), finite, with unit normals and no degenerate triangles.
 export function solidGeometry(g, [i0, i1]) {

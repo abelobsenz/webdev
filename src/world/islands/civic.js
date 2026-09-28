@@ -1,4 +1,4 @@
-import { K, TAU, rect, lerp2 } from './kit.js';
+import { K, TAU, rect, lerp2 } from './cityKit.js';
 
 // Monuments and civic furniture of the island cities, all closed solids in a local frame:
 // O the origin (plan), A the unit "along" direction, B = its left normal. f(u, v) -> plan.

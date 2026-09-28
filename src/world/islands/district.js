@@ -1,4 +1,4 @@
-import { K, H, groundRange, stripRange, lerp2, centroid, area2 } from './kit.js';
+import { K, H, groundRange, stripRange, lerp2, centroid, area2 } from './cityKit.js';
 
 // A terraced district on a curvilinear grid, the way hill towns are built:
 //   rows    streets along the contours (u = U(v) in the city frame P(u, v)), level-ish, graded
@@ -89,7 +89,7 @@ export function planDistrict(D) {
       v = Math.min(b.vb, v + w); breaks.push(v);
     }
     b.breaks = breaks; b.L = L;
-    b.split = b.depth >= 34;                                   // two plot rows, else one fronting the lower street
+    b.split = D.split ? D.split(b) : b.depth >= 34;           // two plot rows, else one fronting the lower street
   }
   // ------------------------------------------------------------------ row streets
   // A row street serves the blocks below and above it; it continues across a lane only

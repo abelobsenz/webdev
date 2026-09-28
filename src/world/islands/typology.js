@@ -1,4 +1,4 @@
-import { K, H, lerp2, centroid, groundRange } from './kit.js';
+import { K, H, lerp2, centroid, groundRange } from './cityKit.js';
 import { STEP_SEAT, steps } from './district.js';
 
 // Buildings on their plots. A plot is a fill terrace (its quad q: front-left, front-right,
