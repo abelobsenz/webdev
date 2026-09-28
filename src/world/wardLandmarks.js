@@ -6,7 +6,7 @@ import { patchedMaterial } from './materials.js';
 import { sweepLoop } from './platform.js';
 import { inArc } from './wards.js';
 import { U } from '../core/uniforms.js';
-import { marinersLantern, voyageHall, seaTheatre, shellPavilion } from './wardLandmarksB.js';
+import { marinersLantern, voyageHall, seaTheatre, shellPavilion, pierSheds } from './wardLandmarksB.js';
 
 // The signature places of the Outer Wards and the furniture of their waterfronts: the Great
 // Observatory, the Tidehall, the heliostat field and the Heliodrome, the Cascade, the harbour
@@ -1055,6 +1055,7 @@ export function buildWardLandmarks(scene, rec, P, G, { palette, world } = {}) {
       case 'terminal': both((B, pp, lod) => terminal(B, W(L), y, lod)); break;
       case 'marinersLantern': both((B, pp, lod) => marinersLantern(B, pp, W(L), y, lod, lod ? null : lights)); break;
       case 'voyageHall': both((B, pp, lod) => voyageHall(B, pp, W(L), y, lod)); break;
+      case 'pierSheds': both((B, pp, lod) => pierSheds(B, { list: L.list.map((q) => ({ ...q, x: w.x + q.x, z0: w.z + q.z0, z1: w.z + q.z1 })) }, QY, lod)); break;
       case 'shellPavilion': both((B, pp, lod) => shellPavilion(B, pp, W(L), y, lod, lod ? null : lights)); break;
       case 'cranes': for (const c of L.list) both((B, pp, lod) => crane(B, { ...c, x: w.x + c.x, z: w.z + c.z }, lod)); break;
       case 'arch': both((B, pp, lod) => triumphalArch(B, W(L), y, lod)); break;

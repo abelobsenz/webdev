@@ -571,10 +571,16 @@ const southmarch = {
     // Sheltered rain gardens follow the landward passenger walk, leaving the
     // quay road, cranes, galleries and turning water dedicated to the port.
     for (const z of [355, 405, 565, 615]) beds.push({ box: { x: -582, z, hw: 9, hd: 17, round: 5 } });
+    // the terminal gardens: a grove between Chandlers' Row and the terminal
+    parks.push({ box: { x: -560, z: 470, hw: 50, hd: 215, round: 18 }, trees: 0.9 });
     for (const z of [345, 390, 555, 600, 645]) trees.push({ x: -600, z, sp: 'flowering', s: 10 });
     for (let z = 280; z < 780; z += 52) if (z < 370 || z > 570) lots.push({ x: -364 - 6 - 3.5 - 12, z, w: 46, d: 24, rot: Math.PI / 2, type: 'warehouse', floors: 3, cls: ST.STREET });
     for (let z = 280; z < 780; z += 52) lots.push({ x: 364 + 6 + 3.5 + 12, z, w: 46, d: 24, rot: -Math.PI / 2, type: 'warehouse', floors: 3, cls: ST.STREET });
     landmarks.push({ type: 'cranes', list: ctx.features.cranes });
+    // transit sheds down the three finger piers (their pier-top reservation keeps the quay
+    // trees, lamps and furniture to the open mooring edges)
+    landmarks.push({ type: 'pierSheds', list: [-175, 0, 175].map((x) => ({ x, z0: 296, z1: 588 })) });
+    for (const x of [-175, 0, 175]) sites.push({ box: { x, z: 442, hw: 9.5, hd: 152 }, margin: 0, name: 'pier transit shed' });
     // parks: Mariners' Park, the channel gardens
     parks.push({ x: -520, z: -800, r: 130, paths: [T.curve([[-600, -860], [-520, -790], [-440, -820]]), T.arc(-520, -800, 70, 0, TAU, 6)], trees: 1 });
     pools.push({ x: -520, z: -800, r: 22 });
@@ -761,6 +767,7 @@ const westmere = {
   plan(ctx) {
     const { R, rnd } = ctx;
     const streets = [], squares = [], plazas = [], parks = [], sites = [], landmarks = [], lots = [], inlays = [], beds = [], zones = [], pools = [], trees = [], parterres = [];
+    const paths = [], accessRoutes = [];
     const A = ctx.amph, O = ctx.opera;
     const L = ctx.landing;
     const nearAmph = (p) => Math.hypot(p[0] - A.x, p[1] - A.z) < A.rOuter + 14;
@@ -799,7 +806,22 @@ const westmere = {
     streets.push(esplanade(ctx, 9));
     streets.push({ pts: T.line(-1010, 0, O.x + 150, 0, 6), cls: ST.AVENUE, hw: 10, name: 'Opera Walk' });
     // squares: the rond-point, rond-points on the boulevard, the arch plaza, the opera forecourt
-    squares.push({ x: 0, z: 0, r: 250, kind: 'crown', noLamps: true });
+    // the Concorde: a paved forecourt round the Civic Crown, then a ring of formal gardens,
+    // eight hedged parterres between the eight axes, each with its fountain, ringed by walks
+    squares.push({ x: 0, z: 0, r: 186, kind: 'crown', noLamps: true });
+    const concorde = [];
+    for (let k = 0; k < 8; k++) {
+      const q0 = (k * Math.PI) / 4 + 0.13, q1 = ((k + 1) * Math.PI) / 4 - 0.13, poly = [];
+      for (let i = 0; i <= 12; i++) { const q = q0 + ((q1 - q0) * i) / 12; poly.push(P(q, 227)); }
+      for (let i = 12; i >= 0; i--) { const q = q0 + ((q1 - q0) * i) / 12; poly.push(P(q, 194)); }
+      parterres.push({ poly });
+      const f = P((k + 0.5) * Math.PI / 4, 210.5);
+      concorde.push({ x: f[0], z: f[1], kind: 'fountain' });
+      sites.push({ x: f[0], z: f[1], r: 12.5, margin: 0.5, name: 'Concorde fountain' });
+    }
+    landmarks.push({ type: 'monuments', list: concorde });
+    paths.push({ pts: T.ring(0, 0, 190, 5), w: 2.6 }, { pts: T.ring(0, 0, 231, 5), w: 2.6 });
+    for (let k = 0; k < 8; k++) paths.push({ pts: T.radial(0, 0, (k * Math.PI) / 4, 186, 256, 4), w: 5 });
     const ronds = RONDS;
     for (const c of ronds) squares.push({ x: c[0], z: c[1], r: 38, kind: 'rond' });
     plazas.push({ x: E[0] + 20, z: E[1], hw: 70, hd: 80, kind: 'landing' });
@@ -815,7 +837,6 @@ const westmere = {
     // the Theatre Walk carries the esplanade round the landward side of the theatre
     streets.push({ pts: T.arc(A.x, A.z, 84, A.a + 1.0, A.a + TAU - 1.0, 5), cls: ST.ESPLANADE, hw: 7, name: 'Theatre Walk', lotSide: -1, noBridges: true });
     // Museum Mile: museums with domes and porticoes both sides of the boulevard
-    const paths = [], accessRoutes = [];
     for (const x of [320, 444, 568, 816, 940]) for (const s of [-1, 1]) {
       lots.push({ x, z: s * 56, w: 96, d: 50, rot: s > 0 ? Math.PI : 0, type: 'museum', floors: 4, cls: ST.AVENUE, civic: true, program: 'Museum Mile' });
       const approach = [[x, s * 6], [x, s * 27.2]];

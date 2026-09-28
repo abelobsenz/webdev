@@ -66,7 +66,10 @@ export function voyageHall(B, parts, L, y, lod) {
     const q = (s - 0.58) / 0.42;
     return Math.max(2.4, b * Math.sqrt(Math.max(0, 1 - q * q)));
   };
-  const keel = (s) => 11 + 6 * s * s;
+  // the sheer: the keel sweeps up toward the bow; the section rises from vertical sides
+  // at the gunwale to a pointed keel ridge (an upturned hull, not a barrel vault)
+  const keel = (s) => 10 + 9 * Math.pow(s, 2.2);
+  const sect = (t) => Math.pow(Math.max(0, 1 - Math.pow(Math.abs(t), 1.35)), 0.8);
   // plan outline (local lx along the axis, lz across), transom at lx = -half
   const n = lod ? 14 : 36, outline = [];
   for (let i = 0; i <= n; i++) { const s = i / n; outline.push([-half + len * s, width(s)]); }
@@ -92,7 +95,7 @@ export function voyageHall(B, parts, L, y, lod) {
   // the hull roof: a closed shell from gunwale to gunwale
   const hull = (u, v) => {
     const s = u, w = width(s), t = 2 * v - 1;
-    return W(-half + len * s, H0 + 0.1 + keel(s) * Math.pow(Math.max(0, 1 - t * t), 0.72), t * w);
+    return W(-half + len * s, H0 + 0.1 + keel(s) * sect(t), t * w);
   };
   parts.push(closedWardSurface(lod ? 12 : 30, lod ? 6 : 14, hull, 0.55, K.STONE, K.STONE));
   // the keel: a glowing line along the crown, and the bronze stem down the bow
@@ -105,19 +108,19 @@ export function voyageHall(B, parts, L, y, lod) {
   {
     const arch = [];
     const w0 = width(0);
-    for (let i = 0; i <= 16; i++) { const t = -1 + (2 * i) / 16; arch.push([-t * w0, H0 + 0.1 + keel(0) * Math.pow(Math.max(0, 1 - t * t), 0.72)]); }
+    for (let i = 0; i <= 16; i++) { const t = -1 + (2 * i) / 16; arch.push([-t * w0, H0 + 0.1 + keel(0) * sect(t)]); }
     B.frame(x, y, z, rot + Math.PI / 2);
     B.vprism(arch, -half + 0.25, -half + 0.55, K.GLASS, K.GLASS);
     // and a stone bow-piece closing the narrow arch at the prow
     const bow = [], w1 = width(1);
-    for (let i = 0; i <= 10; i++) { const t = -1 + (2 * i) / 10; bow.push([-t * w1, H0 + 0.1 + keel(1) * Math.pow(Math.max(0, 1 - t * t), 0.72)]); }
+    for (let i = 0; i <= 10; i++) { const t = -1 + (2 * i) / 10; bow.push([-t * w1, H0 + 0.1 + keel(1) * sect(t)]); }
     B.vprism(bow, half - 0.6, half - 0.25, K.STONE, K.STONE);
   }
   if (!lod) {
     // bone-white ribs over the shell every 10 m, standing just proud of it
     for (let lx = -half + 5; lx < half - 4; lx += 10) {
       const s = (lx + half) / len, w = width(s), rib = [];
-      for (let i = 0; i <= 18; i++) { const t = -1 + (2 * i) / 18; rib.push(W(lx, H0 + 0.1 + keel(s) * Math.pow(Math.max(0, 1 - t * t), 0.72) + 0.42, t * (w + 0.05))); }
+      for (let i = 0; i <= 18; i++) { const t = -1 + (2 * i) / 18; rib.push(W(lx, H0 + 0.1 + keel(s) * sect(t) + 0.42, t * (w + 0.05))); }
       parts.push(sweepTube(rib, () => 0.36, 6, { kind: K.STONE }));
     }
   }
@@ -228,4 +231,32 @@ export function shellPavilion(B, parts, L, y, lod, lights) {
   }
   B.frame(0, 0, 0, 0);
   if (lights) { const p = W(0, 4.2, -1.0); lights.push({ x: p.x, y: p.y, z: p.z, c: [0.35, 0.95, 1.0], s: 1.2 }); }
+}
+
+/**
+ * Transit sheds along Southmarch's finger piers: a long fritted-glass barrel on slender
+ * bronze columns down the middle of each pier, where passengers wait for the sea-ships
+ * out of the rain; the pier's edges stay open for mooring and for walking.
+ * L.list: [{ x, z0, z1 }] in world coordinates; y is the quay level.
+ */
+export function pierSheds(B, L, y, lod) {
+  for (const p of L.list) {
+    const len = p.z1 - p.z0, zc = (p.z0 + p.z1) / 2;
+    B.frame(p.x, y, zc, -Math.PI / 2);          // local x runs down the pier (+z world)
+    const half = len / 2, H = 7.4;
+    B.vault(-half, half, -5.2, 5.2, H, 2.3, K.FRIT, lod ? 6 : 12);
+    // a bronze eaves beam along both sides carries the barrel
+    for (const sg of [-1, 1]) B.box(-half, half, sg * 4.9 - 0.3, sg * 4.9 + 0.3, H - 0.55, H + 0.02, K.METAL, K.METAL);
+    const step = lod ? 28 : 14, n = Math.round(len / step);
+    for (let i = 0; i <= n; i++) {
+      const lx = -half + 1.5 + ((len - 3) * i) / n;
+      for (const sg of [-1, 1]) {
+        if (lod) B.box(lx - 0.35, lx + 0.35, sg * 4.9 - 0.35, sg * 4.9 + 0.35, -0.2, H - 0.5, K.METAL, K.METAL);
+        else B.lathe(lx, sg * 4.9, [[0.5, -0.2, K.STONE], [0.5, 0.35, K.STONE], [0.26, 0.5, K.METAL], [0.2, H - 0.8, K.METAL], [0.34, H - 0.5, K.METAL]], 8);
+      }
+      // benches between the columns, facing the ships
+      if (!lod && i < n) for (const sg of [-1, 1]) B.box(lx + 4, lx + 9, sg * 2.2 - 0.3, sg * 2.2 + 0.3, 0, 0.48, K.STONE, K.TIMBER);
+    }
+  }
+  B.frame(0, 0, 0, 0);
 }
