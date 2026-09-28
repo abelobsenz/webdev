@@ -18,6 +18,7 @@ import { buildStreetscape } from './streetscape.js';
 import { NATURE_U } from './natureGlsl.js';
 import { TreeField } from './vegetation.js';
 import { planTrees } from './treePlanner.js';
+import { planIslandTrees } from './islandTrees.js';
 import { buildClearance } from './clearance.js';
 import { buildNature } from './nature.js';
 import { GroundCover, buildHedges } from './groundCover.js';
@@ -181,7 +182,7 @@ export class World {
     // --- nature (vegetation after all architecture, so it can keep clear of it) ---
     this.clearance = buildClearance(this.scene, (x, z) => this.sampler.get(x, z));
     this.trees = new TreeField(this.scene, this.settings);
-    this.trees.build(this.placeTrees());
+    this.trees.build([...this.placeTrees(), ...planIslandTrees(this.skyline.isFree)]);   // + woods on the far islands' heights
     this.updaters.push({ applyQuality: (s) => this.trees.applyQuality(s), update: (dt, t) => this.trees.update(dt, t, this.app.camera) });
     progress(0.78); await tick();
     // Floating gardens

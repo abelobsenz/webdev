@@ -232,6 +232,7 @@ function building(parts, rnd, Lq, lu, lv, top, H, wall = 5, roof = 9) {
 
 /** Villas, farmsteads and a far-shore lighthouse over the rest of the island. */
 function countryside(parts, c, rnd, lights, placed, n) {
+  FOOTPRINTS.push({ c, placed });
   let made = 0, tries = 0;
   while (made < n && tries++ < n * 30) {
     const a = rnd() * TAU, r = Math.sqrt(rnd()) * c.coast.s * 1.1;
@@ -268,6 +269,7 @@ function countryside(parts, c, rnd, lights, placed, n) {
     SKYLINE_KEEPOUT.push({ x, z, r: 16 });
     parts.push(latheFacade([{ r: 9, y: g - 4, kind: 1 }, { r: 9, y: g + 3, kind: 1 }, { r: 4.6, y: g + 3, kind: 1 }, { r: 3.4, y: g + 36, kind: 1 }, { r: 4.4, y: g + 37, kind: 10 }, { r: 2.8, y: g + 38, kind: 2 }, { r: 2.8, y: g + 43, kind: 2 }, { r: 0.05, y: g + 47, kind: 10 }], 12).translate(x, 0, z));
     lights.push({ x, y: g + 41, z, c: [1.0, 0.95, 0.8], s: 2.4 });
+    placed.push({ x, z, r: 16 });
     break;
   }
 }
@@ -407,7 +409,23 @@ function buildAustral(parts, c, rnd, lights) {
 }
 
 // ------------------------------------------------------------------ build --
+// every island city's footprint (districts, landmarks, villas, farms, lighthouse) for
+// whatever grows or is built round them later (the island woods)
+const FOOTPRINTS = [];
+/** Is a circle (x, z, r) clear of the island cities, their harbours and countryside? */
+export function islandCityFree(x, z, r = 0) {
+  for (const { c, placed } of FOOTPRINTS) {
+    if (Math.hypot(x - c.ix, z - c.iz) > c.coast.s * 1.3 + 2000) continue;
+    for (const p of placed) if (Math.hypot(p.x - x, p.z - z) < p.r + r) return false;
+    const Q = c.quayLine;
+    for (let k = 0; k < Q.length - 1; k++) if (segDist(x, z, Q[k], Q[k + 1]) < 200 + r) return false;
+    if (Math.hypot(x - c.station.x, z - c.station.z) < 220 + r) return false;
+  }
+  return true;
+}
+
 export function buildSkyline(scene) {
+  FOOTPRINTS.length = 0;
   const oc = outerCities();
   const meshes = [];
   const lights = [];
@@ -435,5 +453,5 @@ export function buildSkyline(scene) {
   const mt = buildMassifTowns(scene, oc.massif, lights);
   meshes.push(...mt.meshes);
   tris += mt.tris;
-  return { meshes, tris, lights, cities: oc };
+  return { meshes, tris, lights, cities: oc, isFree: islandCityFree };
 }
