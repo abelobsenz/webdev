@@ -390,7 +390,8 @@ export function islandDistrictRoads(c,s){
 
 /** A conservative occupancy plan, shared by site builders, farming and island woods. */
 export function buildIslandPlan(c, obstacles = []) {
-  const rnd = mulberry32(8271 + c.island * 197), sites = [], routes = [], circles = [], start = [c.deep.x - c.d[0] * 22, c.deep.z - c.d[1] * 22];
+  // A city that plans its own core (islands/) hands the regional roads a gate on its edge.
+  const rnd = mulberry32(8271 + c.island * 197), sites = [], routes = [], circles = [], start = c.gate ? [c.gate.x, c.gate.z] : [c.deep.x - c.d[0] * 22, c.deep.z - c.d[1] * 22];
   const W = (u, v) => [c.ix + c.d[0] * u + c.side[0] * v, c.iz + c.d[1] * u + c.side[1] * v];
   const R = c.coast.s;
   const desires = {
@@ -440,5 +441,5 @@ export function buildIslandPlan(c, obstacles = []) {
   const localStreets=active.flatMap(s=>islandDistrictRoads(c,s).map(points=>({points,width:c.id==='anchorage'?11:7})));
   const isRoadFree=(x,z,r=0)=>![...routes,...localStreets].some(route=>route.points.slice(1).some((p,i)=>pointSegmentDistance(x,z,route.points[i],p)<r+route.width/2+8));
   const free=(x,z,r=0)=>!circles.some(p=>Math.hypot(p.x-x,p.z-z)<p.r+r)&&isRoadFree(x,z,r);
-  return {city:c.id,sites:active,routes,localStreets,circles,start,free,isRoadFree,W,civicObstacles,reserved:[...civicObstacles,...active.map(s=>({x:s.x,z:s.z,r:64}))],coreEntrances:[]};
+  return {city:c.id,sites:active,routes,localStreets,circles,start,startY:c.gate?.y,free,isRoadFree,W,civicObstacles,reserved:[...civicObstacles,...active.map(s=>({x:s.x,z:s.z,r:64}))],coreEntrances:[]};
 }

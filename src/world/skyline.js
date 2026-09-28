@@ -9,6 +9,7 @@ import { buildMassifTowns } from './massifTowns.js';
 import { buildOuterLOD } from './outerLod.js';
 import { islandPrism, islandFoundation, islandRoad, footprintGround, rectangle, circleFootprint, buildIslandPlan, pointSegmentDistance, islandRoadHeight, someCircleNear } from './islandPlan.js';
 import { buildIslandLandscape } from './islandLandmarks.js';
+import { ISLAND_CITY_BUILDERS, islandCityReserve, createGiltMaterial } from './islands/index.js';
 
 /** Everything built on the island land (districts, landmarks, villas, lighthouses) as keep-out
  *  circles {x, z, r}, filled by buildSkyline(): ground cover grows only outside them. */
@@ -538,7 +539,7 @@ export function buildSkyline(scene, { audit = false } = {}) {
   FOOTPRINTS.length = 0;
   ROAD_CLEARANCE.clear();
   SKYLINE_KEEPOUT.length = 0;
-  const auditParts = [], plans = [];
+  const auditParts = [], plans = [], cityTrees = [];
   const oc = outerCities();
   const meshes = [];
   const lights = [];
@@ -550,11 +551,17 @@ export function buildSkyline(scene, { audit = false } = {}) {
     // Distance tiers (see outerLod.js): stairs, entries and small furniture only up
     // close; the street ribbons to a few km; the connecting and regional roads to the
     // edge of the shadow range; buildings, terraces and landmarks everywhere.
-    const items = [];
+    // Parts built with islands/kit.js name their own tier, LOD cell and material.
+    const items = [], gilt = [];
     for (const g of parts) {
       if (!g || !g.attributes.position.count) continue;
       const u = g.userData;
       let tier = 3;
+      if (u.islandTier !== undefined) {
+        (u.islandMaterial === 'gilt' ? gilt : items).push({ geo: g, tier: u.islandTier, x: u.islandAnchor[0], z: u.islandAnchor[1] });
+        tris += g.index.count / 3;
+        continue;
+      }
       if (u.islandStair || u.islandEntry) tier = 0;
       else if (u.islandRole || u.islandAccess) tier = 2;
       else if (u.islandRoad) tier = 1;
@@ -567,16 +574,21 @@ export function buildSkyline(scene, { audit = false } = {}) {
       tris += (g.index ? g.index.count : g.attributes.position.count) / 3;
     }
     meshes.push(...buildOuterLOD(scene, items, mat, { cell: 700, name, levels: ISLAND_LOD }));
+    if (gilt.length) meshes.push(...buildOuterLOD(scene, gilt, createGiltMaterial(pal, seed), { cell: 700, name: `${name} gilt`, levels: ISLAND_LOD }));
   };
   oc.islands.forEach((c, i) => {
     const parts = [];
     const obstacles=[];
-    if(c.id==='thalassa'){const s=summit(c);obstacles.push({x:s.x,z:s.z,r:180});}
+    // Thalassa, Anchorage and Orison (islands/): their cores reserve their own ground
+    const island = ISLAND_CITY_BUILDERS[c.id], reserve = island ? islandCityReserve(c) : null;
+    if(reserve)obstacles.push(...reserve.obstacles);
+    else if(c.id==='thalassa'){const s=summit(c);obstacles.push({x:s.x,z:s.z,r:180});}
     if(c.id==='austral')obstacles.push({x:c.coast.x-c.d[0]*950,z:c.coast.z-c.d[1]*950,r:300});
     if(c.id==='vesper')obstacles.push({x:c.coast.x-c.d[0]*520,z:c.coast.z-c.d[1]*520,r:125});
-    if(c.id==='anchorage')for(const sign of [-1,1])obstacles.push({x:c.coast.x-c.d[0]*420+c.side[0]*sign*95,z:c.coast.z-c.d[1]*420+c.side[1]*sign*95,r:60});
-    const plan=buildIslandPlan(c,obstacles), city={...c,plan};
-    builders[c.style](parts, city, mulberry32(2026 + i * 17), lights);
+    if(!island&&c.id==='anchorage')for(const sign of [-1,1])obstacles.push({x:c.coast.x-c.d[0]*420+c.side[0]*sign*95,z:c.coast.z-c.d[1]*420+c.side[1]*sign*95,r:60});
+    const plan=buildIslandPlan(reserve?.gate?{...c,gate:reserve.gate}:c,obstacles), city={...c,plan};
+    if(island){const placed=island(parts,city,mulberry32(2026 + i * 17),lights);cityTrees.push(...placed.trees);for(const k of placed.keepout)SKYLINE_KEEPOUT.push(k);countryside(parts,city,mulberry32(3026 + i * 17),lights,placed.placed,{thalassa:70,anchorage:90,orison:60}[c.id]*3);}
+    else builders[c.style](parts, city, mulberry32(2026 + i * 17), lights);
     const footprint=FOOTPRINTS.find(f=>f.c.id===c.id);
     plan.circles.push(...footprint.placed);
     buildIslandLandscape(parts,city,plan,lights,SKYLINE_KEEPOUT);
@@ -589,5 +601,5 @@ export function buildSkyline(scene, { audit = false } = {}) {
   for(const part of mt.auditParts)auditParts.push(part);
   meshes.push(...mt.meshes);
   tris += mt.tris;
-  return { meshes, tris, lights, cities: oc, isFree: islandCityFree, plans, auditParts };
+  return { meshes, tris, lights, cities: oc, isFree: islandCityFree, plans, auditParts, cityTrees };
 }

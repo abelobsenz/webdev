@@ -190,7 +190,7 @@ export function buildIslandLandscape(parts,c,plan,lights,keepouts){
   const record=(x,z,r,type,q,top,entranceEdges)=>{const p={x,z,r,type,q,top,entranceEdges};plots.push(p);plan.circles.push(p);keepouts.push({x,z,r});};
   // Public forecourts are clear destinations: incoming streets stop at their measured level.
   for(const s of plan.sites){const top=c.id==='austral'?Math.max(footprintGround(circleFootprint(s.x,s.z,64,40)).max,footprintGround(circleFootprint(s.x-c.d[0]*150,s.z-c.d[1]*150,125,48)).max)+.85:undefined;s.plazaY=islandFoundation(parts,circleFootprint(s.x,s.z,64,40),{name:`${s.id} arrival square`,top});record(s.x,s.z,64,'arrival square');}
-  for(const route of plan.routes){const from=plan.sites.find(s=>s.id===route.from),to=plan.sites.find(s=>s.id===route.to);addSurface(islandRoad(parts,route.points,route.width,{startY:from?.plazaY??3.75,endY:to.plazaY,startRadius:from?64:0,endRadius:64,keepouts}),regionalSurfaces,route.width);parts.at(-1).userData.islandRole='regional';}
+  for(const route of plan.routes){const from=plan.sites.find(s=>s.id===route.from),to=plan.sites.find(s=>s.id===route.to);addSurface(islandRoad(parts,route.points,route.width,{startY:from?.plazaY??plan.startY??3.75,endY:to.plazaY,startRadius:from?64:0,endRadius:64,keepouts}),regionalSurfaces,route.width);parts.at(-1).userData.islandRole='regional';}
   for(const s of plan.sites){
     const cs=Math.cos(s.angle),sn=Math.sin(s.angle),W=(u,v)=>[s.x+u*cs-v*sn,s.z+u*sn+v*cs];
     // The settlement plan is part of its architectural identity. These are distinct
@@ -346,7 +346,9 @@ export function buildIslandLandscape(parts,c,plan,lights,keepouts){
     const edge=q.map((a,i)=>({a,b:q[(i+1)%q.length],distance:pointSegmentDistance(...to,a,q[(i+1)%q.length])})).sort((a,b)=>a.distance-b.distance)[0],len=Math.hypot(edge.b[0]-edge.a[0],edge.b[1]-edge.a[1]),t=[(edge.b[0]-edge.a[0])/len,(edge.b[1]-edge.a[1])/len],centre=q.reduce((s,p)=>[s[0]+p[0]/q.length,s[1]+p[1]/q.length],[0,0]);let inward=[-t[1],t[0]];if(inward[0]*(centre[0]-to[0])+inward[1]*(centre[1]-to[1])<0)inward=inward.map(v=>-v);
     // Meet the actual plot edge orthogonally: an oblique tread can enter the
     // retaining solid before its nominal endpoint reaches the terrace.
-    const reach=Math.min(6,L*.4),lead=[to[0]-inward[0]*reach,to[1]-inward[1]*reach];return[from,lead,to];
+    // the lead is long enough for the flight to turn on a radius wider than itself (a short
+    // lead folded the inner edge of sharply turning flights back over itself)
+    const turn=Math.acos(Math.max(-1,Math.min(1,((to[0]-from[0])*inward[0]+(to[1]-from[1])*inward[1])/L))),reach=Math.min(Math.max(6,.8*width*Math.tan(turn/2)/.45+.5),L*.45),lead=[to[0]-inward[0]*reach,to[1]-inward[1]*reach];return[from,lead,to];
   };
   const entranceAprons=parts.filter(g=>g.userData.islandFoundation?.name.includes('street-end entrance apron')).map(g=>g.userData.islandFoundation);
   const streetFloor=q=>{const candidates=new Set();for(let x=Math.floor(Math.min(...q.map(p=>p[0]))/64);x<=Math.floor(Math.max(...q.map(p=>p[0]))/64);x++)for(let z=Math.floor(Math.min(...q.map(p=>p[1]))/64);z<=Math.floor(Math.max(...q.map(p=>p[1]))/64);z++)for(const s of publicRoadGrid.get(x+','+z)||[])candidates.add(s);let y=-Infinity;for(const [a,b]of candidates)if(islandPolygonsOverlap(q,[a.left,a.right,b.right,b.left]))y=Math.max(y,a.y,b.y);for(const f of entranceAprons)if(islandPolygonsOverlap(q,f.q))y=Math.max(y,f.top);return y;};
