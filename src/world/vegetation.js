@@ -302,6 +302,23 @@ function createFarDepthMaterial() {
   return mat;
 }
 
+/** A light far crown (80-face sphere, 5-sided trunk) sharing the blob's shape attributes. */
+function farLoBlob(blob) {
+  const parts = [[new THREE.CylinderGeometry(1, 1, 1, 5, 1, true).translate(0, 0.5, 0), 0], [new THREE.IcosahedronGeometry(1, 1), 1]];
+  const pos = [], nrm = [], part = [];
+  for (const [g0, k] of parts) {
+    const g = g0.index ? g0.toNonIndexed() : g0;
+    pos.push(...g.attributes.position.array); nrm.push(...g.attributes.normal.array);
+    for (let i = 0; i < g.attributes.position.count; i++) part.push(k);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('normal', new THREE.Float32BufferAttribute(nrm, 3));
+  g.setAttribute('aPart', new THREE.Float32BufferAttribute(part, 1));
+  g.boundingSphere = blob.boundingSphere;
+  return g;
+}
+
 // -------------------------------------------------------------- tree field --
 export class TreeField {
   constructor(scene, settings) {
@@ -311,6 +328,8 @@ export class TreeField {
     const rnd = mulberry32(77);
     this.species = buildSpeciesGeometry(rnd);
     this.farGeo = buildFarGeometry();
+    this.farLo = farLoBlob(this.farGeo.blob);
+    this.loChunks = [];
     this.nearMat = createNearMaterial(this.tex, { lod: true, key: 'treeNear' });
     this.farMat = createFarMaterial(true);
     this.localFarMat = createFarMaterial(false);
@@ -416,8 +435,7 @@ export class TreeField {
     });
   }
 
-  _farMesh(list, farType, material, layer) {
-    const base = this.farGeo[farType];
+  _farMesh(list, farType, material, layer, base = this.farGeo[farType]) {
     const g = new THREE.BufferGeometry();
     for (const k of Object.keys(base.attributes)) g.setAttribute(k, base.attributes[k]);
     g.boundingSphere = base.boundingSphere;
@@ -461,7 +479,7 @@ export class TreeField {
     const buckets = new Map();
     for (const t of trees) {
       const ft = SPECIES[t.sp].far;
-      const key = `${Math.floor(t.x / chunk)},${Math.floor(t.z / chunk)},${ft}`;
+      const key = `${Math.floor(t.x / chunk)},${Math.floor(t.z / chunk)},${ft}${t.far ? ',far' : ''}`;
       if (!buckets.has(key)) buckets.set(key, []);
       buckets.get(key).push(t);
     }
@@ -472,6 +490,19 @@ export class TreeField {
       const mesh = this._farMesh(list, ft, this.farMat, layer);
       this.scene.add(mesh);
       this.chunks.push(mesh);
+      if (key.endsWith(',far')) {
+        // the far islands' woods: seen from 15-40 km, so a long reach, and a light
+        // (80-face) crown beyond a few km where each tree is a handful of pixels
+        mesh.userData.reach = 46000;
+        if (ft === 'blob') {
+          const lo = this._farMesh(list, ft, this.farMat, layer, this.farLo);
+          lo.userData.center = mesh.userData.center;
+          lo.visible = false;
+          this.scene.add(lo);
+          this.loChunks.push(lo);
+          mesh.userData.lo = lo;
+        }
+      }
     }
     this.count = trees.length;
     this.applyQuality(this.settings);
@@ -519,7 +550,7 @@ export class TreeField {
   applyQuality(s) {
     this.settings = s;
     LOD.nearR.value = s.treeNear ?? 320;
-    for (const m of this.chunks) m.count = Math.max(1, Math.floor(m.userData.fullCount * s.trees));
+    for (const m of [...this.chunks, ...this.loChunks]) m.count = Math.max(1, Math.floor(m.userData.fullCount * s.trees));
     const a2c = (s.msaa || 0) > 0;
     for (const m of [this.nearMat]) {
       if (m.alphaToCoverage !== a2c) { m.alphaToCoverage = a2c; m.needsUpdate = true; }
@@ -534,7 +565,12 @@ export class TreeField {
     const maxD = 6500 + cp.y * 1.2;
     for (const m of this.chunks) {
       const d = Math.hypot(m.userData.center.x - cp.x, m.userData.center.y - cp.z);
-      m.visible = d < maxD;
+      const reach = m.userData.reach;
+      if (!reach) { m.visible = d < maxD; continue; }
+      const lo = m.userData.lo, inReach = d < reach + cp.y * 2;
+      const detailed = !lo || d < 4200;
+      m.visible = inReach && detailed;
+      if (lo) lo.visible = inReach && !detailed;
     }
     // local groups: detailed trees only when close
     const R = LOD.nearR.value;
