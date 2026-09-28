@@ -227,7 +227,12 @@ void main() {
   vec3 Tw = exp(-absorb * path * 1.2) * floorVis;
 
   // --- foam: shorelines, around anything standing in the water, sparse whitecaps ---
-  float shoreD = min(depth, floorDepth);
+  // the depth buffer resolves about dist^2 / (near * 2^24) metres: beyond a couple of km that is
+  // coarser than the foam band, and depth-derived foam crawls and flickers along the shore as the
+  // camera moves (the wards and far islands have no baked terrain, so it is their only shore)
+  float zUlp = dist * dist / (uNearFar.x * 16777216.0);
+  float trustZ = 1.0 - smoothstep(0.04, 0.25, zUlp);
+  float shoreD = min(depth, mix(80.0, floorDepth, trustZ));
   float shore = 1.0 - smoothstep(0.0, 1.6, shoreD);
   float fn = vnoise(p * 0.18 + vec2(uTime * 0.3, 0.0)) * vnoise(p * 0.05 - uTime * 0.05);
   float bands = smoothstep(0.5, 0.9, sin(shoreD * 5.0 - uTime * 1.3 + fn * 4.0) * 0.5 + 0.5);
@@ -299,6 +304,9 @@ export class Water {
       }),
       transparent: true,
       depthWrite: false,
+      // where a shore meets the water nearly level the two surfaces tie in depth; pushing the water
+      // back a few depth units lets the land win consistently instead of flickering frame to frame
+      polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 4,
       blending: THREE.CustomBlending,
       blendSrc: THREE.OneFactor,
       blendDst: THREE.OneMinusSrcAlphaFactor,

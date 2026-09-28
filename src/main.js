@@ -217,6 +217,10 @@ class App {
     const r = this.renderer;
     const p = this.pipeline;
     r.info.reset();
+    // the passes before the main render (reflection, cloud shadows) read camera.matrixWorld, which
+    // renderer.render would only refresh later: without this the mirrored view lagged the camera by a
+    // frame, and in flight the reflected shoreline slid against the real one and flickered
+    this.camera.updateMatrixWorld();
     // 1. planar reflections (uses last frame's shadow map, so skip until it exists)
     p.timer.begin('reflections');   // rendering agent: optional GPU timings (?gpuprof)
     if (!this.settings.shadows || this.lighting.sun.shadow.map) this.world.renderReflections(r, this.camera, this.skyScene, this.skyCamera);
