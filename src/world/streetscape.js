@@ -234,5 +234,7 @@ export function buildStreetscape(scene, plan, ground, extraLamps = []) {
     scene.add(mesh);
     out.meshes.push(mesh);
   }
+  // thin furniture: the camera collision grid skips it (poles would block whole cells)
+  for (const m of out.meshes) m.userData.noCollide = true;
   return out;
 }
