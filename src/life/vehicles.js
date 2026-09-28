@@ -50,6 +50,46 @@ function hull(profile, seg, { sx = 1, sy = 1 } = {}) {
 const box = (w, h, d, x, y, z) => new THREE.BoxGeometry(w, h, d).translate(x, y, z);
 const ring = (r, tube, rs, ts) => new THREE.TorusGeometry(r, tube, rs, ts);
 
+/** Half-width of a hull() section at station z and height y (0 where the section does not reach y). */
+function hullHalfWidth(profile, sy, z, y) {
+  let r = 0;
+  for (let i = 0; i < profile.length - 1; i++) {
+    const [r0, z0] = profile[i], [r1, z1] = profile[i + 1];
+    if (z >= z0 && z <= z1) { r = r0 + ((r1 - r0) * (z - z0)) / Math.max(z1 - z0, 1e-6); break; }
+  }
+  const e = y / Math.max(r * sy, 1e-6);
+  return Math.abs(e) >= 1 ? 0 : r * Math.sqrt(1 - e * e);
+}
+
+/**
+ * A flank band (window strip, rub rail) that follows the hull's taper as n short boxes per
+ * side: each box's inner face sits inside the hull and its outer face stands just proud of it
+ * over the whole segment, so the band never floats free of a narrowing nose or tail.
+ */
+function flankBand(profile, sy, y, h, z0, z1, n, t, part) {
+  const out = [], L = (z1 - z0) / n;
+  for (let i = 0; i < n; i++) {
+    const zc = z0 + (i + 0.5) * L;
+    let lo = 1e9, hi = 0;
+    for (const z of [zc - L * 0.52, zc, zc + L * 0.52]) for (const yy of [y - h / 2, y, y + h / 2]) {
+      const w = hullHalfWidth(profile, sy, z, yy);
+      lo = Math.min(lo, w); hi = Math.max(hi, w);
+    }
+    if (lo < t * 2) continue;
+    const inner = lo - t * 0.6, outer = hi + t * 0.25;
+    for (const sx of [1, -1]) out.push(tag(box(outer - inner, h, L * 1.04, sx * (inner + outer) * 0.5, y, zc), part));
+  }
+  return out;
+}
+
+/** Ducted lift fan: the glowing underside disc, a dark upper fan disc and a closed hub, so the duct reads solid from above and below. */
+function liftFan(parts, r, x, y, z) {
+  parts.push(tag(new THREE.CircleGeometry(r, 12).rotateX(Math.PI / 2).translate(x, y - 0.04 * r, z), PART.LIFT));
+  parts.push(tag(new THREE.CircleGeometry(r, 12).rotateX(-Math.PI / 2).translate(x, y + 0.04 * r, z), PART.TRIM));
+  parts.push(tag(new THREE.CylinderGeometry(r * 0.22, r * 0.26, r * 0.3, 8).translate(x, y + 0.1 * r, z), PART.HULL));
+  for (let k = 0; k < 3; k++) parts.push(tag(new THREE.BoxGeometry(r * 1.9, r * 0.04, r * 0.16).rotateY((k * Math.PI) / 3).translate(x, y + 0.08 * r, z), PART.TRIM));
+}
+
 function finish(list) {
   const g = mergeGeometries(list, false);
   g.computeBoundingSphere();
@@ -60,12 +100,14 @@ function finish(list) {
 /** Personal air car ("skimmer"): a pearl teardrop with a bubble canopy and twin ducted lift rings. ~6.4 m */
 export function airCarGeometry() {
   const parts = [];
-  parts.push(tag(hull([[0.0, -3.2], [0.62, -3.15], [0.98, -2.6], [1.16, -1.5], [1.2, -0.4], [1.08, 0.8], [0.8, 1.9], [0.42, 2.8], [0.1, 3.22], [0.0, 3.28]], 10, { sy: 0.46 }), PART.BODY));
+  const prof = [[0.0, -3.2], [0.62, -3.15], [0.98, -2.6], [1.16, -1.5], [1.2, -0.4], [1.08, 0.8], [0.8, 1.9], [0.42, 2.8], [0.1, 3.22], [0.0, 3.28]];
+  parts.push(tag(hull(prof, 10, { sy: 0.46 }), PART.BODY));
+  parts.push(...flankBand(prof, 0.46, -0.08, 0.1, -2.4, 2.2, 5, 0.05, PART.ACCENT));
   parts.push(tag(new THREE.SphereGeometry(1, 10, 6, 0, Math.PI * 2, 0, Math.PI * 0.55).scale(0.72, 0.62, 1.55).translate(0, 0.2, 0.55), PART.GLASS));
   for (const sx of [1, -1]) {
     const nac = ring(0.56, 0.16, 4, 12).rotateX(Math.PI / 2).translate(sx * 1.42, -0.12, -1.25);
     parts.push(tag(nac, PART.TRIM));
-    parts.push(tag(new THREE.CircleGeometry(0.46, 10).rotateX(Math.PI / 2).translate(sx * 1.42, -0.2, -1.25), PART.LIFT));
+    liftFan(parts, 0.44, sx * 1.42, -0.14, -1.25);
     parts.push(tag(box(0.55, 0.08, 0.5, sx * 1.0, -0.1, -1.25), PART.TRIM));
   }
   parts.push(tag(box(1.5, 0.09, 0.14, 0, 0.02, 3.0), PART.HEAD));
@@ -78,13 +120,15 @@ export function airCarGeometry() {
 /** Long passenger ferry with a continuous window band, dorsal spine and four lift pods. ~64 m */
 export function ferryGeometry() {
   const parts = [];
-  parts.push(tag(hull([[0.0, -32], [1.4, -31.4], [2.6, -29], [3.3, -24], [3.45, -12], [3.45, 10], [3.2, 20], [2.6, 26.5], [1.6, 30.5], [0.5, 32.2], [0.0, 32.5]], 14, { sy: 0.86 }), PART.BODY));
+  const prof = [[0.0, -32], [1.4, -31.4], [2.6, -29], [3.3, -24], [3.45, -12], [3.45, 10], [3.2, 20], [2.6, 26.5], [1.6, 30.5], [0.5, 32.2], [0.0, 32.5]];
+  parts.push(tag(hull(prof, 14, { sy: 0.86 }), PART.BODY));
+  // window band and rub rail follow the hull's taper instead of running straight off the bow
+  parts.push(...flankBand(prof, 0.86, 0.55, 1.05, -21.5, 23.5, 15, 0.12, PART.WINDOW));
+  parts.push(...flankBand(prof, 0.86, -0.55, 0.18, -24, 26, 10, 0.14, PART.ACCENT));
   for (const sx of [1, -1]) {
-    parts.push(tag(box(0.12, 1.05, 46, sx * 3.36, 0.55, 1.5), PART.WINDOW));
-    parts.push(tag(box(0.14, 0.18, 50, sx * 3.33, -0.55, 1.0), PART.ACCENT));
     for (const z of [-19, 17]) {
       parts.push(tag(ring(1.9, 0.42, 4, 14).rotateX(Math.PI / 2).translate(sx * 5.4, -1.2, z), PART.TRIM));
-      parts.push(tag(new THREE.CircleGeometry(1.55, 12).rotateX(Math.PI / 2).translate(sx * 5.4, -1.35, z), PART.LIFT));
+      liftFan(parts, 1.5, sx * 5.4, -1.25, z);
       parts.push(tag(box(2.4, 0.35, 1.4, sx * 4.0, -1.0, z), PART.TRIM));
     }
   }
@@ -92,7 +136,7 @@ export function ferryGeometry() {
   parts.push(tag(new THREE.SphereGeometry(1, 12, 6, 0, Math.PI * 2, 0, Math.PI * 0.5).scale(2.3, 1.5, 4.5).translate(0, 1.0, 25.5), PART.GLASS));
   parts.push(tag(box(3.4, 0.25, 0.3, 0, -0.2, 31.9), PART.HEAD));
   parts.push(tag(box(2.4, 0.3, 0.3, 0, 0.4, -31.7), PART.TAIL));
-  parts.push(tag(box(0.12, 3.2, 5.5, 0, 4.2, -26), PART.ACCENT));
+  parts.push(tag(box(0.12, 3.2, 5.5, 0, 3.6, -26), PART.ACCENT)); // fin root sunk into the tapering tail
   return finish(parts);
 }
 
@@ -103,13 +147,16 @@ export function cargoDroneGeometry() {
   parts.push(tag(box(3.0, 2.6, 6.2, 0, -1.9, 0), PART.BODY));
   parts.push(tag(box(3.1, 0.18, 6.3, 0, -0.55, 0), PART.ACCENT));
   parts.push(tag(box(1.6, 0.7, 2.6, 0, 0.1, 0), PART.HULL));
+  // slung container: a pylon joins it to the frame (no gap under the hull) and wrap ribs stiffen it
+  parts.push(tag(box(1.0, 0.5, 1.8, 0, -0.42, 0), PART.TRIM));
+  for (const z of [-2.2, 0, 2.2]) parts.push(tag(box(3.12, 2.4, 0.14, 0, -1.9, z), PART.TRIM));
   for (const [sx, sz] of [[1, 1], [-1, 1], [1, -1], [-1, -1]]) {
     const arm = box(0.28, 0.22, 3.6, 0, 0.1, 0);
     arm.rotateY(Math.atan2(sx, sz));
     arm.translate(sx * 1.2, 0, sz * 1.2);
     parts.push(tag(arm, PART.TRIM));
     parts.push(tag(ring(1.25, 0.2, 4, 14).rotateX(Math.PI / 2).translate(sx * 2.5, 0.15, sz * 2.5), PART.TRIM));
-    parts.push(tag(new THREE.CircleGeometry(1.05, 12).rotateX(Math.PI / 2).translate(sx * 2.5, 0.05, sz * 2.5), PART.LIFT));
+    liftFan(parts, 1.02, sx * 2.5, 0.12, sz * 2.5);
   }
   parts.push(tag(box(0.9, 0.2, 0.15, 0, 0.0, 1.35), PART.HEAD));
   parts.push(tag(box(0.9, 0.2, 0.15, 0, 0.0, -1.35), PART.TAIL));
@@ -120,13 +167,15 @@ export function cargoDroneGeometry() {
 /** Rescue / service craft: angular wedge with a roof light bar. ~9 m */
 export function serviceGeometry() {
   const parts = [];
-  parts.push(tag(hull([[0.0, -4.4], [0.9, -4.3], [1.35, -3.2], [1.45, -1.0], [1.35, 1.2], [0.95, 3.0], [0.4, 4.3], [0.0, 4.5]], 8, { sy: 0.62 }), PART.BODY));
+  const prof = [[0.0, -4.4], [0.9, -4.3], [1.35, -3.2], [1.45, -1.0], [1.35, 1.2], [0.95, 3.0], [0.4, 4.3], [0.0, 4.5]];
+  parts.push(tag(hull(prof, 8, { sy: 0.62 }), PART.BODY));
+  parts.push(...flankBand(prof, 0.62, -0.05, 0.28, -3.3, 3.3, 6, 0.08, PART.ACCENT));
+  parts.push(tag(box(1.1, 0.25, 0.35, 0, 0.8, -0.4), PART.TRIM)); // light-bar mount, seated on the roof
   parts.push(tag(new THREE.SphereGeometry(1, 8, 5, 0, Math.PI * 2, 0, Math.PI * 0.5).scale(0.95, 0.62, 1.8).translate(0, 0.35, 1.2), PART.GLASS));
   parts.push(tag(box(1.7, 0.2, 0.45, 0, 0.98, -0.4), PART.LIGHTBAR));
   for (const sx of [1, -1]) {
-    parts.push(tag(box(0.08, 0.28, 6.2, sx * 1.36, -0.05, 0), PART.ACCENT));
     parts.push(tag(ring(0.62, 0.17, 4, 12).rotateX(Math.PI / 2).translate(sx * 1.8, -0.2, -1.8), PART.TRIM));
-    parts.push(tag(new THREE.CircleGeometry(0.5, 10).rotateX(Math.PI / 2).translate(sx * 1.8, -0.3, -1.8), PART.LIFT));
+    liftFan(parts, 0.48, sx * 1.8, -0.22, -1.8);
   }
   parts.push(tag(box(1.4, 0.1, 0.14, 0, 0.0, 4.25), PART.HEAD));
   parts.push(tag(box(1.6, 0.14, 0.1, 0, 0.12, -4.35), PART.TAIL));

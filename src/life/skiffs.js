@@ -10,6 +10,7 @@ import { FLOATING_ISLANDS, CHORUS } from '../world/layout.js';
 // trailing plume, so the exhaust hangs in the air and bends through every turn.
 
 const _v = new THREE.Vector3(), _t = new THREE.Vector3(), _n = new THREE.Vector3(), _q = new THREE.Quaternion(), _m = new THREE.Matrix4();
+const _w = new THREE.Vector3(), _up = new THREE.Vector3(0, 1, 0), _zAxis = new THREE.Vector3(0, 0, 1), _qr = new THREE.Quaternion();
 
 function loop(center, rx, rz, y, amp, n = 64, phase = 0, lobes = 2) {
   const pts = [];
@@ -115,13 +116,13 @@ export class Skiffs {
       const tan = c.curve.getTangentAt(c.u, _t);
       const ahead = c.curve.getTangentAt((c.u + 0.004) % 1, _n);
       // bank into the turn: lateral acceleration from the change of heading
-      const turn = new THREE.Vector3().crossVectors(tan, ahead).y;
+      const turn = tan.z * ahead.x - tan.x * ahead.z;   // (tan x ahead).y
       const targetRoll = THREE.MathUtils.clamp(-turn * 90, -1.1, 1.1);
       c.roll += (targetRoll - c.roll) * (1 - Math.exp(-dt * 2.5));
-      _m.lookAt(p.clone().add(tan), p, new THREE.Vector3(0, 1, 0));
+      _m.lookAt(_w.copy(p).add(tan), p, _up);
       _q.setFromRotationMatrix(_m);
       c.mesh.position.copy(p);
-      c.mesh.quaternion.copy(_q).multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), c.roll));
+      c.mesh.quaternion.copy(_q).multiply(_qr.setFromAxisAngle(_zAxis, c.roll));
       c.mesh.updateMatrixWorld();
       const climb = tan.y;
       const throttle = THREE.MathUtils.clamp(0.9 + climb * 2.0 + Math.abs(turn) * 8, 0.5, 1.4);
@@ -130,7 +131,7 @@ export class Skiffs {
       c.glows.forEach((g, j) => {
         const tr = c.trails[j];
         if (far) { tr.mesh.visible = false; return; }
-        const noz = g.p.clone().add(new THREE.Vector3(0, 0, -0.2)).applyMatrix4(c.mesh.matrixWorld);
+        const noz = _w.copy(g.p).setZ(g.p.z - 0.2).applyMatrix4(c.mesh.matrixWorld);
         tr.update(noz, throttle * 1.1, dt, 1);
       });
     }
