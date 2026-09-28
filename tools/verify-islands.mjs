@@ -102,7 +102,7 @@ check('massif civic approaches meet their squares and front edges without crossi
   }
 });
 check('tower and needle collars rise monotonically in actual mesh rows',()=>{
-  let count=0;for(const {geometry:g}of result.auditParts){const q=g.userData.islandLatheProfile;if(!q)continue;const p=g.attributes.position;for(let row=1;row<q.rows;row++)assert(p.getY(row*(q.segments+1))>=p.getY((row-1)*(q.segments+1))-.0001,'a tower collar folds down through the preceding body');count++;}assert(count>100);stats.monotonicTowerProfiles=count;
+  let count=0;for(const {geometry:g}of result.auditParts){const q=g.userData.islandLatheProfile;if(!q)continue;const p=g.attributes.position;for(let row=1;row<q.rows;row++)assert(p.getY(row*(q.segments+1))>=p.getY((row-1)*(q.segments+1))-.0001,'a tower collar folds down through the preceding body');count++;}assert(count>=8,`only ${count} tower lathes audited`);   // Thalassa, Anchorage and Orison now build from islands/cityKit.js (verify-island-cities.mjs audits those)stats.monotonicTowerProfiles=count;
 });
 check('island geometry stays in its own geographical envelope',()=>{
   for(const c of result.cities.islands){
