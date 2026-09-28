@@ -1,6 +1,6 @@
 // The towns of the Rim and the country between them.
 //
-// Ten towns are strung along Rim Way like beads, each grown round a rim arcology or a ward
+// Eleven towns are strung along Rim Way like beads, each grown round a rim arcology or a ward
 // bridgehead, with designed country between: orchards and vineyards on the slopes, market
 // gardens and allotments, sports grounds, an amphitheatre, the botanical ring, an observatory,
 // memorial gardens by the Gate, farm hamlets. Each quarter of the ring has its own character:
@@ -28,7 +28,8 @@ export const QUARTERS = {
 // a0, a1: the town's extent along the ring (degrees); centre: the bearing of its market square
 export const RIM_TOWNS = [
   { name: 'Tidemark', a0: 12.0, a1: 36.0, centre: 25.0, quarter: 'harbour' },
-  { name: 'Halewater', a0: 45.0, a1: 62.0, centre: 50.5, quarter: 'harbour' },
+  { name: 'Halewater', a0: 45.0, a1: 58.5, centre: 50.5, quarter: 'harbour' },
+  { name: 'Seagate', a0: 63.5, a1: 74.5, centre: 66.5, quarter: 'gate' },
   { name: 'Southwick', a0: 102.0, a1: 118.0, centre: 104.5, quarter: 'gate' },
   { name: 'Coralgate', a0: 125.5, a1: 141.0, centre: 128.5, quarter: 'gate' },
   { name: 'Westerly', a0: 150.5, a1: 169.5, centre: 161.5, quarter: 'garden' },
@@ -44,13 +45,14 @@ export const RIM_TOWNS = [
 // vineyards, market gardens or meadow as their ground and quarter suggest).
 export const RIM_COUNTRY = [
   { a0: 36.0, a1: 45.0, want: ['sports', 'orchard', 'market', 'allotments'] },
-  { a0: 62.0, a1: 80.0, want: ['amphitheatre', 'memorial', 'orchard', 'palmGrove', 'meadow'] },
+  { a0: 58.5, a1: 63.5, want: ['orchard', 'palmGrove'] },
+  { a0: 74.5, a1: 80.0, want: ['memorial', 'palmGrove'] },
   { a0: 96.0, a1: 102.0, want: ['memorial', 'orchard'] },
   { a0: 118.0, a1: 125.5, want: ['botanical', 'market', 'orchard'] },
   { a0: 141.0, a1: 150.5, want: ['orchard', 'palmGrove'] },
   { a0: 169.5, a1: 196.5, want: ['vineyard', 'hamlet', 'vineyard', 'orchard', 'sports', 'vineyard', 'market'] },
   { a0: 213.5, a1: 226.5, want: ['vineyard', 'orchard', 'meadow'] },
-  { a0: 243.0, a1: 256.5, want: ['observatory', 'orchard', 'allotments', 'vineyard'] },
+  { a0: 243.0, a1: 256.5, want: ['observatory', 'amphitheatre', 'orchard', 'allotments', 'vineyard'] },
   { a0: 272.5, a1: 287.0, want: ['market', 'hamlet', 'allotments', 'orchard', 'market'] },
   { a0: 302.5, a1: 310.5, want: ['orchard', 'palmGrove'] },
   { a0: 341.0, a1: 372.0, want: ['sports', 'orchard', 'market', 'palmGrove'] },

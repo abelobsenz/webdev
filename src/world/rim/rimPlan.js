@@ -11,7 +11,7 @@ import { mulberry32 } from '../noise.js';
 // square at every channel. The lagoon strand is a continuous promenade on the 3.4 m contour
 // (an esplanade with an arcaded frontage in the towns, a palm walk in the country); the sea side
 // has a parade on the 4.4 m contour in the towns and a dune walk in the country.
-// The ten towns are planned towns in the frame: streets that run with Rim Way every 70-96 m
+// The eleven towns are planned towns in the frame: streets that run with Rim Way every 70-96 m
 // (by quarter), streets and lanes that cross the rim from the strand to the parade every 62-80 m,
 // so every block is a perimeter block round a garden court; a market square on Rim Way and a
 // harbour square on the strand at each town's centre. Between the towns the country is divided
@@ -541,7 +541,7 @@ export function planRim({ ground, towers, heads, gateFeet }) {
         const r = rnd();
         p.kind = p.slope > 0.24 ? 'wood'
           : p.slope > 0.08 && (p.quarter === 'garden' || p.quarter === 'upland') && r < 0.6 ? 'vineyard'
-            : p.width > 40 && r < 0.4 ? 'palmGrove' : p.width > 40 && r < 0.68 ? 'market' : 'meadow';
+            : p.width > 40 && r < 0.5 ? 'palmGrove' : p.width > 40 && r < 0.8 ? 'market' : 'meadow';
       }
     }
   }

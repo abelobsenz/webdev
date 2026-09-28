@@ -109,16 +109,18 @@ function allotments(Kn, Kf, site, ground) {
   for (const p of site.plots) {
     const o = { x: p.x, z: p.z, yaw: p.yaw };
     // two raised beds along the plot, a path between; a shed at the back of half the plots
-    [-3.6, 0.6].forEach((zc, bi) => {
-      const P = [localToWorld(o, -4.6, zc), localToWorld(o, 0, zc), localToWorld(o, 4.6, zc)];
-      const top = p.soil && p.soil[bi] ? K.CERAMIC : K.GARDEN;
-      Kn.strip(P, 1.1, (x, z) => ground(x, z) - 0.3, (x, z) => ground(x, z) + 0.38, K.TIMBER, top);
-      Kf.strip([P[0], P[2]], 1.1, (x, z) => ground(x, z) - 0.3, (x, z) => ground(x, z) + 0.36, top, top);
+    // raised beds across the plot (a shed and its patch at the back of some), crops or dug soil
+    const beds = p.shed ? [-5.4, -2.7, 0.0] : [-5.4, -2.7, 0.0, 2.7, 5.4];
+    beds.forEach((zc, bi) => {
+      const P = [localToWorld(o, -4.9, zc), localToWorld(o, 0, zc), localToWorld(o, 4.9, zc)];
+      const top = (p.soil && p.soil[bi % 2]) === (bi % 2 === 0) ? K.CERAMIC : K.GARDEN;
+      Kn.strip(P, 0.8, (x, z) => ground(x, z) - 0.3, (x, z) => ground(x, z) + 0.36, K.TIMBER, top);
+      Kf.strip([P[0], P[2]], 0.8, (x, z) => ground(x, z) - 0.3, (x, z) => ground(x, z) + 0.34, top, top);
     });
     // a low box hedge along the plot's path side
-    const H = [localToWorld(o, -5.6, -6.2), localToWorld(o, 0, -6.2), localToWorld(o, 5.6, -6.2)];
+    const H = [localToWorld(o, -5.7, -7.6), localToWorld(o, 0, -7.6), localToWorld(o, 5.7, -7.6)];
     Kn.strip(H, 0.3, (x, z) => ground(x, z) - 0.3, (x, z) => ground(x, z) + 0.8, K.GARDEN, K.GARDEN);
-    if (p.shed) house(Kn, Kf, ground, o, 2.2, 5.0, 4.1, 7.6, 2.1, 1.1, K.TIMBER, K.TIMBER, { eave: 0.25 });
+    if (p.shed) house(Kn, Kf, ground, o, 1.6, 4.6, 3.6, 7.4, 2.1, 1.1, K.TIMBER, K.TIMBER, { eave: 0.25 });
   }
 }
 

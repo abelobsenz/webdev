@@ -323,8 +323,8 @@ export function placeRimSites(plan, rim, ground) {
         const plots = [];
         let rMin = 1e9, rMax = -1e9;
         for (let i = 0; i <= p.nb; i++) { rMin = Math.min(rMin, p.lo[i]); rMax = Math.max(rMax, p.hi[i]); }
-        for (let r = rMin + 12; r + 9 < rMax; r += 20) {
-          for (let a = p.a0 + 10 / r; a < p.a1 - 10 / r; a += 15 / r) {
+        for (let r = rMin + 12; r + 9 < rMax; r += 19) {
+          for (let a = p.a0 + 10 / r; a < p.a1 - 10 / r; a += 14 / r) {
             const fr = frameAt(a + 6 / r, r + 8.5), yaw = Math.atan2(fr.t[1], fr.t[0]);
             const P = rectPoly(fr.x, fr.z, yaw, 6, 8.5);
             if (!P.every(([x, z]) => p.inside(x, z, 3))) continue;
@@ -588,7 +588,7 @@ export function placeRimSites(plan, rim, ground) {
     flush();
     if (pieces.length) {
       // one site: its sides meet at the corners
-      const site = { kind: 'hedgerow', pieces, fp: stripOutline(pieces[0], 0.5), h: p.kind === 'orchard' || p.kind === 'vineyard' ? 1.8 : 1.4 };
+      const site = { kind: 'hedgerow', pieces, fp: stripOutline(pieces[0], 0.5), h: p.kind === 'orchard' || p.kind === 'vineyard' ? 1.25 : 1.05 };
       sites.push(site);
       for (const pc of pieces) occ.occupy(stripOutline(pc, 0.5), site);
     }
@@ -634,8 +634,8 @@ export function placeRimSites(plan, rim, ground) {
     for (let i = 0; i <= p.nb; i++) { rMin = Math.min(rMin, p.lo[i]); rMax = Math.max(rMax, p.hi[i]); }
     for (let r = rMin + 14; r < rMax - 10; r += 30) {
       for (let a = p.a0 + 16 / r; a < p.a1 - 12 / r; a += 30 / r) {
-        if (rnd() > 0.5) continue;
-        const sp = list[Math.floor(rnd() * list.length)], n = 3 + Math.floor(rnd() * 4);
+        if (rnd() > 0.72) continue;
+        const sp = list[Math.floor(rnd() * list.length)], n = 4 + Math.floor(rnd() * 5);
         const [cx, cz] = at(a + (rnd() - 0.5) * 10 / r, r + (rnd() - 0.5) * 10);
         for (let k = 0; k < n; k++) {
           const t = (k / n) * Math.PI * 2 + rnd(), d = k ? 5 + rnd() * 3 : 0;
