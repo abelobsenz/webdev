@@ -49,7 +49,24 @@ function loftBody(stations, kindAt, around = 16) {
   const n = g.attributes.normal;
   let dot = 0;
   for (let i = 0; i < n.count; i++) dot += n.getX(i) * pos[i * 3] + n.getY(i) * (pos[i * 3 + 1] - stations[Math.floor(i / cols)].y);
-  if (dot < 0) { for (let k = 0; k < idx.length; k += 3) { const t = idx[k + 1]; idx[k + 1] = idx[k + 2]; idx[k + 2] = t; } g.setIndex(idx); g.computeVertexNormals(); }
+  if (dot < 0) { for (let k = 0; k < idx.length; k += 3) { const t = idx[k + 1]; idx[k + 1] = idx[k + 2]; idx[k + 2] = t; } }
+  // close both ends: a fan on its own vertices (flat normals, no smoothing into the body),
+  // wound to face out along -z at the first station and +z at the last
+  for (const [j, sgn] of [[0, -1], [stations.length - 1, 1]]) {
+    const s = stations[j];
+    const c0 = pos.length / 3;
+    pos.push(0, s.y, s.z); fac.push(0, s.z, kindAt(Math.PI * 0.5, s.z, j));
+    for (let i = 0; i < around; i++) { pos.push(pos[(j * cols + i) * 3], pos[(j * cols + i) * 3 + 1], s.z); fac.push(fac[(j * cols + i) * 3], s.z, fac[(j * cols + i) * 3 + 2]); }
+    for (let i = 0; i < around; i++) {
+      const a = c0 + 1 + i, b = c0 + 1 + ((i + 1) % around);
+      const ax = pos[a * 3] - pos[c0 * 3], ay = pos[a * 3 + 1] - pos[c0 * 3 + 1], bx = pos[b * 3] - pos[c0 * 3], by = pos[b * 3 + 1] - pos[c0 * 3 + 1];
+      if ((ax * by - ay * bx) * sgn >= 0) idx.push(c0, a, b); else idx.push(c0, b, a);
+    }
+  }
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('aFacade', new THREE.Float32BufferAttribute(fac, 3));
+  g.setIndex(idx);
+  g.computeVertexNormals();
   return g;
 }
 
@@ -108,8 +125,10 @@ function ferryGeometry() {
   parts.push(boxG(-2.4, 2.4, 5.9, 7.8, -8, 3, 0));
   parts.push(boxG(-2.6, 2.6, 7.8, 8.1, -8.3, 3.3, 1));
   for (const z of [-11, 9]) {
-    parts.push(boxG(-5.5, 5.5, -0.4, -0.1, z - 1.2, z + 1.2, 10));
-    for (const x of [-4.5, 4.5]) parts.push(boxG(x - 0.15, x + 0.15, -0.3, 1.2, z - 0.4, z + 0.4, 10));
+    // foils run 0.8 m under the surface (the route rides at +0.6), struts up into the hull
+    parts.push(boxG(-5.5, 5.5, -1.45, -1.15, z - 1.2, z + 1.2, 10));
+    for (const x of [-4.5, 4.5]) parts.push(boxG(x - 0.15, x + 0.15, -1.3, 1.4, z - 0.4, z + 0.4, 10));
+    parts.push(boxG(-0.2, 0.2, -1.3, 1.0, z - 0.5, z + 0.5, 10));
   }
   parts.push(boxG(-0.15, 0.15, 8.1, 13, 0, 0.3, 10));
   parts.push(boxG(-0.5, 0.5, 13, 13.6, -0.2, 0.5, 2));
@@ -127,7 +146,8 @@ function launchGeometry() {
   parts.push(boxG(-1.1, 1.1, 1.2, 2.5, -3, 1.2, 0));
   parts.push(boxG(-1.25, 1.25, 2.5, 2.7, -3.3, 1.5, 1));
   parts.push(boxG(-0.3, 0.3, 1.0, 1.3, L / 2 - 1.2, L / 2 - 0.9, 2));
-  return mergeClean(parts);
+  // sit the hull in the water: the route rides at +0.35, the keel draws 0.3 m
+  return mergeClean(parts).translate(0, -0.3, 0);
 }
 
 /** A gondola cabin hanging 5 m below its cable (the route runs along the cable). */
