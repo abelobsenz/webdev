@@ -873,6 +873,28 @@ function college(B, L, R, H, lod) {
   return top + 26;
 }
 
+// A closed band between two polygons of equal vertex count (outer and inner): the flat ring
+// at height y, facing up or down - tops of planters and parapets, soffits of overhangs
+function ringBand(B, outer, inner, y, kind, up = true) {
+  const n = outer.length;
+  B.reserve(n * 4, n * 6);
+  const ny = up ? 1 : -1;
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    const a = B.v(outer[i][0], y, outer[i][1], 0, ny, 0, outer[i][0], outer[i][1], kind), b = B.v(outer[j][0], y, outer[j][1], 0, ny, 0, outer[j][0], outer[j][1], kind);
+    const c = B.v(inner[j][0], y, inner[j][1], 0, ny, 0, inner[j][0], inner[j][1], kind), d = B.v(inner[i][0], y, inner[i][1], 0, ny, 0, inner[i][0], inner[i][1], kind);
+    B.quad(a, b, c, d);
+  }
+}
+
+// A solid parapet or planter wall: outer and inner faces and a coping on top, so it reads
+// from inside the roof as well as from the street
+function ringWall(B, outer, inner, y0, y1, kind, topKind = kind) {
+  B.walls(outer, y0, y1, kind);
+  B.walls(inner, y0, y1, kind, { flip: true });
+  ringBand(B, outer, inner, y1, topKind);
+}
+
 // Tidewater: a narrow canal house - brick front, tall windows, a shopfront at the quay, and
 // one of four gables (step, bell, neck, cornice) with a hoist beam under the apex
 function canal(B, L, R, H, lod) {
@@ -884,7 +906,8 @@ function canal(B, L, R, H, lod) {
   B.box(-w / 2 + 0.25, w / 2 - 0.25, -d / 2, zf - 0.3, 0, FH, K.GLASS, K.STONE, { noTop: true });
   B.box(-w / 2, w / 2, -d / 2, zf, FH, top, K.PUNCHED, K.STONE, { bottom: true });
   const g = Math.floor(R() * 4);
-  const rise = Math.min(w * 0.75, 7);
+  // the cornice house hides a low roof behind its attic; the others show a steep gable
+  const rise = g === 3 ? 1.2 : Math.min(w * 0.75, 7);
   // pitched roof, ridge front to back (build in a frame turned a quarter)
   const c0 = B.c, s0 = B.s;
   B.c = Math.cos(L.rot + Math.PI / 2); B.s = Math.sin(L.rot + Math.PI / 2);
@@ -907,13 +930,15 @@ function canal(B, L, R, H, lod) {
     B.vprism([[-w * 0.1, top + rise * 0.98], [w * 0.1, top + rise * 0.98], [0, top + rise * 1.12]], zg0, zg1, K.STONE);
   } else if (g === 2) {
     // neck gable: a tall narrow neck on shoulders
-    B.vprism([[-w / 2, top], [w / 2, top], [w / 2, top + rise * 0.3], [w * 0.22, top + rise * 0.42], [w * 0.22, top + rise * 1.05], [-w * 0.22, top + rise * 1.05], [-w * 0.22, top + rise * 0.42], [-w / 2, top + rise * 0.3]], zg0, zg1, K.PUNCHED, K.STONE);
+    B.vprism([[-w / 2, top], [w / 2, top], [w / 2, top + rise * 0.3], [w * 0.22, top + rise * 0.62], [w * 0.22, top + rise * 1.05], [-w * 0.22, top + rise * 1.05], [-w * 0.22, top + rise * 0.62], [-w / 2, top + rise * 0.3]], zg0, zg1, K.PUNCHED, K.STONE);
   } else {
     // flat cornice, attic storey
     B.box(-w / 2 - 0.2, w / 2 + 0.2, zf - 1.2, zf + 0.35, top, top + 0.6, K.STONE, K.STONE, { bottom: true });
     B.box(-w / 2, w / 2, zg0, zg1, top + 0.6, top + 1.6, K.PUNCHED, K.STONE);
   }
   if (!lod) {
+    // string courses at every floor line and a plinth band over the shopfront
+    for (let k = 1; k < fl; k++) B.box(-w / 2 - 0.06, w / 2 + 0.06, zf, zf + 0.14, k * FH - 0.22, k * FH, K.STONE, K.STONE, { bottom: true });
     // hoist beam, stoop and a door
     const ya = top + rise * (g === 3 ? 0.2 : 0.78);
     B.box(-0.12, 0.12, zf - 0.1, zf + 1.1, ya, ya + 0.24, K.TIMBER, K.TIMBER);
@@ -987,10 +1012,16 @@ function solar(B, L, R, H, lod) {
     const z0 = -sd / 2 - 1 + (i * sd) / rows, z1 = z0 + sd / rows;
     B.vprism([[-sw / 2, top + FH], [sw / 2, top + FH], [sw / 2, top + FH + 2.6], [-sw / 2, top + FH + 2.6]].map(([x, y]) => [x, y]), z0, z0 + 0.3, K.METAL);
     // the sloped panel from the low edge (z1) up to the ridge (z0)
-    const a = B.v(-sw / 2, top + FH, z1, 0, 0.72, 0.69, -sw / 2, 0, K.PV), b = B.v(sw / 2, top + FH, z1, 0, 0.72, 0.69, sw / 2, 0, K.PV);
-    const c = B.v(sw / 2, top + FH + 2.6, z0 + 0.3, 0, 0.72, 0.69, sw / 2, 3.6, K.PV), e = B.v(-sw / 2, top + FH + 2.6, z0 + 0.3, 0, 0.72, 0.69, -sw / 2, 3.6, K.PV);
-    B.reserve(4, 6);
+    const run = Math.max(0.1, z1 - z0 - 0.3), sl = Math.hypot(run, 2.6), pny = run / sl, pnz = 2.6 / sl;
+    B.reserve(10, 12);
+    const a = B.v(-sw / 2, top + FH, z1, 0, pny, pnz, -sw / 2, 0, K.PV), b = B.v(sw / 2, top + FH, z1, 0, pny, pnz, sw / 2, 0, K.PV);
+    const c = B.v(sw / 2, top + FH + 2.6, z0 + 0.3, 0, pny, pnz, sw / 2, sl, K.PV), e = B.v(-sw / 2, top + FH + 2.6, z0 + 0.3, 0, pny, pnz, -sw / 2, sl, K.PV);
     B.quad(a, b, c, e);
+    // triangular cheeks close each tooth at both ends
+    for (const sx of [-1, 1]) {
+      const x = (sx * sw) / 2;
+      B.tri(B.v(x, top + FH, z1, sx, 0, 0, z1, top + FH, K.STONE), B.v(x, top + FH, z0 + 0.3, sx, 0, 0, z0, top + FH, K.STONE), B.v(x, top + FH + 2.6, z0 + 0.3, sx, 0, 0, z0, top + FH + 2.6, K.STONE));
+    }
   }
   if (lod) return top + FH + 2.6;
   // brise-soleil: horizontal golden fins on every floor of the street face, vertical blades between
@@ -1000,7 +1031,7 @@ function solar(B, L, R, H, lod) {
   }
   const nb = Math.floor(w / 3.3);
   for (let i = 0; i <= nb; i++) { const x = -w / 2 + (i * w) / nb; B.box(x - 0.08, x + 0.08, d / 2 - 0.2, d / 2 + 0.8, FH, top - 0.3, K.METAL, K.METAL); }
-  B.walls(rrect(w, d - 1.2, 0.1, 0, -0.6), top, top + 0.9, K.STONE);
+  ringWall(B, rrect(w, d - 1.2, 0, 0, -0.6), rrect(w - 0.5, d - 1.7, 0, 0, -0.6), top, top + 0.9, K.STONE);
   return top + FH + 2.6;
 }
 
@@ -1019,14 +1050,20 @@ function ziggurat(B, L, R, H, lod) {
     const poly = rrect(tw, td, 1.2);
     B.walls(poly, y, y + h, t % 2 ? K.PUNCHED : K.GLASS);
     B.cap(poly, y + h, K.GARDEN);
-    // hanging planting over the lip
-    B.walls(rrect(tw + 0.25, td + 0.25, 1.3), y + h - 1.7, y + h + 0.7, K.GARDEN);
-    if (!lod) B.walls(rrect(tw - 0.5, td - 0.5, 1.1), y + h + 0.7, y + h + 1.0, K.STONE);
+    // a closed planter box round the lip, its planting hanging over the wall below: outer
+    // face, soffit, inner face and a planted top, so no view finds a gap into it
+    const po = rrect(tw + 0.5, td + 0.5, 1.45), pi = rrect(tw - 0.7, td - 0.7, 0.85);
+    B.walls(po, y + h - 1.7, y + h + 0.6, K.GARDEN);
+    ringBand(B, po, poly, y + h - 1.7, K.GARDEN, false);
+    B.walls(pi, y + h, y + h + 0.6, K.STONE, { flip: true });
+    ringBand(B, po, pi, y + h + 0.6, K.GARDEN);
     y += h;
   }
   if (!lod) {
     const tw = w - 2 * step * (tiers - 1) - 3, td = d - 2 * step * (tiers - 1) - 3;
-    for (const sx of [-1, 1]) for (const sz of [-1, 1]) B.box(sx * tw / 2 - 0.15, sx * tw / 2 + 0.15, sz * td / 2 - 0.15, sz * td / 2 + 0.15, y, y + 2.9, K.TIMBER, K.TIMBER);
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) B.box(sx * tw / 2 - 0.15, sx * tw / 2 + 0.15, sz * td / 2 - 0.15, sz * td / 2 + 0.15, y, y + 2.75, K.TIMBER, K.TIMBER);
+    // two beams on the posts carry the rafters
+    for (const sz of [-1, 1]) B.box(-tw / 2 - 0.3, tw / 2 + 0.3, sz * td / 2 - 0.18, sz * td / 2 + 0.18, y + 2.75, y + 2.9, K.TIMBER, K.TIMBER, { bottom: true });
     const m = Math.floor(tw / 1.2);
     for (let i = 0; i <= m; i++) { const x = -tw / 2 + (i * tw) / m; B.box(x - 0.07, x + 0.07, -td / 2, td / 2, y + 2.9, y + 3.1, K.TIMBER, K.TIMBER); }
   }
