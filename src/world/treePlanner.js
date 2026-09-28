@@ -115,6 +115,9 @@ export function planTrees(world) {
     return Math.atan2(gz, -gx);   // yaw that points the local +x (the palm's lean) toward the sea
   };
 
+  // the town's lamps are known before anything is planted (the shore walks' stand in the meadow)
+  if (plan) for (const l of plan.lamps) occupy(l.x, l.z, 2.2, 6);
+
   // ------------------------------------------------ natural placement --
   for (let j = 1; j < N - 1; j++) {
     for (let i = 1; i < N - 1; i++) {

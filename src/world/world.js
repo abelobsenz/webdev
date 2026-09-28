@@ -26,6 +26,7 @@ import { buildFloatingIslands } from './floating.js';
 import { INNER } from './terrain.js';
 import { renderedHeight } from './outerCities.js';
 import { planInnerCivic, buildInnerCivic } from './innerCivic.js';
+import { planShorePromenades } from './innerShore.js';
 
 import { buildInfrastructure, createBeacons } from './infrastructure.js';
 import { Traffic } from '../life/traffic.js';
@@ -154,6 +155,7 @@ export class World {
     // the inner islands' civic buildings: their squares (and the lanes to any in a park) are
     // planned before the street field is baked and the streetscape furnishes the squares
     planInnerCivic(this.plan, this.towers, raw);
+    this.shoreWalks = planShorePromenades(this.plan, raw, this.towers, [...this.infra.stations, ...heads].map((s) => ({ x: s.x, z: s.z, r: s.r || 40 })));
     NATURE_U.uStreets.value = this.plan.field.texture();
     NATURE_U.uStreetFrame.value = this.plan.field.frameTexture();
     progress(0.55); await tick();
