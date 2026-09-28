@@ -4,6 +4,7 @@ import { lathe, sphere, buildShuttle, buildTug } from '../craft/craftClasses.js'
 import { createCraftMaterial } from '../craft/craftMaterial.js';
 import { craftMesh, craftPart, addLamps, placeMerge, placeLamps, pixelRadius } from './craftMesh.js';
 import { LAMP } from './lamps.js';
+import { ctube } from './hull.js';
 import { R_EARTH, bodyDir } from './sim.js';
 
 // Station frames and builders shared by the elevator, the rings and the fleet.
@@ -76,7 +77,7 @@ export function buildPortStation({ junction = false } = {}) {
       const y = 1650 * Math.sin(t * Math.PI / 2);
       pts.push(V(Math.cos(a) * r, y, Math.sin(a) * r));
     }
-    B.tube(pts, 45, 6, CK.BRONZE);
+    ctube(B, pts, 45, 6, CK.BRONZE);
   }
   // concourse wings along the ring (east and west)
   for (const s of [-1, 1]) gallery(B, s * 3100, s * 9800, 480, 260, 170, (i, j) => (i < 4 || i > 13 ? CK.GLASS : (i === 4 || i === 13 ? CK.LANTERN : CK.HULL)));
@@ -94,8 +95,8 @@ export function buildPortStation({ junction = false } = {}) {
   const gates = [];
   for (const s of [-1, 1]) {
     const x = s * 12000, y = -8000;
-    for (const dz of [-500, 500]) B.tube([V(x, -760, dz), V(x, y + 700, dz)], 70, 6, CK.DARK);
-    for (let yy = -1600; yy > y + 700; yy -= 1200) B.tube([V(x, yy, -500), V(x, yy - 600, 500)], 30, 4, CK.DARK);
+    for (const dz of [-500, 500]) ctube(B, [V(x, -760, dz), V(x, y + 700, dz)], 70, 6, CK.DARK);
+    for (let yy = -1600; yy > y + 700; yy -= 1200) ctube(B, [V(x, yy, -500), V(x, yy - 600, 500)], 30, 4, CK.DARK);
     B.push(new THREE.Matrix4().makeTranslation(x, y, 0).multiply(new THREE.Matrix4().makeRotationX(Math.PI / 2)));
     B.torus(720, 70, 48, 10, CK.BRONZE);
     B.torus(640, 22, 48, 6, CK.CONDUIT);
@@ -108,8 +109,8 @@ export function buildPortStation({ junction = false } = {}) {
   // piers north and south past the ring's walls and rotor tubes
   const piers = [];
   for (const s of [-1, 1]) {
-    B.tube([V(0, -560, s * 1250), V(0, -560, s * 21500)], 150, 12, CK.HULL);
-    B.tube([V(0, -380, s * 1400), V(0, -380, s * 21000)], 30, 5, CK.LANTERN);
+    ctube(B, [V(0, -560, s * 1250), V(0, -560, s * 21500)], 150, 12, CK.HULL);
+    ctube(B, [V(0, -380, s * 1400), V(0, -380, s * 21000)], 30, 5, CK.LANTERN);
     for (let z = 3500; z < 21000; z += 3000) {
       B.push(new THREE.Matrix4().makeTranslation(0, -560, s * z));
       lathe(B, [[160, -40, CK.BRONZE], [175, -25, CK.BRONZE], [175, 25, CK.BRONZE], [160, 40, CK.BRONZE]], 12);
@@ -212,7 +213,7 @@ export function buildCounterworks() {
   B.pop();
   for (let k = 0; k < 6; k++) {
     const a = (k / 6) * TAU + 0.26;
-    B.tube([V(Math.cos(a) * 1300, -7600, Math.sin(a) * 1300), V(Math.cos(a) * 14500, 0, Math.sin(a) * 14500)], 130, 8, CK.HULL);
+    ctube(B, [V(Math.cos(a) * 1300, -7600, Math.sin(a) * 1300), V(Math.cos(a) * 14500, 0, Math.sin(a) * 14500)], 130, 8, CK.HULL);
   }
   // mining gantries and ore conveyors on the rock
   for (let k = 0; k < 5; k++) {

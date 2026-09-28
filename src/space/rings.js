@@ -87,7 +87,7 @@ float aaLamp(float x, float P, float w) {
 void main() {
   float u = vRing.x, v = vRing.y, part = vRing.z;
   // below ~2 px across, the far-field ribbon takes over (no aliased dotted lines)
-  if (vWpx < (part > 1.5 ? 33.0 : 2.2)) discard;
+  if (vWpx < ((part > 1.5 && part < 2.5) ? 33.0 : 2.2)) discard;
   vec3 N = normalize(vN);
   if (!gl_FrontFacing) N = -N;
   vec3 p = vWorld;
@@ -110,6 +110,25 @@ void main() {
   float topSide = dot(N, rhat);
   vec3 H = normalize(V + uSunDir);
   float av = abs(v);
+
+#ifdef ROOF
+  // ---- glass vault over the habitat: arched ribs every 2 km, mullions 1 km apart across it,
+  //      clear glass that turns to a Fresnel sheen at grazing angles, a bounded sun glint ----
+  float rib = 1.0 - fPulse(u, 2.0, 0.0, 1.93, fk);
+  float mull = 1.0 - fPulse(v * uWidth + 1.0, 2.0, 0.0, 1.95, fk);
+  float frame = max(rib, mull * 0.55);
+  float ndv = clamp(abs(dot(N, V)), 0.0, 1.0);
+  float Fg = 0.04 + 0.96 * pow(1.0 - ndv, 5.0);
+  float nh = max(dot(N, H), 0.0);
+  vec3 glint = min(sunL * (pow(nh, 400.0) * 1.6 + pow(nh, 40.0) * 0.05) * Fg, sunL * 0.5);
+  vec3 sky = vec3(0.02, 0.03, 0.05) * uSunE * 0.05 * Fg + earthshine * 0.3 * Fg;
+  vec3 frameC = uAlbedo * 0.9 / 3.14159 * (sunL * ndl + earthshine * 2.0) + min(sunL * pow(nh, 60.0) * 0.3, sunL * 0.4);
+  frameC += uHabitatColor * (0.02 + 0.06 * nightSide) * rib;      // the ribs' own faint lamps
+  float glassA = 0.05 + 0.5 * Fg;
+  // premultiplied: frame opaque, glass a thin tint that reflects the sky and the Sun
+  gl_FragColor = vec4(mix(glint + sky, frameC, frame), mix(glassA, 1.0, frame));
+  return;
+#endif
 
   if (part < 0.5) {
     if (topSide > 0.0) {
@@ -150,14 +169,11 @@ void main() {
       float water = max(river, lake);
       alb = mix(alb, vec3(0.02, 0.04, 0.06), water);
       alb = mix(alb, uAlbedo * 1.25, hub);
-      // the roof's ribs catch the sun
-      float ribs = (1.0 - fPulse(u, 2.0, 0.0, 1.96, fk)) * 0.6;
-      alb = mix(alb, uAlbedo, ribs);
       vec3 diff = alb / 3.14159 * sunL * ndl;
-      // glass roof: a bounded glint, stronger over water
+      // water: a bounded glint (the glass roof carries its own)
       float spec = pow(max(dot(N, H), 0.0), 80.0) * 0.45 + pow(max(dot(N, H), 0.0), 20.0) * 0.06;
       float F = 0.04 + 0.96 * pow(clamp(1.0 - dot(N, V), 0.0, 1.0), 5.0);
-      col = diff + min(sunL * spec * F * (0.4 + 0.6 * water), sunL * 0.6);
+      col = diff + min(sunL * spec * F * (0.1 + 0.9 * water), sunL * 0.6);
       col += vec3(0.02, 0.03, 0.05) * F * uSunE * 0.05;
       // lights
       float cell = hash12(floor(vec2(u / 0.35, v * uWidth / 0.35)));
@@ -213,7 +229,7 @@ void main() {
 }
 `;
 
-function buildRing(def, basis, segs) {
+function buildRing(def, basis, segs, roof = false) {
   const { a, b, n, R } = basis;
   const w = def.width;
   const hw = w / 2;
@@ -226,8 +242,31 @@ function buildRing(def, basis, segs) {
     const t = i / NF - 0.5;
     floor.push([t * w, -0.004 * w * (1 - 4 * t * t), 0, 1, t, 0]);
   }
+  // retaining walls as solid slabs: inner face, top, outer face and foot (each its own strip
+  // so the corners stay sharp); a single sheet showed the walls paper-thin edge-on
+  const wt = Math.max(0.15, w * 0.012);
   const wallL = [[-hw, 0, 1, 0, 0.0, 1], [-hw, wall, 1, 0, 1.0, 1]];
   const wallR = [[hw, wall, -1, 0, 1.0, 1], [hw, 0, -1, 0, 0.0, 1]];
+  const slabs = [];
+  for (const sd of [-1, 1]) {
+    const si = sd * hw, so = sd * (hw + wt);
+    slabs.push([[si, wall, 0, 1, 1.0, 1], [so, wall, 0, 1, 1.0, 1]]);
+    slabs.push([[so, wall, sd, 0, 1.0, 1], [so, 0, sd, 0, 0.0, 1]]);
+    slabs.push([[so, 0, 0, -1, 0.0, 1], [si, 0, 0, -1, 0.0, 1]]);
+  }
+  // glass roof: a flat-topped vault from wall top to wall top (clear of the port stations'
+  // masts), normals from the section's own tangent
+  const roofP = [];
+  const NR = 24, rise = w * 0.085;
+  const rf = (t) => wall + rise * Math.sqrt(Math.max(0, 1 - Math.pow(Math.abs(2 * t), 4)));
+  for (let i = 0; i <= NR; i++) {
+    const t = i / NR - 0.5;
+    const e = 0.5 / NR;
+    const ta = Math.max(-0.5, t - e), tb = Math.min(0.5, t + e);
+    let ds = (tb - ta) * w, dd = rf(tb) - rf(ta);
+    const l = Math.hypot(ds, dd) || 1;
+    roofP.push([t * w, rf(t), -dd / l, ds / l, t, 3]);
+  }
   const tubes = [];
   for (const side of [-1, 1]) {
     const tube = [];
@@ -238,7 +277,7 @@ function buildRing(def, basis, segs) {
     }
     tubes.push(tube);
   }
-  const profiles = [floor, wallL, wallR, ...tubes];
+  const profiles = roof ? [roofP] : [floor, wallL, wallR, ...slabs, ...tubes];
   const pos = [], nor = [], ring = [], idx = [];
   const P = new THREE.Vector3(), rad = new THREE.Vector3(), tan = new THREE.Vector3();
   for (const prof of profiles) {
@@ -277,7 +316,7 @@ function buildRing(def, basis, segs) {
   g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
   g.setAttribute('aRing', new THREE.Float32BufferAttribute(ring, 3));
   g.setIndex(idx);
-  g.boundingSphere = new THREE.Sphere(new THREE.Vector3(), R + wall + 5);
+  g.boundingSphere = new THREE.Sphere(new THREE.Vector3(), R + wall + rise + 5);
   return g;
 }
 
@@ -328,6 +367,7 @@ export class Rings {
     this.space = space;
     this.group = new THREE.Group();
     this.meshes = [];
+    this.roofs = [];
     this.far = [];
     this.defs = RINGS;
     this.bases = RINGS.map(ringBasis);
@@ -354,6 +394,18 @@ export class Rings {
       mesh.userData.def = def;
       this.meshes.push(mesh);
       this.group.add(mesh);
+      // the glass vault: its own premultiplied, depth-tested (not depth-writing) mesh
+      // (uniform objects shared with the deck, so update() and setSize() drive both)
+      const roofMat = new THREE.ShaderMaterial({
+        vertexShader: VERT, fragmentShader: FRAG, uniforms: { ...mat.uniforms }, defines: { ROOF: 1 },
+        side: THREE.DoubleSide, transparent: true, depthWrite: false,
+        blending: THREE.CustomBlending, blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor,
+      });
+      const roofMesh = new THREE.Mesh(buildRing(def, basis, Math.round(segs / 2), true), roofMat);
+      roofMesh.frustumCulled = false;
+      roofMesh.renderOrder = 3;
+      this.roofs.push(roofMesh);
+      this.group.add(roofMesh);
       // far-field ribbon (smooth line when the band is thinner than a couple of pixels)
       const pts = [], along = [];
       const NP = 1440;
