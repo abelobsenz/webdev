@@ -5,6 +5,7 @@ import { sweepLoop } from './platform.js';
 import { mulberry32 } from './noise.js';
 import { outerCities, renderedHeight } from './outerCities.js';
 import { terrainHeight } from './terrain.js';
+import { buildMassifTowns } from './massifTowns.js';
 
 // The outer cities of Greater Meridian, seen from the lagoon and the wards at 20-40 km.
 //   Thalassa   a white city in terraces following the contours of its island, a temple of
@@ -15,6 +16,7 @@ import { terrainHeight } from './terrain.js';
 //   Vesper     low white town of domes round its harbour, a cathedral spire, a tall lighthouse
 //   Austral    one great spire among a ring of towers
 //   Ridgeholm, Highgate, Cloudmere: terrace towns stepping up the massif's southern slopes
+//              (built in massifTowns.js)
 // Every island city has a harbour built out to the 3.5 m isobath on the coast facing the
 // capital: a quay with its sea wall, moles with lighthouses, a ferry pier, a waterfront row.
 // Everything stands on the terrain exactly as it is drawn (renderedHeight), and is massing
@@ -325,42 +327,6 @@ function buildAustral(parts, c, rnd, lights) {
   placeRandom(c, rnd, 320, 120, 2200, 0.85, 3, 240, (x, z) => { const w = 26 + rnd() * 50, d = 22 + rnd() * 34; parts.push(block(x, groundMin(x, z, Math.max(w, d) * 0.5), z, 12 + rnd() * 34, w, d, c.toward + (rnd() - 0.5) * 0.4)); return Math.max(w, d) * 0.55; }, placed);
 }
 
-function buildMassifTown(parts, m, rnd, lights) {
-  // terraces following the contours of the south-facing slope, a few slim towers, a chapel
-  const x0 = m.town.x - 1000, x1 = m.town.x + 1000;
-  const heights = [14, 32, 54, 80, 110, 144, 182, 224, 270, 320, 374];
-  for (const h of heights) {
-    const pts = [];
-    for (let x = x0; x <= x1; x += 55) {
-      let found = null;
-      for (let z = m.coast.z; z > m.coast.z - 5000; z -= 12) if (renderedHeight(x, z) > h) { found = [x, z]; break; }
-      pts.push(found);
-    }
-    for (let k = 0; k < pts.length - 1; k++) {
-      const a = pts[k], b = pts[k + 1];
-      if (!a || !b || rnd() < 0.2) continue;
-      if (Math.abs(a[1] - b[1]) > 120) continue;
-      const dep = 14 + rnd() * 6;
-      const q = [[a[0] + 2, a[1] - 3], [b[0] - 2, b[1] - 3], [b[0] - 2, b[1] - 3 - dep], [a[0] + 2, a[1] - 3 - dep]];
-      const g0 = Math.min(...q.map(([x, z]) => renderedHeight(x, z)));
-      parts.push(prism4(q, g0 - 6, h + 8 + rnd() * 12, 5, 3));
-    }
-  }
-  const placed = [];
-  for (let k = 0; k < 4; k++) {
-    const x = m.town.x + (rnd() - 0.5) * 1400, z = m.town.z + 400 + (rnd() - 0.5) * 700;
-    const h = renderedHeight(x, z);
-    if (h < 10 || h > 400) continue;
-    const R = 12 + rnd() * 8;
-    parts.push(tower(rnd, x, groundMin(x, z, R) - 4, z, 90 + rnd() * 120, R, 0.1));
-    placed.push({ x, z, r: R });
-  }
-  const cx = m.town.x + 180, cz = m.town.z + 150;
-  const g = groundMin(cx, cz, 20);
-  parts.push(latheFacade([{ r: 8, y: g - 4, kind: 5 }, { r: 8, y: g + 30, kind: 5 }, { r: 6, y: g + 33, kind: 2 }, { r: 5, y: g + 40, kind: 1 }, { r: 0.1, y: g + 72, kind: 1 }], 8).translate(cx, 0, cz));
-  lights.push({ x: cx, y: g + 40, z: cz, c: [1.0, 0.8, 0.55], s: 2.5 });
-}
-
 // ------------------------------------------------------------------ build --
 export function buildSkyline(scene) {
   const oc = outerCities();
@@ -386,10 +352,9 @@ export function buildSkyline(scene) {
     builders[c.style](parts, c, mulberry32(2026 + i * 17), lights);
     add(parts, c.palette, 900 + i, `${c.name} (island city)`, c.light);
   });
-  oc.massif.forEach((m, i) => {
-    const parts = [];
-    buildMassifTown(parts, m, mulberry32(3030 + i * 19), lights);
-    add(parts, m.palette, 950 + i, `${m.name} (massif town)`);
-  });
+  // the massif terrace towns live in massifTowns.js
+  const mt = buildMassifTowns(scene, oc.massif, lights);
+  meshes.push(...mt.meshes);
+  tris += mt.tris;
   return { meshes, tris, lights, cities: oc };
 }
