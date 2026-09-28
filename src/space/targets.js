@@ -96,4 +96,10 @@ TARGET_INFO.lunarReceiving = {
   facts:[['Fluid vessels','4'],['Ferry length','770 m'],['Role','Water, oxygen and metal receiving']],
 };
 
-export const TARGET_ORDER = ['earth', 'meridian', 'halo', 'geo', 'moon', 'sun', 'hearth', 'liner', 'tenders', 'selene', 'foundry', 'lunarport', 'lunarReceiving', 'solarCollector', 'solarService', 'hearthworks', 'harbourTerrace', 'lunarCourt'];
+TARGET_INFO.lunarLanding = {
+  key:'',name:'Medii Landing',district:'The Moon · Bay of the Middle · 0° N 0° E',
+  lore:'Where the Lift from the Tranquillity Exchange comes down, on the shore of the Bay of the Middle. The town steps down to its harbour in four terraces of courtyard houses; behind the Lift stand the five glass domes of the first settlement, now its gardens. Three landing fields lie beyond them, and to the west the mass driver climbs away over the plain toward its launch gate, 36 km out. The Earth never moves from the top of its sky.',
+  facts:[['Lift','380 km to the Exchange'],['Mass driver','36 km, 1.7 km/s'],['Residents','210,000']],
+};
+
+export const TARGET_ORDER = ['earth', 'meridian', 'halo', 'geo', 'moon', 'sun', 'hearth', 'liner', 'tenders', 'selene', 'foundry', 'lunarport', 'lunarReceiving', 'solarCollector', 'solarService', 'hearthworks', 'harbourTerrace', 'lunarCourt', 'lunarLanding'];
