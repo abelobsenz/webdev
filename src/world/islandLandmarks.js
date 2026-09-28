@@ -3,7 +3,7 @@ import { latheFacade, loftSections, sweepTube } from './geom.js';
 import { sweepLoop } from './platform.js';
 import { renderedHeight } from './outerCities.js';
 import { mulberry32 } from './noise.js';
-import { islandPrism, islandFoundation, islandRoad, footprintGround, rectangle, circleFootprint, pointSegmentDistance, smoothPath, islandRoadHeight, gradeIslandRoadNetwork, islandDistrictRoads, islandPolygonsOverlap } from './islandPlan.js';
+import { islandPrism, islandFoundation, islandRoad, footprintGround, rectangle, circleFootprint, pointSegmentDistance, smoothPath, islandRoadHeight, gradeIslandRoadNetwork, islandDistrictRoads, islandPolygonsOverlap, someCircleNear } from './islandPlan.js';
 
 const TAU=Math.PI*2;
 const V=(x,y,z)=>new THREE.Vector3(x,y,z);
@@ -295,7 +295,7 @@ export function buildIslandLandscape(parts,c,plan,lights,keepouts){
     }
     candidates.sort((a,b)=>a.dist-b.dist);
     for(const q of candidates){
-      if(plan.circles.some(o=>o!==plot&&pointSegmentDistance(o.x,o.z,q.p,q.gate)<o.r+1.5))continue;
+      if(someCircleNear(plan.circles,Math.min(q.p[0],q.gate[0])-1.5,Math.min(q.p[1],q.gate[1])-1.5,Math.max(q.p[0],q.gate[0])+1.5,Math.max(q.p[1],q.gate[1])+1.5,o=>o!==plot&&pointSegmentDistance(o.x,o.z,q.p,q.gate)<o.r+1.5))continue;
       // A curved ribbon's diagonal triangulation can differ slightly from the
       // centreline interpolation. Match the actual Float32 road top at the junction.
       const P=q.road.quad.map(p=>p.map(Math.fround)),Y=q.road.heights.map(Math.fround),[x,z]=q.p;

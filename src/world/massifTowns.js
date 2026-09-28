@@ -3,6 +3,7 @@ import { createFacadeMaterial } from './facade.js';
 import { latheFacade, loftSections, sweepTube, mergeClean } from './geom.js';
 import { islandPrism, islandFoundation, islandRoad, footprintGround, rectangle, circleFootprint, pointSegmentDistance, smoothPath, resamplePath } from './islandPlan.js';
 import { mulberry32 } from './noise.js';
+import { buildOuterLOD } from './outerLod.js';
 import { renderedHeight } from './outerCities.js';
 
 // The massif terrace towns: Ridgeholm, Highgate, Cloudmere. Each is a hill town on the lower
@@ -24,6 +25,8 @@ import { renderedHeight } from './outerCities.js';
 const TAU = Math.PI * 2;
 const DH = 10;                       // height between terrace levels (m)
 const NEAR_DIST = 4500;
+const TOWN_CELL = 300, MASS_TIER = 2;
+const MASSIF_LOD = [{ dist: 0, cast: true }, { dist: NEAR_DIST, cast: true }, { dist: 8500, cast: false }];
 
 // ------------------------------------------------------------ solid builder --
 // Triangles are wound to face a given outward direction, so every closed part is correct
@@ -398,7 +401,10 @@ function buildTown(m, rnd, lights, audit = false) {
   // marching-squares contour is only an estimate of terrain height; it is not a
   // landing. Every accepted flight has its own founded landings and connects the
   // promenade of one surviving terrace run to the promenade of the next level.
-  const inside=(p,q,pad=0)=>{let sign=0;for(let i=0;i<q.length;i++){const a=q[i],b=q[(i+1)%q.length],v=(b[0]-a[0])*(p[1]-a[1])-(b[1]-a[1])*(p[0]-a[0]);if(Math.abs(v)<pad*Math.hypot(b[0]-a[0],b[1]-a[1]))return false;if(v){if(sign&&Math.sign(v)!==sign)return false;sign=Math.sign(v);}}return true;};
+  const insideBox=new WeakMap(),inside=(p,q,pad=0)=>{let bb=insideBox.get(q);if(bb===undefined){let x0=Infinity,x1=-Infinity,z0=Infinity,z1=-Infinity,area=0;for(let i=0;i<q.length;i++){const a=q[i],b=q[(i+1)%q.length];x0=Math.min(x0,a[0]);x1=Math.max(x1,a[0]);z0=Math.min(z0,a[1]);z1=Math.max(z1,a[1]);area+=a[0]*b[1]-b[0]*a[1];}bb=Math.abs(area)>1e-6?[x0-1e-3,x1+1e-3,z0-1e-3,z1+1e-3]:null;insideBox.set(q,bb);}
+    // a point clearly outside the bounding box of a non-degenerate polygon is outside it
+    if(bb&&(p[0]<bb[0]||p[0]>bb[1]||p[1]<bb[2]||p[1]>bb[3]))return false;
+    let sign=0;for(let i=0;i<q.length;i++){const a=q[i],b=q[(i+1)%q.length],v=(b[0]-a[0])*(p[1]-a[1])-(b[1]-a[1])*(p[0]-a[0]);if(Math.abs(v)<pad*Math.hypot(b[0]-a[0],b[1]-a[1]))return false;if(v){if(sign&&Math.sign(v)!==sign)return false;sign=Math.sign(v);}}return true;};
   // A promenade follows the surveyed land, not just the interpolated contour.
   // Where a bend brings a local ridge through its floor, ease the walk outward
   // on a founded stone ledge and move its balustrade with it.
@@ -557,7 +563,7 @@ function buildTown(m, rnd, lights, audit = false) {
   base.components[0].network=network;
   for(const plan of connectedPlans)terraceRun(base,near,plan.run,plan.L,plan.garden,mulberry32(plan.seed),landings,lights,stairCorridors,plan.id,terraceQuads.filter(t=>t.id===plan.id).map(t=>t.walkQ),terraceQuads.filter(t=>t.L===plan.L).map(t=>t.walkQ));
 
-  const baseStructure=base.geometry(),nearStructure=near.geometry();
+  const baseStructure=audit?base.geometry():null,nearStructure=audit?near.geometry():null;
   const auditParts=[];
   if(audit){
     for(const [solid,geo]of [[base,baseStructure],[near,nearStructure]])for(const part of solid.components){
@@ -566,9 +572,13 @@ function buildTown(m, rnd, lights, audit = false) {
     }
     for(const geometry of [...lathes,...nearLathes])auditParts.push({name:`${m.name} lathe`,geometry});
   }
-  const baseGeo = mergeClean([baseStructure, ...lathes].filter(Boolean));
-  const nearGeo = mergeClean([nearStructure, ...nearLathes].filter(Boolean));
-  return { baseGeo, nearGeo, auditParts, center: new THREE.Vector3(C.x, y0, C.z) };
+  // Distance tiers for outerLod.js: the stair flights (tens of thousands of treads)
+  // and the near set are detail; terraces, houses, walls and towers are the massing.
+  const items=[...solidItems(base,MASS_TIER),...solidItems(near,0)];
+  for(const g of lathes)items.push({geo:g,tier:MASS_TIER});
+  for(const g of nearLathes)items.push({geo:g,tier:0});
+  let tris=0;for(const it of items)tris+=(it.geo.index?it.geo.index.count:it.geo.attributes.position.count)/3;
+  return { items, tris, auditParts, center: new THREE.Vector3(C.x, y0, C.z) };
 }
 
 /** Marching squares: the polylines where the height grid crosses level L. */
@@ -790,33 +800,40 @@ export function buildMassifTowns(scene, towns, lights, {audit=false} = {}) {
   const meshes = [],auditParts=[];
   let tris = 0;
   towns.forEach((m, i) => {
-    const { baseGeo, nearGeo, center, auditParts:townParts } = buildTown(m, mulberry32(3030 + i * 19), lights,audit);
+    const { items, tris:townTris, auditParts:townParts } = buildTown(m, mulberry32(3030 + i * 19), lights,audit);
     for(const part of townParts)auditParts.push(part);
     const mat = createFacadeMaterial('fieldstone', 950 + i, { litFrac: 0.62, band: 128 });
-    const mk = (geo, name) => {
-      const me = new THREE.Mesh(geo, mat);
-      me.name = name;
-      me.castShadow = true;
-      me.receiveShadow = true;
-      tris += geo.index.count / 3;
-      return me;
-    };
-    const b = mk(baseGeo, `${m.name} (massif town)`);
-    b.matrixAutoUpdate = false;
-    b.updateMatrix();
-    scene.add(b);
-    meshes.push(b);
-    // the near set: stairs, parapets, chimneys, funicular furniture — dropped with distance
-    const lod = new THREE.LOD();
-    lod.name = `${m.name} (near detail)`;
-    lod.position.copy(center);
-    const n = mk(nearGeo, `${m.name} (near detail mesh)`);
-    n.position.copy(center).negate();
-    lod.addLevel(n, 0);
-    lod.addLevel(new THREE.Object3D(), NEAR_DIST);
-    lod.updateMatrixWorld(true);
-    scene.add(lod);
-    meshes.push(n);
+    tris += townTris;
+    // near detail (stairs, parapets, chimneys, funicular furniture) to NEAR_DIST, the
+    // massing beyond it; past the shadow range the massing stops casting
+    meshes.push(...buildOuterLOD(scene, items, mat, { cell: TOWN_CELL, name: `${m.name} (massif town)`, levels: MASSIF_LOD }));
   });
   return { meshes, tris, auditParts };
+}
+
+/** Bucket a Solid's triangles by cell (triangle centroid) into geometry items; the
+ *  flights of a stair (components flagged .stair and the ones they span) are tier 0. */
+function solidItems(S, tier) {
+  if (!S.pos.length) return [];
+  const nv = S.pos.length / 3, vt = new Int8Array(nv).fill(tier);
+  if (tier) for (let i = 0; i < S.components.length; i++) {
+    const e = S.components[i].stair;
+    if (!e) continue;
+    for (let k = 0; k < e.components && i + k < S.components.length; k++) { const c = S.components[i + k]; vt.fill(0, c.start, c.start + c.count); }
+  }
+  const buckets = new Map();
+  for (let v = 0; v < nv; v += 3) {
+    const o = v * 3, x = (S.pos[o] + S.pos[o + 3] + S.pos[o + 6]) / 3, z = (S.pos[o + 2] + S.pos[o + 5] + S.pos[o + 8]) / 3;
+    const cx = Math.floor(x / TOWN_CELL), cz = Math.floor(z / TOWN_CELL), t = vt[v], key = cx + ',' + cz + ',' + t;
+    let b = buckets.get(key);
+    if (!b) buckets.set(key, b = { pos: [], fac: [], tier: t, x: (cx + .5) * TOWN_CELL, z: (cz + .5) * TOWN_CELL });
+    for (let j = o; j < o + 9; j++) { b.pos.push(S.pos[j]); b.fac.push(S.fac[j]); }
+  }
+  return [...buckets.values()].map((b) => {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(b.pos, 3));
+    g.setAttribute('aFacade', new THREE.Float32BufferAttribute(b.fac, 3));
+    g.computeVertexNormals();
+    return { geo: g, tier: b.tier, x: b.x, z: b.z };
+  });
 }

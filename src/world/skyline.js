@@ -6,7 +6,8 @@ import { mulberry32 } from './noise.js';
 import { outerCities, renderedHeight } from './outerCities.js';
 import { terrainHeight } from './terrain.js';
 import { buildMassifTowns } from './massifTowns.js';
-import { islandPrism, islandFoundation, islandRoad, footprintGround, rectangle, circleFootprint, buildIslandPlan, pointSegmentDistance, islandRoadHeight } from './islandPlan.js';
+import { buildOuterLOD } from './outerLod.js';
+import { islandPrism, islandFoundation, islandRoad, footprintGround, rectangle, circleFootprint, buildIslandPlan, pointSegmentDistance, islandRoadHeight, someCircleNear } from './islandPlan.js';
 import { buildIslandLandscape } from './islandLandmarks.js';
 
 /** Everything built on the island land (districts, landmarks, villas, lighthouses) as keep-out
@@ -265,7 +266,7 @@ function countryside(parts, c, rnd, lights, placed, n) {
     const fg=footprintGround(q);
     const gMin = fg.min, gMax = fg.max;
     if (gMin < 4 || gMax - gMin > (big ? 10 : 6)) continue;
-    if (placed.some((p) => Math.hypot(p.x - x, p.z - z) < p.r + (big ? 60 : 24)) || (c.plan && (!c.plan.free(x, z, big ? 62 : 26) || c.plan.sites.some(s=>Math.hypot(s.x-x,s.z-z)<700)))) continue;
+    if (circleGridHit(placed, x, z, big ? 60 : 24) || (c.plan && (!c.plan.free(x, z, big ? 62 : 26) || c.plan.sites.some(s=>Math.hypot(s.x-x,s.z-z)<700)))) continue;
     if(c.plan.holdingPaths.some(([a,b])=>pointSegmentDistance(x,z,a,b)<(big?60:24)+3))continue;
     let access=null;
     for(let side=0;side<q.length;side++){
@@ -273,7 +274,7 @@ function countryside(parts, c, rnd, lights, placed, n) {
       for(const route of c.plan.routes)for(let j=1;j<route.points.length;j++){
         const a=route.points[j-1],b=route.points[j],dx=b[0]-a[0],dz=b[1]-a[1],t=Math.max(0,Math.min(1,((gate[0]-a[0])*dx+(gate[1]-a[1])*dz)/(dx*dx+dz*dz||1))),p=[a[0]+dx*t,a[1]+dz*t],distance=Math.hypot(p[0]-gate[0],p[1]-gate[1]);
         if(distance>420||(access&&distance>=access.distance))continue;
-        if(placed.some(o=>pointSegmentDistance(o.x,o.z,p,gate)<o.r+2))continue;
+        if(someCircleNear(placed,Math.min(p[0],gate[0])-2,Math.min(p[1],gate[1])-2,Math.max(p[0],gate[0])+2,Math.max(p[1],gate[1])+2,o=>pointSegmentDistance(o.x,o.z,p,gate)<o.r+2))continue;
         access={p,gate,distance};
       }
     }
@@ -517,13 +518,14 @@ function reserveRoad(points,width){
     for(let x=Math.floor((Math.min(a[0],b[0])-seg.r)/ROAD_CELL);x<=Math.floor((Math.max(a[0],b[0])+seg.r)/ROAD_CELL);x++)for(let z=Math.floor((Math.min(a[1],b[1])-seg.r)/ROAD_CELL);z<=Math.floor((Math.max(a[1],b[1])+seg.r)/ROAD_CELL);z++){const key=x+','+z;if(!ROAD_CLEARANCE.has(key))ROAD_CLEARANCE.set(key,[]);ROAD_CLEARANCE.get(key).push(seg);}
   }
 }
+const circleGridHit = (list, x, z, r) => someCircleNear(list, x - r, z - r, x + r, z + r, (p) => Math.hypot(p.x - x, p.z - z) < p.r + r);
 /** Is a circle (x, z, r) clear of the island cities, their harbours and countryside? */
 export function islandCityFree(x, z, r = 0) {
   for(let ix=Math.floor((x-r)/ROAD_CELL);ix<=Math.floor((x+r)/ROAD_CELL);ix++)for(let iz=Math.floor((z-r)/ROAD_CELL);iz<=Math.floor((z+r)/ROAD_CELL);iz++)for(const s of ROAD_CLEARANCE.get(ix+','+iz)||[])if(pointSegmentDistance(x,z,s.a,s.b)<r+s.r+1)return false;
   for (const { c, placed, plan } of FOOTPRINTS) {
     if (Math.hypot(x - c.ix, z - c.iz) > c.coast.s * 1.3 + 2000) continue;
-    for (const p of placed) if (Math.hypot(p.x - x, p.z - z) < p.r + r) return false;
-    if(plan && (!plan.isRoadFree(x,z,r) || plan.circles.some(p=>Math.hypot(p.x-x,p.z-z)<p.r+r)))return false;
+    if (circleGridHit(placed, x, z, r)) return false;
+    if(plan && (!plan.isRoadFree(x,z,r) || circleGridHit(plan.circles, x, z, r)))return false;
     const Q = c.quayLine;
     for (let k = 0; k < Q.length - 1; k++) if (segDist(x, z, Q[k], Q[k + 1]) < 200 + r) return false;
     if (Math.hypot(x - c.station.x, z - c.station.z) < 220 + r) return false;
@@ -531,6 +533,7 @@ export function islandCityFree(x, z, r = 0) {
   return true;
 }
 
+const ISLAND_LOD = [{ dist: 0, cast: true }, { dist: 2000, cast: true }, { dist: 4500, cast: true }, { dist: 8500, cast: false }];
 export function buildSkyline(scene, { audit = false } = {}) {
   FOOTPRINTS.length = 0;
   ROAD_CLEARANCE.clear();
@@ -543,17 +546,27 @@ export function buildSkyline(scene, { audit = false } = {}) {
   const builders = { terraced: buildThalassa, port: buildAnchorage, needles: buildOrison, domes: buildVesper, spire: buildAustral };
   const add = (parts, pal, seed, name, light) => {
     if(audit)for(const geometry of parts)auditParts.push({name,geometry});
-    const geo = mergeClean(parts.filter((g) => g && g.attributes.position.count));
     const mat = createFacadeMaterial(pal, seed, { litFrac: 0.62, band: 128, lampTint: light ? light.map((v) => v / Math.max(...light)) : undefined });
-    const m = new THREE.Mesh(geo, mat);
-    m.name = name;
-    m.matrixAutoUpdate = false;
-    m.updateMatrix();
-    m.castShadow = true;
-    m.receiveShadow = true;
-    scene.add(m);
-    meshes.push(m);
-    tris += geo.index.count / 3;
+    // Distance tiers (see outerLod.js): stairs, entries and small furniture only up
+    // close; the street ribbons to a few km; the connecting and regional roads to the
+    // edge of the shadow range; buildings, terraces and landmarks everywhere.
+    const items = [];
+    for (const g of parts) {
+      if (!g || !g.attributes.position.count) continue;
+      const u = g.userData;
+      let tier = 3;
+      if (u.islandStair || u.islandEntry) tier = 0;
+      else if (u.islandRole || u.islandAccess) tier = 2;
+      else if (u.islandRoad) tier = 1;
+      else {
+        g.computeBoundingBox();
+        const b = g.boundingBox;
+        if (Math.max(b.max.x - b.min.x, b.max.y - b.min.y, b.max.z - b.min.z) < 10) tier = 0;
+      }
+      items.push({ geo: g, tier });
+      tris += (g.index ? g.index.count : g.attributes.position.count) / 3;
+    }
+    meshes.push(...buildOuterLOD(scene, items, mat, { cell: 700, name, levels: ISLAND_LOD }));
   };
   oc.islands.forEach((c, i) => {
     const parts = [];

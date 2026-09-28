@@ -8,8 +8,40 @@ export const pointSegmentDistance = (x, z, a, b) => {
   return Math.hypot(x - a[0] - dx * f, z - a[1] - dz * f);
 };
 
+// A lazily extended grid over an append-only list of circles {x, z, r}. Each circle
+// is filed in every cell its bounding square touches; someCircleNear() runs `test`
+// on the circles filed in the cells of a query box and reports whether any passes.
+// A circle within p.r + pad of any point of the box always shares a cell with the box
+// grown by pad, so callers pass that grown box and get the same answer as a scan.
+const CIRCLE_CELL = 96, CIRCLE_GRIDS = new WeakMap();
+export function someCircleNear(list, x0, z0, x1, z1, test) {
+  let g = CIRCLE_GRIDS.get(list);
+  if (!g || g.n > list.length) CIRCLE_GRIDS.set(list, g = { n: 0, cells: new Map() });
+  for (; g.n < list.length; g.n++) {
+    const p = list[g.n];
+    for (let ix = Math.floor((p.x - p.r) / CIRCLE_CELL); ix <= Math.floor((p.x + p.r) / CIRCLE_CELL); ix++)
+      for (let iz = Math.floor((p.z - p.r) / CIRCLE_CELL); iz <= Math.floor((p.z + p.r) / CIRCLE_CELL); iz++) {
+        const key = ix * 65536 + iz;
+        let c = g.cells.get(key);
+        if (!c) g.cells.set(key, c = []);
+        c.push(p);
+      }
+  }
+  for (let ix = Math.floor(x0 / CIRCLE_CELL); ix <= Math.floor(x1 / CIRCLE_CELL); ix++)
+    for (let iz = Math.floor(z0 / CIRCLE_CELL); iz <= Math.floor(z1 / CIRCLE_CELL); iz++) {
+      const c = g.cells.get(ix * 65536 + iz);
+      if (c) for (const p of c) if (test(p)) return true;
+    }
+  return false;
+}
+
 export function islandPolygonsOverlap(a,b){
-  for(const q of [a,b])for(let i=0;i<q.length;i++){const p=q[i],r=q[(i+1)%q.length],nx=-(r[1]-p[1]),nz=r[0]-p[0],A=a.map(p=>p[0]*nx+p[1]*nz),B=b.map(p=>p[0]*nx+p[1]*nz);if(Math.max(...A)<=Math.min(...B)+.00001||Math.max(...B)<=Math.min(...A)+.00001)return false;}return true;
+  for(let s=0;s<2;s++){const q=s?b:a;for(let i=0;i<q.length;i++){const p=q[i],r=q[(i+1)%q.length],nx=-(r[1]-p[1]),nz=r[0]-p[0];
+    let aMin=Infinity,aMax=-Infinity,bMin=Infinity,bMax=-Infinity;
+    for(const v of a){const d=v[0]*nx+v[1]*nz;if(d<aMin)aMin=d;if(d>aMax)aMax=d;}
+    for(const v of b){const d=v[0]*nx+v[1]*nz;if(d<bMin)bMin=d;if(d>bMax)bMax=d;}
+    if(aMax<=bMin+.00001||bMax<=aMin+.00001)return false;}}
+  return true;
 }
 
 /** Footprint sampling includes all boundary edges and a regular interior grid. */
@@ -71,12 +103,16 @@ export function islandFoundation(parts, q, { top, kind = 9, wall = 1, name = 'fo
 }
 
 /** Intersect the actual Float32 triangulated ribbon top in plan. */
+const ROAD_TRIS=[[0,1,2],[0,2,3]];
 export function islandRoadHeight(sections,point){
-  const [x,z]=point;let highest=-Infinity;
+  const [x,z]=point,f=Math.fround;let highest=-Infinity;
   for(let k=1;k<sections.length;k++){
-    const a=sections[k-1],b=sections[k],P=[a.left,a.right,b.right,b.left].map(p=>p.map(Math.fround)),Y=[a.y,a.y,b.y,b.y].map(Math.fround);
-    if(x<Math.min(...P.map(p=>p[0]))-.006||x>Math.max(...P.map(p=>p[0]))+.006||z<Math.min(...P.map(p=>p[1]))-.006||z>Math.max(...P.map(p=>p[1]))+.006)continue;
-    for(const [i,j,k]of [[0,1,2],[0,2,3]]){
+    const a=sections[k-1],b=sections[k];
+    // cheap Float32 bounding-box rejection before building the quad
+    const x0=f(a.left[0]),x1=f(a.right[0]),x2=f(b.right[0]),x3=f(b.left[0]),z0=f(a.left[1]),z1=f(a.right[1]),z2=f(b.right[1]),z3=f(b.left[1]);
+    if(x<Math.min(x0,x1,x2,x3)-.006||x>Math.max(x0,x1,x2,x3)+.006||z<Math.min(z0,z1,z2,z3)-.006||z>Math.max(z0,z1,z2,z3)+.006)continue;
+    const P=[[x0,z0],[x1,z1],[x2,z2],[x3,z3]],Y=[f(a.y),f(a.y),f(b.y),f(b.y)];
+    for(const [i,j,k]of ROAD_TRIS){
       const [a,b,c]=[P[i],P[j],P[k]],det=(b[1]-c[1])*(a[0]-c[0])+(c[0]-b[0])*(a[1]-c[1]);
       const u=((b[1]-c[1])*(x-c[0])+(c[0]-b[0])*(z-c[1]))/det,v=((c[1]-a[1])*(x-c[0])+(a[0]-c[0])*(z-c[1]))/det,w=1-u-v;
       if(Math.min(u,v,w)>=-.002)highest=Math.max(highest,u*Y[i]+v*Y[j]+w*Y[k]);
@@ -275,7 +311,7 @@ export function gradeIslandRoadNetwork(parts,refined=false,entries=[]){
   });
   const parent=nodes.map(n=>n.id),root=id=>{while(parent[id]!==id){parent[id]=parent[parent[id]];id=parent[id];}return id;},join=(a,b)=>{a=root(a);b=root(b);if(a!==b)parent[a]=b;};
   roads.forEach(g=>{const r=g.userData.islandRoad;r.points.forEach((p,i)=>{const key=p.map(v=>v.toFixed(4)).join(','),id=g.userData.islandGradeNodes[i];if(shared.has(key))join(id,shared.get(key));else shared.set(key,id);});});
-  const overlaps=(a,b)=>{if(a.x1<=b.x0+.0001||b.x1<=a.x0+.0001||a.z1<=b.z0+.0001||b.z1<=a.z0+.0001)return false;for(const q of[a.q,b.q])for(let i=0;i<q.length;i++){const p=q[i],r=q[(i+1)%q.length],nx=-(r[1]-p[1]),nz=r[0]-p[0],A=a.q.map(p=>p[0]*nx+p[1]*nz),B=b.q.map(p=>p[0]*nx+p[1]*nz);if(Math.max(...A)<=Math.min(...B)+.0001||Math.max(...B)<=Math.min(...A)+.0001)return false;}return true;};
+  const overlaps=(a,b)=>{if(a.x1<=b.x0+.0001||b.x1<=a.x0+.0001||a.z1<=b.z0+.0001||b.z1<=a.z0+.0001)return false;for(let s=0;s<2;s++){const q=s?b.q:a.q;for(let i=0;i<q.length;i++){const p=q[i],r=q[(i+1)%q.length],nx=-(r[1]-p[1]),nz=r[0]-p[0];let aMin=Infinity,aMax=-Infinity,bMin=Infinity,bMax=-Infinity;for(const v of a.q){const d=v[0]*nx+v[1]*nz;if(d<aMin)aMin=d;if(d>aMax)aMax=d;}for(const v of b.q){const d=v[0]*nx+v[1]*nz;if(d<bMin)bMin=d;if(d>bMax)bMax=d;}if(aMax<=bMin+.0001||bMax<=aMin+.0001)return false;}}return true;};
   const entryGrid=new Map(),entryNodes=new Map(),entrySegments=new Set();
   entries.forEach((e,i)=>{const reach=Math.max(4,(e.width??3.8)/2+1.5);for(let x=Math.floor((e.from[0]-reach)/cell);x<=Math.floor((e.from[0]+reach)/cell);x++)for(let z=Math.floor((e.from[1]-reach)/cell);z<=Math.floor((e.from[1]+reach)/cell);z++){const key=x+','+z;if(!entryGrid.has(key))entryGrid.set(key,[]);entryGrid.get(key).push({e,i});}});
   for(const seg of segments){const r=roads[seg.road].userData.islandRoad,A=r.points[seg.index-1],B=r.points[seg.index],near=new Map();for(let x=Math.floor((seg.x0-4)/cell);x<=Math.floor((seg.x1+4)/cell);x++)for(let z=Math.floor((seg.z0-4)/cell);z<=Math.floor((seg.z1+4)/cell);z++)for(const item of entryGrid.get(x+','+z)||[])near.set(item.i,item.e);
@@ -284,7 +320,7 @@ export function gradeIslandRoadNetwork(parts,refined=false,entries=[]){
   for(const [key,ids]of entryNodes){const e=entries[Number(key.split(',')[0])],ground=footprintGround(circleFootprint(...e.from,Math.max(3.4,(e.width??3.8)/2+1.4),32),1);for(const id of ids)nodes[id].y=Math.max(nodes[id].y,ground.max+.28);for(let i=1;i<ids.length;i++)join(ids[0],ids[i]);}
   const pairs=new Set(),crossings=[];
   for(const entries of grid.values())for(let i=0;i<entries.length;i++)for(let j=i+1;j<entries.length;j++){
-    const a=entries[i],b=entries[j];if(a.road===b.road)continue;const key=Math.min(a.id,b.id)+','+Math.max(a.id,b.id);if(pairs.has(key))continue;pairs.add(key);if(!overlaps(a,b))continue;
+    const a=entries[i],b=entries[j];if(a.road===b.road)continue;if(a.x1<=b.x0+.0001||b.x1<=a.x0+.0001||a.z1<=b.z0+.0001||b.z1<=a.z0+.0001)continue;const key=Math.min(a.id,b.id)*4194304+Math.max(a.id,b.id);if(pairs.has(key))continue;pairs.add(key);if(!overlaps(a,b))continue;
     const ids=[...a.ids,...b.ids];for(let k=1;k<ids.length;k++)join(ids[0],ids[k]);crossings.push([a.id,b.id]);
   }
   if(!refined){
