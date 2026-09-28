@@ -178,7 +178,7 @@ vec4 gcClassify(vec2 p, float h, vec3 n, out vec3 col, out float forestD, out fl
   g = mix(g, vec3(0.2, 0.22, 0.08), strand * 0.55);
   float pa = fbm2_3(p * 0.0021 + 31.0);
   g = mix(g, vec3(0.2, 0.2, 0.07), smoothstep(0.55, 0.7, pa) * 0.55 * smoothstep(20.0, 160.0, h));
-  float uw = 0.0, lawn = 0.0, bed = 0.0, hedge = 0.0, meadow = 0.0;
+  float uw = 0.0, lawn = 0.0, bed = 0.0, hedge = 0.0, meadow = 0.0, pav = 0.0;
   vec3 lc = g;
   if (urban > 0.05 || nearStreet > 0.01) {
     float e = stE;
@@ -190,6 +190,7 @@ vec4 gcClassify(vec2 p, float h, vec3 n, out vec3 col, out float forestD, out fl
     border = max(border, median * (1.0 - smoothstep(1.5, 1.9, abs(stC))));
     hedge = smoothstep(0.35, 0.42, e) * (1.0 - smoothstep(0.88, 0.95, e)) * (1.0 - median) * border;
     float paved = max(onStreet * (1.0 - median), square);
+    pav = paved;
     uw = max(smoothstep(0.08, 0.4, urban), nearStreet) * wVeg * (1.0 - wRock * 0.7);
     bed = border * (1.0 - paved) * uw;
     lawn = (1.0 - paved) * (1.0 - border) * uw;
@@ -203,7 +204,8 @@ vec4 gcClassify(vec2 p, float h, vec3 n, out vec3 col, out float forestD, out fl
   }
   col = mix(g, lc, uw);
   uwOut = uw;
-  float grass = lawn + natW * (1.0 - uw) * (1.0 - forestD * 0.8);
+  // wild grass never on paving (rocky ground leaves uw short of 1 on a square)
+  float grass = lawn + natW * (1.0 - uw) * (1.0 - forestD * 0.8) * (1.0 - pav);
   return vec4(grass, meadow * lawn / max(grass, 1e-3), bed, hedge);
 }
 `;
