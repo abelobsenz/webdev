@@ -118,6 +118,20 @@ export function planTrees(world) {
 
   // the town's lamps are known before anything is planted (the shore walks' stand in the meadow)
   if (plan) for (const l of plan.lamps) occupy(l.x, l.z, 2.2, 6);
+  // the inner towns' designed trees (src/world/towns: forecourt planters, avenues, gardens) are
+  // planted first, their sites surveyed clear of the architecture, rooted at their soil; their
+  // benches claimed too, so nothing planted later crowds them. Their own stream of chance
+  // leaves every other tree exactly where it was.
+  if (plan && plan.trees) {
+    const r2 = mulberry32(5150);
+    for (const b of plan.furniture || []) occupy(b.x, b.z, 2.4, 6);
+    for (const t of plan.trees) {
+      const sp = SP[t.sp] ?? SP.flowering;
+      const v = 0.88 + r2() * 0.24;
+      trees.push({ x: t.x, y: t.y, z: t.z, s: t.s, sp, rot: t.rot ?? r2() * Math.PI * 2, lean: t.lean ?? 0, tint: [v, v * (0.96 + r2() * 0.08), v * 0.97], bloom: t.bloom, keep: true });
+      occupy(t.x, t.z, 1.6, 8);
+    }
+  }
 
   // ------------------------------------------------ natural placement --
   for (let j = 1; j < N - 1; j++) {

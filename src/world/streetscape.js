@@ -980,6 +980,18 @@ export function buildStreetscape(scene, plan, ground, extraLamps = []) {
     }
   }
 
+  // ---- furniture the towns layer placed (src/world/towns): the forecourts round the arcologies
+  // and the stations, the gardens; each with its footing already surveyed (y), still kept clear
+  // of everything placed so far
+  const extraSets = { bench: benchSet, bin: binSet, planter: planterSet, kiosk: kioskSet, stele: steleSet, tap: tapSet };
+  for (const f of plan.furniture || []) {
+    const set = extraSets[f.kind];
+    if (!set || !occ.free(f.x, f.z, f.r)) continue;
+    set.add(f.x, f.y, f.z, f.yaw, litAt(f.x, f.z));
+    occ.add(f.x, f.z, f.r);
+    if (f.kind === 'bench') benches.push({ x: f.x, z: f.z, yaw: f.yaw });
+  }
+
   // ---- benches (and a litter bin by every other one) along the streets
   // In the lagoon's towns the walk is the whole carriageway and a clipped hedge lines the
   // verge: benches stand on the kerb course with their backs to the hedge, clear of the
