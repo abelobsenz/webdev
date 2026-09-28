@@ -5,6 +5,7 @@ import { INNER } from './terrain.js';
 import { PLAZA_R, PLAZA_Y } from './layout.js';
 import { SPECIES, SP } from './treeGeometry.js';
 import { wardHeight, WARD_TOP } from './metro.js';
+import { wardTreeGuard } from './wardsA/wardGuard.js';
 
 // A civic approach is public paving even where it crosses a street verge.
 // Include the root flare, rather than testing only the trunk centre.
@@ -242,6 +243,10 @@ export function planTrees(world) {
   // (their ground is built, not terrain: every tree is rooted at its level explicitly)
   const mp = world.metro && world.metro.plan;
   if (mp) {
+    // built-fabric clearance (parapets, stairs, kerbs, bridges, landmarks) where measured;
+    // a rejected tree still claims its spot, so every later choice is exactly as before
+    const guard = wardTreeGuard(world);
+    const fabricClear = (x, z, y, sp, s) => !guard || guard(x, y, z, Math.max(0.6, s * 0.035), crownRadius(sp, s), s);
     for (const l of mp.lamps) occupy(l.x, l.z, 2.2, 6);
     for (const S of world.metro.streetscapes || []) for (const b of S.benches || []) occupy(b.x, b.z, 2.4, 6);
     const towns = world.wardTowns;
@@ -284,7 +289,11 @@ export function planTrees(world) {
             const s2 = baseS * (0.92 + rnd() * 0.16);
             if (!bldgFree(x, z, Math.min(crownRadius(sp, s2), 4) + 0.5)) continue;
             if (!clear(x, z, 2.5, 6)) continue;
-            push(x, z, sp, s2, { y: y0 - 0.15, layer: 6, spacing: 2.5, lean: sp === SP.palm ? rnd() * 0.04 : 0, rot: rnd() * Math.PI * 2 });
+            // draw the tree's randomness before the fabric test, so a rejected tree leaves
+            // the planner's sequence (and every later district's trees) exactly as it was
+            const lean = sp === SP.palm ? rnd() * 0.04 : 0, rot = rnd() * Math.PI * 2;
+            if (!fabricClear(x, z, y0, sp, s2)) { occupy(x, z, 2.5, 6); continue; }
+            push(x, z, sp, s2, { y: y0 - 0.15, layer: 6, spacing: 2.5, lean, rot });
           }
         }
       }
@@ -297,7 +306,9 @@ export function planTrees(world) {
       if (!(y > 2)) continue;                              // rooted on the platform, never over water
       if (reserved(t.x, t.z) === 2 || surf(t.x, t.z) === 'water' || surf(t.x, t.z) === 'road') continue;
       if (!clear(t.x, t.z, 2.0, 6) || towerHit(t.x, t.z, 2) || !bldgFree(t.x, t.z, 1.5)) continue;
-      push(t.x, t.z, sp, t.s * (0.94 + rnd() * 0.12), { y: y - 0.15, layer: 6, spacing: 2.2, rot: rnd() * Math.PI * 2 });
+      const s2 = t.s * (0.94 + rnd() * 0.12), rot = rnd() * Math.PI * 2;
+      if (!fabricClear(t.x, t.z, y, sp, s2)) { occupy(t.x, t.z, 2.2, 6); continue; }
+      push(t.x, t.z, sp, s2, { y: y - 0.15, layer: 6, spacing: 2.2, rot });
     }
     // groves in the parks, each ward with its own trees
     const grove = {
@@ -324,7 +335,9 @@ export function planTrees(world) {
         if (!clear(x, z, cr * 0.7, 7) || towerHit(x, z, cr)) continue;
         const y = wardHeight(x, z);
         if (!(y > 2)) continue;
-        push(x, z, sp, s2, { y: y - 0.15, layer: 7, spacing: cr * 0.7, lean: sp === SP.palm ? rnd() * 0.06 : 0 });
+        const lean = sp === SP.palm ? rnd() * 0.06 : 0, rot = rnd() * Math.PI * 2;
+        if (!fabricClear(x, z, y, sp, s2)) { occupy(x, z, cr * 0.7, 7); continue; }
+        push(x, z, sp, s2, { y: y - 0.15, layer: 7, spacing: cr * 0.7, lean, rot });
       }
     }
     // specimen trees on the lawns of the garden blocks, clear of every building
@@ -345,7 +358,9 @@ export function planTrees(world) {
         if (towerHit(x, z, cr) || !clear(x, z, cr * 0.8, 7)) continue;
         const y = wardHeight(x, z);
         if (!(y > 2)) continue;
-        push(x, z, sp, s2, { y: y - 0.15, layer: 7, spacing: cr * 0.8 });
+        const rot = rnd() * Math.PI * 2;
+        if (!fabricClear(x, z, y, sp, s2)) { occupy(x, z, cr * 0.8, 7); continue; }
+        push(x, z, sp, s2, { y: y - 0.15, layer: 7, spacing: cr * 0.8, rot });
       }
     }
     // shade trees along the quays
@@ -361,7 +376,9 @@ export function planTrees(world) {
         const sp = (qw.ward === 'coral' || qw.ward === 'sunward' || qw.ward === 'seraph') ? SP.palm : SP.flowering;
         const s2 = sp === SP.palm ? 11 + rnd() * 3 : 7.5 + rnd() * 2;
         if (!clear(x, z, 3.2, 6) || towerHit(x, z, 4) || !bldgFree(x, z, 3) || reserved(x, z) === 2) continue;
-        push(x, z, sp, s2, { y: qw.y - 0.15, layer: 6, spacing: 3.2, lean: sp === SP.palm ? rnd() * 0.05 : 0 });
+        const lean = sp === SP.palm ? rnd() * 0.05 : 0, rot = rnd() * Math.PI * 2;
+        if (!fabricClear(x, z, qw.y, sp, s2)) { occupy(x, z, 3.2, 6); continue; }
+        push(x, z, sp, s2, { y: qw.y - 0.15, layer: 6, spacing: 3.2, lean, rot });
       }
     }
   }
