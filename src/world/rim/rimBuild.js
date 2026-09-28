@@ -8,12 +8,13 @@ import { INNER } from '../terrain.js';
 import { smoothstep } from '../noise.js';
 
 // Builds the Rim's country, shores and avenue furniture (rimSites.js places them): every site's
-// near model and far massing go into 500 m chunks, the near ones shown (with their shadows)
-// within 900 m and the massing beyond. The lagoon strand gets its timber jetties (innerShore.js).
+// near model and far massing go into 700 m chunks, the near ones shown (with their shadows)
+// within 900 m, the massing beyond it to 5 km (main view only); the lighthouses are their own
+// chunks, their massing seen from anywhere and in the water. The lagoon strand gets its timber jetties (innerShore.js).
 // The terrain's district channels are brought into line with the plan: the towns read as town,
 // the designed parcels as tended ground (no wild forest floor under an orchard).
 
-const CHUNK = 500;
+const CHUNK = 700;
 
 export function buildRim(scene, world, ground, { quality = null } = {}) {
   const plan = world.plan;
@@ -24,15 +25,16 @@ export function buildRim(scene, world, ground, { quality = null } = {}) {
   const { sites, trees } = placeRimSites(plan, rim, ground);
   out.sites = sites; out.trees = trees;
 
-  // ---- geometry, chunked
+  // ---- geometry: 700 m chunks (a lighthouse is its own, seen from far off)
   const chunks = new Map();
   const centre = (s) => { if (s.x !== undefined) return [s.x, s.z]; let x = 0, z = 0; for (const p of s.fp) { x += p[0]; z += p[1]; } return [x / s.fp.length, z / s.fp.length]; };
-  for (const s of sites) {
+  for (const [i, s] of sites.entries()) {
     const fn = STRUCTURES[s.kind];
     if (!fn) continue;
     const [cx, cz] = centre(s);
-    const key = `${Math.floor(cx / CHUNK)},${Math.floor(cz / CHUNK)}`;
-    if (!chunks.has(key)) chunks.set(key, { near: new Kit(), far: new Kit() });
+    const landmark = s.kind === 'lighthouse';
+    const key = landmark ? `lighthouse ${i}` : `${Math.floor(cx / CHUNK)},${Math.floor(cz / CHUNK)}`;
+    if (!chunks.has(key)) chunks.set(key, { near: new Kit(), far: new Kit(), landmark });
     const ch = chunks.get(key);
     fn(ch.near, ch.far, s, ground);
   }
@@ -40,13 +42,16 @@ export function buildRim(scene, world, ground, { quality = null } = {}) {
   for (const [key, ch] of chunks) {
     if (!ch.near.tris) continue;
     const near = new THREE.Mesh(ch.near.build(), mat), far = new THREE.Mesh(ch.far.build(), mat);
-    near.name = `Rim country ${key}`; far.name = `Rim country ${key} (massing)`;
+    near.name = `Rim ${key}`; far.name = `Rim ${key} (massing)`;
     for (const m of [near, far]) { m.matrixAutoUpdate = false; m.updateMatrix(); m.receiveShadow = true; scene.add(m); out.meshes.push(m); }
     near.castShadow = true; far.castShadow = false;
+    // the country's detail is for the main view only; a lighthouse shows in the water too
+    near.layers.set(1); far.layers.set(ch.landmark ? 0 : 1);
     const bs = far.geometry.boundingSphere || near.geometry.boundingSphere;
-    out.chunks.push({ key, near, far, center: bs.center.clone(), radius: bs.radius });
+    out.chunks.push({ key, near, far, landmark: ch.landmark, center: bs.center.clone(), radius: bs.radius });
   }
   out.nearDist = 900;
+  out.farDist = 5200;
   out.applyQuality = (s) => { out.nearDist = s && s.lowrise >= 1 ? 1000 : s && s.lowrise >= 0.75 ? 800 : 600; };
   if (quality) out.applyQuality(quality);
   out.update = (camera) => {
@@ -56,8 +61,8 @@ export function buildRim(scene, world, ground, { quality = null } = {}) {
       const d = cp.distanceTo(c.center) - c.radius;
       const near = d < out.nearDist;
       c.near.visible = near;
-      c.near.layers.set(near ? 1 : 0);
-      c.far.layers.set(near ? 2 : 0);
+      // beyond a few kilometres the fields and gardens are below a pixel a row: the land shows
+      c.far.visible = !near && (c.landmark || d < out.farDist + cp.y);
     }
   };
 

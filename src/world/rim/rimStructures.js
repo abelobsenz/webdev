@@ -40,7 +40,15 @@ function house(Kn, Kf, ground, o, x0, x1, z0, z1, wall, roof, kWall, kRoof = K.T
 
 /** Append a lathe profile (latheFacade points { r, y, kind }) at (x, y, z). */
 function lathe(Kt, x, y, z, prof, seg = 24) {
-  const g = latheFacade(prof, seg);
+  // kinds interpolate across a segment: each segment keeps its starting point's kind, and a
+  // coincident ring switches to the next kind where it changes
+  const P = [];
+  for (let i = 0; i < prof.length; i++) {
+    const p = prof[i], prev = P[P.length - 1];
+    if (prev && prev.kind !== p.kind && (prev.r !== p.r || prev.y !== p.y)) P.push({ r: p.r, y: p.y, kind: prev.kind });
+    P.push(p);
+  }
+  const g = latheFacade(P, seg);
   Kt.geometry(g, new THREE.Matrix4().makeTranslation(x, y, z));
 }
 
@@ -60,10 +68,40 @@ function vineyard(Kn, Kf, site, ground) {
 }
 
 function marketGarden(Kn, Kf, site, ground) {
-  for (const row of site.rows) {
-    Kn.strip(row, 0.72, (x, z) => ground(x, z) - 0.3, (x, z) => ground(x, z) + 0.42, K.TIMBER, K.GARDEN);
+  // raised beds, timber-edged: crops, or dark fresh-tilled soil, field by field
+  for (const { pts: row, soil } of site.rows) {
+    const top = soil ? K.CERAMIC : K.GARDEN, h = soil ? 0.3 : 0.42;
+    Kn.strip(row, 0.72, (x, z) => ground(x, z) - 0.3, (x, z) => ground(x, z) + h, K.TIMBER, top);
     const R = row.filter((_, i) => i % 3 === 0 || i === row.length - 1);
-    if (R.length >= 2) Kf.strip(R, 0.72, (x, z) => ground(x, z) - 0.3, (x, z) => ground(x, z) + 0.4, K.GARDEN, K.GARDEN);
+    if (R.length >= 2) Kf.strip(R, 0.72, (x, z) => ground(x, z) - 0.3, (x, z) => ground(x, z) + h - 0.02, top, top);
+  }
+}
+
+function glasshouse(Kn, Kf, site, ground) {
+  // a glass barrel vault on a low stone base course, a vent along its ridge
+  const o = { x: site.x, z: site.z, yaw: site.yaw };
+  const u = under(ground, o, -17.2, 17.2, -4.8, 4.8);
+  const b = u.hi + 0.35;
+  const sec = [[-4.6, b - 0.05], [4.6, b - 0.05], [4.6, b + 1.2]];
+  for (let i = 1; i < 10; i++) { const t = (i / 10) * Math.PI; sec.push([4.6 * Math.cos(t), b + 1.2 + 3.0 * Math.sin(t)]); }
+  sec.push([-4.6, b + 1.2]);
+  for (const Kt of [Kn, Kf]) Kt.box(o, -17.2, 17.2, u.lo - 0.6, b, -4.8, 4.8, K.STONE, K.PAVING);
+  Kn.extrudeX(o, sec, -17, 17, K.GLASS, K.GLASS);
+  Kn.box(o, -16, 16, b + 4.1, b + 4.45, -0.35, 0.35, K.METAL);
+  Kf.box(o, -17, 17, b - 0.05, b + 1.2, -4.6, 4.6, K.GLASS);
+  Kf.gable(o, -17, 17, -4.6, 4.6, b + 1.18, b + 4.2, K.GLASS, K.GLASS);
+}
+
+function packhouse(Kn, Kf, site, ground) {
+  house(Kn, Kf, ground, { x: site.x, z: site.z, yaw: site.yaw }, -8, 8, -5.5, 5.5, 5.2, 3.8, K.TIMBER, K.TIMBER, { eave: 0.6 });
+}
+
+function hedgerow(Kn, Kf, site, ground) {
+  const h = site.h;
+  for (const P of site.pieces) {
+    Kn.strip(P, 0.45, (x, z) => ground(x, z) - 0.3, (x, z) => ground(x, z) + h, K.GARDEN, K.GARDEN);
+    const R = P.filter((_, i) => i % 3 === 0 || i === P.length - 1);
+    if (R.length >= 2) Kf.strip(R, 0.45, (x, z) => ground(x, z) - 0.3, (x, z) => ground(x, z) + h - 0.05, K.GARDEN, K.GARDEN);
   }
 }
 
@@ -71,11 +109,15 @@ function allotments(Kn, Kf, site, ground) {
   for (const p of site.plots) {
     const o = { x: p.x, z: p.z, yaw: p.yaw };
     // two raised beds along the plot, a path between; a shed at the back of half the plots
-    for (const zc of [-3.6, 0.6]) {
+    [-3.6, 0.6].forEach((zc, bi) => {
       const P = [localToWorld(o, -4.6, zc), localToWorld(o, 0, zc), localToWorld(o, 4.6, zc)];
-      Kn.strip(P, 1.1, (x, z) => ground(x, z) - 0.3, (x, z) => ground(x, z) + 0.38, K.TIMBER, K.GARDEN);
-      Kf.strip([P[0], P[2]], 1.1, (x, z) => ground(x, z) - 0.3, (x, z) => ground(x, z) + 0.36, K.GARDEN, K.GARDEN);
-    }
+      const top = p.soil && p.soil[bi] ? K.CERAMIC : K.GARDEN;
+      Kn.strip(P, 1.1, (x, z) => ground(x, z) - 0.3, (x, z) => ground(x, z) + 0.38, K.TIMBER, top);
+      Kf.strip([P[0], P[2]], 1.1, (x, z) => ground(x, z) - 0.3, (x, z) => ground(x, z) + 0.36, top, top);
+    });
+    // a low box hedge along the plot's path side
+    const H = [localToWorld(o, -5.6, -6.2), localToWorld(o, 0, -6.2), localToWorld(o, 5.6, -6.2)];
+    Kn.strip(H, 0.3, (x, z) => ground(x, z) - 0.3, (x, z) => ground(x, z) + 0.8, K.GARDEN, K.GARDEN);
     if (p.shed) house(Kn, Kf, ground, o, 2.2, 5.0, 4.1, 7.6, 2.1, 1.1, K.TIMBER, K.TIMBER, { eave: 0.25 });
   }
 }
@@ -318,6 +360,72 @@ function hamlet(Kn, Kf, site, ground) {
   void R;
 }
 
+// ------------------------------------------------------------------ the towns --
+function marketHall(Kn, Kf, site, ground) {
+  // an open octagonal hall on a stepped plinth: a ring of columns under an entablature and the
+  // quarter's roof - shingled on the Harbour Coast, a copper dome on the Gate Coast, a glass
+  // dome on the Garden Coast, a stepped stone pyramid in the uplands - a lantern on top; stalls
+  // round a fountain inside
+  const cx = site.x, cz = site.z, R = site.R;
+  let lo = 1e9, hi = -1e9;
+  for (let k = 0; k < 24; k++) for (const f of [0, 0.5, 0.8, 1]) { const h = ground(cx + Math.cos((k / 24) * TAU) * (R + 1.7) * f, cz + Math.sin((k / 24) * TAU) * (R + 1.7) * f); lo = Math.min(lo, h); hi = Math.max(hi, h); }
+  const top = hi + 0.5;
+  const q = site.quarter;
+  for (const Kt of [Kn, Kf]) {
+    Kt.ringSector(cx, cz, 0, R + 1.6, 0, TAU, lo - 0.8, top - 0.25, K.STONE, K.PAVING, K.STONE, 8);
+    Kt.ringSector(cx, cz, 0, R + 0.8, 0, TAU, lo - 0.85, top, K.STONE, K.PAVING, K.STONE, 8);
+    Kt.ringSector(cx, cz, R - 1.7, R + 0.3, 0, TAU, top + 6.0, top + 7.3, K.STONE, K.STONE, K.STONE, Kt === Kn ? 32 : 16);
+  }
+  // the columns
+  const nC = 16;
+  for (let k = 0; k < nC; k++) {
+    const t = (k / nC) * TAU + Math.PI / nC, x = cx + Math.cos(t) * (R - 0.7), z = cz + Math.sin(t) * (R - 0.7);
+    lathe(Kn, x, top - 0.05, z, [{ r: 0.55, y: 0, kind: 1 }, { r: 0.55, y: 0.35, kind: 1 }, { r: 0.4, y: 0.45, kind: 1 }, { r: 0.34, y: 5.45, kind: 1 }, { r: 0.52, y: 5.75, kind: 1 }, { r: 0.52, y: 6.1, kind: 1 }], 10);
+    if (k % 4 === 0) Kf.box({ x, z, yaw: t }, -0.4, 0.4, top - 0.05, top + 6.05, -0.4, 0.4, K.STONE);
+  }
+  // the roof (its underside the hall's ceiling), the lantern
+  const y0 = top + 7.25, seg = (n) => n;
+  let yTop;
+  if (q === 'gate') {
+    yTop = y0 + 1.6 + R * 0.72 + 3.4;
+    for (const Kt of [Kn, Kf]) lathe(Kt, cx, 0, cz, [{ r: R + 0.9, y: y0, kind: 1 }, { r: R + 0.9, y: y0 + 0.5, kind: 1 }, { r: R - 0.4, y: y0 + 0.5, kind: 1 }, { r: R - 0.4, y: y0 + 1.6, kind: 1 },
+      ...Array.from({ length: 8 }, (_, i) => { const a = ((i + 1) / 9) * (Math.PI / 2); return { r: (R - 0.4) * Math.cos(a), y: y0 + 1.6 + R * 0.72 * Math.sin(a), kind: 10 }; }),
+      { r: 1.3, y: y0 + 1.6 + R * 0.72, kind: 2 }, { r: 1.3, y: yTop - 1.2, kind: 2 }, { r: 1.7, y: yTop - 1.2, kind: 10 }, { r: 0, y: yTop, kind: 10 }], Kt === Kn ? seg(32) : 12);
+  } else if (q === 'garden') {
+    yTop = y0 + 0.5 + R * 0.8 + 3.2;
+    for (const Kt of [Kn, Kf]) lathe(Kt, cx, 0, cz, [{ r: R + 0.9, y: y0, kind: 1 }, { r: R + 0.9, y: y0 + 0.5, kind: 1 }, { r: R - 0.2, y: y0 + 0.5, kind: 1 },
+      ...Array.from({ length: 8 }, (_, i) => { const a = ((i + 1) / 9) * (Math.PI / 2); return { r: (R - 0.2) * Math.cos(a), y: y0 + 0.5 + R * 0.8 * Math.sin(a), kind: 0 }; }),
+      { r: 1.1, y: y0 + 0.5 + R * 0.8, kind: 2 }, { r: 1.1, y: yTop - 1.0, kind: 2 }, { r: 1.5, y: yTop - 1.0, kind: 10 }, { r: 0, y: yTop, kind: 10 }], Kt === Kn ? seg(32) : 12);
+    // bronze ribs over the glass
+    for (let k = 0; k < 8; k++) {
+      const t = (k / 8) * TAU;
+      for (let i = 0; i < 6; i++) {
+        const a0 = (i / 7) * (Math.PI / 2), a1 = ((i + 1) / 7) * (Math.PI / 2);
+        const r0 = (R - 0.2) * Math.cos(a0), r1 = (R - 0.2) * Math.cos(a1), yA = y0 + 0.5 + R * 0.8 * Math.sin(a0), yB = y0 + 0.5 + R * 0.8 * Math.sin(a1);
+        Kn.box({ x: cx, z: cz, yaw: t, y: 0 }, Math.min(r0, r1) - 0.15, Math.max(r0, r1) + 0.12, Math.min(yA, yB) - 0.1, Math.max(yA, yB) + 0.18, -0.09, 0.09, K.METAL);
+      }
+    }
+  } else if (q === 'upland') {
+    yTop = y0 + 7.4;
+    for (const Kt of [Kn, Kf]) {
+      Kt.ringSector(cx, cz, 0, R + 0.9, 0, TAU, y0, y0 + 1.2, K.STONE, K.STONE, K.STONE, 8);
+      Kt.ringSector(cx, cz, 0, R * 0.7, 0, TAU, y0 + 1.15, y0 + 2.6, K.STONE, K.STONE, K.STONE, 8);
+      Kt.ringSector(cx, cz, 0, R * 0.42, 0, TAU, y0 + 2.55, y0 + 4.0, K.STONE, K.STONE, K.STONE, 8);
+      lathe(Kt, cx, 0, cz, [{ r: 1.5, y: y0 + 3.95, kind: 2 }, { r: 1.5, y: y0 + 6.0, kind: 2 }, { r: 1.9, y: y0 + 6.0, kind: 10 }, { r: 0, y: yTop, kind: 10 }], 8);
+    }
+  } else {
+    yTop = y0 + 5.8 + 3.2;
+    for (const Kt of [Kn, Kf]) lathe(Kt, cx, 0, cz, [{ r: R + 1.1, y: y0, kind: 8 }, { r: 1.6, y: y0 + 5.8, kind: 8 }, { r: 1.6, y: y0 + 5.8, kind: 2 }, { r: 1.3, y: y0 + 5.8, kind: 2 }, { r: 1.3, y: y0 + 7.8, kind: 2 }, { r: 1.7, y: y0 + 7.8, kind: 10 }, { r: 0, y: yTop, kind: 10 }], 8);
+  }
+  // inside: a fountain basin and four stalls
+  Kn.ringSector(cx, cz, 0, 2.4, 0, TAU, lo - 0.9, top + 0.55, K.STONE, K.WATER, K.STONE, 16);
+  for (let k = 0; k < 4; k++) {
+    const t = (k / 4) * TAU + Math.PI / 4;
+    Kn.box({ x: cx + Math.cos(t) * (R * 0.55), z: cz + Math.sin(t) * (R * 0.55), yaw: t + Math.PI / 2, y: top - 0.02 }, -1.6, 1.6, 0, 1.05, -0.5, 0.5, K.TIMBER);
+  }
+  void yTop;
+}
+
 // ------------------------------------------------------------------ the coasts --
 function lighthouse(Kn, Kf, site, ground) {
   const cx = site.x, cz = site.z, H = site.h;
@@ -391,9 +499,9 @@ function boathouse(Kn, Kf, site, ground) {
   // the slipway from its doors into the water
   const P = [];
   for (let t = 9.2; t <= 32; t += 2) P.push(localToWorld(o, t, 0));
-  const yT = P.map(([x, z]) => Math.max(ground(x, z) + 0.12, -0.6));
-  Kn.strip(P, 2.4, P.map(([x, z]) => ground(x, z) - 0.6), yT, K.STONE, K.PAVING);
-  Kf.strip([P[0], P[P.length - 1]], 2.4, [P[0], P[P.length - 1]].map(([x, z]) => ground(x, z) - 0.6), [yT[0], yT[yT.length - 1]], K.STONE, K.PAVING);
+  const yT = (x, z) => Math.max(ground(x, z) + 0.12, -0.6), yB = (x, z) => Math.min(ground(x, z), -0.6) - 0.6;
+  Kn.strip(P, 2.4, yB, yT, K.STONE, K.PAVING);
+  Kf.strip(P.filter((_, i) => i % 3 === 0 || i === P.length - 1), 2.4, yB, yT, K.STONE, K.PAVING);
 }
 
 function lido(Kn, Kf, site, ground) {
@@ -440,4 +548,4 @@ function stop(Kn, Kf, site, ground) {
   Kn.box(o, 4.5, 5.0, b + 3.4, b + 3.9, -0.25, 0.25, K.LANTERN, K.METAL, K.METAL);
 }
 
-export const STRUCTURES = { vineyard, market: marketGarden, allotments, sports, amphitheatre, observatory, botanical, memorial, hamlet, lighthouse, seawall, lookout, beachHuts, boathouse, lido, stop };
+export const STRUCTURES = { marketHall, vineyard, market: marketGarden, glasshouse, packhouse, hedgerow, allotments, sports, amphitheatre, observatory, botanical, memorial, hamlet, lighthouse, seawall, lookout, beachHuts, boathouse, lido, stop };

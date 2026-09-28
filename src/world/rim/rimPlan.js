@@ -242,7 +242,20 @@ export function planRim({ ground, towers, heads, gateFeet }) {
     return best ? best.quarter : 'harbour';
   };
 
-  const pushStreet = (pts, cls, hw, props) => { const st = { pts, cls, hw, ...props }; st.lotSize = rimLotSize(st); streets.push(st); return st; };
+  // the country is lit sparingly: Rim Way's lamps alternate sides every 40 m, the strand's every
+  // 34 m, the dune walks and field lanes have a lamp at their crossings and every 90 m
+  const COUNTRY_LAMPS = { rimWay: [40, false], strand: [34, false], dune: [90, false], lane: [90, false] };
+  // in the towns the rows and cross streets alternate sides every 32 m, the mews every 40 m;
+  // the waterfronts are lit on both sides
+  const TOWN_LAMPS = { row: [32, false], cross: [32, false], mews: [40, false], strand: [24, true], parade: [24, true] };
+  const pushStreet = (pts, cls, hw, props) => {
+    const st = { pts, cls, hw, ...props };
+    st.lotSize = rimLotSize(st);
+    const cl = !st.town ? COUNTRY_LAMPS[st.role] : TOWN_LAMPS[st.role];
+    if (cl) { st.lampSpacing = cl[0]; st.lampBoth = cl[1]; }
+    streets.push(st);
+    return st;
+  };
 
   // ---- Rim Way itself, cut into its town and country stretches (lots stand only in the towns)
   for (const w of runWays) {
@@ -326,18 +339,28 @@ export function planRim({ ground, towers, heads, gateFeet }) {
     if (!inRun(town.cr)) continue;
     // the market square on Rim Way's lagoon side, the harbour square on the strand
     let market = null, harbour = null;
-    for (const da of [0, 1, -1, 2, -2, 3, -3, 4, -4, 6, -6, 8, -8]) {
+    // the market square on Rim Way (either side), where its hall finds the most level ground
+    const hallR = town.quarter === 'garden' ? 11.5 : 10;
+    let bestM = null;
+    for (const da of [0, 1, -1, 2, -2, 3, -3, 4, -4, 5, -5, 6, -6, 8, -8, 10, -10]) {
       const a = town.cr + (da * 22) / R_MEAN, r = rimWayR(a);
       if (r === null) continue;
       const R = town.quarter === 'garden' ? 30 : 26;
       for (const sgn of [-1, 1]) {
         const [x, z] = at(a, r + sgn * (RIM_HW.rimWay + R + 3));
         if (block(x, z) < R + 8 || ground(x, z) < 3.2) continue;
-        let ok = true;
+        let ok = true, lo = 1e9, hi = -1e9;
         for (let i = 0; i < 16 && ok; i++) { const t = (i / 16) * TAU; if (ground(x + Math.cos(t) * R, z + Math.sin(t) * R) < 2.8) ok = false; }
-        if (ok) { market = { x, z, r: R, kind: 'civic', district: 'rim', town: town.name, role: 'market', a }; break; }
+        for (let i = 0; i < 16; i++) for (const f of [0, 0.5, 1]) { const t = (i / 16) * TAU, h = ground(x + Math.cos(t) * (hallR + 2) * f, z + Math.sin(t) * (hallR + 2) * f); lo = Math.min(lo, h); hi = Math.max(hi, h); }
+        if (!ok) continue;
+        const score = (hi - lo) + Math.abs(da) * 0.15;
+        if (!bestM || score < bestM.score) bestM = { score, lev: hi - lo, q: { x, z, r: R, kind: 'civic', district: 'rim', town: town.name, role: 'market', a, quarter: town.quarter } };
       }
-      if (market) break;
+    }
+    if (bestM) {
+      market = bestM.q;
+      // a market hall at its heart where the ground is level enough for its plinth
+      if (bestM.lev < 2.2) { market.hallR = hallR; market.landmarkR = hallR + 1.7; }
     }
     for (const da of [0, 1, -1, 2, -2, 3, -3, 5, -5, 7, -7]) {
       const a = (market ? market.a : town.cr) + (da * 24) / R_MEAN, s = sampleArr(rSs, a);
@@ -518,7 +541,7 @@ export function planRim({ ground, towers, heads, gateFeet }) {
         const r = rnd();
         p.kind = p.slope > 0.24 ? 'wood'
           : p.slope > 0.08 && (p.quarter === 'garden' || p.quarter === 'upland') && r < 0.6 ? 'vineyard'
-            : p.width > 40 && r < 0.55 ? 'orchard' : p.width > 40 && r < 0.75 ? 'market' : p.width > 40 && r < 0.85 ? 'palmGrove' : 'meadow';
+            : p.width > 40 && r < 0.4 ? 'palmGrove' : p.width > 40 && r < 0.68 ? 'market' : 'meadow';
       }
     }
   }
@@ -527,8 +550,8 @@ export function planRim({ ground, towers, heads, gateFeet }) {
   for (const w of runWays) for (const end of [0, 1]) {
     const P = w.pts, p = end ? P[P.length - 1] : P[0], q = end ? P[P.length - 4] : P[3];
     const dx = p[0] - q[0], dz = p[1] - q[1], l = Math.hypot(dx, dz) || 1;
-    const R = 20, x = p[0] + (dx / l) * (R - 4), z = p[1] + (dz / l) * (R - 4);
-    if (block(x, z) > R + 4 && ground(x, z) > 3) squares.push({ x, z, r: R, kind: 'village', district: 'rim', role: 'channelHead', end, run: w.run });
+    const R = 18, x = p[0] + (dx / l) * 6, z = p[1] + (dz / l) * 6;
+    if (block(x, z) > R + 2 && ground(x, z) > 2.6) squares.push({ x, z, r: R, kind: "village", district: "rim", role: "channelHead", end, run: w.run });
   }
 
   // lidos: the strand point nearest each bearing
@@ -538,5 +561,16 @@ export function planRim({ ground, towers, heads, gateFeet }) {
     if (!Number.isNaN(s)) lidos.push({ a, r: s });
   }
 
-  return { frame: F, streets, squares, parcels, stretches, towns, runWays, strands, parades, lidos, rS: rSs, rP: rPs, rw, block, townAt, quarterAt, rimWayR, T, heads, gateFeet, debug };
+  // the plan's order: the towns' own streets first, dealt round the towns in turn (High Street,
+  // rows, cross streets), then Rim Way, the shore walks, the approaches and the country lanes
+  const rank = { high: 0, row: 1, cross: 2, mews: 3, rimWay: 4, strand: 5, parade: 6, approach: 7, dune: 8, lane: 9 };
+  const townLists = new Map();
+  for (const st of streets) if (st.town && rank[st.role] <= 3) { if (!townLists.has(st.town)) townLists.set(st.town, []); townLists.get(st.town).push(st); }
+  for (const l of townLists.values()) l.sort((a, b) => rank[a.role] - rank[b.role]);
+  const ordered = [];
+  const lists = [...townLists.values()];
+  for (let i = 0; lists.some((l) => i < l.length); i++) for (const l of lists) if (i < l.length) ordered.push(l[i]);
+  const rest = streets.filter((st) => !(st.town && rank[st.role] <= 3)).sort((a, b) => rank[a.role] - rank[b.role]);
+  const sortedStreets = [...ordered, ...rest];
+  return { frame: F, streets: sortedStreets, squares, parcels, stretches, towns, runWays, strands, parades, lidos, rS: rSs, rP: rPs, rw, block, townAt, quarterAt, rimWayR, T, heads, gateFeet, debug };
 }

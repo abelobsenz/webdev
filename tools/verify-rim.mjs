@@ -112,7 +112,7 @@ for (const [si, s] of built.sites.entries()) {
         if (v.y < gy + 0.05) continue;
         const wet = s.kind === 'boathouse' || s.kind === 'lido' || s.kind === 'beachHuts';
         if (F.edge(v.x, v.z) < -0.05) { check(false, `${s.kind} over a carriageway`, { site: si, at: [R1(v.x), R1(v.y), R1(v.z)] }); bad++; }
-        if (F.squareAt(v.x, v.z) > 0.5) { check(false, `${s.kind} in a square`, { site: si, at: [R1(v.x), R1(v.z)] }); bad++; }
+        if (F.squareAt(v.x, v.z) > 0.5 && s.kind !== 'marketHall') { check(false, `${s.kind} in a square`, { site: si, at: [R1(v.x), R1(v.z)] }); bad++; }
         if (inLot(v.x, v.z)) { check(false, `${s.kind} on a lot`, { site: si, at: [R1(v.x), R1(v.z)] }); bad++; }
         if (v.y < gy + 6.8 && nearLamp(v.x, v.z, 0.35)) { check(false, `${s.kind} on a lamp`, { site: si, at: [R1(v.x), R1(v.z)] }); bad++; }
         if (rim.block(v.x, v.z) < 0) { check(false, `${s.kind} in a keep-out`, { site: si, at: [R1(v.x), R1(v.z)] }); bad++; }
@@ -153,6 +153,7 @@ for (const [si, s] of built.sites.entries()) {
   }
   console.log('trees checked', nt);
 }
-console.log('RIM_SURVEY ' + JSON.stringify({ sites: built.sites.length, byKind, components: comps, tris, rimLots: rimLots.length, lamps: plan.lamps.length, ms: Date.now() - t0 }));
+const treeSp = {}; for (const t of built.trees) treeSp[t.sp + (t.avenue ? '-avenue' : t.row ? '-row' : '')] = (treeSp[t.sp + (t.avenue ? '-avenue' : t.row ? '-row' : '')] || 0) + 1;
+console.log('RIM_SURVEY ' + JSON.stringify({ sites: built.sites.length, byKind, treeSp, components: comps, tris, rimLots: rimLots.length, lamps: plan.lamps.length, ms: Date.now() - t0 }));
 console.log('RIM_ERRORS ' + JSON.stringify({ counts, examples }, null, 1));
 if (!errors.length) console.log('RIM_VERIFIED'); else { console.log(errors.slice(0, 20).join('\n')); process.exitCode = 1; }

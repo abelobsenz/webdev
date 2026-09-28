@@ -1139,8 +1139,8 @@ export function planCity({ ground, towers, promenades, urbanMask, stations = [] 
   };
   for (const st of streets) {
     const P = st.pts;
-    const spacing = st.cls === ST.AVENUE ? 24 : st.cls === ST.ESPLANADE ? 20 : st.cls === ST.STREET ? 27 : 30;
-    const bothSides = st.cls === ST.AVENUE || st.cls === ST.ESPLANADE;
+    const spacing = st.lampSpacing || (st.cls === ST.AVENUE ? 24 : st.cls === ST.ESPLANADE ? 20 : st.cls === ST.STREET ? 27 : 30);
+    const bothSides = st.lampBoth ?? (st.cls === ST.AVENUE || st.cls === ST.ESPLANADE);
     const eL = LAMP_E[st.cls];
     let acc = 0, k = 0;
     for (let i = 1; i < P.length; i++) {

@@ -88,9 +88,10 @@ export class Occupancy {
     for (const l of this._near(this.lampGrid, x, z, reach)) d = Math.min(d, Math.hypot(l.x - x, l.z - z));
     return d;
   }
-  siteDist(x, z, reach = 30) {
+  /** Metres to the nearest site's footprint (skip: a parcel whose own fields are not counted). */
+  siteDist(x, z, reach = 30, skip = null) {
     let d = reach;
-    for (const s of this._near(this.siteGrid, x, z, reach)) d = Math.min(d, polyDistOut(s.fp, x, z));
+    for (const s of this._near(this.siteGrid, x, z, reach)) if (!skip || s.site.parcel !== skip) d = Math.min(d, polyDistOut(s.fp, x, z));
     return d;
   }
   /** Is a footprint polygon clear of the plan (streets by `street` m of kerb, squares, lots,
@@ -144,6 +145,15 @@ export function placeRimSites(plan, rim, ground) {
   const F = plan.field;
   const treeOk = (x, z, r) => ground(x, z) > 2.6 && F.edge(x, z) > r + 1.5 && F.squareAt(x, z) < 0.01 && rim.block(x, z) > r + 2 && occ.lotDist(x, z, r + 3) > r + 1.5 && occ.lampDist(x, z) > 2.5 && occ.siteDist(x, z, r + 3) > r + 1;
 
+  // ---------------------------------------------------------------- the towns' market halls --
+  // each at the heart of its market square (planned into the square: its furniture rings it)
+  for (const q of plan.squares) {
+    if (q.district !== 'rim' || q.role !== 'market' || !q.hallR) continue;
+    const disc = []; for (let k = 0; k < 16; k++) disc.push([q.x + Math.cos((k / 16) * TAU) * (q.hallR + 1.7), q.z + Math.sin((k / 16) * TAU) * (q.hallR + 1.7)]);
+    if (!disc.every(([x, z]) => occ.lotDist(x, z, 4) > 1 && occ.lampDist(x, z) > 1 && rim.block(x, z) > 4 && F.edge(x, z) > 1)) { q.landmarkR = 0; continue; }
+    add({ kind: 'marketHall', x: q.x, z: q.z, R: q.hallR, quarter: q.quarter, yaw: Math.atan2(-q.z, -q.x), fp: disc });
+  }
+
   // ---------------------------------------------------------------- big set pieces first --
   const byKind = (k) => rim.parcels.filter((p) => p.kind === k);
   /** The best rectangle (length L along the rim, width W across) in parcel p: flattest ground. */
@@ -169,9 +179,10 @@ export function placeRimSites(plan, rim, ground) {
 
   // sports grounds: a pitch inside a running track, a grandstand and a clubhouse
   for (const p of byKind('sports')) {
-    const s = fitRect(p, 190, 112, { street: 6 });
-    if (!s) { p.kind = 'orchard'; continue; }
-    add({ kind: 'sports', x: s.x, z: s.z, yaw: s.yaw, L: 190, W: 112, fp: s.P, g: s.g, side: p.side });
+    // the pitch and track (176 x 88 m), the grandstand and its canopy to 60 m off the axis
+    const s = fitRect(p, 190, 126, { street: 6 });
+    if (!s) { p.kind = 'palmGrove'; continue; }
+    add({ kind: 'sports', x: s.x, z: s.z, yaw: s.yaw, L: 190, W: 126, fp: s.P, g: s.g, side: p.side });
   }
   // the amphitheatre: its bowl in the slope, the stage toward the lagoon
   for (const p of byKind('amphitheatre')) {
@@ -193,7 +204,7 @@ export function placeRimSites(plan, rim, ground) {
       if (!best || score > best.score) best = { score, x: fr.x, z: fr.z, yaw, R, P };
     }
     if (best && occ.clear(best.P, { street: 6, pad: 3 })) add({ kind: 'amphitheatre', x: best.x, z: best.z, yaw: best.yaw, R: best.R, fp: best.P });
-    else p.kind = 'orchard';
+    else p.kind = 'meadow';
   }
   // the observatory on the parcel's highest ground
   for (const p of byKind('observatory')) {
@@ -210,7 +221,7 @@ export function placeRimSites(plan, rim, ground) {
       }
     }
     if (best && occ.clear(best.disc, { street: 6, pad: 3 })) add({ kind: 'observatory', x: best.x, z: best.z, R: 30, yaw: best.a, fp: best.disc });
-    else p.kind = 'orchard';
+    else p.kind = 'palmGrove';
   }
   // the botanical ring: a circular garden ringed by glasshouses round a palm house
   for (const p of byKind('botanical')) {
@@ -232,17 +243,17 @@ export function placeRimSites(plan, rim, ground) {
   // memorial gardens: an axial garden - a long pool between avenues of stelae, a cenotaph
   for (const p of byKind('memorial')) {
     const L = Math.min(150, p.len - 40), s = L > 80 ? fitRect(p, L, 46, { street: 6 }) : null;
-    if (!s) { p.kind = 'orchard'; continue; }
+    if (!s) { p.kind = 'palmGrove'; continue; }
     add({ kind: 'memorial', x: s.x, z: s.z, yaw: s.yaw, L, W: 46, fp: s.P, g: s.g });
     for (const side of [-1, 1]) for (let u = -L / 2 + 8; u <= L / 2 - 8; u += 11) {
-      const c = Math.cos(s.yaw), sn = Math.sin(s.yaw), v = side * 20;
+      const c = Math.cos(s.yaw), sn = Math.sin(s.yaw), v = side * 19.5;
       trees.push({ x: s.x + u * c - v * sn, z: s.z + u * sn + v * c, sp: 'araucaria', s: 15, site: true });
     }
   }
   // farm hamlets: a farmhouse, barns and a silo round a yard by the lane
   for (const p of byKind('hamlet')) {
     const s = fitRect(p, 70, 54, { street: 5 });
-    if (!s) { p.kind = 'orchard'; continue; }
+    if (!s) { p.kind = 'palmGrove'; continue; }
     add({ kind: 'hamlet', x: s.x, z: s.z, yaw: s.yaw, L: 70, W: 54, fp: s.P, g: s.g, seed: rnd() });
     p.kind = 'orchard';        // the rest of the parcel is its orchard
     p.hamlet = true;
@@ -253,6 +264,24 @@ export function placeRimSites(plan, rim, ground) {
     if (p.kind === 'vineyard' || p.kind === 'market' || p.kind === 'allotments') {
       const rows = [];
       const spacing = p.kind === 'vineyard' ? 2.8 : p.kind === 'market' ? 3.2 : 0;
+      if (p.kind === 'market') {
+        // two or three glasshouses in a row near the Rim Way side, and the packing shed
+        const n = 2 + Math.floor(rnd() * 2);
+        const am = (p.a0 + p.a1) / 2;
+        const sp0 = parcelSpan(p, am);
+        if (sp0) {
+          const rr0 = p.side < 0 ? sp0[1] - 9 : sp0[0] + 9;
+          for (let k = 0; k < n; k++) {
+            const rr = rr0 + (p.side < 0 ? -1 : 1) * k * 13, fr = frameAt(am, rr), yaw = Math.atan2(fr.t[1], fr.t[0]);
+            const P = rectPoly(fr.x, fr.z, yaw, 17.3, 4.9);
+            if (!P.every(([x, z]) => p.inside(x, z, 2)) || !occ.clear(P, { street: 5, pad: 2 })) continue;
+            add({ kind: 'glasshouse', x: fr.x, z: fr.z, yaw, fp: P, g: groundStats(ground, P, 2) });
+          }
+          const a = am + 30 / rr0, fr = frameAt(a, rr0 + (p.side < 0 ? -2 : 2)), yaw = Math.atan2(fr.n[1], fr.n[0]);
+          const P = rectPoly(fr.x, fr.z, yaw, 8.5, 6);
+          if (P.every(([x, z]) => p.inside(x, z, 2)) && occ.clear(P, { street: 5, pad: 2 })) add({ kind: 'packhouse', x: fr.x, z: fr.z, yaw, fp: P, g: groundStats(ground, P, 2) });
+        }
+      }
       if (spacing) {
         const span0 = parcelSpan(p, (p.a0 + p.a1) / 2);
         if (!span0) continue;
@@ -263,7 +292,14 @@ export function placeRimSites(plan, rim, ground) {
           // headlands: a cart track every 14 rows
           if (ri % 15 === 14) continue;
           const step = 5 / r, pts = [];
-          const flush = () => { if (pts.length >= 3) rows.push(pts.slice()); pts.length = 0; };
+          // market beds: bands of four rows, crops or fresh-tilled soil by field
+          const band = Math.floor(ri / 4);
+          const flush = () => {
+            if (pts.length >= 3) {
+              if (p.kind === 'market') { const f = Math.floor(((Math.atan2(pts[0][1], pts[0][0]) - p.a0) * r) / 72); rows.push({ pts: pts.slice(), soil: ((band * 7 + f * 3 + (p.a0 * 1000 | 0)) % 5) < 2 }); } else rows.push(pts.slice());
+            }
+            pts.length = 0;
+          };
           let seg = 0;
           for (let a = p.a0 + 6 / r; a < p.a1 - 6 / r; a += step) {
             const [x, z] = at(a, r);
@@ -295,7 +331,7 @@ export function placeRimSites(plan, rim, ground) {
             if (!occ.clear(P, { street: 4, pad: 1.5 })) continue;
             const g = groundStats(ground, P, 3);
             if (g.hi - g.lo > 2.2) continue;
-            plots.push({ x: fr.x, z: fr.z, yaw, g, shed: rnd() < 0.55, seed: rnd() });
+            plots.push({ x: fr.x, z: fr.z, yaw, g, shed: rnd() < 0.55, seed: rnd(), soil: [rnd() < 0.4, rnd() < 0.4], frame: rnd() < 0.2 });
           }
         }
         if (plots.length) {
@@ -394,6 +430,24 @@ export function placeRimSites(plan, rim, ground) {
   }
 
   // ---------------------------------------------------------------- the strand --
+  // the timber jetties innerShore.js builds off the strand (same rule: every 55th point where
+  // boat-draught water lies within 110 m): their corridors are kept clear
+  for (const st of plan.streets) {
+    if (st.district !== 'rim' || st.role !== 'strand') continue;
+    const P = st.pts;
+    for (let i = 20; i < P.length - 20; i += 55) {
+      const [x, z] = P[i], [x0, z0] = P[i - 2], [x1, z1] = P[i + 2];
+      let nx = -(z1 - z0), nz = x1 - x0; const l = Math.hypot(nx, nz) || 1; nx /= l; nz /= l;
+      if (ground(x + nx * 20, z + nz * 20) > ground(x - nx * 20, z - nz * 20)) { nx = -nx; nz = -nz; }
+      let end = 0;
+      for (let t = st.hw + 2; t < 110; t += 2) { if (ground(x + nx * t, z + nz * t) < -1.4) { end = t + 8; break; } }
+      if (!end || end < 18) continue;
+      const mid = (st.hw + end + 6) / 2, half = (end + 6 - st.hw) / 2 + 2;
+      const fp = rectPoly(x + nx * mid, z + nz * mid, Math.atan2(nz, nx), half, 9);
+      const site = { kind: 'jetty', fp };
+      occ.occupy(fp, site);
+    }
+  }
   // beach huts in rows on the sand below the strand, near the towns; boathouses by the
   // harbour squares
   for (const st of plan.streets) {
@@ -437,17 +491,23 @@ export function placeRimSites(plan, rim, ground) {
     const nx = -q.x / Math.hypot(q.x, q.z), nz = -q.z / Math.hypot(q.x, q.z), tx = -nz, tz = nx;
     for (const side of [-1, 1]) {
       let done = false;
-      for (let dOut = q.r + 16; dOut < q.r + 70 && !done; dOut += 2) {
-        const x = q.x + nx * dOut + tx * side * 18, z = q.z + nz * dOut + tz * side * 18;
-        // the house stands on the beach with its doors to the water
-        const fp = rectPoly(x, z, Math.atan2(nz, nx), 9, 5.5);
-        const g = groundStats(ground, fp, 1);
-        if (g.lo < 0.5 || g.hi > 3.4) continue;
-        const wet = ground(x + nx * 22, z + nz * 22) < -0.8;
-        if (!wet) continue;
-        if (!occ.clear(fp, { street: 2, pad: 1.5, minH: 0.5 })) continue;
-        add({ kind: 'boathouse', x, z, yaw: Math.atan2(nz, nx), fp, g });
-        done = true;
+      for (const lat of [18, 28, 38, 12]) {
+        for (let dOut = q.r + 12; dOut < q.r + 80 && !done; dOut += 2) {
+          const x = q.x + nx * dOut + tx * side * lat, z = q.z + nz * dOut + tz * side * lat, yaw = Math.atan2(nz, nx);
+          // the house stands on the beach with its doors to the water, its slipway running in
+          const fp = rectPoly(x, z, yaw, 9.8, 6.2);
+          const g = groundStats(ground, fp, 1);
+          if (g.lo < 0.35 || g.hi > 4.2) continue;
+          let wet = false;
+          for (let t = 12; t <= 32 && !wet; t += 2) if (ground(x + nx * t, z + nz * t) < -0.7) wet = true;
+          if (!wet) continue;
+          const slip = rectPoly(x + nx * 21, z + nz * 21, yaw, 11.6, 2.9);
+          if (!occ.clear(fp, { street: 2, pad: 1.5, minH: 0.35 }) || !occ.clear(slip, { street: 2, pad: 1.5, water: true })) continue;
+          const site = add({ kind: 'boathouse', x, z, yaw, fp, g });
+          occ.occupy(slip, site);
+          done = true;
+        }
+        if (done) break;
       }
     }
   }
@@ -495,27 +555,95 @@ export function placeRimSites(plan, rim, ground) {
     }
   }
 
+  // ---------------------------------------------------------------- hedgerows --
+  // every cultivated field, orchard and park is hedged: a clipped hedge a metre inside its
+  // bounds, with a gate every ~90 m and wherever something stands in the way
+  for (const p of rim.parcels) {
+    if (!['vineyard', 'market', 'allotments', 'orchard', 'sports', 'amphitheatre', 'observatory', 'botanical', 'memorial'].includes(p.kind)) continue;
+    const inset = 1.3;
+    const ring = [];
+    const aAt = (i) => p.a0 + ((p.a1 - p.a0) * i) / p.nb;
+    for (let i = 0; i <= p.nb; i++) { const r = p.lo[i] + inset; ring.push(at(aAt(i) + (i === 0 ? inset / r : i === p.nb ? -inset / r : 0), r)); }
+    for (let i = p.nb; i >= 0; i--) { const r = p.hi[i] - inset; ring.push(at(aAt(i) + (i === 0 ? inset / r : i === p.nb ? -inset / r : 0), r)); }
+    // resampled at 4 m round the closed outline
+    const W = [];
+    // the sides: 0 along lo, 1 the a1 end, 2 along hi, 3 the a0 end (each a hedge of its own)
+    const sideOf = (i) => (i < p.nb ? 0 : i === p.nb ? 1 : i < 2 * p.nb + 1 ? 2 : 3);
+    for (let i = 0; i < ring.length; i++) {
+      const P0 = ring[i], P1 = ring[(i + 1) % ring.length];
+      const L = Math.hypot(P1[0] - P0[0], P1[1] - P0[1]), m = Math.max(1, Math.ceil(L / 4));
+      for (let k = 0; k <= m; k++) if (k < m || sideOf(i) !== sideOf((i + 1) % ring.length)) W.push([P0[0] + ((P1[0] - P0[0]) * k) / m, P0[1] + ((P1[1] - P0[1]) * k) / m, sideOf(i)]);
+    }
+    let cur = [], run = 0;
+    const pieces = [];
+    const flush = () => { if (cur.length >= 3) pieces.push(cur); cur = []; };
+    for (let k = 0; k <= W.length; k++) {
+      const q = W[k % W.length];
+      if (k && q[2] !== W[k - 1][2]) flush();
+      run += 4;
+      const gate = run % 92 < 6;
+      const ok = !gate && ground(q[0], q[1]) > 2.4 && F.edge(q[0], q[1]) > 2.2 && F.squareAt(q[0], q[1]) < 0.01 && rim.block(q[0], q[1]) > 3 && occ.lotDist(q[0], q[1], 4) > 1.5 && occ.lampDist(q[0], q[1]) > 1.6 && occ.siteDist(q[0], q[1], 3, p) > 1.2;
+      if (ok) cur.push([q[0], q[1]]); else flush();
+    }
+    flush();
+    if (pieces.length) {
+      // one site: its sides meet at the corners
+      const site = { kind: 'hedgerow', pieces, fp: stripOutline(pieces[0], 0.5), h: p.kind === 'orchard' || p.kind === 'vineyard' ? 1.8 : 1.4 };
+      sites.push(site);
+      for (const pc of pieces) occ.occupy(stripOutline(pc, 0.5), site);
+    }
+  }
+
   // ---------------------------------------------------------------- the planting --
   // (last, so every tree keeps clear of every structure)
   // ---------------------------------------------------------------- orchards and groves --
   for (const p of rim.parcels) {
     if (p.kind !== 'orchard' && p.kind !== 'palmGrove') continue;
     const palm = p.kind === 'palmGrove';
-    const rowS = palm ? 10 : 8.4, treeS = palm ? 9.5 : 7.6;
+    // standard trees on wide spacing (a coconut plantation 11 m square, fruit trees 11 x 10.5 m)
+    const rowS = 11, treeS = palm ? 11 : 10.5;
     // one blossom to an orchard: cream (citrus), pink (almond) or white-gold; every sixth row a
     // shelter row of rain trees
     const bloom = [0.78, 0.62, 0.8, 0.66][Math.floor(rnd() * 4)];
     let rMin = 1e9, rMax = -1e9;
     for (let i = 0; i <= p.nb; i++) { rMin = Math.min(rMin, p.lo[i]); rMax = Math.max(rMax, p.hi[i]); }
-    let row = 0;
-    for (let r = rMin + 6; r < rMax - 6; r += rowS, row++) {
+    // a fruit orchard is a band of seven rows along Rim Way (a shelter row of rain trees at its
+    // back), the parcel beyond it left to meadow; a coconut plantation fills its parcel
+    const rows = [];
+    for (let r = rMin + 6; r < rMax - 6; r += rowS) rows.push(r);
+    if (!palm) { if (p.side < 0) rows.reverse(); rows.length = Math.min(rows.length, 7); }
+    for (let row = 0; row < rows.length; row++) {
+      const r = rows[row];
       const off = (row % 2) * 0.5;
       for (let a = p.a0 + ((5 + off * treeS) / r); a < p.a1 - 5 / r; a += treeS / r) {
         const [x, z] = at(a, r);
         const cr = palm ? 3.5 : 4.2;
         if (!p.inside(x, z, 3) || !treeOk(x, z, cr)) continue;
-        const s = palm ? 12 + rnd() * 5 : 5.8 + rnd() * 1.3;
-        trees.push({ x, z, sp: palm ? 'palm' : (row % 6 === 5 ? 'rainTree' : 'flowering'), s: palm ? s : (row % 6 === 5 ? s * 1.3 : s), row: true, bloom });
+        const s = palm ? 13 + rnd() * 5 : 7.0 + rnd() * 1.4;
+        const shelter = !palm && row === rows.length - 1 && rows.length >= 5;
+        trees.push({ x, z, sp: palm ? 'palm' : shelter ? 'rainTree' : 'flowering', s: palm ? s : shelter ? s * 1.3 : s, row: true, bloom });
+      }
+    }
+  }
+
+  const clumpSp = { harbour: ['palm', 'rainTree', 'flowering'], gate: ['flowering', 'araucaria', 'rainTree'], garden: ['rainTree', 'flowering', 'araucaria'], upland: ['araucaria', 'rainTree', 'flowering'] };
+  for (const p of rim.parcels) {
+    if (!['sports', 'amphitheatre', 'observatory', 'botanical', 'memorial'].includes(p.kind)) continue;
+    const list = clumpSp[p.quarter] || clumpSp.harbour;
+    let rMin = 1e9, rMax = -1e9;
+    for (let i = 0; i <= p.nb; i++) { rMin = Math.min(rMin, p.lo[i]); rMax = Math.max(rMax, p.hi[i]); }
+    for (let r = rMin + 14; r < rMax - 10; r += 30) {
+      for (let a = p.a0 + 16 / r; a < p.a1 - 12 / r; a += 30 / r) {
+        if (rnd() > 0.5) continue;
+        const sp = list[Math.floor(rnd() * list.length)], n = 3 + Math.floor(rnd() * 4);
+        const [cx, cz] = at(a + (rnd() - 0.5) * 10 / r, r + (rnd() - 0.5) * 10);
+        for (let k = 0; k < n; k++) {
+          const t = (k / n) * Math.PI * 2 + rnd(), d = k ? 5 + rnd() * 3 : 0;
+          const x = cx + Math.cos(t) * d, z = cz + Math.sin(t) * d;
+          const cr = sp === 'araucaria' ? 2.6 : sp === 'palm' ? 3.2 : 4;
+          if (!p.inside(x, z, 2) || !treeOk(x, z, cr)) continue;
+          trees.push({ x, z, sp, s: sp === 'palm' ? 12 + rnd() * 5 : sp === 'araucaria' ? 14 + rnd() * 6 : sp === 'rainTree' ? 9 + rnd() * 4 : 7 + rnd() * 3, park: true });
+        }
       }
     }
   }
@@ -553,6 +681,7 @@ export function parcelPoly(p) {
   return out;
 }
 
+const stripOutline = (P, hw) => stripPoly(P, hw);
 /** The outline of a strip of half-width hw along P. */
 function stripPoly(P, hw) {
   const L = [], R = [];
