@@ -10,6 +10,8 @@ import { buildOuterLOD } from './outerLod.js';
 import { islandPrism, islandFoundation, islandRoad, footprintGround, rectangle, circleFootprint, buildIslandPlan, pointSegmentDistance, islandRoadHeight, someCircleNear } from './islandPlan.js';
 import { buildIslandLandscape } from './islandLandmarks.js';
 import { buildIslandCountryside } from './islands/countryside.js';
+import { vesperLagoon, vesperCathedral } from './islands/vesper.js';
+import { australArcology } from './islands/austral.js';
 
 /** Everything built on the island land (districts, landmarks, villas, lighthouses) as keep-out
  *  circles {x, z, r}, filled by buildSkyline(): ground cover grows only outside them. */
@@ -394,17 +396,13 @@ function buildOrison(parts, c, rnd, lights) {
 }
 
 function buildVesper(parts, c, rnd, lights) {
-  harbour(parts, c, rnd, lights, { moleReach: 280, lighthouseH: 62 });
   const placed = [];
-  // the cathedral: a long nave, a crossing dome and a spire
-  const cx = c.coast.x - c.d[0] * 520, cz = c.coast.z - c.d[1] * 520;
-  const g = groundMin(cx, cz, 70);
-  parts.push(block(cx, g, cz, 34, 130, 42, Math.atan2(c.d[0], c.d[1])));
-  parts.push(latheFacade([{ r: 16, y: g + 32, kind: 5 }, { r: 16, y: g + 44, kind: 5 }, { r: 15, y: g + 52, kind: 1 }, { r: 8, y: g + 64, kind: 1 }, { r: 2, y: g + 68, kind: 2 }, { r: 0.1, y: g + 74, kind: 1 }], 24).translate(cx, 0, cz));
-  const sx = cx + c.d[0] * 70, sz = cz + c.d[1] * 70;
-  parts.push(latheFacade([{ r: 9, y: g - 4, kind: 5 }, { r: 9, y: g + 70, kind: 5 }, { r: 7, y: g + 74, kind: 2 }, { r: 6, y: g + 90, kind: 2 }, { r: 5, y: g + 92, kind: 1 }, { r: 0.1, y: g + 260, kind: 1 }], 8).translate(sx, 0, sz));
-  lights.push({ x: sx, y: g + 92, z: sz, c: [1.0, 0.8, 0.55], s: 3 });
-  placed.push({ x: cx + c.d[0] * 20, z: cz + c.d[1] * 20, r: 100 });
+  // the Lagoon: a round harbour basin closed by a crescent quay of domed houses, with the
+  // lighthouse and the harbour light on the bastions of its mouth (islands/vesper.js)
+  vesperLagoon(parts, c, rnd, lights, placed);
+  // the cathedral: a basilica with a crossing dome and a campanile spire, facing the harbour
+  const cathedral = vesperCathedral(parts, c, lights, [c.coast.x - c.d[0] * 520, c.coast.z - c.d[1] * 520]);
+  placed.push({ x: cathedral.P0[0], z: cathedral.P0[1], r: 122 });
   // the white town of domes round the harbour
   urbanGrid(parts, c, rnd, { ox: c.coast.x - c.d[0] * 850, oz: c.coast.z - c.d[1] * 850, ra: 850, rs: 1600, size: 64, street: 10,
     cell: (P, u0, v0, u1, v1, top) => {
@@ -415,7 +413,29 @@ function buildVesper(parts, c, rnd, lights) {
       return true;
     },
     lot: (Lq, lu, lv, top) => building(parts, rnd, Lq, lu, lv, top, 6 + rnd() * 12, 5, 9) }, placed);
-  countryside(parts, c, rnd, lights, placed, 60 * 3);
+  // the cathedral's steps meet a real street square in front of one of its stylobate's sides,
+  // so the flight climbs straight to its door
+  {
+    const q = cathedral.q, obstacles = parts.filter((g) => g.userData.islandFoundation && !g.userData.islandFoundation.name.startsWith('Vesper cathedral')).map((g) => { const f = g.userData.islandFoundation.q, cx = f.reduce((s, p) => s + p[0] / f.length, 0), cz = f.reduce((s, p) => s + p[1] / f.length, 0); return { cx, cz, r: Math.max(...f.map((p) => Math.hypot(p[0] - cx, p[1] - cz))) }; });
+    let best = null;
+    for (const g of parts) {
+      if (!g.userData.islandStreet) continue;
+      const pts = g.userData.islandRoad.points;
+      for (let i = 0; i < pts.length; i++) for (let e = 0; e < 4; e++) {
+        const A = q[e], B = q[(e + 1) % 4], L = Math.hypot(B[0] - A[0], B[1] - A[1]), tx = (B[0] - A[0]) / L, tz = (B[1] - A[1]) / L;
+        const cxq = q.reduce((s, p) => s + p[0] / 4, 0), czq = q.reduce((s, p) => s + p[1] / 4, 0);
+        let nx = -tz, nz = tx; if (nx * (A[0] - cxq) + nz * (A[1] - czq) < 0) { nx = -nx; nz = -nz; }
+        const p = pts[i], along = (p[0] - A[0]) * tx + (p[1] - A[1]) * tz, out = (p[0] - A[0]) * nx + (p[1] - A[1]) * nz;
+        if (along < 16 || along > L - 16 || out < 12 || out > 140) continue;
+        const door = [A[0] + tx * along, A[1] + tz * along];
+        if (obstacles.some((o) => pointSegmentDistance(o.cx, o.cz, p, door) < o.r + 9)) continue;
+        if (!best || out < best.out) best = { from: p, door, out };
+      }
+    }
+    if (!best) throw new Error('Vesper cathedral needs a street square to one of its sides');
+    c.plan.coreEntrances.push({ from: best.from, to: best.door, top: cathedral.top, width: 16, q, kind: 'cathedral approach' });
+  }
+  countryside(parts, c, rnd, lights, placed, 0);
 }
 
 function buildAustral(parts, c, rnd, lights) {
@@ -452,21 +472,17 @@ function buildAustral(parts, c, rnd, lights) {
     parts.push(latheFacade([{r:1.2,y:g+1.2,kind:1},{r:1,y:g+12,kind:1},{r:12,y:g+13,kind:3},{r:12,y:g+14,kind:1},{r:.1,y:g+17,kind:3}],20).translate(x,0,z));
   }
 
-  for (let k = 0; k < 14; k++) {
-    const a = (k / 14) * TAU + rnd() * 0.2, r = 520 + rnd() * 300;
-    const x = sx + Math.cos(a) * r, z = sz + Math.sin(a) * r;
-    const h = renderedHeight(x, z);
-    if (h < 3 || h > 300) continue;
-    const Rt = 20 + rnd() * 16;
-    if(!c.plan.isRoadFree(x,z,Rt*1.3))continue;
-    parts.push(tower(rnd, x, groundMin(x, z, Rt * 1.25) - 4, z, 150 + rnd() * 170, Rt, rnd()));
-    placed.push({ x, z, r: Rt * 1.3 });
-  }
+  // the arcology round the spire: five terraced Petals with sky bridges into the spire, and
+  // the ring of tower-gardens carrying the Sky Ring (islands/austral.js)
+  australArcology(parts, c, rnd, lights, placed, [sx, sz], g, tower);
   // the arcology's garden-roofed quarters round the spire
   urbanGrid(parts, c, rnd, { ox: sx, oz: sz, ra: 1050, rs: 1400, size: 96, street: 16,
     lot: (Lq, lu, lv, top, t) => building(parts, rnd, Lq, lu, lv, top, (14 + rnd() * 40) * (1.3 - t), rnd() < 0.4 ? 0 : 5, 3) }, placed);
   for(const e of spireApproaches){
-    const from=clearStreetArrival(parts,e.A,e.B,14,{exclude:n=>n.startsWith('Austral spire'),accept:p=>(p[0]-sx)*e.dx+(p[1]-sz)*e.dz>300});
+    // prefer a street on the avenue's own axis, so the flight climbs straight to its threshold
+    const lateral=p=>Math.abs(-(p[0]-sx)*e.dz+(p[1]-sz)*e.dx);let from;
+    try{from=clearStreetArrival(parts,e.A,e.B,14,{exclude:n=>n.startsWith('Austral spire'),accept:p=>(p[0]-sx)*e.dx+(p[1]-sz)*e.dz>300&&lateral(p)<3});}
+    catch{from=clearStreetArrival(parts,e.A,e.B,14,{exclude:n=>n.startsWith('Austral spire'),accept:p=>(p[0]-sx)*e.dx+(p[1]-sz)*e.dz>300});}
     c.plan.coreEntrances.push({from,to:e.B,top:g+1.5,width:14,q:e.threshold,kind:'spire approach'});
   }
   countryside(parts, c, rnd, lights, placed, 70 * 3);

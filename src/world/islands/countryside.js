@@ -127,6 +127,38 @@ export function terrainPieces(poly, fn) {
   }
 }
 
+/** Exact footprint claims: convex polygons in 48 m buckets, tested by separating axes. */
+class Claims {
+  constructor() { this.b = new Map(); }
+  static box(q) { let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity; for (const p of q) { x0 = Math.min(x0, p[0]); x1 = Math.max(x1, p[0]); z0 = Math.min(z0, p[1]); z1 = Math.max(z1, p[1]); } return [x0, z0, x1, z1]; }
+  static sat(a, b, pad) {
+    for (const poly of [a, b]) for (let i = 0; i < poly.length; i++) {
+      const p = poly[i], q = poly[(i + 1) % poly.length], ax = -(q[1] - p[1]), az = q[0] - p[0], L = Math.hypot(ax, az) || 1;
+      let a0 = Infinity, a1 = -Infinity, b0 = Infinity, b1 = -Infinity;
+      for (const v of a) { const d = (v[0] * ax + v[1] * az) / L; a0 = Math.min(a0, d); a1 = Math.max(a1, d); }
+      for (const v of b) { const d = (v[0] * ax + v[1] * az) / L; b0 = Math.min(b0, d); b1 = Math.max(b1, d); }
+      if (a1 <= b0 - pad || b1 <= a0 - pad) return false;
+    }
+    return true;
+  }
+  add(q, tag) {
+    const bx = Claims.box(q), it = { q, bx, tag };
+    for (let i = Math.floor(bx[0] / 48); i <= Math.floor(bx[2] / 48); i++) for (let j = Math.floor(bx[1] / 48); j <= Math.floor(bx[3] / 48); j++) { const k = i * 100003 + j; if (!this.b.has(k)) this.b.set(k, []); this.b.get(k).push(it); }
+  }
+  /** Does q come within `pad` of any claim (skip(tag) true = ignore that claim)? */
+  hits(q, pad = 0.5, skip = null) {
+    const bx = Claims.box(q);
+    for (let i = Math.floor((bx[0] - pad) / 48); i <= Math.floor((bx[2] + pad) / 48); i++) for (let j = Math.floor((bx[1] - pad) / 48); j <= Math.floor((bx[3] + pad) / 48); j++) {
+      for (const it of this.b.get(i * 100003 + j) || []) {
+        if (skip && skip(it.tag)) continue;
+        if (it.bx[2] < bx[0] - pad || bx[2] < it.bx[0] - pad || it.bx[3] < bx[1] - pad || bx[3] < it.bx[1] - pad) continue;
+        if (Claims.sat(q, it.q, pad)) return true;
+      }
+    }
+    return false;
+  }
+}
+
 const rect = (x, z, ang, hl, hw) => { const ax = Math.cos(ang), az = Math.sin(ang), sx = -az, sz = ax; return [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([a, b]) => [x + ax * a * hl + sx * b * hw, z + az * a * hl + sz * b * hw]); };
 
 /** Lowest and highest drawn ground over an oriented rectangle, sampled every ~2.5 m. */
@@ -144,7 +176,7 @@ function groundRange(x, z, ang, hl, hw, step = 2.5) {
 // ---------------------------------------------------------------------------------------
 export function buildIslandCountryside(scene, c, plan, parts, { audit = null, keepouts = [], palette = 'sand', seed = 1 } = {}) {
   const rnd = mulberry32(70117 + c.island * 7919);
-  const R = new Raster(c);
+  const R = new Raster(c), K = new Claims();
   const stats = { farms: 0, villas: 0, fields: 0, vineyards: 0, orchards: 0, olives: 0, lanes: 0, laneLength: 0, shrines: 0, observatories: 0, trees: 0 };
   const records = { buildings: [], fields: [], lanes: [], ramps: [], yards: [], runs: audit ? [] : null, trees: audit ? [] : null, drapes: audit ? [] : null, laneDrapes: audit ? [] : null };
 
@@ -243,7 +275,7 @@ export function buildIslandCountryside(scene, c, plan, parts, { audit = null, ke
         const ii = i + di, jj = j + dj;
         if (ii < 0 || jj < 0 || ii >= M || jj >= M) continue;
         const m = jj * M + ii;
-        if (block[m] && Math.hypot(ii - W, jj - W) > 2.5) continue;
+        if (block[m] && Math.hypot(ii - W, jj - W) > 1.01) continue;
         const d = LG * (di && dj ? Math.SQRT2 : 1), g = Math.abs(H[m] - H[n]) / d;
         const cc = cost[n] + d * (1 + 60 * g * g) + (g > 0.1 ? d * (g - 0.1) * 400 : 0);
         if (!done[m] && cc < cost[m]) { cost[m] = cc; from[m] = n; push(m, cc); }
@@ -310,7 +342,7 @@ export function buildIslandCountryside(scene, c, plan, parts, { audit = null, ke
     const far = [cx + nx * (s.hw - 0.35 + len), cz + nz * (s.hw - 0.35 + len)];
     const tx = -nz, tz = nx;
     const quad = [[edge[0] + tx * hw, edge[1] + tz * hw], [far[0] + tx * hw, far[1] + tz * hw], [far[0] - tx * hw, far[1] - tz * hw], [edge[0] - tx * hw, edge[1] - tz * hw]];
-    if (!obstFree(quad)) return null;
+    if (!obstFree(quad) || K.hits(quad, 0.4, (t) => t === 'lane')) return null;
     let lo = Infinity;
     for (let q = 0; q <= 8; q++) for (const w of [-1, -0.5, 0, 0.5, 1]) { const f = q / 8, x = edge[0] + (far[0] - edge[0]) * f + tx * w * hw, z = edge[1] + (far[1] - edge[1]) * f + tz * w * hw; lo = Math.min(lo, renderedHeight(x, z)); }
     if (lo < 1) return null;
@@ -323,12 +355,29 @@ export function buildIslandCountryside(scene, c, plan, parts, { audit = null, ke
     }
     return { edge, far, quad, bottom: lo - 0.6, topEdge, topFar, len, hw, road: road.id };
   };
+  const inside = (q, p, m) => { let sg = 0; for (let i = 0; i < q.length; i++) { const a = q[i], b = q[(i + 1) % q.length], L = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1, c2 = ((b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0])) / L; if (!sg) sg = Math.sign(c2) || 1; if (c2 * sg < -m) return false; } return true; };
   /** Plan a lane from (x, z): a contour route ending on a road apron or on another lane. */
-  const planLane = (x, z, hw, lead = [], maxR = 1100) => {
+  const planLane = (x, z, hw, lead = [], maxR = 1100, own = [], ownTag = null) => {
     const r = route(x, z, maxR);
     if (!r) return null;
     let pts = resample(smooth(simplify([...lead, ...r.path.slice(lead.length ? 0 : 0)], 11), 3), 4);
     if (lead.length) pts[0] = lead[0];
+    // the whole lane, at its full width and a margin, must lie on free ground (its own
+    // lead-in over the court excepted, and the last link onto its apron checked separately)
+    // the lead-in (from the place's own court or terrace edge out through its gate) is the
+    // only stretch allowed over the place's own reservation
+    let leadLen = 0;
+    if (lead.length) { for (let k = 1; k < lead.length; k++) leadLen += Math.hypot(lead[k][0] - lead[k - 1][0], lead[k][1] - lead[k - 1][1]); leadLen += Math.hypot(x - lead[lead.length - 1][0], z - lead[lead.length - 1][1]); }
+    const clearLane = (P) => {
+      let d = 0;
+      for (let k = 1; k < P.length; k++) {
+        const s0 = d; d += Math.hypot(P[k][0] - P[k - 1][0], P[k][1] - P[k - 1][1]);
+        const isLead = s0 < leadLen + 1.5;
+        if (k < P.length - 1 && !isLead && Math.hypot(P[k - 1][0] - x, P[k - 1][1] - z) > 11 && !R.free(segQuad(P[k - 1], P[k], hw), 0, LANE)) return false;
+        if (K.hits(segQuad(P[k - 1], P[k], hw), 0.4, (t) => t === 'lane' || (isLead && t === ownTag))) return false;
+      }
+      return true;
+    };
     if (r.goalKind === 'road') {
       const end = pts[pts.length - 1], road = nearestRoad(end[0], end[1], 40);
       if (!road) return null;
@@ -341,13 +390,24 @@ export function buildIslandCountryside(scene, c, plan, parts, { audit = null, ke
         if (!obstFree(segQuad(last, ap.far, hw))) return null;
         pts.push(ap.far);
       } else pts[pts.length - 1] = ap.far;
-      if (pts.length < 2) return null;
+      if (pts.length < 2 || !clearLane(pts)) return null;
       return { pts, hw, goal: 'road', apron: ap };
     }
     // joining another lane: stop at its edge so the two finishes do not lie on each other
     const other = lanes[r.goalLane];
     while (pts.length > 2 && polyDist(pts[pts.length - 1][0], pts[pts.length - 1][1], other.pts) < other.hw * 0.92) pts.pop();
-    if (pts.length < 2) return null;
+    // carry the lane on to the edge of the one it joins
+    {
+      const e = pts[pts.length - 1];
+      let best = null;
+      for (let k = 1; k < other.pts.length; k++) { const A = other.pts[k - 1], B = other.pts[k], ex = B[0] - A[0], ez = B[1] - A[1], t = Math.max(0, Math.min(1, ((e[0] - A[0]) * ex + (e[1] - A[1]) * ez) / (ex * ex + ez * ez || 1))), p = [A[0] + ex * t, A[1] + ez * t], d = Math.hypot(e[0] - p[0], e[1] - p[1]); if (!best || d < best.d) best = { p, d }; }
+      if (best && best.d > other.hw * 0.92 + 0.3) {
+        const f = (other.hw * 0.9) / best.d, q = [best.p[0] + (e[0] - best.p[0]) * f, best.p[1] + (e[1] - best.p[1]) * f];
+        const n = Math.ceil(Math.hypot(q[0] - e[0], q[1] - e[1]) / 4);
+        for (let i = 1; i <= n; i++) pts.push([e[0] + (q[0] - e[0]) * i / n, e[1] + (q[1] - e[1]) * i / n]);
+      }
+    }
+    if (pts.length < 2 || !clearLane(pts)) return null;
     return { pts, hw, goal: 'lane', join: r.goalLane };
   };
   /** Drape a lane of half width hw along pts, cut along the terrain triangles (exact). */
@@ -379,33 +439,41 @@ export function buildIslandCountryside(scene, c, plan, parts, { audit = null, ke
   };
   const buildLane = (L) => {
     const { pts, hw } = L;
-    for (let k = 1; k < pts.length; k++) R.markSeg(pts[k - 1], pts[k], hw + 1.5, LANE);
+    for (let k = 1; k < pts.length; k++) { R.markSeg(pts[k - 1], pts[k], hw + 1.5, LANE); K.add(segQuad(pts[k - 1], pts[k], hw), 'lane'); }
     drapeLane(pts, hw, L.goal === 'lane' ? 0.13 : 0.1);
     if (L.apron) {
       const a = L.apron, tx = -(a.far[1] - a.edge[1]) / a.len, tz = (a.far[0] - a.edge[0]) / a.len, P = [];
       for (const [p, y] of [[a.edge, a.topEdge], [a.far, a.topFar]]) for (const w of [-1, 1]) P.push([p[0] + tx * w * a.hw, y, p[1] + tz * w * a.hw]);
       const Q = [[P[0][0], a.bottom, P[0][2]], [P[1][0], a.bottom, P[1][2]], [P[3][0], a.bottom, P[3][2]], [P[2][0], a.bottom, P[2][2]], P[0], P[1], P[3], P[2]];
       chunk(a.edge[0], a.edge[1]).stone.hexa(Q, 1, a.bottom);
-      R.mark(a.quad, HARD, 0);
+      R.mark(a.quad, HARD, 0); K.add(a.quad, 'apron');
       records.ramps.push(a);
     }
     for (const p of pts) laneAt.set(Math.round(p[0] / LG) + ',' + Math.round(p[1] / LG), lanes.length);
     lanes.push(L);
     let len = 0; for (let k = 1; k < pts.length; k++) len += Math.hypot(pts[k][0] - pts[k - 1][0], pts[k][1] - pts[k - 1][1]);
     stats.lanes++; stats.laneLength += len;
-    records.lanes.push({ pts, hw, goal: L.goal, join: L.join, apron: L.apron });
+    records.lanes.push({ pts, hw, goal: L.goal, join: L.join, apron: L.apron, own: L.own });
   };
   /**
    * Plan a place: reserve its footprints, route its lane from `gate` (with an optional
    * straight lead-in), and only then build it; otherwise every claim is withdrawn.
    */
+  let placeTag = null, placeSeq = 0;
   const place = (footprints, gate, hw, lead, build) => {
+    if (footprints.some((q) => K.hits(q, 0.6))) return null;
     const undo = [];
-    for (const q of footprints) undo.push(...reserve(q, HARD, 1));
-    const L = planLane(gate[0], gate[1], hw, lead);
+    for (const q of footprints) undo.push(...reserve(q, HARD, 4.5));
+    for (const q of footprints) K.add(q, 'pending');
+    const L = planLane(gate[0], gate[1], hw, lead, 1100, footprints, 'pending');
+    for (const list of K.b.values()) for (let i = list.length - 1; i >= 0; i--) if (list[i].tag === 'pending') list.splice(i, 1);
     if (!L) { restore(undo); return null; }
+    placeTag = 'place' + placeSeq++;
+    for (const q of footprints) K.add(q, placeTag);
+    L.own = footprints;
     build(L);
     buildLane(L);
+    placeTag = null;
     return L;
   };
 
@@ -414,12 +482,12 @@ export function buildIslandCountryside(scene, c, plan, parts, { audit = null, ke
   /** Survey a plinthed building footprint: {lo, base, q} or null (occupied/too steep). */
   const siteBuilding = (x, z, ang, L, W, maxStep = 4.5, allow = 0) => {
     const q = rect(x, z, ang, L / 2 + 0.8, W / 2 + 0.8);
-    if (!R.free(q, 1, allow)) return null;
+    if (!R.free(q, 1, allow) || K.hits(q, 0.6, (t) => t === placeTag)) return null;
     const g = groundRange(x, z, ang, L / 2 + 0.6, W / 2 + 0.6);
     if (g.lo < 4 || g.hi - g.lo > maxStep) return null;
     return { lo: g.lo, base: g.hi + 0.35, q, x, z, ang, L, W };
   };
-  const commit = (s, type) => { R.mark(s.q, HARD, 1); records.buildings.push({ x: s.x, z: s.z, ang: s.ang, L: s.L, W: s.W, lo: s.lo, base: s.base, q: s.q, type }); keepouts.push({ x: s.x, z: s.z, r: Math.hypot(s.L, s.W) / 2 + 3 }); };
+  const commit = (s, type) => { R.mark(s.q, HARD, 1); K.add(s.q, 'building'); records.buildings.push({ x: s.x, z: s.z, ang: s.ang, L: s.L, W: s.W, lo: s.lo, base: s.base, q: s.q, type }); keepouts.push({ x: s.x, z: s.z, r: Math.hypot(s.L, s.W) / 2 + 3 }); };
   const buildHouse = (s, wallH, opts = {}) => {
     const C = chunk(s.x, s.z), ang = s.ang;
     plinth(C, s.x, s.z, ang, s.L / 2 + 0.5, s.W / 2 + 0.5, s.lo, s.base);
@@ -457,12 +525,15 @@ export function buildIslandCountryside(scene, c, plan, parts, { audit = null, ke
       const a = [p0[0] + ((p1[0] - p0[0]) * k) / n, p0[1] + ((p1[1] - p0[1]) * k) / n], b = [p0[0] + ((p1[0] - p0[0]) * (k + 1)) / n, p0[1] + ((p1[1] - p0[1]) * (k + 1)) / n];
       const sb = span(b);
       let ya = sa[0] - foot, yb = sb[0] - foot, H = Math.max(sa[1] - ya, sb[1] - yb);
-      for (const f of [0.2, 0.4, 0.6, 0.8]) {
+      const len = Math.hypot(b[0] - a[0], b[1] - a[1]), ns = Math.max(4, Math.ceil(len / 1.0));
+      for (let q = 1; q < ns; q++) { const f = q / ns;
         const m = span([a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f]), yb0 = ya + (yb - ya) * f;
         // a hollow between the ends: take the whole bottom edge down to it
         if (m[0] - foot < yb0) { const d = yb0 - (m[0] - foot); ya -= d; yb -= d; }
         H = Math.max(H, m[1] - (ya + (yb - ya) * f));
       }
+      // a hollow found late may have lowered the ends: re-take the tops over the whole run
+      for (let q = 0; q <= ns; q++) { const f = q / ns, m = span([a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f]); H = Math.max(H, m[1] - (ya + (yb - ya) * f)); }
       H += h;
       C.walls.run(a, ya, b, yb, H, t, kind);
       if (records.runs) records.runs.push({ a, b, ya, yb, H, t, kind });
@@ -512,7 +583,7 @@ export function buildIslandCountryside(scene, c, plan, parts, { audit = null, ke
     const gs = rnd() < 0.7 ? siteBuilding(gp[0], gp[1], 0, 6.8, 6.8, 3) : null;
     const yard = rect(x, z, ang, 18, 9);
     if (!R.free(yard, 0)) return false;
-    const gate = P(-36, 0), lead = [P(-18, 0), P(-27, 0)];
+    const gate = P(-46, 0), lead = [P(-18, 0), P(-30, 0), P(-40, 0)];
     const L = place([fq], gate, 1.8, lead, () => {
       buildHouse(hs, 6.2, { chimney: true, type: 'farmhouse' });
       const roof = kind === 'glass' ? 0 : rnd() < 0.45 ? 7 : rnd() < 0.5 ? 3 : 11;
@@ -520,7 +591,7 @@ export function buildIslandCountryside(scene, c, plan, parts, { audit = null, ke
       if (ss) buildHouse(ss, 4.2, { wall: 8, pitch: 0.5, type: 'cart shed' });
       if (gs) buildGranary(gs, 10 + rnd() * 4);
       // the yard: setts between the ranges
-      R.mark(yard, YARD, 0);
+      R.mark(yard, YARD, 0); K.add(yard, 'yard');
       drapeGrid(chunk(x, z), P, 18, 9, FIELD_COL[8], 8);
       records.yards.push({ q: yard, x, z, ang });
     });
@@ -561,9 +632,9 @@ export function buildIslandCountryside(scene, c, plan, parts, { audit = null, ke
   // ---- villas on the panoramic spurs: a house with its loggia, a formal garden and pool,
   // and a cypress drive
   const villas = [];
-  const cypress = (C, x, z, y, h, r) => {
+  const cypress = (C, x, z, y, h, r, deck) => {
     C.cyp.tree(x, y, z, r, h, rnd() * TAU, 12);
-    if (records.trees) records.trees.push({ x, z, y, r, h, cypress: true });
+    if (records.trees) records.trees.push({ x, z, y, r, h, cypress: true, deck });
     stats.trees++;
   };
   const villa = (x, z) => {
@@ -575,7 +646,7 @@ export function buildIslandCountryside(scene, c, plan, parts, { audit = null, ke
     const ax = Math.cos(ang), az = Math.sin(ang), sx = -az, sz = ax, P = (u, v) => [x + ax * u + sx * v, z + az * u + sz * v];
     const down = (fr.gx * sx + fr.gz * sz) >= 0 ? -1 : 1;     // v toward the view (downhill)
     const top = g.hi + 0.5;
-    const gate = P(-46, 0), lead = [P(-40, 0)];
+    const gate = P(-52, 0), lead = [P(-40, 0), P(-46, 0)];
     const L = place([q], gate, 2.0, lead, () => {
       const C = chunk(x, z);
       // one levelled garden terrace carries house, garden and pool, walled in white stone
@@ -608,7 +679,7 @@ export function buildIslandCountryside(scene, c, plan, parts, { audit = null, ke
         C.detail.box(bp[0], bp[1], ax, az, 3.4, 3.8, top - 0.05, top + 0.7, 3, top);
       }
       for (const [u, v] of [[-37, -down * 27], [37, -down * 27], [-37, down * 27], [37, down * 27]]) {
-        const cp = P(u, v); cypress(C, cp[0], cp[1], top - 0.3, 11 + rnd() * 3, 1.3);
+        const cp = P(u, v); cypress(C, cp[0], cp[1], top - 0.3, 11 + rnd() * 3, 1.3, top);
       }
     });
     if (!L) return false;
@@ -621,8 +692,8 @@ export function buildIslandCountryside(scene, c, plan, parts, { audit = null, ke
       const nx = -(b[1] - a[1]) / l, nz = (b[0] - a[0]) / l;
       for (const sg of [-1, 1]) {
         const px = a[0] + nx * sg * (L.hw + 3.4), pz = a[1] + nz * sg * (L.hw + 3.4), cq = rect(px, pz, 0, 1.6, 1.6);
-        if (!R.free(cq, 0, LANE) || !obstFree(cq) || renderedHeight(px, pz) < 4) continue;
-        R.mark(cq, HARD, 0);
+        if (!R.free(cq, 0, LANE) || !obstFree(cq) || K.hits(cq, 0.3) || renderedHeight(px, pz) < 4) continue;
+        R.mark(cq, HARD, 0); K.add(cq, 'cypress');
         let gy = Infinity; for (const p of cq) gy = Math.min(gy, renderedHeight(p[0], p[1]));
         cypress(chunk(px, pz), px, pz, gy - 0.2, 10 + rnd() * 3, 1.2);
       }
@@ -676,7 +747,7 @@ export function buildIslandCountryside(scene, c, plan, parts, { audit = null, ke
       C.arch.lathe(d, 24, x, z);
       C.arch.box(x, z, 1, 0, 0.8, 0.8, y - 0.05, y + 1.0, 1, y);
       R.mark(fq, HARD, 1);
-      records.buildings.push({ x, z, ang: 0, L: 22, W: 22, lo: g.lo, base: b, q: rect(x, z, 0, 11, 11), type: 'tholos shrine' });
+      records.buildings.push({ x, z, ang: 0, L: 22, W: 22, lo: g.lo, base: b, q: Array.from({ length: 16 }, (_, i) => [x + Math.cos(i * TAU / 16) * 11.05 / Math.cos(Math.PI / 16), z + Math.sin(i * TAU / 16) * 11.05 / Math.cos(Math.PI / 16)]), type: 'tholos shrine' });
       keepouts.push({ x, z, r: 14 });
     });
     if (!L) return false;
@@ -836,10 +907,10 @@ export function buildIslandCountryside(scene, c, plan, parts, { audit = null, ke
     for (const f of big ? [1, 0.7, 0.45] : [0.55, 0.35]) {
       const hl = (40 + rnd() * 70) * f + 16, hw = Math.max(12, Math.min(maxW, (20 + rnd() * 28) * f + 8));
       const q = rect(x, z, fr.ang, hl, hw);
-      if (!R.free(q, 2.5)) continue;
+      if (!R.free(q, 2.5) || K.hits(q, 1.2)) continue;
       const g = groundRange(x, z, fr.ang, hl, hw, 12);
       if (g.lo < 4) continue;
-      R.mark(q, FIELD, 0);
+      R.mark(q, FIELD, 0); K.add(q, 'field');
       layField(x, z, fr, hl, hw, crop, rnd() < 0.45);
       return true;
     }
@@ -883,17 +954,20 @@ export function buildIslandCountryside(scene, c, plan, parts, { audit = null, ke
       if (fr.slope > 0.32) continue;
       const hl = 70 + rnd() * 70, hw = Math.min(90, Math.max(40, (fr.slope > 0.05 ? 9 / fr.slope : 90) * (0.5 + rnd() * 0.5)));
       const q = rect(p.x, p.z, fr.ang, hl, hw);
-      if (!R.free(q, 4)) continue;
+      if (!R.free(q, 4) || K.hits(q, 1.5)) continue;
       const g = groundRange(p.x, p.z, fr.ang, hl, hw, 20);
       if (g.lo < 12) continue;
-      R.mark(q, FIELD, 0);
+      const ptag = 'pasture' + made;
+      R.mark(q, FIELD, 0); K.add(q, ptag);
       const C = chunk(p.x, p.z), ax = Math.cos(fr.ang), az = Math.sin(fr.ang), sx = -az, sz = ax, P = (u, v) => [p.x + ax * u + sx * v, p.z + az * u + sz * v];
       const e = 0.8, gap = Math.floor(rnd() * 4);
       [[P(-hl + e, -hw + e), P(hl - e, -hw + e)], [P(hl - e, -hw + e), P(hl - e, hw - e)], [P(hl - e, hw - e), P(-hl + e, hw - e)], [P(-hl + e, hw - e), P(-hl + e, -hw + e)]].forEach(([a, b], k) => {
         for (const [f0, f1] of k === gap ? [[0, 0.47], [0.53, 1]] : [[0, 1]]) groundRun(C, [a[0] + (b[0] - a[0]) * f0, a[1] + (b[1] - a[1]) * f0], [a[0] + (b[0] - a[0]) * f1, a[1] + (b[1] - a[1]) * f1], 0.9, 0.6, 1, 16);
       });
       // a stone shepherd's shelter in one corner, on its own plinth
+      placeTag = ptag;
       const sp = P(-hl + 9, -hw + 7), ss = siteBuilding(sp[0], sp[1], fr.ang, 7, 5, 3, FIELD);
+      placeTag = null;
       if (ss) buildHouse(ss, 2.8, { wall: 1, roof: 11, pitch: 0.5, type: 'pasture shelter' });
       records.fields.push({ x: p.x, z: p.z, ang: fr.ang, hl, hw, kind: 0, crop: 'pasture', q });
       stats.pastures = (stats.pastures || 0) + 1;
