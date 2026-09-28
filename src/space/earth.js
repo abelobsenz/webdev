@@ -333,6 +333,14 @@ void main() {
   // relief normal (land only)
   vec3 dpdx = dFdx(pG), dpdy = dFdy(pG);
   float hK = max(H, 0.0) * 6.0 * 3.5;        // km, exaggerated x3.5
+#if QUALITY > 0
+  // sub-texel ridges and valleys in the uplands (~18 km and ~6 km), each fading to flat
+  // while it still spans a few pixels; evaluated unconditionally so the derivatives stay defined
+  float mtn = smoothstep(0.02, 0.25, H);
+  float rA = 0.5 - abs(snoise(b * 350.0));
+  float rB = 0.5 - abs(snoise(b * 1100.0 + 7.0));
+  hK += mtn * (rA * 1.4 * (1.0 - smoothstep(3.0, 6.0, fp)) + rB * 0.45 * (1.0 - smoothstep(1.0, 2.0, fp)));
+#endif
   float dhx = dFdx(hK), dhy = dFdy(hK);
   vec3 r1 = cross(dpdy, n), r2 = cross(n, dpdx);
   float det = dot(dpdx, r1);
