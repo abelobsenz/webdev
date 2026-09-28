@@ -348,33 +348,49 @@ function outerFineVertex(I, J) {
   const x = Math.cos(a) * r, z = Math.sin(a) * r;
   return [x, terrainHeight(x, z), z];
 }
-function oBary(a, b, c, d, x, z) {
-  // cells split into (a, b, c) and (b, d, c): interpolate on the plane of the triangle that
-  // contains the point
-  const bary = (p, q, s) => {
-    const v0x = q[0] - p[0], v0z = q[2] - p[2], v1x = s[0] - p[0], v1z = s[2] - p[2], v2x = x - p[0], v2z = z - p[2];
-    const den = v0x * v1z - v1x * v0z || 1e-9;
-    const u = (v2x * v1z - v1x * v2z) / den, v = (v0x * v2z - v2x * v0z) / den;
-    return [1 - u - v, u, v];
-  };
-  const w1 = bary(a, b, c);
-  if (w1[0] >= -1e-4 && w1[1] >= -1e-4 && w1[2] >= -1e-4) return a[1] * w1[0] + b[1] * w1[1] + c[1] * w1[2];
-  const w2 = bary(b, d, c);
-  return b[1] * w2[0] + d[1] * w2[1] + c[1] * w2[2];
+// cells split into (a, b, c) and (b, d, c): interpolate on the plane of the triangle that
+// contains the point (vertices are [x, y, z] triples, read at offsets in flat arrays so the
+// hot query path allocates nothing; the arithmetic is unchanged)
+function oBary(A, ao, B, bo, C, co, D, dox, x, z) {
+  // triangle (a, b, c)
+  let px = A[ao], pz = A[ao + 2];
+  let v0x = B[bo] - px, v0z = B[bo + 2] - pz, v1x = C[co] - px, v1z = C[co + 2] - pz, v2x = x - px, v2z = z - pz;
+  let den = v0x * v1z - v1x * v0z || 1e-9;
+  let u = (v2x * v1z - v1x * v2z) / den, v = (v0x * v2z - v2x * v0z) / den;
+  let w0 = 1 - u - v;
+  if (w0 >= -1e-4 && u >= -1e-4 && v >= -1e-4) return A[ao + 1] * w0 + B[bo + 1] * u + C[co + 1] * v;
+  // triangle (b, d, c)
+  px = B[bo]; pz = B[bo + 2];
+  v0x = D[dox] - px; v0z = D[dox + 2] - pz; v1x = C[co] - px; v1z = C[co + 2] - pz; v2x = x - px; v2z = z - pz;
+  den = v0x * v1z - v1x * v0z || 1e-9;
+  u = (v2x * v1z - v1x * v2z) / den; v = (v0x * v2z - v2x * v0z) / den;
+  w0 = 1 - u - v;
+  return B[bo + 1] * w0 + D[dox + 1] * u + C[co + 1] * v;
 }
-// Surface queries come in dense patches (ground cover samples a camera tile of it), so the
-// fine vertices they interpolate are memoised; the values are identical to the mesh's.
-const OFV_CACHE = new Map();
+// Surface queries (placement of the outer towns, islands and roads; ground cover at run time)
+// come in dense patches, and the mesh build needs every fine vertex too, so each fine vertex
+// is computed once and kept: [x, y, z] in lazily allocated 32 x 32 tiles of float64, exactly
+// the values outerFineVertex returns. (A bounded Map used to thrash here: it was cleared
+// every 60 000 entries, and the placement queries sweep far more vertices than that.)
+const OFV_T = 32;
+const OFV_TI = Math.ceil((OUTER.A * OUTER.K + 2) / OFV_T);
+const OFV_TILES = new Array(OFV_TI * Math.ceil((OUTER.R * OUTER.K + 2) / OFV_T)).fill(null);   // tile (ti, tj) at tj * OFV_TI + ti
+/** Tile holding fine vertex (I, J); the vertex is at offset ofvOffset(I, J). */
+function ofvTile(I, J) {
+  const key = ((J / OFV_T) | 0) * OFV_TI + ((I / OFV_T) | 0);
+  let t = OFV_TILES[key];
+  if (t === null) { t = new Float64Array(OFV_T * OFV_T * 3).fill(NaN); OFV_TILES[key] = t; }
+  const o = ((J % OFV_T) * OFV_T + (I % OFV_T)) * 3;
+  if (Number.isNaN(t[o + 1])) { const v = outerFineVertex(I, J); t[o] = v[0]; t[o + 1] = v[1]; t[o + 2] = v[2]; }
+  return t;
+}
+const ofvOffset = (I, J) => ((J % OFV_T) * OFV_T + (I % OFV_T)) * 3;
 function ofvCached(I, J) {
-  const k = J * 8192 + I;
-  let v = OFV_CACHE.get(k);
-  if (v === undefined) {
-    if (OFV_CACHE.size > 60000) OFV_CACHE.clear();
-    v = outerFineVertex(I, J);
-    OFV_CACHE.set(k, v);
-  }
-  return v;
+  const t = ofvTile(I, J), o = ofvOffset(I, J);
+  return [t[o], t[o + 1], t[o + 2]];
 }
+const _oc = [new Float64Array(3), new Float64Array(3), new Float64Array(3), new Float64Array(3)];
+const oCoarseInto = (i, j, out) => { const k = j * OCOLS + i; out[0] = OLAYOUT.P[k * 2]; out[1] = OLAYOUT.H[k]; out[2] = OLAYOUT.P[k * 2 + 1]; return out; };
 /** Height of the outer mesh surface exactly as its near (fine) LOD draws it. */
 export function outerSurfaceHeight(x, z) {
   outerLayout();
@@ -386,9 +402,10 @@ export function outerSurfaceHeight(x, z) {
   const i = Math.min(Math.floor(fi), A - 1), j = Math.min(Math.floor(fj), R - 1);
   if (OLAYOUT.fine[j * A + i]) {
     const I = Math.min(Math.max(Math.floor(fi * K), i * K), i * K + K - 1), J = Math.min(Math.max(Math.floor(fj * K), j * K), j * K + K - 1);
-    return oBary(ofvCached(I, J), ofvCached(I + 1, J), ofvCached(I, J + 1), ofvCached(I + 1, J + 1), x, z);
+    const ta = ofvTile(I, J), tb = ofvTile(I + 1, J), tc = ofvTile(I, J + 1), td = ofvTile(I + 1, J + 1);
+    return oBary(ta, ofvOffset(I, J), tb, ofvOffset(I + 1, J), tc, ofvOffset(I, J + 1), td, ofvOffset(I + 1, J + 1), x, z);
   }
-  return oBary(oCoarse(i, j), oCoarse(i + 1, j), oCoarse(i, j + 1), oCoarse(i + 1, j + 1), x, z);
+  return oBary(oCoarseInto(i, j, _oc[0]), 0, oCoarseInto(i + 1, j, _oc[1]), 0, oCoarseInto(i, j + 1, _oc[2]), 0, oCoarseInto(i + 1, j + 1, _oc[3]), 0, x, z);
 }
 
 /** Swaps each land chunk of the outer mesh between its fine and coarse cells by distance. */
@@ -455,7 +472,7 @@ export async function buildOuterGeometry(progress) {
   const yAt = (I, J) => {
     I = (I + AK) % AK;
     const q = J * FC + I;
-    if (Number.isNaN(fy[q])) fy[q] = outerFineVertex(I, J)[1];
+    if (Number.isNaN(fy[q])) fy[q] = ofvTile(I, J)[ofvOffset(I, J) + 1];
     return fy[q];
   };
   const pAt = (I, J) => { const a = (I / AK) * Math.PI * 2, r = oRadius(J); return [Math.cos(a) * r, yAt(I, J), Math.sin(a) * r]; };
@@ -463,7 +480,7 @@ export async function buildOuterGeometry(progress) {
     for (let I = 0; I < FC; I++) {
       const v = fmap[J * FC + I];
       if (v < 0) continue;
-      const p = outerFineVertex(I, J), k = v * 3;
+      const p = ofvCached(I, J), k = v * 3;
       pos[k] = p[0]; pos[k + 1] = p[1]; pos[k + 2] = p[2];
       fy[J * FC + (I % AK)] = p[1];
       const u0 = pAt(I - 1, J), u1 = pAt(I + 1, J), w0 = pAt(I, Math.max(J - 1, 0)), w1 = pAt(I, Math.min(J + 1, FR - 1));

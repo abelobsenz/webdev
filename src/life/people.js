@@ -337,8 +337,23 @@ export class People {
       return [w, civicOccupancy(w.landmarks.meshes.filter(m => !far.has(m)))];
     }));
     const wardAt = (x, z) => wards.find(w => Math.abs(x - w.def.x) < w.half && Math.abs(z - w.def.z) < w.half);
+    // stations bucketed on a 128 m grid (each in every cell its r + 2 disc touches), so the
+    // test below reads only the stations that can contain the point
+    const stationCells = new Map();
+    for (const s of stations) {
+      const rr = s.r + 2;
+      for (let i = Math.floor((s.x - rr) / 128); i <= Math.floor((s.x + rr) / 128); i++) {
+        for (let j = Math.floor((s.z - rr) / 128); j <= Math.floor((s.z + rr) / 128); j++) {
+          const k = i * 65536 + j;
+          let b = stationCells.get(k);
+          if (!b) stationCells.set(k, (b = []));
+          b.push(s);
+        }
+      }
+    }
     const blocked = (x, y, z) => {
-      if (stations.some(s => Math.hypot(s.x - x, s.z - z) < s.r + 2)) return true;
+      const sc = stationCells.get(Math.floor(x / 128) * 65536 + Math.floor(z / 128));
+      if (sc && sc.some(s => Math.hypot(s.x - x, s.z - z) < s.r + 2)) return true;
       const w = wardAt(x, z);
       if (!w) return false;
       const occupied = civic.get(w);

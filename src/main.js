@@ -235,9 +235,12 @@ class App {
     p.beginFrame(this.camera, this.skyState.sunDir, this.skyState.moonDir);
     p.timer.begin('scene:shadows+opaque');
     r.shadowMap.needsUpdate = this.settings.shadows;
+    // casters whose shadow cannot reach the view skip the shadow pass (restored right after)
+    if (this.settings.shadows) this.lighting.cullShadowCasters(this.scene, this.camera);
     r.setRenderTarget(p.hdrRT);
     r.clear();
     r.render(this.scene, this.camera);
+    this.lighting.restoreShadowCasters();
     // 4. post
     const exposure = this.exposureFor(this.skyState.sunDir.y, this.camera.position.y);
     p.finalMat.uniforms.uExposure.value = exposure;
