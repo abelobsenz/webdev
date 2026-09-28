@@ -78,6 +78,9 @@ function sampler(path) {
   };
 }
 
+/** A lathe profile closed with a flat top (a duplicated rim ring keeps the edge crisp). */
+const capTop = (prof) => { const l = prof[prof.length - 1]; return [...prof, { r: l.r, y: l.y, kind: l.kind }, { r: 0, y: l.y, kind: l.kind }]; };
+
 const seaFloor = (x, z) => Math.max(terrainHeight(x, z), -30);
 const waterOrGround = (x, z, ground) => Math.max(ground(x, z), 0);
 
@@ -85,14 +88,14 @@ const waterOrGround = (x, z, ground) => Math.max(ground(x, z), 0);
 function pierLotus(parts, p, base) {
   parts.push(latheFacade([
     { r: 7.5, y: base - 18, kind: 1 }, { r: 6.2, y: base + 0.5, kind: 1 }, { r: 4.2, y: base + (p.y - base) * 0.55, kind: 1 },
-    { r: 5.6, y: p.y - 7.5, kind: 1 }, { r: 12.5, y: p.y - 3.4, kind: 1 },
-  ], 16).translate(p.x, 0, p.z));
+    { r: 5.6, y: p.y - 7.5, kind: 1 }, { r: 12.5, y: p.y - 3.4, kind: 1 }, { r: 12.5, y: p.y - 2.9, kind: 5 },
+  ].flatMap((q, i, a) => (i === a.length - 1 ? capTop([q]) : [q])), 16).translate(p.x, 0, p.z));
 }
 function pierStone(parts, p, base, t) {
   // a pier with pointed cutwaters, battered, with a string course under the deck
   const g = latheFacade([
-    { r: 9.5, y: base - 18, kind: 1 }, { r: 8.5, y: base + 2, kind: 1 }, { r: 6.4, y: p.y - 9, kind: 5 }, { r: 7.2, y: p.y - 8, kind: 1 }, { r: 7.2, y: p.y - 3.3, kind: 1 },
-  ], 12, { sx: 1.75, sz: 0.62 });
+    { r: 9.5, y: base - 18, kind: 1 }, { r: 8.5, y: base + 2, kind: 1 }, { r: 6.4, y: p.y - 9, kind: 5 }, { r: 7.2, y: p.y - 8, kind: 1 }, { r: 7.2, y: p.y - 2.9, kind: 1 },
+  ].flatMap((q, i, a) => (i === a.length - 1 ? capTop([q]) : [q])), 12, { sx: 1.75, sz: 0.62 });
   g.rotateY(-Math.atan2(t.x, -t.z));
   parts.push(g.translate(p.x, 0, p.z));
 }
@@ -141,7 +144,7 @@ function styleStayed(parts, S, ground, colliders) {
     const spire = latheFacade([{ r: 5.8, y: 0, kind: 1 }, { r: 4.6, y: H * 0.45, kind: 0 }, { r: 3.4, y: H * 0.8, kind: 2 }, { r: 0.4, y: H - 62 + 12, kind: 2 }], 6);
     spire.rotateY(-Math.atan2(t.z, t.x));
     parts.push(spire.translate(apex.x, apex.y, apex.z));
-    parts.push(latheFacade([{ r: 12, y: base - 20, kind: 1 }, { r: 10, y: base + 3, kind: 1 }, { r: 10, y: base + 4, kind: 1 }], 12, { sx: 1.9, sz: 0.8 }).rotateY(-Math.atan2(side.z, side.x)).translate(p.x, 0, p.z));
+    parts.push(latheFacade(capTop([{ r: 12, y: base - 20, kind: 1 }, { r: 10, y: base + 3, kind: 1 }, { r: 10, y: base + 4, kind: 1 }]), 12, { sx: 1.9, sz: 0.8 }).rotateY(-Math.atan2(side.z, side.x)).translate(p.x, 0, p.z));
     colliders.push({ x: p.x, z: p.z, y0: base, y1: p.y + H + 12, radius: 26 });
     // fans of stays to both deck edges, fore and aft
     for (let k = 1; k <= 12; k++) {
@@ -154,7 +157,7 @@ function styleStayed(parts, S, ground, colliders) {
       }
     }
   }
-  return { free: [[0.3 - 330 / S.L, 0.3 + 330 / S.L], [0.7 - 330 / S.L, 0.7 + 330 / S.L], [0.3, 0.7]], pier: pierLotus };
+  return { free: [[0.3 - 330 / S.L, 0.3 + 330 / S.L], [0.7 - 330 / S.L, 0.7 + 330 / S.L], [0.3, 0.7]], pier: pierLotus, towers };
 }
 
 function styleArches(parts, S, ground) {
@@ -215,7 +218,7 @@ function suspensionTower(parts, S, u, H, colliders, ring) {
     disc.rotateY(-Math.atan2(t.z, t.x));
     parts.push(disc.translate(c.x, c.y, c.z));
   }
-  parts.push(latheFacade([{ r: 13, y: base - 20, kind: 1 }, { r: 11, y: base + 3.5, kind: 1 }, { r: 11, y: base + 4.5, kind: 1 }], 12, { sx: 2.0, sz: 0.8 }).rotateY(-Math.atan2(side.z, side.x)).translate(p.x, 0, p.z));
+  parts.push(latheFacade(capTop([{ r: 13, y: base - 20, kind: 1 }, { r: 11, y: base + 3.5, kind: 1 }, { r: 11, y: base + 4.5, kind: 1 }]), 12, { sx: 2.0, sz: 0.8 }).rotateY(-Math.atan2(side.z, side.x)).translate(p.x, 0, p.z));
   colliders.push({ x: p.x, z: p.z, y0: base, y1: p.y + H + 30, radius: 26 });
   return { p, side, top: p.y + H };
 }
@@ -241,6 +244,14 @@ function cables(parts, S, towers, anchorU, sagMid) {
         pts.push(q.p.clone().addScaledVector(q.side, s * 15.5).setY(Math.max(y, q.p.y + 2)));
       }
       parts.push(sweepTube(pts, () => 0.85, 8, { kind: 10 }));
+      // anchorage blocks where a back-stay meets the deck: from under the deck web up past the cable end
+      for (const E of [A, B]) {
+        if (E.y !== null) continue;
+        const e = S.at(E.u);
+        const Q = (a, l) => { const w = e.p.clone().addScaledVector(e.t, a).addScaledVector(e.side, s * l); return [w.x, w.z]; };
+        parts.push(prismGeo([Q(-7, 13.9), Q(7, 13.9), Q(7, 17.4), Q(-7, 17.4)], e.p.y - 3.4, e.p.y + 2.9, 1, 5, true));
+        parts.push(prismGeo([Q(-4.5, 14.4), Q(4.5, 14.4), Q(4.5, 16.9), Q(-4.5, 16.9)], e.p.y + 2.9, e.p.y + 3.5, 2, 2));
+      }
       // hangers every ~18 m
       const len = (B.u - A.u) * S.L;
       const m = Math.floor(len / 18);
@@ -258,7 +269,7 @@ function cables(parts, S, towers, anchorU, sagMid) {
 function styleSuspension(parts, S, ground, colliders) {
   const tw = [0.28, 0.72].map((u) => ({ u, ...suspensionTower(parts, S, u, 165, colliders, true) }));
   cables(parts, S, tw, [0.12, 0.88], 7);
-  return { free: [[0.2, 0.8]], pier: pierLotus };
+  return { free: [[0.2, 0.8]], pier: pierLotus, towers: tw.map((t) => t.u) };
 }
 
 function styleGrand(parts, S, ground, colliders) {
@@ -270,7 +281,7 @@ function styleGrand(parts, S, ground, colliders) {
     void side;
   }
   cables(parts, S, tw, [0.1, 0.9], 8);
-  return { free: [[0.15, 0.85]], pier: pierLotus };
+  return { free: [[0.15, 0.85]], pier: pierLotus, towers: tw.map((t) => t.u) };
 }
 
 function styleTiedArch(parts, S, ground, colliders) {
@@ -298,7 +309,7 @@ function styleTiedArch(parts, S, ground, colliders) {
     for (const u of [u0, u1]) {
       const { p, side } = S.at(u);
       const base = seaFloor(p.x, p.z);
-      parts.push(latheFacade([{ r: 13, y: base - 20, kind: 1 }, { r: 11, y: base + 2, kind: 1 }, { r: 9.5, y: p.y - 3.4, kind: 1 }, { r: 16, y: p.y - 0.2, kind: 1 }], 14, { sx: 1.6, sz: 0.9 }).rotateY(-Math.atan2(side.z, side.x)).translate(p.x, 0, p.z));
+      parts.push(latheFacade(capTop([{ r: 13, y: base - 20, kind: 1 }, { r: 11, y: base + 2, kind: 1 }, { r: 9.5, y: p.y - 3.4, kind: 1 }, { r: 16, y: p.y - 0.8, kind: 1 }, { r: 16, y: p.y - 0.2, kind: 5 }]), 14, { sx: 1.6, sz: 0.9 }).rotateY(-Math.atan2(side.z, side.x)).translate(p.x, 0, p.z));
       colliders.push({ x: p.x, z: p.z, y0: base, y1: p.y + rise + 6, radius: 22 });
     }
   }
@@ -325,7 +336,7 @@ function styleExtradosed(parts, S, ground, colliders) {
       }
     }
     const base = seaFloor(p.x, p.z);
-    parts.push(latheFacade([{ r: 10, y: base - 18, kind: 1 }, { r: 8.5, y: base + 2, kind: 1 }, { r: 6.5, y: p.y - 6, kind: 1 }, { r: 16.5, y: p.y - 3.3, kind: 1 }], 14, { sx: 1.1, sz: 0.6 }).rotateY(-Math.atan2(side.z, side.x)).translate(p.x, 0, p.z));
+    parts.push(latheFacade(capTop([{ r: 10, y: base - 18, kind: 1 }, { r: 8.5, y: base + 2, kind: 1 }, { r: 6.5, y: p.y - 6, kind: 1 }, { r: 16.5, y: p.y - 3.6, kind: 1 }, { r: 16.5, y: p.y - 2.9, kind: 5 }]), 14, { sx: 1.1, sz: 0.6 }).rotateY(-Math.atan2(side.z, side.x)).translate(p.x, 0, p.z));
     colliders.push({ x: p.x, z: p.z, y0: base, y1: p.y + 50, radius: 22 });
     void t;
   }
@@ -418,9 +429,21 @@ function bridgehead(parts, head) {
   const n2 = ig.attributes.normal;
   if ((n2.getX(0) * (ip[0] - x) + n2.getZ(0) * (ip[2] - z)) > 0) { for (let k = 0; k < ii.length; k += 3) { const q = ii[k + 1]; ii[k + 1] = ii[k + 2]; ii[k + 2] = q; } ig.setIndex(ii); ig.computeVertexNormals(); }
   parts.push(ig);
-  // a parapet top
-  const cap = [];
-  for (const p of ring) cap.push(p);
+  // the parapet top, joining the outer wall to the inner face
+  const cp = [], cf = [], ci = [];
+  for (let i = 0; i < ring.length; i++) {
+    const j = (i + 1) % ring.length;
+    const base = cp.length / 3;
+    for (const p of [ring[i], ring[j], inner[j], inner[i]]) { cp.push(p[0], y + 0.9, p[1]); cf.push(p[0], p[1], 5); }
+    ci.push(base, base + 2, base + 1, base, base + 3, base + 2);
+  }
+  const cg = new THREE.BufferGeometry();
+  cg.setAttribute('position', new THREE.Float32BufferAttribute(cp, 3));
+  cg.setAttribute('aFacade', new THREE.Float32BufferAttribute(cf, 3));
+  cg.setIndex(ci);
+  cg.computeVertexNormals();
+  if (cg.attributes.normal.getY(0) < 0) { for (let k = 0; k < ci.length; k += 3) { const q = ci[k + 1]; ci[k + 1] = ci[k + 2]; ci[k + 2] = q; } cg.setIndex(ci); cg.computeVertexNormals(); }
+  parts.push(cg);
   // the grand stair down the landward end, across most of the width
   const steps = Math.max(4, Math.ceil((y - lo - 2) / 0.32));
   for (let k = 0; k < Math.min(steps, 24); k++) {
@@ -431,12 +454,13 @@ function bridgehead(parts, head) {
   }
 }
 
-function prismGeo(q, y0, y1, kind, topKind) {
+function prismGeo(q, y0, y1, kind, topKind, bottom = false) {
   const pos = [], fac = [], idx = [];
   const add = (a, b, c, d, k) => { const base = pos.length / 3; for (const p of [a, b, c, d]) { pos.push(p[0], p[1], p[2]); fac.push(p[0] + p[2], p[1], k); } idx.push(base, base + 1, base + 2, base, base + 2, base + 3); };
   const cx = (q[0][0] + q[2][0]) / 2, cz = (q[0][1] + q[2][1]) / 2;
   for (let i = 0; i < 4; i++) { const a = q[i], b = q[(i + 1) % 4]; add([a[0], y0, a[1]], [b[0], y0, b[1]], [b[0], y1, b[1]], [a[0], y1, a[1]], kind); }
   add([q[0][0], y1, q[0][1]], [q[1][0], y1, q[1][1]], [q[2][0], y1, q[2][1]], [q[3][0], y1, q[3][1]], topKind);
+  if (bottom) add([q[0][0], y0, q[0][1]], [q[1][0], y0, q[1][1]], [q[2][0], y0, q[2][1]], [q[3][0], y0, q[3][1]], kind);
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   g.setAttribute('aFacade', new THREE.Float32BufferAttribute(fac, 3));
@@ -444,9 +468,9 @@ function prismGeo(q, y0, y1, kind, topKind) {
   g.computeVertexNormals();
   // orient: sides away from the centre, top up
   const n = g.attributes.normal, P = g.attributes.position;
-  for (let f = 0; f < 5; f++) {
+  for (let f = 0; f < (bottom ? 6 : 5); f++) {
     const i0 = f * 4;
-    const out = f < 4 ? (n.getX(i0) * (P.getX(i0) - cx) + n.getZ(i0) * (P.getZ(i0) - cz)) : n.getY(i0);
+    const out = f < 4 ? (n.getX(i0) * (P.getX(i0) - cx) + n.getZ(i0) * (P.getZ(i0) - cz)) : f === 4 ? n.getY(i0) : -n.getY(i0);
     if (out < 0) { const ix = g.index.array; for (let k = f * 6; k < f * 6 + 6; k += 3) { const t = ix[k + 1]; ix[k + 1] = ix[k + 2]; ix[k + 2] = t; } }
   }
   g.computeVertexNormals();
@@ -489,10 +513,14 @@ export function buildWardBridges(scene, bridgePaths, recs, ground, world) {
       res.pier(parts, p, base, t, side);
     }
     // the maglev: held on brackets beside the deck, swinging out on columns into the stations
-    const latAt = (t) => 21 + 11 * (ss(0.07, 0.0, t) + ss(0.93, 1.0, t));
+    // (it swings out to 27 m past the pylon legs, which stand 13-21.5 m out at deck level)
+    const uArc = [0];
+    for (let i = 1; i <= N; i++) uArc.push(uArc[i - 1] + path[i].distanceTo(path[i - 1]));
+    const towerBump = (i) => (res.towers || []).reduce((m, u) => Math.max(m, ss(95, 45, Math.abs(uArc[i] - u * S.L))), 0);
+    const latAt = (t, i) => 21 + 11 * (ss(0.07, 0.0, t) + ss(0.93, 1.0, t)) + 6 * towerBump(i);
     const tube = path.map((p, i) => {
       const t = i / N;
-      return p.clone().addScaledVector(frameAt(path, i).side, latAt(t)).add(V(0, 2.8, 0));
+      return p.clone().addScaledVector(frameAt(path, i).side, latAt(t, i)).add(V(0, 2.8, 0));
     });
     // the ends of the tube: run straight into each station's portal ring
     parts.push(sweepTube(tube, () => 3.0, 12, { kind: 13 }));
@@ -503,14 +531,14 @@ export function buildWardBridges(scene, bridgePaths, recs, ground, world) {
       acc = 0;
       const t = i / N;
       const { side } = frameAt(path, i);
-      const lat = latAt(t);
+      const lat = latAt(t, i);
       const tp = tube[i];
       if (lat < 22.5) {
-        const a = path[i].clone().addScaledVector(side, 13.5).add(V(0, -2.4, 0));
+        const a = path[i].clone().addScaledVector(side, 12.2).add(V(0, -1.6, 0));   // inside the deck's sloped web
         parts.push(sweepTube([a, a.clone().lerp(tp, 0.5).add(V(0, -1.6, 0)), tp.clone().add(V(0, -2.6, 0))], () => 0.55, 6, { kind: 1 }));
       } else {
         const g = Math.max(ground(tp.x, tp.z), -24);
-        if (tp.y - 3 - g > 1.5) parts.push(latheFacade([{ r: 1.6, y: g - 6, kind: 1 }, { r: 1.2, y: tp.y - 4.6, kind: 1 }, { r: 2.4, y: tp.y - 2.8, kind: 1 }], 8).translate(tp.x, 0, tp.z));
+        if (tp.y - 3 - g > 1.5) parts.push(latheFacade(capTop([{ r: 1.6, y: g - 6, kind: 1 }, { r: 1.2, y: tp.y - 4.6, kind: 1 }, { r: 2.4, y: tp.y - 2.4, kind: 1 }]), 8).translate(tp.x, 0, tp.z));
       }
     }
     // gateways astride the deck at both ends
