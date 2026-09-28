@@ -70,6 +70,8 @@ function rotunda(parts, n) {
     { r: 1.4, y: 34, kind: 1 }, { r: 0.9, y: 34.4, kind: 2 }, { r: 0.05, y: 38, kind: 1 },
   ], 48);
   parts.push(g.translate(n.x, 0, n.z));
+  // the concourse floor inside the drum (the terrace deck stops at the drum's foot)
+  parts.push(capPolys([{ outer: circle(0, 0, ROT_R, 48), holes: [] }], 9.6, 9, { ox: n.x, oz: n.z }));
   // ribs up the drum
   for (let k = 0; k < 16; k++) {
     const a = (k / 16) * TAU;
@@ -96,7 +98,7 @@ function guideway(parts, pts, ground, { pierEvery = 36, beam = [3.2, 2.4], avoid
     if (avoid && avoid(p.x, p.z)) continue;
     const g = ground(p.x, p.z);
     if (p.y - d - g < 1) continue;
-    parts.push(latheFacade([{ r: 1.3, y: g - 8, kind: 1 }, { r: 1.0, y: p.y - d - 1.6, kind: 1 }, { r: hw * 0.95, y: p.y - d - 0.2, kind: 1 }, { r: hw * 0.95, y: p.y - d + 0.05, kind: 1 }], 8).translate(p.x, 0, p.z));
+    parts.push(latheFacade([{ r: 1.3, y: g - 8, kind: 1 }, { r: 1.0, y: p.y - d - 1.6, kind: 1 }, { r: hw * 0.95, y: p.y - d - 0.2, kind: 1 }, { r: hw * 0.95, y: p.y - d + 0.05, kind: 1 }, { r: 0.05, y: p.y - d + 0.05, kind: 1 }], 8).translate(p.x, 0, p.z));
   }
 }
 
@@ -119,9 +121,11 @@ function portal(parts, p, dir, lights, glowCol) {
   const spine = [];
   for (let k = 0; k <= 12; k++) { const t = k / 12; spine.push(p.clone().addScaledVector(dir, -6 + t * 42).add(V(0, -1.5 + 20 - 13 * t + 0.8, 0))); }
   parts.push(sweepTube(spine, (u) => 1.6 - 0.9 * u, 8, { kind: 1 }));
-  const found = latheFacade([{ r: 22, y: -14, kind: 1 }, { r: 20, y: -0.6, kind: 1 }, { r: 19.6, y: 0.8, kind: 10 }, { r: 18.8, y: 0.8, kind: 1 }], 32, { sx: 1.0, sz: 1.35 });
+  // (sized so every rib foot lands on it: rib 0 stands 18 m behind the centre, 17 m out)
+  const found = latheFacade([{ r: 24.6, y: -14, kind: 1 }, { r: 22.4, y: -0.6, kind: 1 }, { r: 22.0, y: 0.8, kind: 10 }, { r: 21.1, y: 0.8, kind: 1 },
+    { r: 21.1, y: 0.3, kind: 1 }, { r: 0.05, y: 0.3, kind: 10 }], 32, { sx: 1.0, sz: 1.35 });
   found.rotateY(-Math.atan2(dir.z, dir.x) + Math.PI / 2);
-  const fc = p.clone().addScaledVector(dir, 16);
+  const fc = p.clone().addScaledVector(dir, 12);
   parts.push(found.translate(fc.x, 0, fc.z));
   const fin = p.clone().addScaledVector(dir, -6).add(V(0, 20.5, 0));
   parts.push(latheFacade([{ r: 1.2, y: 0, kind: 1 }, { r: 0.8, y: 3.5, kind: 2 }, { r: 0.05, y: 6, kind: 1 }], 10).translate(fin.x, fin.y, fin.z));
@@ -149,7 +153,7 @@ function footbridge(parts, a, b, ground, lamps) {
     if (acc >= 60) {
       acc = 0;
       const g = ground(p.x, p.z);
-      if (p.y - 2 - g > 3) parts.push(latheFacade([{ r: 2.2, y: g - 10, kind: 1 }, { r: 1.6, y: p.y - 3.4, kind: 1 }, { r: 4.6, y: p.y - 2.0, kind: 1 }], 10).translate(p.x, 0, p.z));
+      if (p.y - 2 - g > 3) parts.push(latheFacade([{ r: 2.2, y: g - 10, kind: 1 }, { r: 1.6, y: p.y - 3.4, kind: 1 }, { r: 4.6, y: p.y - 2.05, kind: 1 }, { r: 0.05, y: p.y - 2.05, kind: 1 }], 10).translate(p.x, 0, p.z));
     }
     if (k % 2 === 0) {
       const { side } = frameAt(path, k);
@@ -181,21 +185,36 @@ function shorePodium(parts, cx, cz, rot, hw, hd, ground) {
   return top;
 }
 
-/** Tapered lattice pylon for the gondolas: four legs, cross-bracing, a head with two sheaves. */
-function gondolaPylon(parts, p, dir, h, g) {
+/** Tapered lattice pylon for the gondolas: four legs founded on their own footings (each
+ *  on the rendered slope under it), braced rings with X-bracing on every face, a head with two sheaves. */
+function gondolaPylon(parts, p, dir, h, g, groundAt) {
   const side = V(-dir.z, 0, dir.x);
   const legs = [[-1, -1], [1, -1], [1, 1], [-1, 1]];
   const top = V(p.x, g + h, p.z);
+  const feet = [], heads = [];
   for (const [a, b] of legs) {
-    const foot = V(p.x, g - 2, p.z).addScaledVector(side, a * 4.5).addScaledVector(dir, b * 3.5);
+    const f = V(p.x, 0, p.z).addScaledVector(side, a * 4.5).addScaledVector(dir, b * 3.5);
+    const gf = groundAt(f.x, f.z);
+    f.y = gf - 1.5;
     const head = top.clone().addScaledVector(side, a * 1.2).addScaledVector(dir, b * 1.0);
-    parts.push(sweepTube([foot, head], () => 0.45, 5, { kind: 1 }));
+    feet.push(f); heads.push(head);
+    parts.push(sweepTube([f, head], () => 0.45, 6, { kind: 1 }));
+    // a stepped concrete footing round the foot
+    parts.push(latheFacade([{ r: 1.5, y: gf - 2.5, kind: 5 }, { r: 1.5, y: gf + 0.5, kind: 5 }, { r: 1.1, y: gf + 1.0, kind: 1 }, { r: 0.05, y: gf + 1.0, kind: 1 }], 8).translate(f.x, 0, f.z));
   }
-  for (let k = 1; k < 5; k++) {
-    const y = g + (h * k) / 5;
-    const w = 4.5 - 3.3 * (k / 5), dd = 3.5 - 2.5 * (k / 5);
-    const q = legs.map(([a, b]) => V(p.x, y, p.z).addScaledVector(side, a * w).addScaledVector(dir, b * dd));
+  // a point on leg i at height y
+  const legAt = (i, y) => feet[i].clone().lerp(heads[i], Math.min(Math.max((y - feet[i].y) / (heads[i].y - feet[i].y), 0), 1));
+  const lv = [];
+  for (let k = 1; k < 5; k++) lv.push(g + (h * k) / 5);
+  let prev = null;
+  for (const y of lv) {
+    const q = [0, 1, 2, 3].map((i) => legAt(i, y));
     for (let i = 0; i < 4; i++) parts.push(sweepTube([q[i], q[(i + 1) % 4]], () => 0.2, 4, { kind: 1 }));
+    if (prev) for (let i = 0; i < 4; i++) {
+      const j = (i + 1) % 4;
+      parts.push(sweepTube([prev[i], q[j]], () => 0.12, 4, { kind: 1 }), sweepTube([prev[j], q[i]], () => 0.12, 4, { kind: 1 }));
+    }
+    prev = q;
   }
   const arm = [top.clone().addScaledVector(side, -7), top.clone().addScaledVector(side, 7)];
   parts.push(sweepTube(arm, () => 0.7, 6, { kind: 1 }));
@@ -382,16 +401,45 @@ export function buildTransit(scene, world) {
     const dir = V(top.x - base.x, 0, top.z - base.z).normalize();
     const side = V(-dir.z, 0, dir.x);
     const Lh = Math.hypot(top.x - base.x, top.z - base.z);
-    const heads = [base.clone().add(V(0, 12, 0))];
     const nP = Math.max(3, Math.round(Lh / 330));
+    // pylons: founded on the lowest rendered ground under their legs; heights raised until the
+    // cabins (7.4 m under the sagging cable) clear the rendered slope by 6 m over every span
+    const pyl = [];
     for (let k = 1; k < nP; k++) {
       const t = k / nP;
       const p = base.clone().lerp(top, t);
-      const g = renderedHeight(p.x, p.z);
-      heads.push(gondolaPylon(parts, p, dir, 38 + 10 * Math.sin(Math.PI * t), g).clone().add(V(0, -0.9, 0)));
-      colliders.push({ x: p.x, z: p.z, y0: g, y1: g + 50, radius: 10 });
+      let g = 1e9;
+      for (const [a, b] of [[0, 0], [-4.5, -3.5], [4.5, -3.5], [4.5, 3.5], [-4.5, 3.5]]) g = Math.min(g, renderedHeight(p.x + side.x * a + dir.x * b, p.z + side.z * a + dir.z * b));
+      pyl.push({ p, g, h: 38 + 10 * Math.sin(Math.PI * t) });
     }
-    heads.push(top.clone().add(V(0, 12, 0)));
+    const headAt = (k) => (k === 0 ? base.clone().add(V(0, 12, 0)) : k === nP ? top.clone().add(V(0, 12, 0)) : V(pyl[k - 1].p.x, pyl[k - 1].g + pyl[k - 1].h - 0.9, pyl[k - 1].p.z));
+    for (let pass = 0; pass < 6; pass++) {
+      let raised = false;
+      for (let k = 0; k < nP; k++) {
+        const a = headAt(k), b = headAt(k + 1), span = a.distanceTo(b);
+        let need = 0, tw = 0.5;
+        for (let i = 1; i < 16; i++) {
+          const t = i / 16, q = a.clone().lerp(b, t);
+          const y = q.y - span * 0.018 * 4 * t * (1 - t);
+          for (const sg of [-1, 1]) { const dn = renderedHeight(q.x + side.x * sg * 5, q.z + side.z * sg * 5) + 13.4 - y; if (dn > need) { need = dn; tw = t; } }
+        }
+        if (need <= 0.05) continue;
+        raised = true;
+        const pa = k > 0 ? pyl[k - 1] : null, pb = k + 1 < nP ? pyl[k] : null;
+        if (pa && pb) { pa.h += need + 0.5; pb.h += need + 0.5; }
+        else if (pa) pa.h += (need + 0.5) / Math.max(1 - tw, 0.25);
+        else if (pb) pb.h += (need + 0.5) / Math.max(tw, 0.25);
+      }
+      if (!raised) break;
+    }
+    const heads = [headAt(0)];
+    for (let k = 1; k < nP; k++) {
+      const { p, g, h } = pyl[k - 1];
+      gondolaPylon(parts, p, dir, h, g, renderedHeight);
+      heads.push(headAt(k));
+      colliders.push({ x: p.x, z: p.z, y0: g, y1: g + h + 2, radius: 10 });
+    }
+    heads.push(headAt(nP));
     // stations: a glazed hall at each end over the bullwheels
     for (const [c, sgn] of [[base, 1], [top, -1]]) {
       const hall = latheFacade([{ r: 12, y: c.y - 3, kind: 1 }, { r: 12, y: c.y + 0.6, kind: 1 }, { r: 11, y: c.y + 0.6, kind: 0 }, { r: 11, y: c.y + 9, kind: 0 }, { r: 12.5, y: c.y + 9.4, kind: 1 }, { r: 12.5, y: c.y + 10.2, kind: 1 }, { r: 8, y: c.y + 13.5, kind: 2 }, { r: 0.2, y: c.y + 14.5, kind: 1 }], 32, { sx: 1.4, sz: 1 });
@@ -399,7 +447,9 @@ export function buildTransit(scene, world) {
       parts.push(hall.translate(c.x + dir.x * 4 * sgn, 0, c.z + dir.z * 4 * sgn));
       if (sgn < 0) {
         // the top station stands on its own terrace podium
-        parts.push(latheFacade([{ r: 20, y: c.y - 14, kind: 5 }, { r: 20, y: c.y - 3, kind: 5 }, { r: 20.8, y: c.y - 2.6, kind: 1 }, { r: 20.8, y: c.y - 2.2, kind: 1 }, { r: 0.2, y: c.y - 2.2, kind: 9 }], 40).translate(c.x, 0, c.z));
+        let lo = c.y - 14;
+        for (let a = 0; a < TAU; a += TAU / 16) lo = Math.min(lo, renderedHeight(c.x + Math.cos(a) * 20.8, c.z + Math.sin(a) * 20.8) - 3);
+        parts.push(latheFacade([{ r: 20, y: lo, kind: 5 }, { r: 20, y: c.y - 3, kind: 5 }, { r: 20.8, y: c.y - 2.6, kind: 1 }, { r: 20.8, y: c.y - 2.2, kind: 1 }, { r: 0.05, y: c.y - 2.2, kind: 9 }], 40).translate(c.x, 0, c.z));
       }
     }
     // cables: an up line and a down line 10 m apart, sagging between the heads
