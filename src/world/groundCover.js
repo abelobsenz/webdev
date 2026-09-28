@@ -3,6 +3,7 @@ import { patchedMaterial } from './materials.js';
 import { NATURE_GLSL, NATURE_U } from './natureGlsl.js';
 import { NOISE_GLSL } from '../shaders/noise.glsl.js';
 import { INNER, TERRAIN_DATA } from './terrain.js';
+import { PLAZA_R } from './layout.js';
 import { FullscreenPass, FS_VERT } from '../core/fullscreen.js';
 import { U } from '../core/uniforms.js';
 
@@ -62,6 +63,7 @@ function buildOccupancy(world) {
     circle(t.def.x, t.def.z, (t.footprint || (t.collide ? t.collide(0) : 40)) + 2);
   }
   for (const st of (world.infra && world.infra.stations) || []) circle(st.x, st.z, st.r);
+  circle(0, 0, PLAZA_R);                // under the Commons' stone disc: nothing to see, nothing to grow
   const data = new Uint8Array(N * N);
   for (let k = 0; k < N * N; k++) data[k] = Math.max(0, Math.min(255, Math.round((dist[k] + OCC_R) * (255 / (2 * OCC_R)))));
   const tex = new THREE.DataTexture(data, N, N, THREE.RedFormat, THREE.UnsignedByteType);
