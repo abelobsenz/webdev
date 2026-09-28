@@ -71,8 +71,8 @@ class Solids {
       const h = Math.hypot(nx, nz), kd = Array.isArray(kind) ? kind[fi] : kind;
       const tx = h > 0.3 ? -nz / h : 1, tz = h > 0.3 ? nx / h : 0;
       for (let k = 1; k < order.length - 1; k++) {
-        for (const vi of [order[0], order[k], order[k + 1]]) {
-          const p = P[vi];
+        for (let w = 0; w < 3; w++) {
+          const p = P[w === 0 ? order[0] : w === 1 ? order[k] : order[k + 1]];
           this.pos.push(p[0], p[1], p[2]); this.nrm.push(nx, ny, nz);
           this.fac.push(p[0] * tx + p[2] * tz, p[1] - vBase, kd);
         }
@@ -593,21 +593,42 @@ export function buildHillCountry(scene, { onComponent = null } = {}) {
     const c=Math.cos(s.ang),a=Math.sin(s.ang),dx=x-s.x,dz=z-s.z;
     return Math.abs(dx*c+dz*a)<s.L/2+.6+pad&&Math.abs(-dx*a+dz*c)<s.W/2+.6+pad;
   };
+  const RING_COS=[],RING_SIN=[];for(let k=0;k<8;k++){const a=k*Math.PI/4;RING_COS.push(Math.cos(a));RING_SIN.push(Math.sin(a));}
   const routeHeight=(x,z,hw=1)=>{
     let h=renderedHeight(x,z);
-    for(let k=0;k<8;k++){const a=k*Math.PI/4;h=Math.max(h,renderedHeight(x+Math.cos(a)*hw,z+Math.sin(a)*hw));}
+    for(let k=0;k<8;k++)h=Math.max(h,renderedHeight(x+RING_COS[k]*hw,z+RING_SIN[k]*hw));
     return h+.2;
   };
-  const trunkSegments=[],segmentCells=new Map(),segmentCell=32;
+  // Segment buckets (numeric cell keys). Every query below returns exactly what a
+  // scan over all segments in id order would: same hits, same order, same ties.
+  const trunkSegments=[],segmentCells=new Map(),segmentCell=32,SK=1<<16;
+  let segI0=Infinity,segI1=-Infinity,segJ0=Infinity,segJ1=-Infinity;
   const addRoadSegments=road=>{const S=road.points;for(let k=1;k<S.length;k++){
     const a=S[k-1],b=S[k],id=trunkSegments.push([a,b,road.halfWidth])-1;
-    for(let i=Math.floor(Math.min(a.x,b.x)/segmentCell);i<=Math.floor(Math.max(a.x,b.x)/segmentCell);i++)for(let j=Math.floor(Math.min(a.z,b.z)/segmentCell);j<=Math.floor(Math.max(a.z,b.z)/segmentCell);j++){const key=`${i},${j}`;if(!segmentCells.has(key))segmentCells.set(key,[]);segmentCells.get(key).push(id);}
+    const i0=Math.floor(Math.min(a.x,b.x)/segmentCell),i1=Math.floor(Math.max(a.x,b.x)/segmentCell),j0=Math.floor(Math.min(a.z,b.z)/segmentCell),j1=Math.floor(Math.max(a.z,b.z)/segmentCell);
+    segI0=Math.min(segI0,i0);segI1=Math.max(segI1,i1);segJ0=Math.min(segJ0,j0);segJ1=Math.max(segJ1,j1);
+    for(let i=i0;i<=i1;i++)for(let j=j0;j<=j1;j++){const key=i*SK+j;let L=segmentCells.get(key);if(!L)segmentCells.set(key,L=[]);L.push(id);}
   }};
   for(const road of allRoads)addRoadSegments(road);
   const projectSegment=(x,z,segment)=>{const [a,b,hw]=segment,dx=b.x-a.x,dz=b.z-a.z,t=Math.max(0,Math.min(1,((x-a.x)*dx+(z-a.z)*dz)/(dx*dx+dz*dz||1))),px=a.x+dx*t,pz=a.z+dz*t;return{x:px,z:pz,y:a.y+(b.y-a.y)*t,d:Math.hypot(x-px,z-pz),hw};};
-  const closeRoads=(x,z,r=12)=>{const out=[];for(let i=Math.floor((x-r)/segmentCell);i<=Math.floor((x+r)/segmentCell);i++)for(let j=Math.floor((z-r)/segmentCell);j<=Math.floor((z+r)/segmentCell);j++)for(const id of segmentCells.get(`${i},${j}`)||[]){const p=projectSegment(x,z,trunkSegments[id]);if(p.d<r)out.push(p);}return out;};
+  // the same distance as projectSegment(...).d, without the allocation
+  const segmentDistance=(x,z,segment)=>{const a=segment[0],b=segment[1],dx=b.x-a.x,dz=b.z-a.z,t=Math.max(0,Math.min(1,((x-a.x)*dx+(z-a.z)*dz)/(dx*dx+dz*dz||1)));return Math.hypot(x-(a.x+dx*t),z-(a.z+dz*t));};
+  const closeRoads=(x,z,r=12)=>{const out=[];const i0=Math.floor((x-r)/segmentCell),i1=Math.floor((x+r)/segmentCell),j0=Math.floor((z-r)/segmentCell),j1=Math.floor((z+r)/segmentCell);for(let i=i0;i<=i1;i++)for(let j=j0;j<=j1;j++){const L=segmentCells.get(i*SK+j);if(L)for(let q=0;q<L.length;q++){const segment=trunkSegments[L[q]];if(segmentDistance(x,z,segment)<r)out.push(projectSegment(x,z,segment));}}return out;};
+  // closeRoads(x,z,r).some(p=>p.d<p.hw+pad+.5): is any carriageway that close?
+  const roadWithin=(x,z,r,pad)=>{const i0=Math.floor((x-r)/segmentCell),i1=Math.floor((x+r)/segmentCell),j0=Math.floor((z-r)/segmentCell),j1=Math.floor((z+r)/segmentCell);for(let i=i0;i<=i1;i++)for(let j=j0;j<=j1;j++){const L=segmentCells.get(i*SK+j);if(L)for(let q=0;q<L.length;q++){const segment=trunkSegments[L[q]],d=segmentDistance(x,z,segment);if(d<r&&d<segment[2]+pad+.5)return true;}}return false;};
+  // Nearest segment (lowest id on ties), by rings of buckets: once the best distance is
+  // below the ring's inner reach, no unvisited segment can be as close.
   const nearestRoad=(x,z)=>{
-    let best=null;for(const segment of trunkSegments){const p=projectSegment(x,z,segment);if(!best||p.d<best.d)best=p;}return best;
+    if(!trunkSegments.length)return null;
+    const ci=Math.floor(x/segmentCell),cj=Math.floor(z/segmentCell);let bestD=Infinity,bestId=-1;
+    for(let k=0;;k++){
+      for(let i=ci-k;i<=ci+k;i++)for(let j=cj-k;j<=cj+k;j+=(i===ci-k||i===ci+k||k===0)?1:2*k){
+        const L=segmentCells.get(i*SK+j);if(L)for(let q=0;q<L.length;q++){const id=L[q],d=segmentDistance(x,z,trunkSegments[id]);if(d<bestD||(d===bestD&&id<bestId)){bestD=d;bestId=id;}}
+      }
+      if(bestId>=0&&bestD<k*segmentCell)break;
+      if(ci-k<=segI0&&ci+k>=segI1&&cj-k<=segJ0&&cj+k>=segJ1)break;
+    }
+    return projectSegment(x,z,trunkSegments[bestId]);
   };
   // New paving meets the old carriageway at its actual elevation. The shoulder
   // transition clears both its embankment and its low kerb before descending.
@@ -654,6 +675,8 @@ export function buildHillCountry(scene, { onComponent = null } = {}) {
     activeSite=previous;
     entrances.push({...e,landing,site:s.id,settlement:s.settlement});s.entrance=entrances.at(-1);
   };
+  const LC=16,lampCells=new Map();
+  for(const p of lamps){const key=Math.floor(p[0]/LC)*SK+Math.floor(p[2]/LC);let L=lampCells.get(key);if(!L)lampCells.set(key,L=[]);L.push(p);}
   for(const [group,sites]of groups){
     settlement=group;
     const center={x:sites.reduce((a,s)=>a+s.x,0)/sites.length,z:sites.reduce((a,s)=>a+s.z,0)/sites.length};
@@ -664,19 +687,38 @@ export function buildHillCountry(scene, { onComponent = null } = {}) {
     const X=n=>xmin+(n%nx)*step,Z=n=>zmin+((n/nx)|0)*step,cell=(x,z)=>Math.round((z-zmin)/step)*nx+Math.round((x-xmin)/step);
     const obstacles=buildingSites.filter(s=>s.x+s.L+s.W>xmin&&s.x-s.L-s.W<xmax&&s.z+s.L+s.W>zmin&&s.z-s.L-s.W<zmax);
     const ports=[];
-    const clear=(x,z,pad=hw+.1,ignore=null)=>!lamps.some(p=>Math.hypot(p[0]-x,p[2]-z)<pad+.4)&&!obstacles.some(s=>s!==ignore&&siteBox(s,x,z,pad))&&!closeRoads(x,z,6).some(p=>p.d<p.hw+pad+.5&&!ports.some(q=>Math.hypot(q.x-x,q.z-z)<9));
+    // Buckets of the obstacles (each by the circle that bounds its padded footprint)
+    // and of the lamps, so clear() tests only what could be hit; same answers.
+    const OB=8,OBPAD=1.5,obCells=new Map(),obFast=[];
+    for(const s of obstacles){
+      const o={s,c:Math.cos(s.ang),a:Math.sin(s.ang),hl:s.L/2+.6,hw:s.W/2+.6};obFast.push(o);
+      const R=Math.hypot(o.hl+OBPAD,o.hw+OBPAD)+.01;
+      for(let i=Math.floor((s.x-R)/OB);i<=Math.floor((s.x+R)/OB);i++)for(let j=Math.floor((s.z-R)/OB);j<=Math.floor((s.z+R)/OB);j++){const key=i*SK+j;let L=obCells.get(key);if(!L)obCells.set(key,L=[]);L.push(o);}
+    }
+    const obHit=(o,x,z,pad)=>{const s=o.s,dx=x-s.x,dz=z-s.z;return Math.abs(dx*o.c+dz*o.a)<o.hl+pad&&Math.abs(-dx*o.a+dz*o.c)<o.hw+pad;};
+    const obstacleAt=(x,z,pad,ignore)=>{
+      if(pad>OBPAD){for(const o of obFast)if(o.s!==ignore&&obHit(o,x,z,pad))return true;return false;}
+      const L=obCells.get(Math.floor(x/OB)*SK+Math.floor(z/OB));if(L)for(let q=0;q<L.length;q++){const o=L[q];if(o.s!==ignore&&obHit(o,x,z,pad))return true;}return false;
+    };
+    const lampAt=(x,z,r)=>{const i0=Math.floor((x-r)/LC),i1=Math.floor((x+r)/LC),j0=Math.floor((z-r)/LC),j1=Math.floor((z+r)/LC);for(let i=i0;i<=i1;i++)for(let j=j0;j<=j1;j++){const L=lampCells.get(i*SK+j);if(L)for(const p of L)if(Math.hypot(p[0]-x,p[2]-z)<r)return true;}return false;};
+    // lamps near this settlement; inside the inner box no other lamp can be within reach
+    const LM=60,groupLamps=lamps.filter(p=>p[0]>xmin-LM&&p[0]<xmax+LM&&p[2]>zmin-LM&&p[2]<zmax+LM);
+    const lampNear=(x,z,r)=>{if(r<LM-2&&x>xmin-LM+r+1&&x<xmax+LM-r-1&&z>zmin-LM+r+1&&z<zmax+LM-r-1){for(const p of groupLamps)if(Math.hypot(p[0]-x,p[2]-z)<r)return true;return false;}return lampAt(x,z,r);};
+    const clear=(x,z,pad=hw+.1,ignore=null)=>!lampNear(x,z,pad+.4)&&!obstacleAt(x,z,pad,ignore)&&!(roadWithin(x,z,6,pad)&&!ports.some(q=>Math.hypot(q.x-x,q.z-z)<9));
     const lineClear=(a,b,ignore=null)=>{const n=Math.max(1,Math.ceil(Math.hypot(a.x-b.x,a.z-b.z)/.65));for(let k=0;k<=n;k++)if(!clear(a.x+(b.x-a.x)*k/n,a.z+(b.z-a.z)*k/n,hw+.1,ignore))return false;return true;};
     const valid=new Uint8Array(N),height=new Float32Array(N),cost=new Float64Array(N).fill(Infinity),prev=new Int32Array(N).fill(-2),anchor=new Map();
     const heap=[];
     const push=(n,c)=>{let k=heap.length;heap.push([n,c]);while(k){const p=(k-1)>>1;if(heap[p][1]<=c)break;heap[k]=heap[p];k=p;heap[k]=[n,c];}};
     const pop=()=>{const result=heap[0],tail=heap.pop();if(heap.length){heap[0]=tail;let k=0;for(;;){let c=k,l=2*k+1,r=l+1;if(l<heap.length&&heap[l][1]<heap[c][1])c=l;if(r<heap.length&&heap[r][1]<heap[c][1])c=r;if(c===k)break;[heap[k],heap[c]]=[heap[c],heap[k]];k=c;}}return result;};
     let candidates=[];
-    for(const [a,b]of trunkSegments){if(Math.max(a.x,b.x)<xmin-8||Math.min(a.x,b.x)>xmax+8||Math.max(a.z,b.z)<zmin-8||Math.min(a.z,b.z)>zmax+8)continue;const count=Math.max(1,Math.ceil(Math.hypot(a.x-b.x,a.z-b.z)/step));for(let k=0;k<=count;k++)candidates.push({x:a.x+(b.x-a.x)*k/count,z:a.z+(b.z-a.z)*k/count,y:a.y+(b.y-a.y)*k/count});}
+    const nearIds=new Set();
+    for(let i=Math.floor((xmin-8)/segmentCell);i<=Math.floor((xmax+8)/segmentCell);i++)for(let j=Math.floor((zmin-8)/segmentCell);j<=Math.floor((zmax+8)/segmentCell);j++){const L=segmentCells.get(i*SK+j);if(L)for(const id of L)nearIds.add(id);}
+    for(const [a,b]of [...nearIds].sort((p,q)=>p-q).map(id=>trunkSegments[id])){if(Math.max(a.x,b.x)<xmin-8||Math.min(a.x,b.x)>xmax+8||Math.max(a.z,b.z)<zmin-8||Math.min(a.z,b.z)>zmax+8)continue;const count=Math.max(1,Math.ceil(Math.hypot(a.x-b.x,a.z-b.z)/step));for(let k=0;k<=count;k++)candidates.push({x:a.x+(b.x-a.x)*k/count,z:a.z+(b.z-a.z)*k/count,y:a.y+(b.y-a.y)*k/count});}
     const allCandidates=candidates;
     candidates.sort((a,b)=>Math.hypot(a.x-center.x,a.z-center.z)-Math.hypot(b.x-center.x,b.z-center.z));
     for(const p of candidates){if(ports.some(q=>Math.hypot(p.x-q.x,p.z-q.z)<(group.startsWith('village-')?villages[Number(group.split('-')[1])].r*.7:30)))continue;ports.push(p);if(ports.length===(group.startsWith('village-')?3:1))break;}
     candidates=ports;
-    for(let n=0;n<N;n++){const x=X(n),z=Z(n);if(clear(x,z)&&renderedHeight(x,z)>5){valid[n]=1;height[n]=joiningHeight(x,z,1.4);const contact=closeRoads(x,z,6).filter(p=>p.d<p.hw+3.2).sort((a,b)=>a.d-b.d)[0];if(contact)height[n]=Math.max(routeHeight(x,z,2.15),contact.y+.1);else height[n]=Math.max(height[n],routeHeight(x,z,2.15));}}
+    for(let n=0;n<N;n++){const x=X(n),z=Z(n);if(clear(x,z)&&renderedHeight(x,z)>5){valid[n]=1;const contact=closeRoads(x,z,6).filter(p=>p.d<p.hw+3.2).sort((a,b)=>a.d-b.d)[0];if(contact)height[n]=Math.max(routeHeight(x,z,2.15),contact.y+.1);else height[n]=Math.max(joiningHeight(x,z,1.4),routeHeight(x,z,2.15));}}
     for(const p of candidates){const ni=Math.round((p.x-xmin)/step),nj=Math.round((p.z-zmin)/step);let best=null;for(let di=-2;di<=2;di++)for(let dj=-2;dj<=2;dj++){
       const i=ni+di,j=nj+dj,n=j*nx+i;if(i<0||j<0||i>=nx||j>=nz||!valid[n])continue;
       const q={x:X(n),z:Z(n)},d=Math.hypot(q.x-p.x,q.z-p.z);if((!best||d<best.d)&&lineClear(q,p))best={n,d};
@@ -1024,7 +1066,10 @@ export function buildHillCountry(scene, { onComponent = null } = {}) {
   lampPts.frustumCulled = false;
   scene.add(lampPts);
 
+  // Beyond a few kilometres a hill house's shadow is below a texel of the far cascade;
+  // chunks past this (nearest edge) stay out of the shadow pass.
   let detailR = 5000, farR = 28000;
+  const shadowR = 8000;
   const api = {
     lod, villages, shrines, farms, buildingSites, fieldSites, roads:allRoads, entrances, routes, villageCenters, orchardTrees, tris, detailTris, houses, fields, roadLen, isFree: (x, z, r) => free(x, z, r),
     applyQuality(s) { const q = Math.max(0.4, Math.min(1, s.lowrise ?? 1)); detailR = 5000 * q; farR = 28000 * (0.7 + 0.3 * q); },
@@ -1033,8 +1078,8 @@ export function buildHillCountry(scene, { onComponent = null } = {}) {
       const p = camera.position;
       for (const L of lod) {
         const d = Math.hypot(L.x - p.x, L.z - p.z) - CH * 0.71;
-        if (L.arch) L.arch.visible = d < farR;
-        if (L.stone) L.stone.visible = d < farR;
+        if (L.arch) { L.arch.visible = d < farR; L.arch.castShadow = d < shadowR; }
+        if (L.stone) { L.stone.visible = d < farR; L.stone.castShadow = d < shadowR; }
         if (L.drape) L.drape.visible = d < farR;
         if (L.detail) L.detail.visible = d < detailR;
       }
