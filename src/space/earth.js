@@ -113,7 +113,7 @@ float cloudDensity(vec3 b, float lod, float fp) {
     pot += det * 0.06 * smoothstep(18.0, 4.0, fp);
   }
 #endif
-  float dens = smoothstep(0.47, 0.74, pot);
+  float dens = smoothstep(0.5, 0.66, pot);
   float ci = mix(c0.a, c1.a, k);
   dens = max(dens, smoothstep(0.45, 0.85, ci) * 0.45);
   return dens;
@@ -164,53 +164,88 @@ const vec3 ISLANDS[8] = vec3[8](vec3(2.5, 2.0, 0.56), vec3(3.75, -0.25, 0.7), ve
   vec3(-2.65, -2.3, 0.64), vec3(-3.8, 0.15, 0.74), vec3(-2.35, 2.7, 0.58), vec3(0.35, 3.7, 0.66));
 // Greater Meridian (km east, km north of the Axis): the seven Outer Wards on their platforms
 // (src/world/layout.js WARDS), the island towns out toward the horizon, the massif terraces
-const vec2 WARDS[7] = vec2[7](vec2(10.2, 5.4), vec2(12.2, -2.4), vec2(16.5, 1.5), vec2(8.2, -9.4), vec2(0.0, -13.8), vec2(-7.8, -9.6), vec2(-12.0, -3.0));
-const vec3 ISLES[7] = vec3[7](vec3(24.0, 9.0, 0.9), vec3(29.0, -6.0, 0.7), vec3(18.0, -24.0, 0.8), vec3(-6.0, -30.0, 0.7), vec3(-25.0, -15.0, 0.9), vec3(-31.0, 6.0, 0.6), vec3(-19.0, 21.0, 0.7));
+const vec3 WARDS[7] = vec3[7](vec3(10.2, 5.4, 1.35), vec3(12.2, -2.4, 1.15), vec3(16.5, 1.5, 1.0), vec3(8.2, -9.4, 1.05), vec3(0.0, -13.8, 1.25), vec3(-7.8, -9.6, 1.1), vec3(-12.0, -3.0, 1.3));
+// the five island cities (src/world/terrain.js FAR_ISLANDS): km east, km north, radius
+const vec3 ISLES[5] = vec3[5](vec3(21.0, -24.0, 3.2), vec3(-26.0, -19.0, 4.2), vec3(31.0, 4.0, 2.6), vec3(-9.0, -33.0, 2.4), vec3(14.0, -36.0, 3.0));
+// the northern massif (src/world/terrain.js MASSIF): km east, km north, radius
+const vec3 MASSIFS[4] = vec3[4](vec3(-2.5, 16.5, 4.3), vec3(4.8, 15.0, 3.3), vec3(-8.8, 14.2, 3.0), vec3(9.8, 19.0, 3.8));
 
-// Meridian's atoll, drawn procedurally at its true size (km, local east/north)
+// Greater Meridian by day, drawn at its true size (km east, km north of the Axis): the
+// turquoise lagoon inside its city rim, the eight district islands, the seven Outer Wards
+// on their pale platforms with the bridges back to the rim, the five island cities, the
+// forested massif to the north, all standing on a shallow bank whose pale water is the
+// first thing you find from high orbit.
+float mSeg(vec2 p, vec2 a, vec2 b) { vec2 ab = b - a; float t = clamp(dot(p - a, ab) / max(dot(ab, ab), 1e-6), 0.0, 1.0); return length(p - a - ab * t); }
 vec4 meridianSite(vec3 b, float fp, out float lightsOut) {
   lightsOut = 0.0;
   vec3 dv = b - uMeridian;
   float dk = length(dv) * 6371.0;
-  if (dk > 48.0) return vec4(0.0);
+  if (dk > 70.0) return vec4(0.0);
   vec3 e = normalize(vec3(uMeridian.z, 0.0, -uMeridian.x));   // east
-  vec3 nn = vec3(0.0, 1.0, 0.0);
-  float x = dot(dv, e) * 6371.0, y = dot(dv, nn) * 6371.0;
-  float r = length(vec2(x, y));
-  float a = atan(y, x);
-  float land = 0.0, lagoon = 0.0, city = 0.0;
-  // rim of the atoll with channels (south = Gate)
+  vec2 P = vec2(dot(dv, e), dv.y) * 6371.0;
+  float r = length(P);
+  float a = atan(P.y, P.x);
+  float aa = max(fp * 0.6, 0.03);                                // antialiasing width (km)
+  // --- the bank: shallow water over sand round every island and platform ---
+  // one irregular platform: a smooth union of the rises under the atoll, wards and islands
+  float bf = exp(-r * r / 260.0);
+  for (int i = 0; i < 7; i++) { vec2 q = P - WARDS[i].xy; bf += 0.6 * exp(-dot(q, q) / 22.0); }
+  for (int i = 0; i < 5; i++) { vec2 q = P - ISLES[i].xy; bf += 0.9 * exp(-dot(q, q) / (ISLES[i].z * ISLES[i].z * 5.0)); }
+  bf += 0.16 * snoise(vec3(P * 0.12, 1.0)) + 0.07 * snoise(vec3(P * 0.45, 2.0));
+  float bank = smoothstep(0.12, 0.62, bf);
+  float shoal = smoothstep(0.7, 1.3, bf);
+  // --- the atoll: rim with its channels (the Gate to the south), lagoon, islands ---
   float rimR = 5.9 + 0.35 * snoise(vec3(cos(a) * 1.7, sin(a) * 1.7, 3.0));
-  float rim = 1.0 - smoothstep(0.32, 0.46, abs(r - rimR));
+  float rim = 1.0 - smoothstep(0.34 - aa, 0.46 + aa, abs(r - rimR));
   float ch = min(min(abs(a + 1.5708), abs(a + 0.05)), min(abs(a - 2.45), abs(a + 2.55)));
   rim *= smoothstep(0.05, 0.12, ch);
-  land = max(land, rim);
-  lagoon = smoothstep(rimR + 0.1, rimR - 0.4, r);
-  // central island and eight district islands
-  land = max(land, smoothstep(1.05, 0.85, r));
+  float lagoon = 1.0 - smoothstep(rimR - 0.3, rimR + 0.1, r);
+  float land = rim;
+  land = max(land, 1.0 - smoothstep(0.9 - aa, 1.02 + aa, r));
   for (int i = 0; i < 8; i++) {
     vec3 isl = ISLANDS[i];
-    land = max(land, smoothstep(isl.z * 1.1, isl.z * 0.75, length(vec2(x, y) - isl.xy)));
+    land = max(land, 1.0 - smoothstep(isl.z * 0.8 - aa, isl.z + aa, length(P - isl.xy)));
   }
-  city = land * smoothstep(rimR + 0.2, rimR - 0.3, r);
-  city = max(city, rim * 0.5);
-  // northern massif and Mount Anchor
-  float massif = smoothstep(7.2, 9.0, y) * (1.0 - smoothstep(19.0, 22.0, y)) * (1.0 - smoothstep(12.0, 16.0, abs(x + 0.8)));
-  massif *= smoothstep(-0.2, 0.3, snoise(vec3(x, y, 0.0) * 0.12));
-  float anchor = smoothstep(4.5, 2.5, length(vec2(x + 18.8, y - 6.8)));
-  land = max(land, max(massif, anchor));
-  lightsOut = city * (1.2 + 0.8 * step(r, 1.2)) + smoothstep(0.35, 0.0, r) * 6.0;
-  // the Outer Wards on their platforms and the island towns (day: pale decks and green roofs)
-  vec2 P = vec2(x, y);
-  float ward = 0.0;
-  for (int i = 0; i < 7; i++) ward = max(ward, smoothstep(1.7, 1.2, length(P - WARDS[i])));
-  float isle = 0.0;
-  for (int i = 0; i < 7; i++) isle = max(isle, smoothstep(ISLES[i].z * 1.6, ISLES[i].z, length(P - ISLES[i].xy)));
-  vec3 col = mix(vec3(0.02, 0.2, 0.2), vec3(0.03, 0.05, 0.02), land);
-  col = mix(col, vec3(0.16, 0.15, 0.13), city * 0.6);
-  col = mix(col, vec3(0.22, 0.22, 0.2), ward * 0.8);
-  col = mix(col, vec3(0.05, 0.08, 0.035), isle);
-  float cover = max(max(lagoon, land), max(ward, isle)) * smoothstep(48.0, 40.0, dk) * smoothstep(9.0, 2.0, fp);
+  float city = land * (1.0 - smoothstep(rimR + 0.4, rimR + 0.8, r));
+  // --- the Outer Wards and their bridges ---
+  float ward = 0.0, bridge = 0.0;
+  for (int i = 0; i < 7; i++) {
+    vec2 c = WARDS[i].xy;
+    ward = max(ward, 1.0 - smoothstep(WARDS[i].z - aa, WARDS[i].z + aa, length(P - c)));
+    float w0 = 0.09;
+    float dB = mSeg(P, normalize(c) * (rimR + 0.2), c - normalize(c) * WARDS[i].z * 0.9);
+    bridge = max(bridge, clamp(1.0 - dB / max(w0, aa), 0.0, 1.0) * min(1.0, w0 / aa));
+  }
+  // --- island cities, the massif and Mount Anchor ---
+  float isle = 0.0, town = 0.0;
+  for (int i = 0; i < 5; i++) {
+    vec2 q = P - ISLES[i].xy;
+    float wob = 1.0 + 0.18 * snoise(vec3(q * 0.35, float(i) * 3.1));
+    float li = 1.0 - smoothstep(ISLES[i].z * wob - aa, ISLES[i].z * wob + aa, length(q));
+    isle = max(isle, li);
+    // each town sits on the coast that faces the capital
+    vec2 hb = ISLES[i].xy - normalize(ISLES[i].xy) * ISLES[i].z * 0.55;
+    town = max(town, li * (1.0 - smoothstep(0.6, 1.5, length(P - hb))));
+  }
+  float massif = 0.0;
+  for (int i = 0; i < 4; i++) massif = max(massif, 1.0 - smoothstep(MASSIFS[i].z * 0.8, MASSIFS[i].z * 1.25, length(P - MASSIFS[i].xy)));
+  massif *= smoothstep(-0.3, 0.2, snoise(vec3(P * 0.2, 0.0)) + 0.4);
+  float anchor = 1.0 - smoothstep(2.5, 4.5, length(P - vec2(-18.8, 6.8)));
+  float green = max(massif, anchor);
+  // --- colour ---
+  vec3 col = mix(vec3(0.006, 0.03, 0.045), vec3(0.028, 0.13, 0.14), bank);  // bank shallows
+  col = mix(col, vec3(0.05, 0.2, 0.19), shoal * 0.7);                          // sandy shoals near the land
+  col = mix(col, vec3(0.045, 0.24, 0.22), lagoon);                          // lagoon turquoise
+  vec3 cityC = mix(vec3(0.3, 0.3, 0.28), vec3(0.05, 0.1, 0.04), 0.3 + 0.2 * snoise(vec3(P * 1.3, 5.0)));
+  col = mix(col, vec3(0.34, 0.32, 0.26), rim * 0.4);                        // reef sand under the rim
+  col = mix(col, cityC, city);
+  col = mix(col, vec3(0.36, 0.35, 0.32), max(ward, bridge * 0.8));
+  vec3 isleC = mix(vec3(0.035, 0.075, 0.028), vec3(0.3, 0.29, 0.26), town);
+  col = mix(col, isleC, isle);
+  col = mix(col, mix(vec3(0.02, 0.045, 0.018), vec3(0.12, 0.11, 0.1), smoothstep(0.6, 1.0, green)), green);
+  float cover = max(max(bank, max(lagoon, land)), max(max(ward, bridge), max(isle, green)));
+  cover *= (1.0 - smoothstep(62.0, 70.0, dk)) * (1.0 - smoothstep(18.0, 40.0, fp));
+  lightsOut = city;
   return vec4(col, cover);
 }
 
@@ -282,12 +317,12 @@ vec3 meridianNight(vec3 b, float fp) {
   for (int i = 0; i < 8; i++) col += gold * mDot(P, ISLANDS[i].xy, ISLANDS[i].z, w) * 7.0;
   // the Outer Wards and their bridges to the rim
   for (int i = 0; i < 7; i++) {
-    vec2 c = WARDS[i];
+    vec2 c = WARDS[i].xy;
     col += mix(white, gold, 0.4) * mDot(P, c, 1.9, w) * 26.0;
     col += teal * mLine(P, normalize(c) * 6.2, c - normalize(c) * 1.4, 0.15, w) * 14.0;
   }
   // tower towns on the far islands, terraces on the massif's lower slopes
-  for (int i = 0; i < 7; i++) col += gold * mDot(P, ISLES[i].xy, ISLES[i].z, w) * 10.0;
+  for (int i = 0; i < 5; i++) col += gold * mDot(P, ISLES[i].xy - normalize(ISLES[i].xy) * ISLES[i].z * 0.55, 1.2, w) * 10.0;
   col += gold * mLine(P, vec2(-7.0, 8.2), vec2(6.5, 8.6), 0.9, w) * 3.0;
   // far off, keep it the brightest point: a glow that shrinks its peak more slowly than area
   float rg = max(8.0, fp * 1.3);
@@ -368,8 +403,14 @@ void main() {
   // ocean with sun glint
   vec3 seaCol;
   {
-    float wind = snoise(b * 25.0 + vec3(0.0, uCloudPh * 2.0, 0.0)) * 0.5 + 0.5;
-    float al = mix(0.12, 0.3, wind);
+    // sea-surface roughness from the wind (Cox-Munk, ~7 m/s): a broad smooth glint, gently
+    // varied by weather systems, with calm slicks streaking it where they are resolved
+    float wind = snoise(b * 7.0 + vec3(0.0, uCloudPh * 0.6, 0.0)) * 0.5 + 0.5;
+    float al = mix(0.17, 0.25, wind);
+#if QUALITY > 0
+    float slick = smoothstep(0.55, 0.8, snoise(b * vec3(90.0, 260.0, 90.0) + wind * 3.0) * 0.5 + 0.5) * (1.0 - smoothstep(2.0, 8.0, fp));
+    al -= 0.05 * slick;
+#endif
     al = mix(al, 0.5, ice);
     vec3 Hh = normalize(V + sun);
     float nh = max(dot(n, Hh), 0.0), nv = max(dot(n, V), 1e-3), nl = max(dot(n, sun), 0.0);
@@ -496,7 +537,7 @@ export class Earth {
       uLightGain: { value: 1 },
       uPixAng: { value: 0.001 },
       uReady: { value: 0 },
-      uAtmoGain: { value: 0.5 },
+      uAtmoGain: { value: 0.36 },
     };
     this.material = new THREE.ShaderMaterial({
       vertexShader: VERT,

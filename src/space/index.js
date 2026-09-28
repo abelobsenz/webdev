@@ -131,6 +131,12 @@ export class SpaceMode {
       frame:q=>q.copy(sim.moonQuat).multiply(lunarFrame),
       minDist:.12,maxDist:20000,defaultDist:11,view:{az:.55,el:.45},
     });
+    // Medii Landing, on the lunar surface beneath the Exchange (src/space/lunarLanding.js)
+    T('lunarLanding', {
+      position:o=>o.set(R_MOON+0.02,0,0).applyQuaternion(sim.moonQuat).add(sim.moonPos),
+      frame:q=>q.copy(sim.moonQuat).multiply(lunarFrame),
+      minDist:.25,maxDist:20000,defaultDist:15,view:{az:2.35,el:.3},
+    });
     const terraceLocal=new THREE.Vector3(Math.cos(.2),0,Math.sin(.2)).multiplyScalar(9.174).addScaledVector(new THREE.Vector3(-Math.sin(.2),0,Math.cos(.2)),.32).setY(-1.07);
     T('harbourTerrace',{
       position:o=>o.copy(terraceLocal).applyQuaternion(meridQ).addScaledVector(merid,R_EARTH+GEO_ALT).applyQuaternion(sim.earthQuat),
