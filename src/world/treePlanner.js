@@ -91,7 +91,9 @@ export function planTrees(world) {
     return m - 0.15;
   };
   /** Does a tree of species sp and height s fit at x,z? */
+  const rimDesigned = world.rim && world.rim.designed;
   const fits = (x, z, sp, s, urban) => {
+    if (rimDesigned && rimDesigned(x, z)) return false;       // the rim's designed parcels plant their own
     const cr = crownRadius(sp, s);
     if (C) {
       if (C.groundAt(x, z) < cr * 0.92 + 0.8) return false;
@@ -470,6 +472,17 @@ export function planTrees(world) {
       if (!clear(x, z, cr * 0.75, 5)) continue;
       push(x, z, sp, s, { y: y - 0.2, layer: 5, spacing: cr * 0.75 });
     }
+  }
+  // ------------------------------------------------ the Rim's designed planting --
+  // orchards and palm groves in rows along the land, avenue trees on Rim Way's country verges,
+  // the set pieces' own trees (rim/rimSites.js placed them clear of the plan; the clearance field
+  // keeps them off the structures). Planted last, so every other tree is drawn as before.
+  if (world.rim) for (const t of world.rim.trees) {
+    const sp = SP[t.sp] ?? SP.flowering;
+    const cr = crownRadius(sp, t.s);
+    if (C && (C.groundAt(t.x, t.z) < Math.min(cr, 3.2) * 0.8 + 0.8 || C.overAt(t.x, t.z) < cr + 1.0)) continue;
+    if (!clear(t.x, t.z, 2.2, 8)) continue;
+    push(t.x, t.z, sp, t.s, { layer: 8, spacing: 2.2, lean: sp === SP.palm ? rnd() * 0.05 : 0, bloom: t.bloom });
   }
   return trees;
 }

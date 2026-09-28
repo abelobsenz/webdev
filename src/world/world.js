@@ -29,6 +29,7 @@ import { renderedHeight } from './outerCities.js';
 import { planInnerCivic, buildInnerCivic } from './innerCivic.js';
 import { planShorePromenades, buildShoreJetties } from './innerShore.js';
 import { planTowns, buildTowns, townPalette } from './towns/index.js';
+import { buildRim } from './rim/rimBuild.js';
 
 import { buildInfrastructure, createBeacons } from './infrastructure.js';
 import { Traffic } from '../life/traffic.js';
@@ -175,6 +176,10 @@ export class World {
     this.jetties = buildShoreJetties(this.scene, this.shoreWalks, raw);
     this.towns = buildTowns(this.scene, this.plan, this.settings);
     this.updaters.push({ applyQuality: (s) => this.towns.applyQuality(s), update: () => this.app.camera && this.towns.update(this.app.camera) });
+    // the Rim's country, shores and avenue (rim/rimBuild.js): vineyards and gardens, the set
+    // pieces, lighthouses at the channel mouths, sea walls, lidos, jetties, stops on Rim Way
+    this.rim = buildRim(this.scene, this, raw, { quality: this.settings });
+    this.updaters.push({ applyQuality: (s) => this.rim.applyQuality(s), update: () => this.app.camera && this.rim.update(this.app.camera) });
     this.updaters.push({ update: () => this.app.camera && this.civic.update(this.app.camera) });
     this.streetscape = buildStreetscape(this.scene, this.plan, raw, [...this.infra.promLamps, ...this.rimCourts.lamps]);
     this.colliders.push(...(this.streetscape.colliders || []));   // square fountains, obelisks, kiosks
