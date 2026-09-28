@@ -77,7 +77,7 @@ class App {
     // rendering agent: hook volumetric clouds / mid-frame depth capture into the main pass
     this.pipeline.attach(this.world, this.scene, this.camera, this.lighting.sun);
     this.controls = new FlyControls(this.camera, this.canvas, {
-      groundHeight: (x, z) => this.world.groundHeight(x, z),
+      groundHeight: (x, z) => this.world.surfaceHeight(x, z),   // the drawn surface, outer land included
       colliders: this.world.colliders,
     });
     this.controls.wantLock = false;

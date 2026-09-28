@@ -24,6 +24,7 @@ import { buildNature } from './nature.js';
 import { GroundCover, buildHedges } from './groundCover.js';
 import { buildFloatingIslands } from './floating.js';
 import { INNER } from './terrain.js';
+import { renderedHeight } from './outerCities.js';
 import { buildInfrastructure, createBeacons } from './infrastructure.js';
 import { Traffic } from '../life/traffic.js';
 import { Chorus, CHORUS_STEM_COLLIDERS } from '../life/chorus.js';
@@ -228,6 +229,13 @@ export class World {
   groundHeight(x, z) {
     const h = this.sampler.get(x, z);
     return Math.max(h, 0, wardHeight(x, z));
+  }
+
+  /** The surface as drawn everywhere (inner grid, ward platforms, and the outer land's mesh beyond
+   *  it): for the camera and tools. groundHeight keeps its inner-grid meaning for placement code. */
+  surfaceHeight(x, z) {
+    const inner = Math.max(Math.abs(x), Math.abs(z)) < INNER.half - 60;
+    return Math.max(inner ? this.sampler.get(x, z) : renderedHeight(x, z), 0, wardHeight(x, z));
   }
 
   applyQuality(settings) {
