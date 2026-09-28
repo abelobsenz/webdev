@@ -1050,5 +1050,8 @@ export function buildStreetscape(scene, plan, ground, extraLamps = []) {
     group.add(mesh);
   }
   group.updateMatrixWorld(true);
+  // thin furniture: the camera collision grid skips it (poles would block whole cells); the square
+  // centrepieces (fountains, obelisks) stay solid
+  group.traverse((o) => { if (o.isMesh && o.name !== 'Square centrepieces') o.userData.noCollide = true; });
   return out;
 }

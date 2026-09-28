@@ -51,10 +51,11 @@ export function buildClearance(scene, groundAt, { N = 2048 } = {}) {
   };
 
   scene.updateMatrixWorld(true);
-  const meshes = [];
+  const meshes = [], all = [];
   scene.traverse((o) => {
     if (!o.isMesh || !o.geometry || !o.geometry.attributes.aFacade) return;
     const key = o.material && o.material.userData && o.material.userData.hooks && o.material.userData.hooks.key;
+    all.push(o);
     if (key === 'plaza') return;              // the Axis plaza is ground, handled as a designed area
     meshes.push(o);
   });
@@ -105,6 +106,7 @@ export function buildClearance(scene, groundAt, { N = 2048 } = {}) {
   };
   return {
     N, cell, half, ground, over, tex, meshes: meshes.length, tris,
+    solids: all,        // the static architecture (for the camera collision grid)
     groundAt: (x, z) => (Math.abs(x) >= half || Math.abs(z) >= half ? 999 : sample(ground, x, z)),
     overAt: (x, z) => (Math.abs(x) >= half || Math.abs(z) >= half ? 999 : sample(over, x, z)),
   };
