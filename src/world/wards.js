@@ -1,5 +1,5 @@
 import { SD } from './platform.js';
-import { ST, T, TAU } from './wardPlan.js';
+import { ST, T, TAU, HALF_W } from './wardPlan.js';
 import { tidewaterRii, carveRii, rioDistance, fondamente, canalMouth, RIO } from './wardsA/tidewaterCanals.js';
 import { auroraCircus, ORRERY, seraphSummit, sunwardDial } from './wardsA/civicGardens.js';
 
@@ -449,9 +449,18 @@ const seraph = {
     for (const [f, w] of [[0.64, 5], [0.355, 4]]) for (const run of T.split(T.arc(0, 0, (a) => R(a) * f, 0, TAU, 5), keep)) beds.push({ pts: run, w });
     // columnar trees along the crest of every terrace, set back from the balustrade: the
     // terraces read as the stepped gardens they are, from the quay and from the air
+    const offStreets = (p, m) => streets.every((st) => {
+      const hw = st.hw ?? HALF_W[st.cls], P = st.pts;
+      for (let i = 1; i < P.length; i++) {
+        const a = P[i - 1], q = P[i], dx = q[0] - a[0], dz = q[1] - a[1], l2 = dx * dx + dz * dz || 1e-9;
+        let t = ((p[0] - a[0]) * dx + (p[1] - a[1]) * dz) / l2; t = t < 0 ? 0 : t > 1 ? 1 : t;
+        if (Math.hypot(p[0] - a[0] - dx * t, p[1] - a[1] - dz * t) < hw + m) return false;
+      }
+      return true;
+    });
     for (const [f, y, s] of [[0.66, 16, 12], [0.37, 23, 11]]) {
       for (const p of T.arc(0, 0, (a) => R(a) * f - 6.5, 0, TAU, 11)) {
-        if (!keep(p) || ctx.levelAt(p[0], p[1], 3.5) !== y || ctx.blocked(p[0], p[1], 6)) continue;
+        if (!keep(p) || ctx.levelAt(p[0], p[1], 3.5) !== y || ctx.blocked(p[0], p[1], 6) || !offStreets(p, 3)) continue;
         trees.push({ x: p[0], z: p[1], sp: 'araucaria', s });
       }
     }
