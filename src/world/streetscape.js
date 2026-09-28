@@ -82,7 +82,7 @@ vLampSeed = 0.5;
 {
   vec3 warm = mix(vec3(1.0, 0.72, 0.45), vec3(1.0, 0.82, 0.62), vLampSeed);
   #ifdef USE_COLOR
-  warm = mix(warm, vColor * 1.1, 0.8);        // a district's own light (the Outer Wards)
+  warm = mix(warm, vColor.rgb * 1.1, 0.8);    // a district's own light (the Outer Wards)
   #endif
   // the diffuser glows brightest in a ring round its centre
   float rr = length(vObjPos.xz);
