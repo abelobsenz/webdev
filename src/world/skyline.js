@@ -93,17 +93,6 @@ function groundMin(x, z, r) {
   return m;
 }
 
-/** Where a ray from the island centre meets rendered height h. */
-function contourPt(cx, cz, a, h, maxR) {
-  const d = [Math.cos(a), Math.sin(a)];
-  let last = -1;
-  for (let s = 0; s < maxR; s += 20) if (renderedHeight(cx + d[0] * s, cz + d[1] * s) > h) last = s;
-  if (last < 0) return null;
-  let lo = last, hi = last + 20;
-  for (let k = 0; k < 8; k++) { const m = (lo + hi) / 2; if (renderedHeight(cx + d[0] * m, cz + d[1] * m) > h) lo = m; else hi = m; }
-  return [cx + d[0] * lo, cz + d[1] * lo];
-}
-
 // --------------------------------------------------------------- harbour --
 function harbour(parts, c, rnd, lights, { moleReach = 340, cranes = 0, lighthouseH = 34 } = {}) {
   const Q = c.quayLine;
@@ -144,7 +133,7 @@ function harbour(parts, c, rnd, lights, { moleReach = 340, cranes = 0, lighthous
   });
   // the ferry pier and its terminal
   const m0 = Q[Math.floor(Q.length / 2)];
-  const pier = [[m0[0] - d[0] * 20, m0[1] - d[1] * 20], [m0[0] + d[0] * 95, m0[1] + d[1] * 95]];
+  const pier = [[m0[0] - d[0] * 29, m0[1] - d[1] * 29], [m0[0] + d[0] * 95, m0[1] + d[1] * 95]];
   parts.push(sweepLoop(pier, () => [{ a: [6, -12], b: [6, 3.7], kind: 1 }, { a: [6, 3.7], b: [-6, 3.7], kind: 9 }, { a: [-6, 3.7], b: [-6, -12], kind: 1 }], { closed: false }));
   const tb = [m0[0] - d[0] * 40, m0[1] - d[1] * 40];
   parts.push(block(tb[0], 3.0, tb[1], 13, 60, 24, Math.atan2(d[0], d[1]), 0, 3));
@@ -167,44 +156,111 @@ function harbour(parts, c, rnd, lights, { moleReach = 340, cranes = 0, lighthous
 }
 
 // ---------------------------------------------------------------- styles --
-function placeRandom(c, rnd, n, rMin, rMax, spread, minH, maxH, fn, placed) {
-  let made = 0, tries = 0;
-  while (made < n && tries++ < n * 40) {
-    const a = c.toward + (rnd() * 2 - 1) * spread;
-    const r = c.coast.s - rMin - rnd() * (rMax - rMin);
-    const x = c.ix + Math.cos(a) * r, z = c.iz + Math.sin(a) * r;
-    const h = terrainHeight(x, z);
-    if (h < minH || h > maxH) continue;
-    const s = Math.abs(terrainHeight(x + 30, z) - h) + Math.abs(terrainHeight(x, z + 30) - h);
-    if (s > 26) continue;
-    const res = fn(x, z, h, r, a);
-    if (!res) continue;
-    if (placed.some((p) => Math.hypot(p.x - x, p.z - z) < p.r + res + 12)) continue;
-    placed.push({ x, z, r: res });
-    made++;
+function segDist(px, pz, a, b) {
+  const ex = b[0] - a[0], ez = b[1] - a[1], L2 = ex * ex + ez * ez || 1;
+  const t = Math.max(0, Math.min(1, ((px - a[0]) * ex + (pz - a[1]) * ez) / L2));
+  return Math.hypot(px - a[0] - ex * t, pz - a[1] - ez * t);
+}
+
+/**
+ * The urban fabric: a street grid in the city's own frame (u toward the capital, v along the
+ * coast). Every city block is a paved podium cut into the slope (its downhill side a retaining
+ * wall, its foot sunk below the lowest ground of the cell, its top just above the highest), so
+ * the town steps up the island in terraces. The streets run on the podium tops between the lots,
+ * and every building stands on its own lot of its own podium.
+ * lot(Lq, lu, lv, top, t) builds on one lot; cell(P, u0, v0, u1, v1, top, t) may take a whole
+ * block instead (towers, domes) and returns true when it did.
+ */
+function urbanGrid(parts, c, rnd, o, placed) {
+  const { ox, oz, ra, rs, size, street = 14, maxSlope = 18, minG = 2.2, lot, cell } = o;
+  const d = c.d, sd = c.side;
+  const P = (u, v) => [ox + d[0] * u + sd[0] * v, oz + d[1] * u + sd[1] * v];
+  const Q = c.quayLine;
+  const nU = Math.ceil(ra / size), nV = Math.ceil(rs / size);
+  for (let i = -nU; i < nU; i++) for (let j = -nV; j < nV; j++) {
+    const u0 = i * size, u1 = u0 + size, v0 = j * size, v1 = v0 + size;
+    const uc = u0 + size / 2, vc = v0 + size / 2;
+    const t = Math.hypot(uc / ra, vc / rs);
+    if (t > 1 - 0.22 * rnd()) continue;
+    const [cx, cz] = P(uc, vc);
+    let near = false;
+    for (let k = 0; k < Q.length - 1 && !near; k++) near = segDist(cx, cz, Q[k], Q[k + 1]) < 110 + size * 0.71;
+    if (near || placed.some((p) => Math.hypot(p.x - cx, p.z - cz) < p.r + size * 0.75)) continue;
+    let gMin = 1e9, gMax = -1e9;
+    for (let a = 0; a <= 2; a++) for (let b = 0; b <= 2; b++) {
+      const [x, z] = P(u0 + (size * a) / 2, v0 + (size * b) / 2);
+      const h = renderedHeight(x, z);
+      gMin = Math.min(gMin, h); gMax = Math.max(gMax, h);
+    }
+    if (gMin < minG || gMax - gMin > maxSlope) continue;
+    const top = gMax + 0.8;
+    parts.push(prism4([P(u0, v0), P(u1, v0), P(u1, v1), P(u0, v1)], gMin - 6, top, 1, 9));
+    const s = street / 2;
+    if (rnd() < 0.08) {                     // a garden square
+      parts.push(prism4([P(u0 + s, v0 + s), P(u1 - s, v0 + s), P(u1 - s, v1 - s), P(u0 + s, v1 - s)], top - 1, top + 0.6, 1, 3));
+      continue;
+    }
+    if (cell && cell(P, u0 + s, v0 + s, u1 - s, v1 - s, top, t)) continue;
+    const nu = rnd() < 0.55 ? 2 : 1, nv = rnd() < 0.55 ? 2 : 1, gap = 4;
+    const lu = (size - street - gap * (nu - 1)) / nu, lv = (size - street - gap * (nv - 1)) / nv;
+    for (let a = 0; a < nu; a++) for (let b = 0; b < nv; b++) {
+      const a0 = u0 + s + a * (lu + gap), b0 = v0 + s + b * (lv + gap);
+      lot((iu0, iv0, iu1, iv1) => [P(a0 + iu0, b0 + iv0), P(a0 + iu1, b0 + iv0), P(a0 + iu1, b0 + iv1), P(a0 + iu0, b0 + iv1)], lu, lv, top, t);
+    }
+  }
+  // the grid is one district: keep the countryside out of it
+  placed.push({ x: ox, z: oz, r: Math.max(ra, rs) });
+}
+
+/** A building on a lot: a body, and for tall ones a set-back upper stage and a lantern crown. */
+function building(parts, rnd, Lq, lu, lv, top, H, wall = 5, roof = 9) {
+  const inset = Math.min(lu, lv) * (0.04 + 0.1 * rnd());
+  parts.push(prism4(Lq(inset, inset, lu - inset, lv - inset), top - 1.5, top + H, wall, roof));
+  if (H > 40) {
+    const k = Math.min(lu, lv) * 0.2;
+    const H2 = H * (0.2 + 0.35 * rnd());
+    parts.push(prism4(Lq(k, k, lu - k, lv - k), top + H - 0.5, top + H + H2, rnd() < 0.5 ? 0 : wall, roof));
+    if (H > 90) parts.push(prism4(Lq(k * 1.9, k * 1.9, lu - k * 1.9, lv - k * 1.9), top + H + H2 - 0.5, top + H + H2 + 6, 2, 2));
   }
 }
 
-function terraces(parts, c, rnd, heights, spread, depth, hMin, hMax) {
-  for (const h of heights) {
-    const pts = [];
-    const n = 44;
-    for (let k = 0; k <= n; k++) {
-      const a = c.toward + ((k / n) * 2 - 1) * spread;
-      const p = contourPt(c.ix, c.iz, a, h, c.ir * 3);
-      pts.push(p);
+/** Villas, farmsteads and a far-shore lighthouse over the rest of the island. */
+function countryside(parts, c, rnd, lights, placed, n) {
+  let made = 0, tries = 0;
+  while (made < n && tries++ < n * 30) {
+    const a = rnd() * TAU, r = Math.sqrt(rnd()) * c.coast.s * 1.1;
+    const x = c.ix + Math.cos(a) * r, z = c.iz + Math.sin(a) * r;
+    const big = rnd() < 0.35;             // a farmstead (house, barn, yard) or a villa
+    const w = big ? 92 : 34, dd = big ? 64 : 26, rot = rnd() * TAU;
+    const cs = Math.cos(rot), sn = Math.sin(rot);
+    const Lq = (u0, v0, u1, v1) => [[u0, v0], [u1, v0], [u1, v1], [u0, v1]].map(([u, v]) => [x + (u - w / 2) * cs - (v - dd / 2) * sn, z + (u - w / 2) * sn + (v - dd / 2) * cs]);
+    const q = Lq(0, 0, w, dd);
+    const hs = q.map(([px, pz]) => renderedHeight(px, pz)).concat(renderedHeight(x, z));
+    const gMin = Math.min(...hs), gMax = Math.max(...hs);
+    if (gMin < 4 || gMax - gMin > (big ? 10 : 6)) continue;
+    if (placed.some((p) => Math.hypot(p.x - x, p.z - z) < p.r + (big ? 60 : 24))) continue;
+    const top = gMax + 0.5;
+    parts.push(prism4(q, gMin - 3, top, 1, 3));             // a planted terrace: fields or garden
+    if (big) {
+      parts.push(prism4(Lq(3, 3, 19, 15), top - 1, top + 8, 5, 1));
+      parts.push(prism4(Lq(24, 4, 43, 30), top - 1, top + 10, 8, 10));
+    } else {
+      parts.push(prism4(Lq(4, 5, 20, 17), top - 1, top + 7, 5, 9));
+      parts.push(prism4(Lq(12, 11, 26, 20), top - 1, top + 4, 0, 3));
     }
-    for (let k = 0; k < n; k++) {
-      const a = pts[k], b = pts[k + 1];
-      if (!a || !b || rnd() < 0.18) continue;
-      const L = Math.hypot(b[0] - a[0], b[1] - a[1]);
-      if (L > 260 || L < 20) continue;
-      const toC = (p) => { const dx = c.ix - p[0], dz = c.iz - p[1], l = Math.hypot(dx, dz); return [dx / l, dz / l]; };
-      const na = toC(a), nb = toC(b);
-      const q = [[a[0] + na[0] * 4, a[1] + na[1] * 4], [b[0] + nb[0] * 4, b[1] + nb[1] * 4], [b[0] + nb[0] * (4 + depth), b[1] + nb[1] * (4 + depth)], [a[0] + na[0] * (4 + depth), a[1] + na[1] * (4 + depth)]];
-      const g0 = Math.min(...q.map(([x, z]) => renderedHeight(x, z)));
-      parts.push(prism4(q, g0 - 6, h + hMin + rnd() * (hMax - hMin), 5, 3));
-    }
+    placed.push({ x, z, r: big ? 58 : 22 });
+    made++;
+  }
+  // the lighthouse on the far shore
+  const a = c.toward + Math.PI;
+  const e = [Math.cos(a), Math.sin(a)];
+  for (let s = c.ir * 3; s > 0; s -= 10) {
+    const x = c.ix + e[0] * s, z = c.iz + e[1] * s;
+    if (renderedHeight(x, z) < 3) continue;
+    const g = groundMin(x, z, 9);
+    parts.push(latheFacade([{ r: 9, y: g - 4, kind: 1 }, { r: 9, y: g + 3, kind: 1 }, { r: 4.6, y: g + 3, kind: 1 }, { r: 3.4, y: g + 36, kind: 1 }, { r: 4.4, y: g + 37, kind: 10 }, { r: 2.8, y: g + 38, kind: 2 }, { r: 2.8, y: g + 43, kind: 2 }, { r: 0.05, y: g + 47, kind: 10 }], 12).translate(x, 0, z));
+    lights.push({ x, y: g + 41, z, c: [1.0, 0.95, 0.8], s: 2.4 });
+    break;
   }
 }
 
@@ -220,15 +276,19 @@ function summit(c) {
 
 function buildThalassa(parts, c, rnd, lights) {
   harbour(parts, c, rnd, lights, { moleReach: 320 });
-  terraces(parts, c, rnd, [10, 26, 46, 70, 98, 130, 166, 206, 250, 298, 348], 1.2, 22, 10, 22);
   const s = summit(c);
   // the temple of the sea: four tiers, a colonnade, a dome and a lantern
   for (let k = 0; k < 4; k++) parts.push(block(s.x, s.h - 6 + k * 9, s.z, 9 + (k === 0 ? 6 : 0), 150 - k * 28, 150 - k * 28, 0.3, 1, 9));
   for (let k = 0; k < 18; k++) { const a = (k / 18) * TAU; parts.push(latheFacade([{ r: 2.2, y: 0, kind: 1 }, { r: 1.8, y: 24, kind: 1 }, { r: 2.6, y: 25, kind: 1 }], 8).translate(s.x + Math.cos(a) * 36, s.h + 30, s.z + Math.sin(a) * 36)); }
-  parts.push(latheFacade([{ r: 40, y: s.h + 55, kind: 1 }, { r: 40, y: s.h + 58, kind: 1 }, { r: 34, y: s.h + 58, kind: 0 }, { r: 26, y: s.h + 76, kind: 0 }, { r: 12, y: s.h + 86, kind: 0 }, { r: 5, y: s.h + 88, kind: 2 }, { r: 3, y: s.h + 100, kind: 2 }, { r: 0.1, y: s.h + 106, kind: 1 }], 32));
+  parts.push(latheFacade([{ r: 40, y: s.h + 54.5, kind: 1 }, { r: 40, y: s.h + 58, kind: 1 }, { r: 34, y: s.h + 58, kind: 0 }, { r: 26, y: s.h + 76, kind: 0 }, { r: 12, y: s.h + 86, kind: 0 }, { r: 5, y: s.h + 88, kind: 2 }, { r: 3, y: s.h + 100, kind: 2 }, { r: 0.1, y: s.h + 106, kind: 1 }], 32));
   lights.push({ x: s.x, y: s.h + 100, z: s.z, c: [1.0, 0.85, 0.6], s: 4 });
-  const placed = [];
-  placeRandom(c, rnd, 8, 900, 2200, 0.9, 60, 300, (x, z, h) => { const H = 220 + rnd() * 200; parts.push(tower(rnd, x, groundMin(x, z, 26) - 4, z, H, 20 + rnd() * 12, 0.2)); return 36; }, placed);
+  const placed = [{ x: s.x, z: s.z, r: 120 }];
+  // the white town climbs from the harbour to the temple in terraces
+  const bx = c.coast.x - c.d[0] * 150, bz = c.coast.z - c.d[1] * 150;
+  const L = Math.hypot(s.x - bx, s.z - bz);
+  urbanGrid(parts, c, rnd, { ox: (bx + s.x) / 2, oz: (bz + s.z) / 2, ra: L / 2 + 120, rs: 1600, size: 70, street: 12, maxSlope: 28,
+    lot: (Lq, lu, lv, top, t) => building(parts, rnd, Lq, lu, lv, top, 7 + rnd() * 14 * (1.2 - t), 5, rnd() < 0.3 ? 3 : 9) }, placed);
+  countryside(parts, c, rnd, lights, placed, 70 * 3);
 }
 
 function buildAnchorage(parts, c, rnd, lights) {
@@ -239,7 +299,7 @@ function buildAnchorage(parts, c, rnd, lights) {
   const tw = [];
   for (const s of [-1, 1]) {
     const x = hx + c.side[0] * s * 95, z = hz + c.side[1] * s * 95;
-    const g = groundMin(x, z, 40);
+    const g = groundMin(x, z, 48);
     parts.push(tower(rnd, x, g - 4, z, 680, 38, 0.6));
     tw.push(V(x, g + 520, z));
     placed.push({ x, z, r: 50 });
@@ -249,26 +309,32 @@ function buildAnchorage(parts, c, rnd, lights) {
   for (let i = 0; i <= 20; i++) { const t = i / 20; const p = tw[0].clone().lerp(tw[1], t); p.y += 34 * Math.sin(Math.PI * t); arc.push(p); }
   parts.push(sweepTube(arc, () => 7, 10, { kind: 0 }));
   parts.push(sweepTube(arc.map((p) => p.clone().add(V(0, -7.5, 0))), () => 1.0, 5, { kind: 2 }));
-  placeRandom(c, rnd, 64, 250, 1700, 0.55, 3, 120, (x, z, h, r) => {
-    const inland = c.coast.s - r;
-    const H = (120 + rnd() * 320) * (1.1 - Math.min(inland, 1700) / 2600);
-    const R = 16 + rnd() * 20;
-    parts.push(tower(rnd, x, groundMin(x, z, R) - 4, z, H, R, 0.55 + rnd() * 0.45));
-    return R * 1.3;
-  }, placed);
-  placeRandom(c, rnd, 420, 120, 2400, 0.8, 3, 200, (x, z) => { const w = 30 + rnd() * 60, d = 24 + rnd() * 40; parts.push(block(x, groundMin(x, z, Math.max(w, d) * 0.5), z, 14 + rnd() * 40, w, d, c.toward + (rnd() - 0.5) * 0.3)); return Math.max(w, d) * 0.55; }, placed);
+  // a dense grid: towers in the centre, slabs and courts round them
+  urbanGrid(parts, c, rnd, { ox: c.coast.x - c.d[0] * 1000, oz: c.coast.z - c.d[1] * 1000, ra: 1000, rs: 1700, size: 100, street: 16,
+    cell: (P, u0, v0, u1, v1, top, t) => {
+      if (t > 0.55 || rnd() > 0.34) return false;
+      const R = Math.min(u1 - u0, v1 - v0) / 2 / 1.3;
+      const [x, z] = P((u0 + u1) / 2, (v0 + v1) / 2);
+      parts.push(tower(rnd, x, top, z, (160 + rnd() * 300) * (1.15 - t), R * (0.7 + 0.3 * rnd()), 0.55 + rnd() * 0.45));
+      return true;
+    },
+    lot: (Lq, lu, lv, top, t) => building(parts, rnd, Lq, lu, lv, top, (16 + rnd() * 60) * (1.3 - t), 5, 9) }, placed);
+  countryside(parts, c, rnd, lights, placed, 90 * 3);
 }
 
 function buildOrison(parts, c, rnd, lights) {
   harbour(parts, c, rnd, lights, { moleReach: 300 });
   const placed = [];
-  placeRandom(c, rnd, 56, 500, 1900, 0.6, 3, 220, (x, z, h, r) => {
-    const H = 220 + rnd() * 500;
-    const R = 10 + rnd() * 12;
-    parts.push(needle(rnd, x, groundMin(x, z, R * 1.6) - 3, z, H, R));
-    return R * 2.4;
-  }, placed);
-  placeRandom(c, rnd, 300, 120, 2200, 0.8, 3, 220, (x, z) => { const w = 26 + rnd() * 40, d = 22 + rnd() * 30; parts.push(block(x, groundMin(x, z, Math.max(w, d) * 0.5), z, 10 + rnd() * 26, w, d, c.toward + (rnd() - 0.5) * 0.4, 5, 7)); return Math.max(w, d) * 0.55; }, placed);
+  urbanGrid(parts, c, rnd, { ox: c.coast.x - c.d[0] * 1000, oz: c.coast.z - c.d[1] * 1000, ra: 950, rs: 1300, size: 90, street: 14,
+    cell: (P, u0, v0, u1, v1, top, t) => {
+      if (rnd() > 0.3 * (1.2 - t)) return false;
+      const R = Math.min(u1 - u0, v1 - v0) / 2 / 1.7;
+      const [x, z] = P((u0 + u1) / 2, (v0 + v1) / 2);
+      parts.push(needle(rnd, x, top - 3, z, (240 + rnd() * 480) * (1.2 - t), R * (0.7 + 0.3 * rnd())));
+      return true;
+    },
+    lot: (Lq, lu, lv, top, t) => building(parts, rnd, Lq, lu, lv, top, 10 + rnd() * 26 * (1.2 - t), 5, 7) }, placed);
+  countryside(parts, c, rnd, lights, placed, 60 * 3);
 }
 
 function buildVesper(parts, c, rnd, lights) {
@@ -278,18 +344,22 @@ function buildVesper(parts, c, rnd, lights) {
   const cx = c.coast.x - c.d[0] * 520, cz = c.coast.z - c.d[1] * 520;
   const g = groundMin(cx, cz, 70);
   parts.push(block(cx, g, cz, 34, 130, 42, Math.atan2(c.d[0], c.d[1])));
-  parts.push(latheFacade([{ r: 16, y: g + 34, kind: 5 }, { r: 16, y: g + 44, kind: 5 }, { r: 15, y: g + 52, kind: 1 }, { r: 8, y: g + 64, kind: 1 }, { r: 2, y: g + 68, kind: 2 }, { r: 0.1, y: g + 74, kind: 1 }], 24).translate(cx, 0, cz));
+  parts.push(latheFacade([{ r: 16, y: g + 32, kind: 5 }, { r: 16, y: g + 44, kind: 5 }, { r: 15, y: g + 52, kind: 1 }, { r: 8, y: g + 64, kind: 1 }, { r: 2, y: g + 68, kind: 2 }, { r: 0.1, y: g + 74, kind: 1 }], 24).translate(cx, 0, cz));
   const sx = cx + c.d[0] * 70, sz = cz + c.d[1] * 70;
   parts.push(latheFacade([{ r: 9, y: g - 4, kind: 5 }, { r: 9, y: g + 70, kind: 5 }, { r: 7, y: g + 74, kind: 2 }, { r: 6, y: g + 90, kind: 2 }, { r: 5, y: g + 92, kind: 1 }, { r: 0.1, y: g + 260, kind: 1 }], 8).translate(sx, 0, sz));
   lights.push({ x: sx, y: g + 92, z: sz, c: [1.0, 0.8, 0.55], s: 3 });
-  placed.push({ x: cx, z: cz, r: 90 });
-  placeRandom(c, rnd, 50, 150, 1500, 0.8, 3, 160, (x, z) => {
-    const r = 6 + rnd() * 20;
-    const gg = groundMin(x, z, r);
-    parts.push(latheFacade([{ r: r * 1.05, y: gg - 5, kind: 5 }, { r: r * 1.05, y: gg + r * 0.8, kind: 5 }, { r: r * 1.1, y: gg + r * 0.85, kind: 1 }, { r: r * 0.9, y: gg + r * 1.3, kind: rnd() < 0.3 ? 7 : 1 }, { r: r * 0.5, y: gg + r * 1.65, kind: 1 }, { r: 0.1, y: gg + r * 1.8, kind: 2 }], 16).translate(x, 0, z));
-    return r * 1.2;
-  }, placed);
-  placeRandom(c, rnd, 320, 90, 1900, 0.9, 3, 200, (x, z) => { const w = 16 + rnd() * 26, d = 14 + rnd() * 20; parts.push(block(x, groundMin(x, z, Math.max(w, d) * 0.5), z, 8 + rnd() * 14, w, d, c.toward + (rnd() - 0.5) * 0.6, 5, 9)); return Math.max(w, d) * 0.55; }, placed);
+  placed.push({ x: cx + c.d[0] * 20, z: cz + c.d[1] * 20, r: 100 });
+  // the white town of domes round the harbour
+  urbanGrid(parts, c, rnd, { ox: c.coast.x - c.d[0] * 850, oz: c.coast.z - c.d[1] * 850, ra: 850, rs: 1600, size: 64, street: 10,
+    cell: (P, u0, v0, u1, v1, top) => {
+      if (rnd() > 0.22) return false;
+      const r = Math.min(u1 - u0, v1 - v0) / 2 * 0.86;
+      const [x, z] = P((u0 + u1) / 2, (v0 + v1) / 2);
+      parts.push(latheFacade([{ r: r * 1.05, y: top - 2, kind: 5 }, { r: r * 1.05, y: top + r * 0.45, kind: 5 }, { r: r * 1.1, y: top + r * 0.5, kind: 1 }, { r: r * 0.9, y: top + r * 0.95, kind: rnd() < 0.3 ? 7 : 1 }, { r: r * 0.5, y: top + r * 1.3, kind: 1 }, { r: 0.1, y: top + r * 1.45, kind: 2 }], 16).translate(x, 0, z));
+      return true;
+    },
+    lot: (Lq, lu, lv, top) => building(parts, rnd, Lq, lu, lv, top, 6 + rnd() * 12, 5, 9) }, placed);
+  countryside(parts, c, rnd, lights, placed, 60 * 3);
 }
 
 function buildAustral(parts, c, rnd, lights) {
@@ -319,10 +389,13 @@ function buildAustral(parts, c, rnd, lights) {
     const h = renderedHeight(x, z);
     if (h < 3 || h > 300) continue;
     const Rt = 20 + rnd() * 16;
-    parts.push(tower(rnd, x, groundMin(x, z, Rt) - 4, z, 150 + rnd() * 170, Rt, rnd()));
+    parts.push(tower(rnd, x, groundMin(x, z, Rt * 1.25) - 4, z, 150 + rnd() * 170, Rt, rnd()));
     placed.push({ x, z, r: Rt * 1.3 });
   }
-  placeRandom(c, rnd, 320, 120, 2200, 0.85, 3, 240, (x, z) => { const w = 26 + rnd() * 50, d = 22 + rnd() * 34; parts.push(block(x, groundMin(x, z, Math.max(w, d) * 0.5), z, 12 + rnd() * 34, w, d, c.toward + (rnd() - 0.5) * 0.4)); return Math.max(w, d) * 0.55; }, placed);
+  // the arcology's garden-roofed quarters round the spire
+  urbanGrid(parts, c, rnd, { ox: sx, oz: sz, ra: 1050, rs: 1400, size: 96, street: 16,
+    lot: (Lq, lu, lv, top, t) => building(parts, rnd, Lq, lu, lv, top, (14 + rnd() * 40) * (1.3 - t), rnd() < 0.4 ? 0 : 5, 3) }, placed);
+  countryside(parts, c, rnd, lights, placed, 70 * 3);
 }
 
 function buildMassifTown(parts, m, rnd, lights) {
