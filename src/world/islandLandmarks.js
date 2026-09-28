@@ -309,20 +309,8 @@ export function buildIslandLandscape(parts,c,plan,lights,keepouts){
     return null;
   };
   
-  // Productive land appears as finite, contour-oriented cultivated terraces near routes,
-  // rather than isolated farm pads unconnected to their villages.
-  for(const s of plan.sites.filter(s=>s.index>=2)){
-    for(let k=0;k<12;k++){
-      const a=k*TAU/12,dist=610+(k%3)*65,x=s.x+Math.cos(a)*dist,z=s.z+Math.sin(a)*dist;
-      const gx=renderedHeight(x+25,z)-renderedHeight(x-25,z),gz=renderedHeight(x,z+25)-renderedHeight(x,z-25),angle=Math.atan2(-gx,gz);
-      const q=rectangle(x,z,140,36,angle),r=75;if(!plan.free(x,z,r)||plots.some(p=>Math.hypot(p.x-x,p.z-z)<p.r+r))continue;
-      const g=footprintGround(q,20);if(g.min<10||g.max-g.min>13)continue;
-      const holding={x,z,r,q},access=entrance(holding,localSurfaces);if(!access)continue;
-      const y=islandFoundation(parts,q,{kind:3,name:'cultivation terrace'});record(x,z,r,'cultivation',q,y);
-      for(let j=-2;j<=2;j++){const p=[x-Math.sin(angle)*j*5,z+Math.cos(angle)*j*5];body(parts,rectangle(p[0],p[1],128,1.5,angle),y,.6,3,3);}
-      plots.at(-1).plannedAccess=access;
-    }
-  }
+  // Productive land (fields, vineyards, orchards and farms on the contour, with their lanes)
+  // is laid after the road network is graded, by islands/countryside.js.
   for(const plot of plots.filter(p=>['home','designed grounds','hospice','garden laboratory','countryside holding'].includes(p.type)))plot.plannedAccess=entrance(plot,[...localSurfaces,...regionalSurfaces]);
   gradeIslandRoadNetwork(parts,false,[...plan.coreEntrances,...plots.filter(p=>p.plannedAccess).map(p=>({from:p.plannedAccess.p,width:3.8}))]);
   // Refresh the physical street surfaces after grading their shared junctions.
