@@ -24,7 +24,7 @@ export const POIS = [
   },
   {
     id: 'commons', key: '3', name: 'The Commons', district: 'Axis Plaza',
-    view: V(430, 19, 520), target: V(0, 900, 0), time: 18.25,
+    view: V(300, 21, 470), target: V(0, 160, 0), time: 18.25,
     lore: 'The plaza at the foot of the Axis is the civic heart of the Concord. Any citizen may speak here and be heard by the whole assembly. The concentric reflecting pools hold the names of everyone who has served; twelve avenues point to the twelve founding regions.',
     facts: [['Diameter', '1.12 km'], ['Avenues', '12'], ['Reflecting pools', '2 rings']],
   },
