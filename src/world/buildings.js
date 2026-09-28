@@ -1480,11 +1480,17 @@ export function buildBuildings(scene, plan, ground, settings, opts = {}) {
     placements.push({ x: L.x, z: L.z, sx: L.w, sz: L.d, y: L.baseY, sy: top, rot: L.rot, type });
   }
 
-  const mat = createLowriseMaterial(opts.palette || 'pearl', { litFrac: opts.litFrac ?? 0.5, warmth: opts.warmth ?? 0.75, lampTint: opts.lampTint });
+  // one material per palette: a plan may give each district its own (opts.paletteOf)
+  const mats = new Map();
+  const matFor = (pal) => {
+    if (!mats.has(pal)) mats.set(pal, createLowriseMaterial(pal, { litFrac: opts.litFrac ?? 0.5, warmth: opts.warmth ?? 0.75, lampTint: opts.lampTint }));
+    return mats.get(pal);
+  };
   const meshes = [];
   const list = [];
   let tris = 0;
   for (const [key, ch] of chunks) {
+    const mat = matFor((opts.paletteOf && ch.lots.length && opts.paletteOf(ch.lots[0].district)) || opts.palette || 'pearl');
     const near = new THREE.Mesh(ch.near.geometry(), mat);
     const far = new THREE.Mesh(ch.far.geometry(), mat);
     for (const m of [near, far]) { m.castShadow = true; m.receiveShadow = true; m.matrixAutoUpdate = false; scene.add(m); meshes.push(m); }

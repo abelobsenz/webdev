@@ -1197,7 +1197,8 @@ export function planCity({ ground, towers, promenades, urbanMask, stations = [] 
   }
   for (const l of lamps) field.lamp(l.x, l.z, l.cls === ST.LANE ? 0.75 : 1);
 
-  return { streets, squares, lots, lamps, districts, exclusions, field, walkDist: (x, z) => field.edge(x, z) + 2.6 };
+  // room: the headroom grid of what stands on the ground (for the towns layer, src/world/towns)
+  return { streets, squares, lots, lamps, districts, exclusions, field, room, walkDist: (x, z) => field.edge(x, z) + 2.6 };
 }
 
 /** The landing square: on the main avenue just ahead of the deck's foot (the deck comes down

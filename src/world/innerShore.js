@@ -194,6 +194,10 @@ export function buildShoreJetties(scene, walks, ground) {
       }
       // rails along the deck, bollards at the head, two boats moored on its lee
       for (const sgn of [-1, 1]) boxAt(near, x + nx * (d0 + len / 2) - nz * sgn * (DECK_HW - 0.1), DECK_Y + 0.5, z + nz * (d0 + len / 2) + nx * sgn * (DECK_HW - 0.1), len, 0.08, 0.08, yaw, 10);
+      // the rails' posts, from the deck up under them (the rails no longer float over it)
+      for (let u = d0 + 0.3; u <= d0 + len - 0.3 + 1e-6; u += Math.max(1, (len - 0.6) / Math.max(1, Math.round((len - 0.6) / 3)))) for (const sgn of [-1, 1]) {
+        boxAt(near, x + nx * u - nz * sgn * (DECK_HW - 0.1), DECK_Y + 0.25, z + nz * u + nx * sgn * (DECK_HW - 0.1), 0.08, 0.5, 0.08, yaw, 10);
+      }
       for (const sgn of [-1, 1]) boat(parts, hx + nx * 1 - nz * sgn * 9.5, hz + nz * 1 + nx * sgn * 9.5, yaw + Math.PI / 2, 7 + (i % 3));
       out.jetties.push({ x: hx, z: hz, district: st.district });
     }

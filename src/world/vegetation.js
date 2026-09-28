@@ -358,7 +358,7 @@ export class TreeField {
 
   _buildNear(trees) {
     const N = trees.length;
-    const mats = new Float32Array(N * 16), cols = new Float32Array(N * 3), blooms = new Float32Array(N * 4), pos = new Float32Array(N * 3), sp = new Uint8Array(N);
+    const mats = new Float32Array(N * 16), cols = new Float32Array(N * 3), blooms = new Float32Array(N * 4), pos = new Float32Array(N * 3), sp = new Uint8Array(N), keep = new Uint8Array(N);
     const grid = new Map();
     const CELL = 150;
     trees.forEach((t, i) => {
@@ -367,6 +367,7 @@ export class TreeField {
       blooms.set(this._bloom(t), i * 4);
       pos.set([t.x, t.y, t.z], i * 3);
       sp[i] = t.sp;
+      keep[i] = t.keep ? 1 : 0;       // a designed tree (a planter's): never thinned by the quality setting
       const k = `${Math.floor(t.x / CELL)},${Math.floor(t.z / CELL)}`;
       if (!grid.has(k)) grid.set(k, []);
       grid.get(k).push(i);
@@ -392,7 +393,7 @@ export class TreeField {
       this.scene.add(m);
       return m;
     });
-    this.near = { mats, cols, blooms, pos, sp, grid, CELL, meshes, last: new THREE.Vector3(1e9, 0, 0), lastR: 0 };
+    this.near = { mats, cols, blooms, pos, sp, keep, grid, CELL, meshes, last: new THREE.Vector3(1e9, 0, 0), lastR: 0 };
   }
 
   _updateNear(camera) {
@@ -413,7 +414,7 @@ export class TreeField {
       for (const i of list) {
         const dx = n.pos[i * 3] - cp.x, dy = n.pos[i * 3 + 1] - cp.y, dz = n.pos[i * 3 + 2] - cp.z;
         if (dx * dx + dy * dy + dz * dz > RR * RR) continue;
-        if (thin < 1 && ((i * 2654435761) % 1000) / 1000 > thin) continue;
+        if (thin < 1 && !n.keep[i] && ((i * 2654435761) % 1000) / 1000 > thin) continue;
         const s = n.sp[i];
         const m = n.meshes[s];
         if (counts[s] >= m.userData.cap) continue;
@@ -479,7 +480,7 @@ export class TreeField {
     const buckets = new Map();
     for (const t of trees) {
       const ft = SPECIES[t.sp].far;
-      const key = `${Math.floor(t.x / chunk)},${Math.floor(t.z / chunk)},${ft}${t.far ? ',far' : ''}`;
+      const key = `${Math.floor(t.x / chunk)},${Math.floor(t.z / chunk)},${ft}${t.far ? ',far' : t.keep ? ',keep' : ''}`;
       if (!buckets.has(key)) buckets.set(key, []);
       buckets.get(key).push(t);
     }
@@ -489,6 +490,7 @@ export class TreeField {
       for (let i = list.length - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); [list[i], list[j]] = [list[j], list[i]]; }
       const mesh = this._farMesh(list, ft, this.farMat, layer);
       this.scene.add(mesh);
+      if (key.endsWith(',keep')) { this.kept = this.kept || []; this.kept.push(mesh); continue; }   // designed: never thinned
       this.chunks.push(mesh);
       if (key.endsWith(',far')) {
         // the far islands' woods: seen from 15-40 km, so a long reach, and a light

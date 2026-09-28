@@ -909,8 +909,8 @@ export function buildStreetscape(scene, plan, ground, extraLamps = []) {
     const innerEdge = band ? band[0] : q.r - 3;
     // centrepiece
     let Rc = 0;
-    if (q.landmarkR) {                  // a civic building stands here (innerCivic.js): ring it
-      Rc = q.landmarkR + 0.6;
+    if (q.landmarkR || q.townR) {       // a civic building (innerCivic.js) or the towns layer's centrepiece stands here: ring it
+      Rc = (q.landmarkR || q.townR) + 0.6;
       occ.add(q.x, q.z, Rc);
     } else if (!deck) {
       const civic = kind === 'civic';
@@ -978,6 +978,18 @@ export function buildStreetscape(scene, plan, ground, extraLamps = []) {
         if (place(benchSet, x, z, yaw, 1.05, footprint(x, z, yaw, 0.96, -0.37, 0.28))) benches.push({ x, z, yaw });
       }
     }
+  }
+
+  // ---- furniture the towns layer placed (src/world/towns): the forecourts round the arcologies
+  // and the stations, the gardens; each with its footing already surveyed (y), still kept clear
+  // of everything placed so far
+  const extraSets = { bench: benchSet, bin: binSet, planter: planterSet, kiosk: kioskSet, stele: steleSet, tap: tapSet };
+  for (const f of plan.furniture || []) {
+    const set = extraSets[f.kind];
+    if (!set || !occ.free(f.x, f.z, f.r)) continue;
+    set.add(f.x, f.y, f.z, f.yaw, litAt(f.x, f.z));
+    occ.add(f.x, f.z, f.r);
+    if (f.kind === 'bench') benches.push({ x: f.x, z: f.z, yaw: f.yaw });
   }
 
   // ---- benches (and a litter bin by every other one) along the streets
