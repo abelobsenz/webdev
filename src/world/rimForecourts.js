@@ -1,71 +1,277 @@
 import * as THREE from 'three';
-import { latheFacade, sweepTube, mergeClean } from './geom.js';
+import { latheFacade, mergeClean } from './geom.js';
 import { createFacadeMaterial } from './facade.js';
-import { towerFootprint } from './urban.js';
+import { rimArcologies, towerBase, RIM_TERRACE } from './urban.js';
 
-// Forecourts for the arcologies on the atoll rim: each stands in its paved square behind a
-// ring colonnade (columns on the ground wherever it falls, a lintel ring carried level
-// above them), with a fountain on the side facing the lagoon and marker obelisks on the
-// cross axes. Lamps ring the colonnade.
+// Forecourts for the arcologies on the atoll rim. The rim is steep, so each arcology stands on
+// a level terrace at the height of its own base: an ashlar retaining wall (down into the ground
+// all round, into the lagoon floor where the terrace reaches the water) with a parapet and a
+// coping, a paved top. On it: a ring colonnade on a stepped stylobate carrying an entablature
+// (architrave, frieze, a cornice planted on top), open at four gates; a fountain with water in
+// its basins on the side facing the lagoon; obelisks on stepped plinths on the cross axes;
+// lamps round the terrace. Wherever the hill rises above the terrace the parts buried in it are
+// left out. The rim streets stop at the terrace (urban.js clipAtStops).
+// Each terrace has a detailed set and a massing set (same volumes: the columns turn square, the
+// fountain loses its bowl) swapped by distance.
 
 const TAU = Math.PI * 2;
-const V = (x, y, z) => new THREE.Vector3(x, y, z);
+const K = { STONE: 1, LANTERN: 2, GARDEN: 3, POOL: 6, PAVING: 9, METAL: 10 };
 
-export function buildRimForecourts(scene, towers, ground, avoid = () => false) {
-  const parts = [];
-  const lamps = [];
-  for (const t of towers) {
-    const r0 = Math.hypot(t.def.x, t.def.z);
-    if (r0 < 4700 || r0 > 7000 || t.def.ward) continue;
-    const base = t.footprint || Math.max(towerFootprint(t, 100), t.collide ? t.collide(0) : (t.def.radius || 60) * 1.4);
-    if (avoid(t.def.x, t.def.z, base + 40)) continue;
-    const R = base + 7;
-    const n = Math.max(24, Math.floor((TAU * R) / 8.5));
-    let hi = -1e9;
-    const pts = [];
-    for (let k = 0; k < n; k++) {
-      const a = (k / n) * TAU;
-      const x = t.def.x + Math.cos(a) * R, z = t.def.z + Math.sin(a) * R;
-      const g = ground(x, z);
-      pts.push([x, z, g]);
-      hi = Math.max(hi, g);
+/** Mesh parts with facade coordinates (u, v, kind) and explicit normals. */
+class Parts {
+  constructor() { this.pos = []; this.nrm = []; this.fac = []; this.idx = []; }
+  v(x, y, z, nx, ny, nz, u, w, k) { this.pos.push(x, y, z); this.nrm.push(nx, ny, nz); this.fac.push(u, w, k); return this.pos.length / 3 - 1; }
+  quad(a, b, c, d) { this.idx.push(a, b, c, a, c, d); }
+  geometry() {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(this.pos, 3));
+    g.setAttribute('normal', new THREE.Float32BufferAttribute(this.nrm, 3));
+    g.setAttribute('aFacade', new THREE.Float32BufferAttribute(this.fac, 3));
+    g.setIndex(this.idx);
+    return g;
+  }
+}
+
+/**
+ * Closed annular sector round (cx, cz): radii r0 < r1, heights y0(a) < y1, angles a0 < a1.
+ * Outer face out, inner face in, top up, bottom down (optional), end caps on a partial ring.
+ * y0 may be a function of the angle (retaining walls that follow the ground).
+ */
+function ringBand(P, cx, cz, r0, r1, y0, y1, a0, a1, { kind = K.STONE, top = kind, bottom = true, inner = true, seg } = {}) {
+  const full = a1 - a0 >= TAU - 1e-6;
+  const n = seg || Math.max(3, Math.ceil(((a1 - a0) * r1) / 3));
+  const Y0 = typeof y0 === 'function' ? y0 : () => y0;
+  const ring = (r, face) => {
+    // face: +1 outer, -1 inner
+    for (let i = 0; i < n; i++) {
+      const t0 = a0 + ((a1 - a0) * i) / n, t1 = a0 + ((a1 - a0) * (i + 1)) / n;
+      const c0 = Math.cos(t0), s0 = Math.sin(t0), c1 = Math.cos(t1), s1 = Math.sin(t1);
+      const b0 = Y0(t0), b1 = Y0(t1);
+      const p = P.v(cx + c0 * r, b0, cz + s0 * r, c0 * face, 0, s0 * face, t0 * r, b0, kind);
+      const q = P.v(cx + c1 * r, b1, cz + s1 * r, c1 * face, 0, s1 * face, t1 * r, b1, kind);
+      const e = P.v(cx + c1 * r, y1, cz + s1 * r, c1 * face, 0, s1 * face, t1 * r, y1, kind);
+      const f = P.v(cx + c0 * r, y1, cz + s0 * r, c0 * face, 0, s0 * face, t0 * r, y1, kind);
+      // counter-clockwise seen from outside
+      if (face > 0) P.quad(p, f, e, q); else P.quad(p, q, e, f);
     }
-    if (hi < 1.5) continue;
-    // a colonnade only where the whole ring stands on dry ground
-    if (pts.filter((q) => q[2] < 1.2).length > n * 0.04) continue;
-    const top = hi + 7.5;
-    for (const [x, z, g] of pts) {
-      if (g < 1.2 || avoid(x, z, 4)) continue;          // no columns in the water or on a bridgehead
-      parts.push(latheFacade([{ r: 0.75, y: g - 1.5, kind: 1 }, { r: 0.75, y: g + 0.6, kind: 1 }, { r: 0.52, y: g + 0.8, kind: 1 }, { r: 0.44, y: top - 0.7, kind: 1 }, { r: 0.7, y: top - 0.3, kind: 1 }, { r: 0.7, y: top, kind: 1 }], 10).translate(x, 0, z));
+  };
+  const flat = (y, up, k) => {
+    for (let i = 0; i < n; i++) {
+      const t0 = a0 + ((a1 - a0) * i) / n, t1 = a0 + ((a1 - a0) * (i + 1)) / n;
+      const pts = [[r0, t0], [r1, t0], [r1, t1], [r0, t1]].map(([r, t]) => [cx + Math.cos(t) * r, cz + Math.sin(t) * r]);
+      const yy = typeof y === 'function' ? (t) => y(t) : () => y;
+      const ids = pts.map(([x, z], j) => P.v(x, yy(j < 2 ? t0 : t1), z, 0, up ? 1 : -1, 0, x, z, k));
+      if (up) P.quad(ids[0], ids[3], ids[2], ids[1]); else P.quad(ids[0], ids[1], ids[2], ids[3]);
     }
-    const ring = [];
-    for (let k = 0; k <= 96; k++) { const a = (k / 96) * TAU; ring.push(V(t.def.x + Math.cos(a) * R, top + 0.45, t.def.z + Math.sin(a) * R)); }
-    parts.push(sweepTube(ring, () => 0.6, 6, { kind: 1, ellipse: 0.7 }));
-    parts.push(sweepTube(ring.map((p) => p.clone().add(V(0, -0.85, 0))), () => 0.14, 4, { kind: 2 }));
-    // the fountain toward the lagoon, obelisks on the cross axes
-    const toL = Math.atan2(-t.def.z, -t.def.x);
-    const fx = t.def.x + Math.cos(toL) * (R + 16), fz = t.def.z + Math.sin(toL) * (R + 16);
-    const fg = ground(fx, fz);
-    if (fg > 1.5) parts.push(latheFacade([{ r: 7, y: fg - 1, kind: 1 }, { r: 7, y: fg + 0.7, kind: 1 }, { r: 6.4, y: fg + 0.7, kind: 1 }, { r: 6.4, y: fg + 0.45, kind: 6 }, { r: 1.2, y: fg + 0.45, kind: 6 }, { r: 0.9, y: fg + 3.2, kind: 1 }, { r: 2.8, y: fg + 3.4, kind: 1 }, { r: 2.5, y: fg + 3.6, kind: 6 }, { r: 0.4, y: fg + 3.6, kind: 6 }, { r: 0.3, y: fg + 5.8, kind: 1 }, { r: 0.05, y: fg + 6.4, kind: 2 }], 28).translate(fx, 0, fz));
-    for (const da of [Math.PI / 2, -Math.PI / 2]) {
-      const a = toL + da;
-      const ox = t.def.x + Math.cos(a) * (R + 12), oz = t.def.z + Math.sin(a) * (R + 12);
-      const og = ground(ox, oz);
-      if (og < 1.5) continue;
-      parts.push(latheFacade([{ r: 2.2, y: og - 1, kind: 1 }, { r: 2.2, y: og + 0.8, kind: 1 }, { r: 0.8, y: og + 0.8, kind: 1 }, { r: 0.45, y: og + 12, kind: 1 }, { r: 0.001, y: og + 13, kind: 2 }], 4, { phase: Math.PI / 4 }).translate(ox, 0, oz));
-    }
-    for (let k = 0; k < 12; k++) {
-      const a = ((k + 0.5) / 12) * TAU;
-      const x = t.def.x + Math.cos(a) * (R + 3.5), z = t.def.z + Math.sin(a) * (R + 3.5);
-      const g = ground(x, z);
-      if (g > 1.5) lamps.push({ x, y: g - 0.1, z, yaw: a + Math.PI, cls: 0 });
+  };
+  ring(r1, 1);
+  if (inner) ring(r0, -1);
+  flat(y1, true, top);
+  if (bottom) flat(Y0, false, kind);
+  if (!full) {
+    for (const [t, sgn] of [[a0, -1], [a1, 1]]) {
+      const c = Math.cos(t), s = Math.sin(t);
+      const nx = -s * sgn, nz = c * sgn;          // along the tangent, out of the sector
+      const b = Y0(t);
+      const ids = [[r0, b], [r1, b], [r1, y1], [r0, y1]].map(([r, y]) => P.v(cx + c * r, y, cz + s * r, nx, 0, nz, r, y, kind));
+      if (sgn > 0) P.quad(ids[0], ids[1], ids[2], ids[3]); else P.quad(ids[0], ids[3], ids[2], ids[1]);
     }
   }
-  if (!parts.length) return { meshes: [], lamps };
-  const mesh = new THREE.Mesh(mergeClean(parts), createFacadeMaterial('pearl', 4321, { litFrac: 0.5, band: 1e5 }));
-  mesh.name = 'Rim forecourts';
-  mesh.castShadow = true; mesh.receiveShadow = true;
-  mesh.matrixAutoUpdate = false; mesh.updateMatrix();
-  scene.add(mesh);
-  return { meshes: [mesh], lamps };
+}
+
+/** Closed box (plan rotated by rot) from y0 to y1; bottom face optional. */
+function boxF(P, cx, cz, hx, hz, y0, y1, rot, { kind = K.STONE, top = kind, bottom = false } = {}) {
+  const c = Math.cos(rot), s = Math.sin(rot);
+  const W = (x, z) => [cx + x * c - z * s, cz + x * s + z * c];
+  const cs = [[-hx, -hz], [hx, -hz], [hx, hz], [-hx, hz]].map(([x, z]) => W(x, z));
+  let u = 0;
+  for (let i = 0; i < 4; i++) {
+    const a = cs[i], b = cs[(i + 1) % 4];
+    const ex = b[0] - a[0], ez = b[1] - a[1], L = Math.hypot(ex, ez);
+    const nx = ez / L, nz = -ex / L;                 // outward: the corners run counter-clockwise in (x, z)
+    const ids = [[a, y0, u], [b, y0, u + L], [b, y1, u + L], [a, y1, u]].map(([p, y, uu]) => P.v(p[0], y, p[1], nx, 0, nz, uu, y, kind));
+    P.quad(ids[0], ids[3], ids[2], ids[1]);
+    u += L;
+  }
+  const capF = (y, up, k) => {
+    const ids = cs.map(([x, z]) => P.v(x, y, z, 0, up ? 1 : -1, 0, x, z, k));
+    if (up) P.quad(ids[0], ids[3], ids[2], ids[1]); else P.quad(ids[0], ids[1], ids[2], ids[3]);
+  };
+  capF(y1, true, top);
+  if (bottom) capF(y0, false, kind);
+}
+
+/** Lathe with per-segment kinds (a duplicated ring at every change of kind) at (x, y, z). */
+function lathe(list, x, y, z, prof, seg, opts) {
+  const out = [];
+  for (let i = 0; i < prof.length; i++) {
+    const [r, h, k] = prof[i];
+    if (i > 0 && prof[i - 1][2] !== k) out.push({ r: prof[i - 1][0], y: prof[i - 1][1], kind: k });
+    out.push({ r, y: h, kind: k });
+  }
+  list.push(latheFacade(out, seg, opts).translate(x, y, z));
+}
+
+// the column: square plinth, torus, a shaft with entasis, necking, echinus and abacus
+function column(list, x, y, z, h, lod) {
+  if (lod) { lathe(list, x, y, z, [[0.7, -0.1, K.STONE], [0.6, h * 0.5, K.STONE], [0.52, h + 0.1, K.STONE]], 4, { phase: Math.PI / 4 }); return; }
+  lathe(list, x, y, z, [
+    [0.82, -0.1, K.STONE], [0.82, 0.28, K.STONE], [0.74, 0.34, K.STONE], [0.72, 0.46, K.STONE], [0.6, 0.56, K.STONE],
+    [0.58, 1.2, K.STONE], [0.56, h * 0.45, K.STONE], [0.48, h - 0.72, K.STONE], [0.53, h - 0.66, K.STONE], [0.53, h - 0.58, K.STONE],
+    [0.49, h - 0.52, K.STONE], [0.78, h - 0.22, K.STONE], [0.8, h + 0.1, K.STONE],
+  ], 14);
+}
+
+export function buildRimForecourts(scene, towers, ground, avoid = () => false) {
+  const lamps = [];
+  const sets = [];
+  const mat = createFacadeMaterial('pearl', 4321, { litFrac: 0.5, band: 1e5 });
+  for (const t of rimArcologies(towers)) {
+    const cx = t.def.x, cz = t.def.z;
+    const base = t.footprint || towerBase(t);
+    const RT = base + RIM_TERRACE;                  // the terrace edge (outer face of the wall)
+    if (avoid(cx, cz, RT + 10)) continue;
+    const Y0 = Math.max(t.baseY + 2, 1.8);           // paved top: the tower's own ground level
+    const RC = base + 6;                             // colonnade axis
+    const hC = 7.2;                                  // column height
+    // highest and lowest ground in a small disc (the bilinear sampler can differ from the
+    // rendered grid by a little: the margins below cover it)
+    const gMax = (x, z, r) => { let m = ground(x, z); for (let k = 0; k < 6; k++) { const a = (k / 6) * TAU; m = Math.max(m, ground(x + Math.cos(a) * r, z + Math.sin(a) * r)); } return m; };
+    const buried = (x, z, r, lift = 0) => gMax(x, z, r) > Y0 + lift;
+    // the retaining wall's foot follows the lowest ground under each stretch, well sunk
+    const nW = Math.max(96, Math.ceil((TAU * RT) / 4));
+    const foot = new Float32Array(nW + 1);
+    for (let i = 0; i <= nW; i++) {
+      let m = 1e9;
+      for (let k = -2; k <= 2; k++) {
+        const a = ((i + k * 0.25) / nW) * TAU;
+        for (const rr of [RT - 1.5, RT, RT + 1]) m = Math.min(m, ground(cx + Math.cos(a) * rr, cz + Math.sin(a) * rr));
+      }
+      foot[i] = Math.max(Math.min(m - 3, Y0 - 1.5), -60);
+    }
+    const footAt = (a) => { const f = (((a / TAU) % 1) + 1) % 1 * nW; const i = Math.floor(f); return foot[Math.min(i, nW)] + (foot[Math.min(i + 1, nW)] - foot[Math.min(i, nW)]) * (f - i); };
+    const toL = Math.atan2(-cz, -cx);                // toward the lagoon
+
+    const build = (lod) => {
+      const P = new Parts();
+      const list = [];
+      // ---- the terrace: retaining wall (ashlar) with its parapet, the coping, the paved top
+      ringBand(P, cx, cz, RT - 0.5, RT, footAt, Y0 + 1.0, 0, TAU, { kind: K.PAVING, bottom: false, inner: false, seg: nW });
+      ringBand(P, cx, cz, RT - 0.5, RT, Y0 - 0.05, Y0 + 1.0, 0, TAU, { kind: K.PAVING, bottom: false, seg: nW });
+      ringBand(P, cx, cz, RT - 0.62, RT + 0.22, Y0 + 1.0, Y0 + 1.22, 0, TAU, { kind: K.STONE, seg: nW });
+      if (!lod) ringBand(P, cx, cz, RT, RT + 0.12, (a) => footAt(a), Y0 - 0.55, 0, TAU, { kind: K.STONE, bottom: false, inner: false, seg: nW });   // a string course under the parapet
+      {
+        const nD = lod ? 64 : nW;
+        const c0 = P.v(cx, Y0, cz, 0, 1, 0, cx, cz, K.PAVING);
+        const ring = [];
+        for (let i = 0; i <= nD; i++) { const a = (i / nD) * TAU; const x = cx + Math.cos(a) * (RT - 0.5), z = cz + Math.sin(a) * (RT - 0.5); ring.push(P.v(x, Y0, z, 0, 1, 0, x, z, K.PAVING)); }
+        for (let i = 0; i < nD; i++) P.idx.push(c0, ring[i + 1], ring[i]);
+      }
+      // ---- the colonnade: columns wherever the terrace is clear of the hill, gates on four axes
+      const nCol = Math.max(24, Math.round((TAU * RC) / 6.5));
+      const gate = (a) => [0, Math.PI / 2, Math.PI, -Math.PI / 2].some((g) => { let d = Math.abs(a - toL - g) % TAU; d = Math.min(d, TAU - d); return d * RC < 7; });
+      const has = [];
+      for (let k = 0; k < nCol; k++) {
+        const a = (k / nCol) * TAU;
+        const x = cx + Math.cos(a) * RC, z = cz + Math.sin(a) * RC;
+        has.push(!gate(a) && !buried(x, z, 1.8, -0.05) && !avoid(x, z, 4));
+      }
+      // runs of consecutive columns (a run may wrap round past k = 0)
+      const runs = [];
+      const start = has.indexOf(false);
+      if (start >= 0) {
+        let cur = null;
+        for (let j = 1; j <= nCol; j++) {
+          const k = (start + j) % nCol;
+          if (has[k]) { if (!cur) cur = [start + j, start + j]; else cur[1] = start + j; } else if (cur) { runs.push(cur); cur = null; }
+        }
+        if (cur) runs.push(cur);
+      }
+      for (const [k0, k1] of runs) {
+        if (k1 - k0 < 2) continue;                   // a lone pair of columns carries nothing
+        const a0 = (k0 / nCol) * TAU - 1.2 / RC, a1 = (k1 / nCol) * TAU + 1.2 / RC;
+        // stylobate: two steps, sunk a little into the paving
+        ringBand(P, cx, cz, RC - 1.7, RC + 1.7, Y0 - 0.05, Y0 + 0.2, a0 - 0.6 / RC, a1 + 0.6 / RC, { kind: K.PAVING, bottom: false });
+        ringBand(P, cx, cz, RC - 1.25, RC + 1.25, Y0 + 0.2, Y0 + 0.42, a0 - 0.2 / RC, a1 + 0.2 / RC, { kind: K.PAVING, bottom: false });
+        for (let k = k0; k <= k1; k++) {
+          const a = (k / nCol) * TAU;
+          column(list, cx + Math.cos(a) * RC, Y0 + 0.42, cz + Math.sin(a) * RC, hC, lod);
+        }
+        // entablature: architrave, frieze, and a cornice with a planted top
+        const yE = Y0 + 0.42 + hC;
+        ringBand(P, cx, cz, RC - 0.85, RC + 0.85, yE, yE + 0.85, a0, a1, { kind: K.STONE });
+        ringBand(P, cx, cz, RC - 0.7, RC + 0.7, yE + 0.85, yE + 1.7, a0 + 0.1 / RC, a1 - 0.1 / RC, { kind: lod ? K.STONE : K.METAL, bottom: false });
+        ringBand(P, cx, cz, RC - 1.2, RC + 1.2, yE + 1.7, yE + 2.15, a0 - 0.3 / RC, a1 + 0.3 / RC, { kind: K.STONE, top: K.GARDEN });
+        if (!lod) {
+          // dentils under the cornice, a guttae band over the architrave
+          const nd = Math.floor(((a1 - a0) * (RC + 0.72)) / 0.9);
+          for (let i = 0; i < nd; i++) {
+            const a = a0 + ((i + 0.5) / nd) * (a1 - a0);
+            for (const [rr, sg] of [[RC + 0.78, 1], [RC - 0.78, -1]]) boxF(P, cx + Math.cos(a) * rr, cz + Math.sin(a) * rr, 0.16, 0.09, yE + 1.52, yE + 1.7, a + Math.PI / 2, { bottom: true });
+          }
+        }
+      }
+      // ---- the fountain, toward the lagoon, on the terrace between the colonnade and the parapet
+      const rF = base + 11.6;
+      const fx = cx + Math.cos(toL) * rF, fz = cz + Math.sin(toL) * rF;
+      if (!buried(fx, fz, 4.2, -0.05) && !avoid(fx, fz, 5)) {
+        const basin = [
+          [4.0, -0.05, K.STONE], [4.0, 0.62, K.STONE], [4.12, 0.64, K.STONE], [4.12, 0.78, K.STONE], [3.5, 0.78, K.STONE], [3.5, 0.52, K.STONE],
+          [0.95, 0.52, K.POOL], [0.95, 0.52, K.STONE], [0.9, 0.9, K.STONE], [0.6, 1.3, K.STONE], [0.42, 1.6, K.STONE],
+        ];
+        const top = lod ? [[0.4, 2.7, K.STONE], [0.05, 3.1, K.STONE]] : [
+          [0.38, 2.1, K.STONE], [0.55, 2.2, K.STONE], [1.9, 2.55, K.STONE], [2.0, 2.78, K.STONE], [1.78, 2.8, K.STONE], [1.74, 2.64, K.STONE],
+          [0.34, 2.64, K.POOL], [0.34, 2.64, K.STONE], [0.26, 3.5, K.STONE], [0.42, 3.62, K.STONE], [0.3, 3.85, K.STONE], [0.06, 4.35, K.LANTERN],
+        ];
+        lathe(list, fx, Y0, fz, [...basin, ...top], lod ? 16 : 48);
+      }
+      // ---- obelisks on stepped plinths on the cross axes
+      for (const da of [Math.PI / 2, -Math.PI / 2]) {
+        const a = toL + da;
+        const ox = cx + Math.cos(a) * rF, oz = cz + Math.sin(a) * rF;
+        if (buried(ox, oz, 2.4, -0.05) || avoid(ox, oz, 4)) continue;
+        boxF(P, ox, oz, 2.1, 2.1, Y0 - 0.05, Y0 + 0.4, a, { kind: K.PAVING });
+        boxF(P, ox, oz, 1.6, 1.6, Y0 + 0.4, Y0 + 0.85, a, { kind: K.PAVING });
+        boxF(P, ox, oz, 1.1, 1.1, Y0 + 0.85, Y0 + 2.0, a, { kind: K.STONE });
+        lathe(list, ox, Y0, oz, [[1.05, 1.95, K.STONE], [0.95, 2.2, K.STONE], [0.6, 12.2, K.STONE], [0.02, 13.2, K.LANTERN]], 4, { phase: Math.PI / 4 + a });
+      }
+      list.push(P.geometry());
+      return mergeClean(list);
+    };
+    const near = new THREE.Mesh(build(false), mat), far = new THREE.Mesh(build(true), mat);
+    for (const m of [near, far]) {
+      m.name = 'Rim forecourts';
+      m.castShadow = true; m.receiveShadow = true;
+      m.matrixAutoUpdate = false; m.updateMatrix();
+      scene.add(m);
+    }
+    near.geometry.computeBoundingSphere(); far.geometry.computeBoundingSphere();
+    sets.push({ near, far, center: new THREE.Vector3(cx, Y0, cz), radius: RT });
+    // lamps just inside the parapet, clear of the fountain, the obelisks and the gates' axes
+    const nL = Math.max(12, Math.round((TAU * RT) / 26));
+    for (let k = 0; k < nL; k++) {
+      const a = ((k + 0.5) / nL) * TAU;
+      const rl = RT - 1.4;
+      const x = cx + Math.cos(a) * rl, z = cz + Math.sin(a) * rl;
+      const clearOf = [0, Math.PI / 2, -Math.PI / 2].every((g) => { const ga = toL + g; return Math.hypot(x - (cx + Math.cos(ga) * (base + 11.6)), z - (cz + Math.sin(ga) * (base + 11.6))) > 6; });
+      if (!clearOf || buried(x, z, 0.6, -0.05) || avoid(x, z, 2)) continue;
+      lamps.push({ x, y: Y0 - 0.05, z, yaw: a + Math.PI, cls: 0 });
+    }
+  }
+  const api = {
+    meshes: sets.flatMap((s) => [s.near, s.far]), lamps, sets,
+    nearDist: 1100,
+    update(camera) {
+      if (!camera) return;
+      const cp = camera.position;
+      for (const s of sets) {
+        const near = cp.distanceTo(s.center) - s.radius < this.nearDist;
+        // near: detail in the main view, massing in the (cheaper) reflection pass
+        s.near.visible = near;
+        s.near.layers.set(near ? 1 : 0);
+        s.far.layers.set(near ? 2 : 0);
+      }
+    },
+  };
+  return api;
 }
