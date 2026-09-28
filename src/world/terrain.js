@@ -231,9 +231,11 @@ export function buildInnerGeometry(heights) {
       pos[k * 3] = -half + i * step;
       pos[k * 3 + 1] = heights[k];
       pos[k * 3 + 2] = -half + j * step;
-      const hl = heights[j * s + Math.max(i - 1, 0)], hr = heights[j * s + Math.min(i + 1, n)];
-      const hd = heights[Math.max(j - 1, 0) * s + i], hu = heights[Math.min(j + 1, n) * s + i];
-      let nx = hl - hr, ny = 2 * step, nz = hd - hu;
+      // central differences, one-sided at the grid border (scaled to the span actually sampled)
+      const il = Math.max(i - 1, 0), ir = Math.min(i + 1, n), jd = Math.max(j - 1, 0), ju = Math.min(j + 1, n);
+      const hl = heights[j * s + il], hr = heights[j * s + ir];
+      const hd = heights[jd * s + i], hu = heights[ju * s + i];
+      const nx = (hl - hr) / (ir - il), ny = step, nz = (hd - hu) / (ju - jd);
       const l = Math.hypot(nx, ny, nz);
       nrm[k * 3] = nx / l; nrm[k * 3 + 1] = ny / l; nrm[k * 3 + 2] = nz / l;
     }
