@@ -236,6 +236,7 @@ export class SpaceMode {
     this.modules.push(this.ports);
     // lane guidance beacons along the corridors
     this.lanes = new Lanes(this);
+    this.modules.push(this.lanes);
     // ships: liners at the Harbour, tenders over the Halo, Selene Works above the Moon
     this.fleet = new Fleet(this);
     this.modules.push(this.fleet);

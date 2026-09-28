@@ -79,6 +79,18 @@ ${NOISE_GLSL}
 ${FACADE_GLSL}
 
 float aaStep(float e, float x, float w) { return smoothstep(e - w, e + w, x); }
+// coverage of the band |d| < hw for a pixel aa wide: a band narrower than the pixel keeps its
+// energy spread over it instead of breaking into dashes
+float aaBand(float d, float hw, float aa) { float w = max(hw, aa * 0.5); return clamp((w - abs(d)) / max(aa, 1e-5) + 0.5, 0.0, 1.0) * min(1.0, hw / w); }
+float aaDisc(float r, float R, float aa) { return clamp((R - r) / max(aa, 1e-5) + 0.5, 0.0, 1.0); }
+// the Halo river's centre line (km across the deck), periodic round the whole ring and
+// straight and centred through each hub basin
+float haloRiver(float u, float hub) {
+  float hk = mod(u, hub) - 0.5 * hub;
+  float calm = smoothstep(4.0, 16.0, abs(hk));
+  float f1 = 6.2831853 * floor(uLen / 61.0) / uLen, f2 = 6.2831853 * floor(uLen / 23.3) / uLen;
+  return calm * (2.9 * sin(u * f1 + 0.7) + 1.5 * sin(u * f2 + 2.1));
+}
 // lamps every P km, w km long, filtered so a sub-pixel lamp keeps its energy spread over
 // the pixel instead of popping on and off as the view moves
 float aaLamp(float x, float P, float w) {
@@ -135,54 +147,101 @@ void main() {
 
   if (part < 0.5) {
     if (topSide > 0.0) {
-      // ---- habitat floor seen from space: parks, forests, towns, lakes, a patchwork of farms
-      //      under a glass roof on ribs every 2 km ----
-      float zi = floor(u / 48.0);
-      float zone = hash11(zi * 1.37 + uSeed);
-      float zoneN = hash11((zi + 1.0) * 1.37 + uSeed);
-      float blend = smoothstep(0.8, 1.0, fract(u / 48.0));
-      float z = mix(zone, zoneN, blend);
-      float dF = RDET(1.2), dS = RDET(0.12), dB = RDET(0.5), dL = RDET(0.35);
-      vec3 park = vec3(0.05, 0.1, 0.035) * (0.8 + 0.4 * vnoise(vec2(u * 0.4, v * 20.0)));
-      park = mix(park, vec3(0.025, 0.06, 0.02), smoothstep(0.55, 0.7, vnoise(vec2(u * 0.15, v * 7.0) + 3.0)) * 0.8);   // forest
-      // farms: fields of different crops, ploughed in stripes
-      vec2 fc = vec2(floor(u / 1.2), floor((v + 0.5) * 8.0));
-      float crop = hash12(fc + uSeed);
-      vec3 cropC = crop < 0.3 ? vec3(0.17, 0.16, 0.07) : crop < 0.55 ? vec3(0.09, 0.14, 0.05) : crop < 0.75 ? vec3(0.21, 0.18, 0.1) : vec3(0.12, 0.12, 0.06);
-      vec3 farmAvg = vec3(0.145, 0.15, 0.07);
-      float plough = fPulse(u + v * 3.0, 0.12, 0.0, 0.06, fk);
-      vec3 farm = mix(farmAvg, cropC * (0.9 + 0.2 * mix(0.5, plough, dS)), dF);
-      farm *= 1.0 - 0.2 * (1.0 - fPulse(u, 1.2, 0.0, 1.17, fk)) * dF;               // hedgerows between fields
-      // towns: blocks between a grid of streets, a shade apart
-      float blk = hash12(floor(vec2(u / 0.5, v * uWidth / 0.5)));
-      float streets = 1.0 - fPulse(u, 0.5, 0.0, 0.44, fk) * fPulse(v * uWidth, 0.5, 0.0, 0.44, fk);
-      vec3 town = mix(vec3(0.19, 0.18, 0.165), mix(vec3(0.14, 0.135, 0.13), vec3(0.24, 0.22, 0.2), blk), dB);
-      town = mix(town, vec3(0.1, 0.1, 0.11), streets * 0.6);
-      town = mix(town, park, 0.3 * mix(0.5, vnoise(vec2(u * 2.0, v * uWidth * 2.0)), dB));   // street trees and yards
-      // the land use changes gradually from zone to zone (no hard-edged blocks)
-      float wPark = 1.0 - smoothstep(0.34, 0.44, z), wTown = smoothstep(0.7, 0.8, z);
-      vec3 alb = mix(mix(farm, park, wPark), town, wTown);
-      float urban = mix(0.25, 1.0, wTown);
-      // towns always line the walls, a river runs down the middle, lakes here and there
-      float edge = smoothstep(0.34, 0.38, av);
-      alb = mix(alb, town, edge);
-      urban = max(urban, edge);
-      float river = 1.0 - smoothstep(0.018, 0.028 + fv, abs(v + 0.02 * sin(u * 0.05)));
-      float lake = smoothstep(0.72, 0.76, vnoise(vec2(u * 0.08, v * 6.0) + 11.0)) * (1.0 - edge) * (1.0 - wTown);
-      float water = max(river, lake);
-      alb = mix(alb, vec3(0.02, 0.04, 0.06), water);
-      alb = mix(alb, uAlbedo * 1.25, hub);
+      // ---- the habitat floor, planned: a river meanders down the spine of the deck; at every
+      //      hub (under its arch) it widens into the round basin of a harbour town, ringed by
+      //      pale quays, eight boulevards and a green belt; river towns sit on alternate banks
+      //      between the hubs, each with its bridge; terraced quarters climb the foot of both
+      //      walls; between them fields lie in long strips across the deck with woods in drifts.
+      //      Every order is filtered to its mean while it still spans a few pixels. ----
+      float vk = v * uWidth;                                // km across the deck from its centre line
+      float aa = fk;                                        // km per pixel
+      float dB = RDET(0.5), dL = RDET(0.35), dF = RDET(0.85), dT = RDET(0.3);
+      float quarter = uHub * 0.25;
+      float q = (u - 0.5 * uHub) / quarter;
+      float ti = floor(q + 0.5);                            // settlement cell (every fourth a hub town)
+      float du = (q - ti) * quarter;                        // km along the ring from its centre
+      float isHub = 1.0 - step(0.5, mod(ti + 4000.0, 4.0));
+      float hk = mod(u, uHub) - 0.5 * uHub;                 // km from the nearest hub centre
+      // the river's line: calm and centred through each hub basin
+      float rc = haloRiver(u, uHub);
+      float dr = vk - rc;
+      float rw = 0.42 + 0.07 * sin(u * 0.047);
+      // hub town: basin, island, quays, ring quarter, boulevards, green belt
+      float rH = length(vec2(du, vk));
+      float basin = isHub * aaDisc(rH, 2.6, aa);
+      float island = isHub * aaDisc(rH, 0.8, aa);
+      float ringQ = isHub * aaDisc(rH, 6.4, aa) * (1.0 - aaDisc(rH, 2.75, aa));
+      float belt = isHub * aaDisc(rH, 7.3, aa) * (1.0 - aaDisc(rH, 6.4, aa));
+      float a8 = (fract(atan(vk, du) / 0.7853982 + 0.5) - 0.5) * 0.7853982;
+      float boul = ringQ * aaBand(rH * sin(a8), 0.09, aa);
+      float rings2 = ringQ * max(aaBand(rH - 4.0, 0.06, aa), aaBand(rH - 5.25, 0.06, aa));
+      float quay = isHub * aaBand(rH - 2.68, 0.08, aa);
+      // under the arch, a civic avenue crosses the whole deck from wall to wall
+      float avenue = aaBand(hk, 0.28, aa) * (1.0 - basin);
+      // river towns, on the bank chosen for each cell, following the meander
+      float tid = ti + uSeed * 7.0;
+      float h1 = hash11(tid * 1.37 + 0.3), h2 = hash11(tid * 2.11 + 1.7), h3 = hash11(tid * 3.07 + 4.1);
+      float side = h1 < 0.5 ? -1.0 : 1.0;
+      float ta = 3.0 + 2.6 * h2, tb = 1.4 + 1.0 * h3;
+      float edgeN = (vnoise(vec2(u * 0.8, vk * 0.8) + tid) - 0.5) * 0.22 * RDET(1.5);
+      float te = length(vec2(du / ta, (dr - side * (rw + 0.1 + tb)) / tb)) + edgeN;
+      float town = (1.0 - isHub) * (1.0 - smoothstep(1.0 - aa / tb, 1.0 + aa / tb, te));
+      // a village across the water from about half of them
+      float tv = length(vec2((du - (h2 - 0.5) * ta) / (ta * 0.45), (dr + side * (rw + 0.1 + tb * 0.55)) / (tb * 0.55))) + edgeN;
+      town = max(town, (1.0 - isHub) * step(0.5, h3) * (1.0 - smoothstep(1.0 - aa / tb, 1.0 + aa / tb, tv)));
+      float bridge = (1.0 - isHub) * aaBand(du, 0.05, aa) * step(abs(dr), rw + 0.12) * step(te, 2.2);
+      // terraced quarters along both walls, their streets parallel to the wall
+      float wallT = smoothstep(12.3 - aa, 12.3 + aa, abs(vk));
+      float terr = 1.0 - fPulse(abs(vk), 0.45, 0.0, 0.39, aa);
+      float crossL = 1.0 - fPulse(u, 0.8, 0.0, 0.72, aa);
+      // ---- colours
+      float cellT = hash12(floor(vec2(u / 0.5, vk / 0.5)));
+      vec3 park = vec3(0.05, 0.1, 0.035) * (0.85 + 0.3 * mix(0.5, vnoise(vec2(u * 0.4, vk * 0.6)), dT));
+      vec3 wood = vec3(0.022, 0.055, 0.02) * (0.85 + 0.3 * mix(0.5, vnoise(vec2(u * 1.3, vk * 1.3) + 5.0), dT));
+      // fields in long strips across the deck (one farm lane splits each side), muted crops
+      float strip = hash12(vec2(floor(u / 0.85), floor(abs(vk) / 4.3) + step(0.0, vk) * 17.0) + uSeed);
+      vec3 cropC = strip < 0.28 ? vec3(0.19, 0.165, 0.08) : strip < 0.55 ? vec3(0.09, 0.14, 0.05) : strip < 0.8 ? vec3(0.13, 0.15, 0.065) : vec3(0.15, 0.125, 0.07);
+      vec3 farm = mix(vec3(0.135, 0.145, 0.065), cropC, dF);
+      farm *= 1.0 - 0.14 * (1.0 - fPulse(u, 0.85, 0.0, 0.81, aa));        // hedges between strips
+      farm *= 1.0 - 0.2 * aaBand(mod(abs(vk), 4.3) - 2.15, 0.02, aa);      // farm lanes
+      float forest = smoothstep(0.57, 0.67, vnoise(vec2(u * 0.055, vk * 0.13) + 3.0) * 0.7 + vnoise(vec2(u * 0.21, vk * 0.4) + 9.0) * 0.3);
+      vec3 townC = mix(vec3(0.22, 0.21, 0.19), mix(vec3(0.17, 0.165, 0.155), vec3(0.3, 0.285, 0.255), cellT), dB);
+      float streets = 1.0 - fPulse(u, 0.5, 0.0, 0.44, aa) * fPulse(vk, 0.5, 0.0, 0.44, aa);
+      townC = mix(townC, vec3(0.12, 0.12, 0.125), streets * 0.5);
+      townC = mix(townC, park, 0.28 * mix(0.5, vnoise(vec2(u * 2.0, vk * 2.0)), dB));    // yards and street trees
+      vec3 terrC = mix(vec3(0.21, 0.2, 0.18), vec3(0.26, 0.25, 0.225), terr * dB);
+      terrC = mix(terrC, park, 0.35 * (1.0 - terr) * dB + 0.12);
+      terrC = mix(terrC, vec3(0.12, 0.12, 0.125), crossL * 0.4);
+      vec3 hubC = mix(vec3(0.3, 0.29, 0.27), mix(vec3(0.24, 0.23, 0.215), vec3(0.36, 0.345, 0.31), cellT), dB);
+      hubC = mix(hubC, park, 0.18);
+      vec3 alb = mix(farm, wood, forest);
+      float riparian = 1.0 - smoothstep(rw + 0.7, rw + 1.1, abs(dr));
+      alb = mix(alb, park, riparian);
+      alb = mix(alb, terrC, wallT);
+      alb = mix(alb, townC, town * (1.0 - wallT));
+      alb = mix(alb, park * 1.1, belt);
+      alb = mix(alb, hubC, ringQ);
+      alb = mix(alb, vec3(0.4, 0.38, 0.34), max(max(boul, rings2), max(quay, avenue * (1.0 - wallT) * 0.8)));
+      float river = aaBand(dr, rw, aa) * (1.0 - wallT);
+      float water = max(max(river, basin) * (1.0 - island), 0.0);
+      water *= 1.0 - bridge * 0.9;
+      alb = mix(alb, vec3(0.018, 0.038, 0.058), water);
+      alb = mix(alb, mix(park, vec3(0.38, 0.36, 0.32), aaDisc(rH, 0.3, aa)), island);
+      alb = mix(alb, vec3(0.36, 0.34, 0.3), bridge * step(abs(dr), rw + 0.12));
       vec3 diff = alb / 3.14159 * sunL * ndl;
       // water: a bounded glint (the glass roof carries its own)
       float spec = pow(max(dot(N, H), 0.0), 80.0) * 0.45 + pow(max(dot(N, H), 0.0), 20.0) * 0.06;
       float F = 0.04 + 0.96 * pow(clamp(1.0 - dot(N, V), 0.0, 1.0), 5.0);
       col = diff + min(sunL * spec * F * (0.1 + 0.9 * water), sunL * 0.6);
       col += vec3(0.02, 0.03, 0.05) * F * uSunE * 0.05;
-      // lights
-      float cell = hash12(floor(vec2(u / 0.35, v * uWidth / 0.35)));
+      // lights: lit rooms in the towns, lamps along the boulevards, the quays and both river banks
+      float urban = max(max(town, wallT), ringQ);
+      float cell = hash12(floor(vec2(u / 0.35, vk / 0.35)));
       float lit = mix(0.24, step(0.55, cell) * (0.5 + cell), dL);
       em += uHabitatColor * urban * lit * (0.08 + 0.22 * nightSide) * (1.0 - water);
-      em += uHabitatColor * hub * 0.35;
+      float banks = aaBand(abs(dr) - rw - 0.05, 0.02, aa) * (1.0 - wallT) * (1.0 - basin);
+      em += uHabitatColor * (max(max(boul, rings2), avenue * 0.7) * (0.12 + 0.5 * nightSide) + quay * (0.3 + 0.9 * nightSide) + banks * (0.12 + 0.7 * nightSide));
+      em += uHabitatColor * island * aaDisc(rH, 0.3, aa) * (0.25 + 0.6 * nightSide);
     } else {
       // ---- underside, facing the Earth: structure, radiators, lights ----
       float dP = RDET(2.4), dR = RDET(6.0), dL = RDET(0.8);

@@ -134,6 +134,21 @@ export function buildHarbour() {
       lathe(B, [[238, -40, CK.BRONZE], [250, -30, CK.BRONZE], [250, 30, CK.BRONZE], [238, 40, CK.BRONZE]], 12);
       B.pop();
     }
+    // cargo racks on the keel's outer face between its verticals: a bronze saddle and two
+    // capsule pods, the stock waiting for the ships at the heads (inboard of the berth fingers)
+    {
+      const s = up ? 1 : -1;
+      B.push(new THREE.Matrix4().makeBasis(d, V(0, s, 0), side.clone().multiplyScalar(s)).setPosition(0, y, 0));
+      for (let r = 2700, j = 0; r < 11000; r += 1400, j++) {
+        B.box(r, 422, 0, 760, 56, 720, CK.BRONZE);
+        for (const sz of [-190, 190]) {
+          B.push(new THREE.Matrix4().makeTranslation(r, 446 + 150, sz).multiply(new THREE.Matrix4().makeRotationY(Math.PI / 2)));
+          lathe(B, [[0.1, -440, CK.HULL], [90, -430, CK.HULL], [150, -380, (j + i) % 3 ? CK.HULL : CK.DECK], [150, -150, CK.BRONZE], [150, -120, (j + i) % 2 ? CK.DECK : CK.HULL], [150, 120, CK.BRONZE], [150, 150, CK.HULL], [150, 380, CK.HULL], [90, 430, CK.HULL], [0.1, 440, CK.DARK]], 16);
+          B.pop();
+        }
+      }
+      B.pop();
+    }
     // windows strip: a lantern gallery on the arm's flank
     ctube(B, [d.clone().multiplyScalar(1400).add(side.clone().multiplyScalar(200)).setY(y + 60), d.clone().multiplyScalar(L - 500).add(side.clone().multiplyScalar(200)).setY(y + 60)], 40, 6, CK.LANTERN);
     // arm head: a docking hub with a collar ring facing outward
@@ -208,6 +223,26 @@ export function buildHarbour() {
         W.pop();
       }
     }
+    // hoop frames round the trough every 7.5 (small rings 10) degrees, between the spokes: a
+    // bronze rib seated on the skin all the way round the section (over the glass roof too)
+    const nRib = R > 9000 ? 48 : 36;
+    for (let k = 0; k < nRib; k++) {
+      const th = ((k + 0.5) / nRib) * TAU;
+      const c = Math.cos(th), sn = Math.sin(th), loop = [];
+      for (let i = 0; i <= 40; i++) {
+        const t = (i / 40) * TAU, ct = Math.cos(t), st = Math.sin(t);
+        const x = Math.sign(ct) * Math.pow(Math.abs(ct), 2 / 3.4) * (a + 22), r = Math.sign(st) * Math.pow(Math.abs(st), 2 / 3.4) * (b + 22);
+        loop.push(V(c * (R + r), yc + x, sn * (R + r)));
+      }
+      loop[40].copy(loop[0]);
+      ctube(W, loop, 30, 6, CK.BRONZE);
+    }
+    // glazed promenade galleries along both faces of the ring, lit from within, carried by the frames
+    for (const sx of [-1, 1]) {
+      W.push(new THREE.Matrix4().makeTranslation(0, yc + sx * (a + 6), 0).multiply(new THREE.Matrix4().makeRotationX(Math.PI / 2)));
+      W.torus(R + b * 0.18, 64, R > 9000 ? 360 : 280, 10, CK.LANTERN);
+      W.pop();
+    }
     const rg = W.geometry();
     rg.scale(HS, HS, HS);
     rings.push({ geo: rg, dir: dirn, omega: Math.sqrt(9.81 / ((R + b) * HS)), R: R * HS, y: yc * HS });
@@ -245,6 +280,41 @@ export function buildHarbour() {
     lathe(D,[[190,-50,CK.HULL],[265,0,CK.BRONZE],[275,90,CK.GLASS],[230,190,CK.ROOF],[90,320,CK.ROOF],[0,350,CK.BRONZE]],28);D.pop();
     servicePods.push({root, radius:275, arm:arms.indexOf(arm)});
   }
+  // Lit loading gantries on every berth finger: two legs on the tip block, a crosshead, and a
+  // boom reaching out over the berth (clear above the tallest berthed radiator, 192 m), with a
+  // trolley, a mast and its tie, floodlights under the boom and an amber lamp at its end.
+  const gantries = [];
+  for (const bth of berths) {
+    const s = bth.up ? 1 : -1;
+    const Z = bth.side.clone().multiplyScalar(bth.sd);
+    D.push(new THREE.Matrix4().makeBasis(bth.d, V(0, s, 0), Z).setPosition(bth.tip));
+    for (const x of [-60, 60]) ctube(D, [V(x, 76, 0), V(x, 270, 0)], 14, 8, CK.HULL);
+    D.box(0, 270, 0, 150, 24, 24, CK.BRONZE);
+    D.box(0, 270, 290, 22, 20, 580, CK.HULL);
+    ctube(D, [V(0, 280, 0), V(0, 380, 0)], 8, 6, CK.DARK);
+    ctube(D, [V(0, 376, 0), V(0, 279, 572)], 3.5, 6, CK.DARK);
+    D.box(0, 250, 330, 40, 20, 40, CK.DARK);
+    D.box(0, 270, 584, 30, 30, 12, CK.BRONZE);
+    D.pop();
+    const W = new THREE.Matrix4().makeBasis(bth.d, V(0, s, 0), Z).setPosition(bth.tip);
+    for (const z of [160, 330, 500]) lamps.push({ p: V(0, 252, z).applyMatrix4(W), r: 5, color: LAMP.WHITE, i: 2.2, dir: V(0, -s, 0) });
+    lamps.push({ p: V(0, 292, 584).applyMatrix4(W), r: 7, color: LAMP.AMBER, i: 2.6, breathe: 0.35, phase: (bth.r * 0.0007) % 1 });
+    gantries.push({ tip: bth.tip.clone(), matrix: W, boomBottom: 260, reach: 580 });
+  }
+  // Tug stands beside every arm head (on the side away from the liner at arm 4): a bracket off
+  // the head's collar ending in a bronze clamp that meets the parked escort tug's flank.
+  const stands = arms.map((arm, i) => {
+    const lat = arm.side.clone().multiplyScalar(i === 4 ? 1 : -1);
+    const along = arm.L + 100;
+    const pos = arm.d.clone().multiplyScalar(along).addScaledVector(lat, 330).setY(arm.y);
+    ctube(D, [arm.d.clone().multiplyScalar(along).addScaledVector(lat, 200).setY(arm.y), pos.clone().addScaledVector(lat, -20)], 20, 10, CK.HULL);
+    const c = pos.clone().addScaledVector(lat, -16.6);
+    D.push(new THREE.Matrix4().makeBasis(arm.d, V(0, 1, 0), new THREE.Vector3().crossVectors(arm.d, V(0, 1, 0))).setPosition(c));
+    D.box(0, 0, 0, 14, 14, 14, CK.BRONZE);
+    D.pop();
+    lamps.push({ p: c.clone().add(V(0, 12, 0)), r: 5, color: LAMP.AMBER, i: 2.2, breathe: 0.3, phase: i / 8 });
+    return { arm: i, pos, lat, fwd: arm.d.clone().negate(), clamp: c };
+  });
   const fr = buildFreighter(1100), te = buildTender(620), sh = buildShuttle(110), tu = buildTug(80), co = buildCourier(44);
   const I = new THREE.Matrix4();
   const teFull = { geo: placeMerge([{ geo: te.geo, m: I }, ...te.arms.map((A) => ({ geo: A.geo, m: I }))]), lamps: [], length: te.length };
@@ -345,7 +415,7 @@ export function buildHarbour() {
   }
   linerProbe.material.dispose();linerGeo.dispose();
   const body = placeMerge([{ geo: bodyDesign, m: new THREE.Matrix4() }, { geo: G.geometry(), m: new THREE.Matrix4() }, { geo: D.geometry(), m: new THREE.Matrix4() }]);
-  return { body, rings, wingGeo, wingRoots, shipsBigGeo, shipsSmallGeo, lamps, berths, arms, pier, servicePods, gangways };
+  return { body, rings, wingGeo, wingRoots, shipsBigGeo, shipsSmallGeo, lamps, berths, arms, pier, servicePods, gangways, gantries, stands };
 }
 
 /** The Harbour as a scene object: a group in km, rings turning, wings tracking the Sun. */

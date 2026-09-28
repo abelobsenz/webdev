@@ -99,5 +99,53 @@ export class Lanes {
     this.portLamps = createLamps(pl, { minPx: 1.3 });
     space.earthFixed.add(this.portLamps);
     space.addBody('lanesPorts', [this.portLamps], () => _v.set(0, 0, 0), R_EARTH + 700);
+    // the port columns' buoys: one beacon crown per lamp, the same set at every port (port frame,
+    // metres; a body per port so each column keeps its own depth slice)
+    const colBuoys = portColumnBuoys();
+    this.portColumnData = colBuoys;
+    const colGeo = placeMerge(colBuoys.map((b) => ({ geo: buoy.geo, m: b.m })));
+    this.portColumns = [];
+    for (const p of HALO_PORTS) {
+      const lon = THREE.MathUtils.degToRad(p.lon);
+      const dir = bodyDir(0, lon);
+      const g = new THREE.Group();
+      g.position.copy(dir).multiplyScalar(R_EARTH);
+      stationFrame(dir, g.quaternion);
+      const m = craftMesh(colGeo, { accent: [1.0, 0.72, 0.45], lit: 0.4 });
+      g.add(m);
+      space.earthFixed.add(g);
+      const c = new THREE.Vector3();
+      const body = space.addBody(`portColumns-${p.name}`, [g], () => g.localToWorld(c.set(0, 330, 0)), 300);
+      this.portColumns.push({ group: g, mesh: m, body, center: c });
+    }
   }
+
+  update(sim, realTime, dt, space) {
+    // the buoys only when a column's buoys can cover a pixel (they are 350 m tall)
+    if (!this.portColumns) return;
+    const cam = space.camera, k = space.size.y * 0.5 / Math.tan(THREE.MathUtils.degToRad(cam.fov) * 0.5);
+    for (const c of this.portColumns) {
+      c.group.localToWorld(c.center.set(0, 330, 0));
+      const d = Math.max(c.center.distanceTo(cam.position) - 300, 1);
+      c.body.visible = (0.35 / d) * k > 0.6;
+    }
+  }
+}
+
+/**
+ * Buoys up the port columns (port frame: x west, y up from the
+ * ground, metres): a pair at every 60 km of each column, 1.6 km to either side of the column's
+ * line, their lantern crowns carrying the column lamps. The columns run 12 km east (arrivals,
+ * climbing) and 12 km west (departures) of the port's centre line.
+ */
+export function portColumnBuoys(size = 8) {
+  const out = [];
+  for (const upc of [1, -1]) for (let h = 60; h <= 600; h += 60) for (const sd of [1, -1]) {
+    // east is -x in the port frame
+    const x = -(upc * 12 + sd * 1.6) * 1000;
+    const lamp = new THREE.Vector3(x, h * 1000, 0);
+    const base = lamp.clone().add(new THREE.Vector3(0, -(BUOY_TOP + 3) * size, 0));
+    out.push({ lamp, base, size, column: upc, m: new THREE.Matrix4().compose(base, new THREE.Quaternion(), new THREE.Vector3(size, size, size)) });
+  }
+  return out;
 }

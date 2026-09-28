@@ -211,7 +211,7 @@ for (const c of plans) {
 }
 // positive control: a route straight across the Harbour from arm 3's stage to the departure gate
 {
-  const c = plans[0], a = c.stage, b = c.gateD;
+  const c = plans.find((p) => p.arm === 3), a = c.stage, b = c.gateD;
   let hit = false;
   for (let k = 0; k <= 200; k++) if (dist(H, a.clone().lerp(b, k / 200)) < 0.1) hit = true;
   assert.ok(hit, 'positive control: the direct departure line crosses the Harbour');

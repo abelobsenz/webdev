@@ -6,6 +6,7 @@ import { craftMesh, craftPart, addEngines, addLamps, placeMerge, placeLamps, KM 
 import { LAMP } from './lamps.js';
 import { R_EARTH, R_MOON, MERIDIAN_LON, bodyDir } from './sim.js';
 import { stationFrame, CORRIDORS } from './stations.js';
+import { HS } from './harbour.js';
 
 // MERIDIAN's ships in the orbital view (km units; the craft are built in metres).
 //
@@ -153,13 +154,19 @@ export class Fleet {
     // ---- tugs and a courier working the Harbour (children of the Harbour: short hops)
     const tug = buildTug(80), courier = buildCourier(44), shuttle = buildShuttle(110);
     const A = station.data.arms;
-    const armHead = (i, extra = 0) => A[i].d.clone().multiplyScalar((A[i].L + 650 + extra) * KM).setY(A[i].y * KM);
-    // The lower tug passes beneath the thermal fins before climbing to its arm head.
+    // (the arm heads belong to the berthing freighters and their escort tugs, src/space/geoRoads.js)
+    // a tug's loading station 420 m (drawn) over the outermost cargo rack on an arm's keel
+    const rack = (i) => A[i].d.clone().multiplyScalar(9700 * HS * KM).setY((A[i].y + (A[i].up ? 1 : -1) * 1000 * HS) * KM);
+    // the shuttle's stand beside the customs pod on arm 6, on the side away from its berthed ships
+    const pod = (i, dy) => A[i].d.clone().multiplyScalar((A[i].L - 980 - 250) * KM).addScaledVector(A[i].side, -0.55).setY((A[i].y + (A[i].up ? 1 : -1) * 590) * KM + dy);
+    const flat = (p, k) => p.clone().setY(0).multiplyScalar(k).setY(p.y);
+    // The lower tug passes beneath the thermal fins before climbing to the rack it loads.
     const runs = [
-      { craft: tug, pts: [V(1.25, -6.1, 0.35), V(3.8, -7.2, 1.7), armHead(5).add(V(0, -6.0, 0)), armHead(5, 150)], move: 150, pause: 45, offset: 0 },
-      { craft: tug, pts: [armHead(1), armHead(1).add(V(0, 1.7, 0)), armHead(2).add(V(0, 1.7, 0)), armHead(2)], move: 130, pause: 60, offset: 80 },
+      { craft: tug, pts: [V(1.25, -6.1, 0.35), V(3.8, -7.2, 1.7), rack(5).add(V(0, -3.0, 0)), rack(5)], move: 150, pause: 45, offset: 0 },
+      // stock handed between the racks of two neighbouring arms, level beneath the upper ring
+      { craft: tug, pts: [rack(1), flat(rack(1), 1.3), flat(rack(2), 1.3), rack(2)], move: 130, pause: 60, offset: 80 },
       { craft: courier, pts: [V(-0.95, 6.1, 0.2), V(-2.5, 7.2, 1.3), corr.dD.clone().multiplyScalar(9.5).add(V(0, 2.5, 0)), corr.dD.clone().multiplyScalar(13).add(V(0, 2.1, 0))], move: 110, pause: 50, offset: 30 },
-      { craft: shuttle, pts: [V(0.2, -6.1, -1.0), V(0, -8.4, -3.4), armHead(6).add(V(0, -2.5, 0)), armHead(6, 100).add(V(0, -0.5, 0))], move: 170, pause: 55, offset: 120 },
+      { craft: shuttle, pts: [V(0.2, -6.1, -1.0), V(0, -8.4, -3.4), pod(6, -1.5), pod(6, 0)], move: 170, pause: 55, offset: 120 },
     ];
     this.runs = runs.map((r, i) => {
       const m = craftMesh(r.craft.geo, { accent: [0.55, 0.9, 1.0], lit: 0.5 });
