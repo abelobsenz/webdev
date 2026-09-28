@@ -191,9 +191,10 @@ export class Moon {
     this.space = space;
     this.group = new THREE.Group();
     this.uniforms = { uSunDir: { value: new THREE.Vector3(1, 0, 0) }, uSunE: U.uSunIlluminance, uTime: { value: 0 } };
-    // the ground: ray-traced on a proxy sphere (moonSurface.js)
-    this.surface = new MoonSurface(space);
-    this.mesh = this.surface.mesh;
+    // the ground: ray-traced on a proxy sphere (moonSurface.js); the Node verifiers build the Moon
+    // without a renderer, and get its structures without the baked ground
+    this.surface = space.renderer ? new MoonSurface(space) : null;
+    this.mesh = this.surface ? this.surface.mesh : new THREE.Group();
     this.group.add(this.mesh);
     this.atmoU = { uSunDir: this.uniforms.uSunDir, uSunE: U.uSunIlluminance, uCenter: { value: new THREE.Vector3() } };
     this.atmo = new THREE.Mesh(new THREE.SphereGeometry(R_MOON + 70, 128, 64), new THREE.ShaderMaterial({
@@ -287,11 +288,11 @@ export class Moon {
     const u = this.uniforms;
     u.uSunDir.value.copy(sim.sunDir);
     u.uTime.value = realTime;
-    this.surface.update(sim, realTime);
+    if (this.surface) this.surface.update(sim, realTime);
     LUNAR_FRAME.sunDir.copy(sim.sunDir);
     LUNAR_FRAME.moonPos.copy(sim.moonPos);
     LUNAR_FRAME.time = realTime;
-    LUNAR_FRAME.earthLit.value = this.surface.uniforms.uEarthLit.value;
+    if (this.surface) LUNAR_FRAME.earthLit.value = this.surface.uniforms.uEarthLit.value;
     const lu = this.liftMat.uniforms;
     lu.uSunDir.value.copy(sim.sunDir);
     lu.uTime.value = realTime;
