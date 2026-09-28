@@ -289,43 +289,343 @@ function buildPromenades(groundHeight) {
   return { geo: mergeClean(parts), paths, lamps, stations };
 }
 
-// ----------------------------------------------------------------- Gate --
-function buildGate() {
-  const parts = [];
-  const { span, height } = GATE;
-  const half = span / 2;
-  for (const lean of [-0.2, 0.2]) {
-    const pts = [];
-    const N = 120;
-    const k = 2.2;
-    for (let i = 0; i <= N; i++) {
-      const u = i / N;
-      const x = -half + span * u;
-      const c = Math.cosh(k * (x / half));
-      const y = height * (Math.cosh(k) - c) / (Math.cosh(k) - 1);
-      // lean the arch out of plane; both arches meet at the base points
-      const z = Math.sin(lean) * y;
-      pts.push(new THREE.Vector3(x, y * Math.cos(lean) - 8, z));
+// ------------------------------------------------------- closed solids --
+// The Gate and the skyport are built of closed solids: sections swept along a path, lathes and
+// six-faced slabs, with crisp creases, seam-free normals, capped ends and facade coordinates in
+// metres.
+
+function solidGeo(pos, nor, fac, idx) {
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+  g.setAttribute('aFacade', new THREE.Float32BufferAttribute(fac, 3));
+  g.setIndex(idx);
+  return g;
+}
+
+/**
+ * Sweep a closed cross-section along a path. frame(j) -> { p, t, s, n } (unit vectors, s x n = t)
+ * places station j; outline(j) -> its section as a CCW polygon [[s, n, kind], ...] (the kind is
+ * that of the edge leaving the point; the same point count at every station). Corners sharper
+ * than `crease` are crisp, the rest smooth, and the normals come from the swept surface itself
+ * (taper included), so no seam shows anywhere. The facade runs round the section (`sec` may remap
+ * it) and along the path (`v`: per-station values, default metres); `swap` exchanges the two.
+ * Open paths are capped at both ends (kind capKind); `loop` closes the path on itself.
+ */
+function sweepSolid(count, frame, outline, { loop = false, crease = 0.6, capKind = 1, v = null, sec = null, swap = false } = {}) {
+  const F = [], O = [];
+  for (let j = 0; j < count; j++) { F.push(frame(j)); O.push(outline(j)); }
+  const m = O[0].length, mid = O[count >> 1];
+  // strips: the outline splits at crisp corners (judged at the middle station) and at kind changes
+  const hard = new Uint8Array(m), cut = new Uint8Array(m);
+  for (let i = 0; i < m; i++) {
+    const p = mid[(i + m - 1) % m], q = mid[i], r = mid[(i + 1) % m];
+    const d = Math.atan2(r[1] - q[1], r[0] - q[0]) - Math.atan2(q[1] - p[1], q[0] - p[0]);
+    hard[i] = cut[i] = Math.abs(Math.atan2(Math.sin(d), Math.cos(d))) > crease ? 1 : 0;
+    for (let j = 0; j < count && !cut[i]; j++) if (O[j][i][2] !== O[j][(i + m - 1) % m][2]) cut[i] = 1;
+  }
+  if (!cut.includes(1)) cut[0] = 1;
+  const starts = [];
+  for (let i = 0; i < m; i++) if (cut[i]) starts.push(i);
+  const rows = loop ? count + 1 : count;
+  const V = v ? v.slice() : [0];
+  if (!v) for (let r = 1; r < rows; r++) V.push(V[r - 1] + F[r % count].p.distanceTo(F[r - 1].p));
+  const X = O.map((o, j) => o.map(([s, n]) => F[j].p.clone().addScaledVector(F[j].s, s).addScaledVector(F[j].n, n)));
+  const P = O.map((o) => { const c = [0]; for (let i = 1; i <= m; i++) c.push(c[i - 1] + Math.hypot(o[i % m][0] - o[i - 1][0], o[i % m][1] - o[i - 1][1])); return c; });
+  const edgeN = (o, i) => { const a = o[i], b = o[(i + 1) % m], ds = b[0] - a[0], dn = b[1] - a[1], l = Math.hypot(ds, dn) || 1; return [dn / l, -ds / l]; };
+  const pos = [], nor = [], fac = [], idx = [];
+  const ts = new THREE.Vector3(), dp = new THREE.Vector3(), nn = new THREE.Vector3();
+  for (let k = 0; k < starts.length; k++) {
+    const i0 = starts[k], i1 = k + 1 < starts.length ? starts[k + 1] : starts[0] + m;
+    const cols = i1 - i0 + 1, base = pos.length / 3;
+    for (let r = 0; r < rows; r++) {
+      const j = r % count, o = O[j], f = F[j], kind = o[i0][2];
+      const jp = loop ? (j + 1) % count : Math.min(j + 1, count - 1), jm = loop ? (j + count - 1) % count : Math.max(j - 1, 0);
+      const cum = (ii) => (ii < m ? P[j][ii] : P[j][m] + P[j][ii - m]);
+      const ua = cum(i0), ub = cum(i1);
+      for (let c = 0; c < cols; c++) {
+        const i = (i0 + c) % m;
+        const eP = edgeN(o, (i + m - 1) % m), eN = edgeN(o, i);
+        let n2;
+        if (c === 0 && hard[i]) n2 = eN;
+        else if (c === cols - 1 && hard[i]) n2 = eP;
+        else { const x = eP[0] + eN[0], y = eP[1] + eN[1], l = Math.hypot(x, y) || 1; n2 = [x / l, y / l]; }
+        // normal = (section tangent) x (path direction at this vertex)
+        ts.copy(f.s).multiplyScalar(-n2[1]).addScaledVector(f.n, n2[0]);
+        nn.crossVectors(ts, dp.subVectors(X[jp][i], X[jm][i]));
+        if (!(nn.lengthSq() > 1e-18)) nn.copy(f.s).multiplyScalar(n2[0]).addScaledVector(f.n, n2[1]);
+        nn.normalize();
+        const q = X[j][i];
+        pos.push(q.x, q.y, q.z);
+        nor.push(nn.x, nn.y, nn.z);
+        const u = sec ? sec({ s: o[i][0], n: o[i][1], kind, cum: cum(i0 + c), a: ua, b: ub, i0 }) : cum(i0 + c);
+        if (swap) fac.push(V[r], u, kind); else fac.push(u, V[r], kind);
+      }
     }
-    parts.push(sweepTube(pts, (u) => { const m = Math.abs(u - 0.5) * 2; return 16 + 26 * Math.pow(m, 1.6); }, 20, { kind: 0, ellipse: 0.8 }));
-    // luminous spine along the intrados
-    parts.push(sweepTube(pts.map((p) => p.clone().add(new THREE.Vector3(0, -2, 0))), (u) => 3 + 2 * Math.abs(u - 0.5), 8, { kind: 4 }));
+    for (let r = 0; r < rows - 1; r++) {
+      for (let c = 0; c < cols - 1; c++) {
+        const A = base + r * cols + c, B = A + 1, C = A + cols, D = C + 1;
+        idx.push(A, B, C, B, D, C);
+      }
+    }
   }
-  // keystone ring suspended at the apex
-  const pts = [];
-  for (let i = 0; i <= 96; i++) { const a = (i / 96) * TAU; pts.push(new THREE.Vector3(Math.cos(a) * 70, Math.sin(a) * 70, 0)); }
-  const ring = sweepTube(pts, () => 5, 10, { kind: 2 });
-  ring.translate(0, height * 0.93 - 90, 0);
-  parts.push(ring);
-  // foundations
+  if (!loop) {
+    for (const end of [false, true]) {
+      const j = end ? count - 1 : 0, o = O[j], t = F[j].t, sg = end ? 1 : -1, b = pos.length / 3;
+      for (let i = 0; i < m; i++) { const q = X[j][i]; pos.push(q.x, q.y, q.z); nor.push(t.x * sg, t.y * sg, t.z * sg); fac.push(o[i][0], o[i][1], capKind); }
+      for (const [p0, p1, p2] of THREE.ShapeUtils.triangulateShape(o.map((q) => new THREE.Vector2(q[0], q[1])), [])) {
+        const ar = (o[p1][0] - o[p0][0]) * (o[p2][1] - o[p0][1]) - (o[p1][1] - o[p0][1]) * (o[p2][0] - o[p0][0]);
+        if ((ar > 0) === end) idx.push(b + p0, b + p1, b + p2); else idx.push(b + p0, b + p2, b + p1);
+      }
+    }
+  }
+  return solidGeo(pos, nor, fac, idx);
+}
+
+/**
+ * Closed lathe: `profile` [{ r, y, kind }] runs from the axis round the outside and back with
+ * the solid on its left (out along the bottom, up the wall, in over the top); each point's kind
+ * is that of the segment leaving it. Corners sharper than `crease` are crisp, zero radii close as
+ * fans, and the normals are analytic (no seam); sx/sz stretch the plan into an ellipse. u runs
+ * round (metres, snapped so the facade's 16 m rhythm closes), v up a wall or out across a flat.
+ */
+function latheSolid(profile, seg = 48, { sx = 1, sz = 1, crease = 0.6, phase = 0 } = {}) {
+  const n = profile.length, SN = [];
+  for (let j = 0; j < n - 1; j++) {
+    const p = profile[j], q = profile[j + 1], dr = q.r - p.r, dy = q.y - p.y, l = Math.hypot(dr, dy) || 1;
+    SN.push([dy / l, -dr / l]);
+  }
+  const vN = (j, k) => {       // normal of segment j at its profile point k (j or j + 1)
+    const o = k === j ? j - 1 : j + 1;
+    if (o < 0 || o >= n - 1) return SN[j];
+    const a = SN[j], b = SN[o];
+    if (Math.acos(THREE.MathUtils.clamp(a[0] * b[0] + a[1] * b[1], -1, 1)) > crease) return a;
+    const x = a[0] + b[0], y = a[1] + b[1], l = Math.hypot(x, y) || 1;
+    return [x / l, y / l];
+  };
+  const pos = [], nor = [], fac = [], idx = [];
+  const cols = seg + 1;
+  for (let j = 0; j < n - 1; j++) {
+    const p = profile[j], q = profile[j + 1], kind = p.kind ?? 1;
+    if (Math.hypot(q.r - p.r, q.y - p.y) < 1e-9) continue;
+    const rm = (p.r + q.r) / 2, steep = Math.abs(q.y - p.y) >= Math.abs(q.r - p.r);
+    const rU = rm > 4 ? (Math.round((TAU * rm) / 16) * 16) / TAU : Math.max(rm, 1);
+    const base = pos.length / 3;
+    for (const [pt, k] of [[p, j], [q, j + 1]]) {
+      const [nr, ny] = vN(j, k);
+      for (let i = 0; i <= seg; i++) {
+        const a = (i / seg) * TAU + phase, c = Math.cos(a), s = Math.sin(a);
+        pos.push(c * pt.r * sx, pt.y, s * pt.r * sz);
+        const x = (nr * c) / sx, z = (nr * s) / sz, l = Math.hypot(x, ny, z) || 1;
+        nor.push(x / l, ny / l, z / l);
+        fac.push((i / seg) * TAU * rU, steep ? pt.y : pt.r, kind);
+      }
+    }
+    for (let i = 0; i < seg; i++) {
+      const A = base + i, B = A + 1, C = A + cols, D = C + 1;
+      if (p.r > 1e-9) idx.push(A, C, B);
+      if (q.r > 1e-9) idx.push(B, C, D);
+    }
+  }
+  return solidGeo(pos, nor, fac, idx);
+}
+
+/** Closed six-faced slab from eight corners (c[0..3] one face, c[4..7] the opposite one in the same order), flat-shaded. */
+function slab(c, kind, scale = 1) {
+  const pos = [], nor = [], fac = [], idx = [];
+  const ctr = new THREE.Vector3();
+  for (const p of c) ctr.addScaledVector(p, 1 / 8);
+  const e1 = new THREE.Vector3(), e2 = new THREE.Vector3(), nn = new THREE.Vector3(), fc = new THREE.Vector3();
+  for (const q of [[0, 1, 2, 3], [4, 7, 6, 5], [0, 4, 5, 1], [1, 5, 6, 2], [2, 6, 7, 3], [3, 7, 4, 0]]) {
+    let [a, b, cc, d] = q.map((i) => c[i]);
+    nn.crossVectors(e1.subVectors(cc, a), e2.subVectors(d, b));
+    fc.copy(a).add(b).add(cc).add(d).multiplyScalar(0.25).sub(ctr);
+    if (nn.dot(fc) < 0) { nn.negate(); [b, d] = [d, b]; }
+    if (!(nn.lengthSq() > 1e-24)) continue;
+    nn.normalize();
+    const u = e1.subVectors(b, a).normalize(), w = e2.crossVectors(nn, u);
+    const base = pos.length / 3;
+    for (const p of [a, b, cc, d]) { pos.push(p.x, p.y, p.z); nor.push(nn.x, nn.y, nn.z); fac.push(p.dot(u) * scale, p.dot(w) * scale, kind); }
+    idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
+  }
+  return solidGeo(pos, nor, fac, idx);
+}
+
+/** Straight closed beam from p0 to p1 with an elliptical section: dims(u) -> [half-width, half-height], u 0..1. */
+function beam(p0, p1, dims, kind = 1, { stations = 2, points = 20, up = new THREE.Vector3(0, 1, 0) } = {}) {
+  const t = new THREE.Vector3().subVectors(p1, p0).normalize();
+  const ref = Math.abs(t.dot(up)) > 0.95 ? new THREE.Vector3(1, 0, 0) : up;
+  const n = ref.clone().addScaledVector(t, -ref.dot(t)).normalize(), s = new THREE.Vector3().crossVectors(n, t);
+  return sweepSolid(stations, (j) => ({ p: p0.clone().lerp(p1, j / (stations - 1)), t, s, n }), (j) => {
+    const [w, h] = dims(j / (stations - 1)), o = [];
+    for (let i = 0; i < points; i++) { const a = -Math.PI / 2 + (i / points) * TAU; o.push([w * Math.cos(a), h * Math.sin(a), kind]); }
+    return o;
+  }, { capKind: kind });
+}
+
+// ----------------------------------------------------------------- Gate --
+// Two catenary arches lean apart over the Gate channel from shared feet. Each is one closed swept
+// section, tapering from 84 m at the feet to 32 m at the crown: glazed flanks between rails (the
+// upper rails lit), a light slot recessed along the intrados, a crest fin along the extrados and a
+// frame ring every 44 m. The legs spring from sculpted collars on stepped caisson plinths founded
+// in the channel floor, and a tie between the two crowns carries the keystone ring.
+// core/collision.js samples the same centreline and radius law for the camera.
+const GATE_K = 2.2, GATE_LEAN = 0.2, GATE_DROP = 8, GATE_TERRACE = 9.6, GATE_COLLAR = 24.6;
+
+/** One arch: its frames (p, t, s across, n to the extrados, r) at any arc length, and its length. */
+function gateArch(lean) {
+  const { span, height } = GATE, half = span / 2, k = GATE_K, ch = Math.cosh(k) - 1;
+  const cl = Math.cos(lean), sl = Math.sin(lean);
+  const at = (x) => { const y = (height * (Math.cosh(k) - Math.cosh((k * x) / half))) / ch; return new THREE.Vector3(x, y * cl - GATE_DROP, y * sl); };
+  const nP = new THREE.Vector3(0, -sl, cl);      // normal of the arch's leaning plane
+  const frameX = (x) => {
+    const d = (-height * k * Math.sinh((k * x) / half)) / (half * ch);
+    const t = new THREE.Vector3(1, d * cl, d * sl).normalize(), n = new THREE.Vector3().crossVectors(nP, t).normalize();
+    return { p: at(x), t, n, s: new THREE.Vector3().crossVectors(n, t), r: 16 + 26 * Math.pow(Math.min(Math.abs(x) / half, 1), 1.6), x };
+  };
+  // arc length from the west foot
+  const N = Math.round(span / 0.5), XS = [], SS = [];
+  let acc = 0, prev = at(-half);
+  for (let i = 0; i <= N; i++) { const x = -half + (span * i) / N, p = at(x); acc += p.distanceTo(prev); prev = p; XS.push(x); SS.push(acc); }
+  const L = SS[N];
+  const xAt = (s) => {
+    s = THREE.MathUtils.clamp(s, 0, L);
+    let lo = 0, hi = N;
+    while (hi - lo > 1) { const m = (lo + hi) >> 1; if (SS[m] < s) lo = m; else hi = m; }
+    return XS[lo] + ((XS[hi] - XS[lo]) * (s - SS[lo])) / Math.max(SS[hi] - SS[lo], 1e-9);
+  };
+  return { L, frame: (s) => frameX(xAt(s)) };
+}
+
+/** Section of an arch of radius r (s across, n toward the extrados), CCW from the slot floor. */
+function gateSection(r) {
+  const a = r, b = 0.8 * r, o = [];
+  const E = (t) => [a * Math.cos(t), b * Math.sin(t)];
+  const sp = (t) => Math.hypot(a * Math.sin(t), b * Math.cos(t));
+  const raise = (t, h) => { const x = b * Math.cos(t), y = a * Math.sin(t), l = Math.hypot(x, y); return [a * Math.cos(t) + (x / l) * h, b * Math.sin(t) + (y / l) * h]; };
+  const pt = (q, kind) => o.push([q[0], q[1], kind]);
+  const arc = (t0, t1, kind, k) => { for (let i = 0; i < k; i++) pt(E(t0 + ((t1 - t0) * i) / k), kind); };
+  // a rail 2 m wide standing 0.8 m proud; returns where the surface resumes
+  const rail = (t, top) => { const d = 1 / sp(t); pt(E(t - d), 1); pt(raise(t - d, 0.8), top); pt(raise(t + d, 0.8), 1); return t + d; };
+  const ws = THREE.MathUtils.clamp(0.17 * a, 3.4, 6.2);                    // half-width of the light slot
+  const tL = -Math.PI / 2 + Math.asin(ws / a), nF = b * Math.sin(tL) + 1.6;  // its lips, and its floor 1.6 m up
+  const t1 = -0.62, t2 = 0.72, tF = Math.acos(1.5 / a), hF = 2.6 + 0.05 * a;
+  pt([-ws, nF], 2);                                  // slot floor (lit)
+  pt([ws, nF], 1);                                   // its right wall
+  arc(tL, t1 - 1 / sp(t1), 1, 6);                    // lower shoulder
+  let t = rail(t1, 1);
+  arc(t, t2 - 1 / sp(t2), 0, 12);                    // glazed flank
+  t = rail(t2, 2);                                   // upper rail, lit along its top
+  arc(t, tF, 1, 7);                                  // upper shoulder
+  pt(E(tF), 1); pt([1, b + hF], 1); pt([-1, b + hF], 1);   // crest fin
+  arc(Math.PI - tF, Math.PI - t2 - 1 / sp(t2), 1, 7);
+  t = rail(Math.PI - t2, 2);
+  arc(t, Math.PI - t1 - 1 / sp(t1), 0, 12);
+  t = rail(Math.PI - t1, 1);
+  arc(t, Math.PI - tL, 1, 6);
+  pt([-ws, b * Math.sin(tL)], 1);                    // left wall of the slot, back up to its floor
+  return o;
+}
+
+function ellipseSection(a, b, kind, k = 40) {
+  const o = [];
+  for (let i = 0; i < k; i++) { const t = -Math.PI / 2 + (i / k) * TAU; o.push([a * Math.cos(t), b * Math.sin(t), kind]); }
+  return o;
+}
+
+function buildGate() {
+  const parts = [], beacons = [];
+  const half = GATE.span / 2;
+  const arches = [-GATE_LEAN, GATE_LEAN].map(gateArch);
+  const archV = (A, s) => Math.min(s, A.L - s) + 30;     // facade v: metres up from either foot
+  for (const A of arches) {
+    // stations out from the crown, at most 20 m and 1.6 degrees apart
+    const off = [];
+    let last = 0, lt = A.frame(A.L / 2).t;
+    for (let d = 1; d < A.L / 2; d += 1) {
+      const tt = A.frame(A.L / 2 + d).t;
+      if (d - last >= 20 || tt.angleTo(lt) >= 0.028) { off.push(d); last = d; lt = tt; }
+    }
+    if (A.L / 2 - last > 3) off.push(A.L / 2); else off[off.length - 1] = A.L / 2;
+    const S = [...off.slice().reverse().map((d) => A.L / 2 - d), A.L / 2, ...off.map((d) => A.L / 2 + d)];
+    const F = S.map((s) => A.frame(s));
+    parts.push(sweepSolid(S.length, (j) => F[j], (j) => gateSection(F[j].r), {
+      v: S.map((s) => archV(A, s)),
+      sec: ({ kind, cum, a, b }) => (kind === 0 ? cum - (a + b) / 2 : cum),     // glazing columns centred on each flank
+    }));
+    // frame rings every 44 m, clear of the collars
+    for (let k = 0; ; k++) {
+      const d = (k + 0.5) * 44;
+      if (d > A.L / 2) break;
+      for (const s of [A.L / 2 - d, A.L / 2 + d]) {
+        const f0 = A.frame(s - 1.3), f1 = A.frame(s + 1.3);
+        const sec = (f) => ellipseSection(f.r + 1.1, 0.8 * f.r + 1.1, 1);
+        let low = 1e9;
+        for (const f of [f0, f1]) for (const [ps, pn] of sec(f)) low = Math.min(low, f.p.y + f.s.y * ps + f.n.y * pn);
+        if (low < GATE_COLLAR + 3) continue;
+        parts.push(sweepSolid(2, (j) => (j ? f1 : f0), (j) => sec(j ? f1 : f0), { v: [archV(A, s - 1.3), archV(A, s + 1.3)] }));
+      }
+    }
+    // an aircraft beacon on the crest fin at the crown
+    const c = A.frame(A.L / 2), top = c.p.clone().addScaledVector(c.n, 0.8 * c.r + 2.6 + 0.05 * c.r + 0.9);
+    beacons.push(top.x, top.y, top.z);
+  }
+  // Feet: a caisson founded 40 m down in the channel floor, a battered wall through the waves, a
+  // quay 2.4 m above the sea, the upper wall with its coping and parapet round a garden terrace,
+  // and on it a collar (lit band under its cornice) from which both legs spring.
+  const plinth = [
+    { r: 0, y: -40, kind: 1 }, { r: 106, y: -40, kind: 1 }, { r: 100, y: -1.2, kind: 1 }, { r: 99.4, y: 2.4, kind: 9 },
+    { r: 93, y: 2.4, kind: 1 }, { r: 91.2, y: 9.4, kind: 1 }, { r: 91.6, y: 10.6, kind: 1 }, { r: 90.2, y: 10.6, kind: 1 },
+    { r: 90.2, y: GATE_TERRACE, kind: 3 }, { r: 0, y: GATE_TERRACE },
+  ];
+  // the collar hugs both legs where they pass its cornice (east foot; the west one mirrors it)
+  const foot = [];
+  for (const A of arches) {
+    for (let s = A.L - 60; s <= A.L; s += 0.5) {
+      const f = A.frame(s);
+      for (const [ps, pn] of gateSection(f.r)) {
+        const q = f.p.clone().addScaledVector(f.s, ps).addScaledVector(f.n, pn);
+        if (q.y > GATE_TERRACE && q.y < GATE_COLLAR + 0.5) foot.push(q);
+      }
+    }
+  }
+  let x0 = 1e9, x1 = -1e9, zm = 0;
+  for (const q of foot) { x0 = Math.min(x0, q.x); x1 = Math.max(x1, q.x); zm = Math.max(zm, Math.abs(q.z)); }
+  const xc = (x0 + x1) / 2, ax = (x1 - x0) / 2;
+  let kk = 0;
+  for (const q of foot) kk = Math.max(kk, Math.hypot((q.x - xc) / ax, q.z / zm));
+  const cA = ax * kk + 3, cB = zm * kk + 3;
+  const collar = [
+    { r: 0, y: GATE_TERRACE - 0.8, kind: 1 }, { r: 1.1, y: GATE_TERRACE - 0.8, kind: 1 }, { r: 1.1, y: 11.2, kind: 1 }, { r: 1.05, y: 11.2, kind: 1 },
+    { r: 1.0, y: 22.2, kind: 2 }, { r: 1.0, y: 23.6, kind: 1 }, { r: 1.035, y: GATE_COLLAR, kind: 9 }, { r: 0, y: GATE_COLLAR },
+  ];
   for (const sx of [-1, 1]) {
-    const f = latheFacade([{ r: 95, y: -12, kind: 1 }, { r: 90, y: 6, kind: 1 }, { r: 70, y: 12, kind: 3 }, { r: 0.1, y: 13, kind: 3 }], 48);
-    f.translate(sx * half, 0, 0);
-    parts.push(f);
+    const p = latheSolid(plinth, 64);
+    p.translate(sx * half, 0, 0);
+    parts.push(p);
+    const c = latheSolid(collar, 64, { sx: cA, sz: cB });
+    c.translate(sx * xc, 0, 0);
+    parts.push(c);
   }
+  // Crown tie and keystone ring: a beam between the crowns, 7.5 m below their centrelines, ends
+  // buried in both arches; the ring hangs on it (the beam runs through the ring, its rim resting
+  // in a dark metal clasp on the beam).
+  const cA0 = arches[0].frame(arches[0].L / 2).p, cB0 = arches[1].frame(arches[1].L / 2).p;
+  const yb = (cA0.y + cB0.y) / 2 - 7.5;
+  const X = new THREE.Vector3(1, 0, 0), Y = new THREE.Vector3(0, 1, 0), Z = new THREE.Vector3(0, 0, 1);
+  const along = (z0, z1, sec) => sweepSolid(2, (j) => ({ p: new THREE.Vector3(0, yb, j ? z1 : z0), t: Z, s: X, n: Y }), () => sec);
+  parts.push(along(cA0.z, cB0.z, ellipseSection(4.2, 3.2, 1, 24)));
+  parts.push(along(-7, 7, ellipseSection(5.4, 4.2, 10, 24)));
+  const yr = yb + 3.2 - 0.4 - 65, ring = [];
+  for (let i = 0; i < 128; i++) {
+    const a = (i / 128) * TAU, c = Math.cos(a), s = Math.sin(a);
+    ring.push({ p: new THREE.Vector3(70 * c, yr + 70 * s, 0), t: new THREE.Vector3(-s, c, 0), n: new THREE.Vector3(c, s, 0), s: Z });
+  }
+  parts.push(sweepSolid(128, (j) => ring[j], () => ellipseSection(5, 5, 2, 24), { loop: true }));
   const g = mergeClean(parts);
   g.translate(GATE.x, 0, GATE.z);
-  return g;
+  for (let i = 0; i < beacons.length; i += 3) { beacons[i] += GATE.x; beacons[i + 2] += GATE.z; }
+  return { geo: g, beacons };
 }
 
 // -------------------------------------------------------- lotus platforms --
@@ -377,94 +677,197 @@ function buildLotusPads(groundHeight, promenadePaths) {
 }
 
 // ------------------------------------------------------------- skyport ----
-function buildSkyport() {
-  const parts = [];
-  const R = SKYPORT.r;
-  // main landing ring (lens-profile torus)
-  const ringPts = [];
-  for (let i = 0; i <= 256; i++) { const a = (i / 256) * TAU; ringPts.push(new THREE.Vector3(Math.cos(a) * R, 0, Math.sin(a) * R)); }
-  parts.push(sweepTube(ringPts, () => 26, 16, { kind: 0, ellipse: 0.45 }));
-  parts.push(sweepTube(ringPts.map((p) => p.clone().multiplyScalar(0.9).add(new THREE.Vector3(0, 10, 0))), () => 4, 8, { kind: 2 }));
-  // spokes to the hub
-  for (let s = 0; s < 6; s++) {
-    const a = (s / 6) * TAU;
-    const pts = [];
-    for (let k = 0; k <= 12; k++) { const t = k / 12; pts.push(new THREE.Vector3(Math.cos(a) * R * t, -30 * Math.sin(Math.PI * t) - 10 * t, Math.sin(a) * R * t)); }
-    parts.push(sweepTube(pts, (t) => 7 - 3 * t, 8, { kind: 1 }));
-  }
-  // hub: stacked lenses with a docking spire
-  parts.push(latheFacade([
-    { r: 0.1, y: -140, kind: 1 }, { r: 20, y: -110, kind: 1 }, { r: 60, y: -40, kind: 0 }, { r: 90, y: -12, kind: 0 }, { r: 96, y: 0, kind: 2 },
-    { r: 86, y: 14, kind: 0 }, { r: 50, y: 30, kind: 3 }, { r: 18, y: 40, kind: 1 }, { r: 10, y: 150, kind: 4 }, { r: 0.5, y: 190, kind: 1 },
-  ], 64));
-  // upper halo ring and short docking clamps; ships berth tangentially along the rim
-  const upper = [];
-  for (let i = 0; i <= 192; i++) { const a = (i / 192) * TAU; upper.push(new THREE.Vector3(Math.cos(a) * R * 0.62, 70, Math.sin(a) * R * 0.62)); }
-  parts.push(sweepTube(upper, () => 12, 12, { kind: 0, ellipse: 0.5 }));
-  for (let s = 0; s < 6; s++) {
-    const a = (s / 6) * TAU + TAU / 12;
-    const pts = [];
-    for (let k = 0; k <= 10; k++) { const t = k / 10; const rr = R * 0.62 + (R - R * 0.62) * t; pts.push(new THREE.Vector3(Math.cos(a) * rr, 70 * (1 - t) + 8 * Math.sin(Math.PI * t) * 0, Math.sin(a) * rr)); }
-    parts.push(sweepTube(pts, () => 4, 8, { kind: 1 }));
-  }
-  const berths = [];
-  for (let s = 0; s < 10; s++) {
-    const a = (s / 10) * TAU + 0.3;
-    for (let k = 0; k <= 4; k++) {
-      const pts = [new THREE.Vector3(Math.cos(a) * (R + 10), -6, Math.sin(a) * (R + 10)), new THREE.Vector3(Math.cos(a) * (R + 38), -10, Math.sin(a) * (R + 38))];
-      if (k === 0) parts.push(sweepTube(pts, () => 3, 6, { kind: 1 }));
-    }
-    berths.push({ p: new THREE.Vector3(Math.cos(a) * (R + 52), -12, Math.sin(a) * (R + 52)), a });
-  }
-  const g = mergeClean(parts);
-  return { geo: g, berths };
+// A hovering harbour of closed solids: the landing ring (keel, berth ledge, concourse glazing, a
+// paved landing deck with planted strips between parapets, the lantern band round its inner face)
+// with frames under it; six spokes to the tiered hub and its docking spire; the upper halo on six
+// clamps; and ten berths, where each ship lies alongside the ring touching a gangway from the
+// ledge (into its flank) and a cradle under its keel carried by a strut from the ring's hull.
+// The taxi pads of life/traffic.js sit on the deck's centre line at +12.6 m.
+const SHIP_R = 0.11, SHIP_FLAT = 0.55, BERTH_GAP = 32;   // unit ship's midship radius, its flattening; ring axis to hull
+
+function ringSection() {
+  const o = [];
+  const pt = (s, n, k) => o.push([s, n, k]);
+  const quarter = (cx, t0, t1) => { for (let i = 0; i < 8; i++) { const t = t0 + ((t1 - t0) * i) / 8; pt(cx + 12 * Math.cos(t), -2 + 9.5 * Math.sin(t), 1); } };
+  pt(-14, -11.5, 1);                                                  // keel
+  quarter(14, -Math.PI / 2, 0);                                       // outer lower hull
+  pt(26, -2, 1); pt(27.4, -2, 1); pt(27.4, 0.6, 1);                  // berth ledge
+  pt(26, 0.6, 0);                                                     // concourse glazing
+  pt(19.6, 11.9, 1); pt(19.6, 13.1, 1); pt(18.8, 13.1, 1);           // outer parapet
+  pt(18.8, 11.9, 9); pt(12.5, 11.9, 3); pt(8.5, 11.9, 9); pt(-8.5, 11.9, 3); pt(-12.5, 11.9, 9);   // deck: planted strips beside the landing lane
+  pt(-18.8, 11.9, 1); pt(-18.8, 13.1, 1); pt(-19.6, 13.1, 1);        // inner parapet
+  pt(-19.6, 11.9, 0);                                                 // inner glazing
+  pt(-26, 2, 2);                                                      // lantern band
+  quarter(-14, Math.PI, Math.PI * 1.5);                               // inner lower hull
+  return o;
 }
 
-// Elegant starship hull (used for docked and travelling ships). The model is built at unit
-// length; its facade coordinates are laid out in metres for a ship of `facadeLen` so the hull
-// plating, the window bands along both flanks and the lantern ring have real proportions
-// whatever the instance scale.
-export function shipGeometry(len = 1, facadeLen = 130) {
-  const prof = [];
-  for (let i = 0; i <= 24; i++) {
-    const t = i / 24;
-    const r = 0.11 * Math.pow(Math.sin(Math.PI * Math.pow(t, 0.7)), 0.8) * (1 + 0.25 * Math.exp(-Math.pow((t - 0.75) / 0.08, 2)));
-    prof.push({ r: r + 0.002, y: t - 0.5, kind: t > 0.72 && t < 0.8 ? 2 : t < 0.08 ? 4 : 1 });
+// a frame under the ring: the lower hull's outline 0.7 m proud, from the lantern band round the
+// keel into the berth ledge (its inner face buried 0.4 m in the hull)
+function ringFrameSection() {
+  const o = [];
+  const quarter = (cx, e, t0, t1, incl) => { for (let i = 0; i < 8 + (incl ? 1 : 0); i++) { const t = t0 + ((t1 - t0) * i) / 8; o.push([cx + (12 + e) * Math.cos(t), -2 + (9.5 + e) * Math.sin(t), 1]); } };
+  quarter(-14, 0.7, Math.PI, Math.PI * 1.5, false);
+  quarter(14, 0.7, -Math.PI / 2, 0.06, true);
+  quarter(14, -0.4, 0.06, -Math.PI / 2, false);
+  quarter(-14, -0.4, Math.PI * 1.5, Math.PI, true);
+  return o;
+}
+
+// gangway tube: rounded rectangle 3.6 x 3.2 m, fritted glass sides
+function gangwaySection() {
+  const o = [], w = 1.8, h = 1.6, c = 0.55;
+  for (const [cx, cy, t0, next] of [[w - c, -h + c, -Math.PI / 2, 12], [w - c, h - c, 0, 1], [-w + c, h - c, Math.PI / 2, 12], [-w + c, -h + c, Math.PI, 1]]) {
+    for (let i = 0; i < 3; i++) { const t = t0 + (Math.PI / 6) * i; o.push([cx + c * Math.cos(t), cy + c * Math.sin(t), 1]); }
+    o.push([cx + c * Math.cos(t0 + Math.PI / 2), cy + c * Math.sin(t0 + Math.PI / 2), next]);
   }
-  const seg = 24;
-  const g = latheFacade(prof, seg, { sx: 1, sz: 0.55 });
-  {
-    const P = g.attributes.position, F = g.attributes.aFacade;
-    for (let j = 0; j < prof.length; j++) {
-      for (let i = 0; i <= seg; i++) {
-        const k = j * (seg + 1) + i;
-        const x = P.getX(k), y = P.getY(k), z = P.getZ(k);
-        const r = Math.hypot(x, z / 0.55);
-        const a = (i / seg) * Math.PI * 2;
-        const t = y + 0.5;
-        // window bands along both flanks of the habitable midsection
-        const flank = (i % 12 === 0 || i % 12 === 1 || i % 12 === 11) && t > 0.18 && t < 0.7;
-        F.setXYZ(k, a * r * facadeLen, y * facadeLen, flank ? 0 : F.getZ(k));
+  return o;
+}
+
+// cradle under a hull of half-width hw and half-height hh: its inner face 1.5 % inside the hull
+function cradleSection(hw, hh) {
+  const o = [], t0 = (-5 * Math.PI) / 6, t1 = -Math.PI / 6;
+  for (let i = 0; i <= 10; i++) { const t = t0 + ((t1 - t0) * i) / 10; o.push([(hw + 1.3) * Math.cos(t), (hh + 1.3) * Math.sin(t), 10]); }
+  for (let i = 0; i <= 10; i++) { const t = t1 + ((t0 - t1) * i) / 10; o.push([0.985 * hw * Math.cos(t), 0.985 * hh * Math.sin(t), 10]); }
+  return o;
+}
+
+/** A closed ring of section `sec` round the vertical axis at radius rr and height y; facade u along the ring (snapped to 16 m), v from `vOf`. */
+function hoop(rr, y, sec, count, vOf) {
+  const U16 = Math.round((TAU * rr) / 16) * 16, V = [];
+  for (let j = 0; j <= count; j++) V.push((j / count) * U16);
+  const up = new THREE.Vector3(0, 1, 0);
+  return sweepSolid(count, (j) => {
+    const a = (j / count) * TAU, c = Math.cos(a), s = Math.sin(a);
+    return { p: new THREE.Vector3(rr * c, y, rr * s), t: new THREE.Vector3(-s, 0, c), s: new THREE.Vector3(c, 0, s), n: up };
+  }, () => sec, { loop: true, v: V, swap: true, sec: vOf });
+}
+
+function buildSkyport() {
+  const parts = [], beacons = [];
+  const R = SKYPORT.r, up = new THREE.Vector3(0, 1, 0);
+  const radial = (a, r, y) => new THREE.Vector3(Math.cos(a) * r, y, Math.sin(a) * r);
+  // landing ring: storey lines follow the height, the deck is laid out across
+  parts.push(hoop(R, 0, ringSection(), 288, ({ s, n, kind }) => (kind === 9 || kind === 3 ? s : n)));
+  // frames under it every 5 degrees
+  for (let k = 0; k < 72; k++) {
+    const a0 = ((k + 0.5) / 72) * TAU, da = 0.6 / R;
+    parts.push(sweepSolid(2, (j) => {
+      const a = a0 + (j ? da : -da), c = Math.cos(a), s = Math.sin(a);
+      return { p: new THREE.Vector3(R * c, 0, R * s), t: new THREE.Vector3(-s, 0, c), s: new THREE.Vector3(c, 0, s), n: up };
+    }, () => ringFrameSection(), { v: [0, 1.2] }));
+  }
+  // six spokes from the hub's belly to the ring's axis (both ends buried)
+  for (let k = 0; k < 6; k++) {
+    const a = (k / 6) * TAU;
+    parts.push(beam(radial(a, 52, -9), radial(a, R, -1.5), (u) => [6.5 - 2 * u, 4.6 - 1.2 * u], 1));
+  }
+  // hub: a keel cone, four glazed tiers under ledges, the rim with its lantern band, the upper
+  // concourse, a garden terrace behind a parapet, the drum and its roof garden, and the docking
+  // spire ringed with lanterns
+  parts.push(latheSolid([
+    { r: 0, y: -152, kind: 1 }, { r: 6, y: -142, kind: 1 }, { r: 20, y: -114, kind: 10 },
+    { r: 23, y: -108, kind: 0 }, { r: 43, y: -82, kind: 1 }, { r: 47, y: -82, kind: 1 }, { r: 47, y: -80, kind: 1 },
+    { r: 45, y: -80, kind: 0 }, { r: 64, y: -56, kind: 1 }, { r: 68, y: -56, kind: 1 }, { r: 68, y: -54, kind: 1 },
+    { r: 66, y: -54, kind: 0 }, { r: 82, y: -30, kind: 1 }, { r: 86, y: -30, kind: 1 }, { r: 86, y: -28, kind: 1 },
+    { r: 84, y: -28, kind: 0 }, { r: 93, y: -8, kind: 1 }, { r: 97, y: -8, kind: 1 }, { r: 97, y: -3, kind: 2 },
+    { r: 97, y: 3, kind: 1 }, { r: 97, y: 5, kind: 1 }, { r: 93, y: 5, kind: 0 }, { r: 84, y: 14, kind: 1 },
+    { r: 84, y: 15.2, kind: 1 }, { r: 82.8, y: 15.2, kind: 1 }, { r: 82.8, y: 14.2, kind: 3 }, { r: 58, y: 14.2, kind: 1 },
+    { r: 55, y: 28, kind: 3 }, { r: 30, y: 28, kind: 1 }, { r: 22, y: 42, kind: 1 },
+    { r: 14, y: 72, kind: 2 }, { r: 14, y: 76, kind: 1 }, { r: 12, y: 108, kind: 2 }, { r: 12, y: 112, kind: 1 },
+    { r: 10, y: 140, kind: 2 }, { r: 10, y: 146, kind: 1 }, { r: 4, y: 176, kind: 1 }, { r: 0.8, y: 189, kind: 1 }, { r: 0, y: 190 },
+  ], 64));
+  beacons.push(0, 191.2, 0);
+  // upper halo (glazed outboard) on six clamps down to the ring's axis
+  const Rh = R * 0.62, halo = [];
+  for (let i = 0; i < 32; i++) { const t = (i / 32) * TAU; halo.push([12 * Math.cos(t), 6 * Math.sin(t), Math.cos(t + TAU / 64) > 0.64 ? 0 : 1]); }
+  parts.push(hoop(Rh, 70, halo, 192, ({ n }) => n));
+  for (let k = 0; k < 6; k++) {
+    const a = (k / 6) * TAU + TAU / 12;
+    parts.push(beam(radial(a, Rh, 70), radial(a, R, 0), () => [4, 3.2], 1));
+  }
+  // berths
+  const berths = [];
+  for (let s = 0; s < 10; s++) {
+    const a = (s / 10) * TAU + 0.3, len = 90 + (s % 3) * 45;
+    const hw = SHIP_R * len, hh = SHIP_FLAT * SHIP_R * len, ys = -0.7;
+    const er = radial(a, 1, 0), et = new THREE.Vector3(-Math.sin(a), 0, Math.cos(a)), nt = et.clone().negate();
+    const C = radial(a, R + BERTH_GAP + hw, ys);
+    // gangway from inside the ring, through the ledge, 0.8 m into the ship's flank
+    const g0 = radial(a, R + 22, ys), g1 = radial(a, R + BERTH_GAP + 0.8, ys);
+    parts.push(sweepSolid(2, (j) => ({ p: j ? g1 : g0, t: er, s: nt, n: up }), () => gangwaySection()));
+    // cradle under the keel, 12 m long, and the strut that carries it from the ring's lower hull
+    parts.push(sweepSolid(2, (j) => ({ p: C.clone().addScaledVector(et, j ? 6 : -6), t: et, s: er, n: up }), () => cradleSection(hw, hh), { capKind: 10 }));
+    parts.push(beam(radial(a, R + 16, -9), C.clone().add(new THREE.Vector3(0, -hh - 0.65, 0)), (u) => [1.6 + 0.2 * u, 1.2 - 0.65 * u], 10));
+    berths.push({ p: C, a, len, flip: s % 2 === 1 });
+  }
+  for (let k = 0; k < 12; k++) { const q = radial(((k + 0.5) / 12) * TAU, R + 19.2, 13.7); beacons.push(q.x, q.y, q.z); }
+  return { geo: mergeClean(parts), berths, beacons };
+}
+
+// Sky-ship hull for the berths, built at unit length along +Z (nose forward) with its facade
+// laid out in metres for a ship of `facadeLen`, so the plating, the window bands along both
+// flanks and the bridge canopy keep real proportions whatever the instance scale: a closed swept
+// hull of flattened elliptical section, a Y tail of three fins and two engine bells in the stern.
+function shipRadius(t) {
+  if (t < 0.3) return 0.075 + (SHIP_R - 0.075) * Math.sin(((t / 0.3) * Math.PI) / 2);
+  if (t < 0.68) return SHIP_R;
+  const u = (t - 0.68) / 0.32;
+  return Math.max(SHIP_R * Math.sqrt(Math.max(0, 1 - u * u)), 0.0015);
+}
+
+export function shipGeometry(len = 1, facadeLen = 130) {
+  const parts = [];
+  const T = [0, 0.012, 0.05, 0.1, 0.16, 0.2, 0.3, 0.45, 0.55, 0.68, 0.74, 0.76, 0.8, 0.84, 0.88, 0.91, 0.94, 0.97, 0.99, 0.998, 1];
+  const X = new THREE.Vector3(1, 0, 0), Y = new THREE.Vector3(0, 1, 0), Z = new THREE.Vector3(0, 0, 1);
+  // 24 edges round: window bands on both flanks (edges 22-1 and 10-13) along the midship, the
+  // bridge canopy over the top (edges 2-9) behind the nose
+  parts.push(sweepSolid(T.length, (j) => ({ p: new THREE.Vector3(0, 0, T[j] - 0.5), t: Z, s: X, n: Y }), (j) => {
+    const t = T[j], r = shipRadius(t), o = [];
+    for (let i = 0; i < 24; i++) {
+      const a = (i / 24) * TAU;
+      const flank = (i >= 22 || i <= 1 || (i >= 10 && i <= 13)) && t >= 0.2 && t <= 0.68;
+      const canopy = i >= 2 && i <= 9 && t >= 0.76 && t <= 0.88;
+      o.push([r * Math.cos(a), SHIP_FLAT * r * Math.sin(a), flank ? 0 : canopy ? 2 : 1]);
+    }
+    return o;
+  }, { capKind: 10, v: T.map((t) => (t - 0.5) * facadeLen), sec: ({ cum, a, i0 }) => (i0 === 22 || i0 === 10 ? cum - a + 0.0215 : cum) * facadeLen }));
+  // Y tail: a dorsal fin and two ventral fins 60 degrees below the beam, roots buried in the hull
+  const fin = (dx, dy, span) => {
+    const hullR = (t) => { const r = shipRadius(t); return 1 / Math.hypot(dx / r, dy / (SHIP_FLAT * r)); };
+    const c = [];
+    for (const side of [-1, 1]) {
+      for (const [t, d, th] of [[0.04, 0.75 * hullR(0.04), 0.009], [0.3, 0.75 * hullR(0.3), 0.009], [0.15, hullR(0.15) + span, 0.004], [0.015, hullR(0.015) + span, 0.004]]) {
+        c.push(new THREE.Vector3(dx * d - dy * th * 0.5 * side, dy * d + dx * th * 0.5 * side, t - 0.5));
       }
     }
+    return slab(c, 1, facadeLen);
+  };
+  parts.push(fin(0, 1, 0.075), fin(0.5, -0.866, 0.07), fin(-0.5, -0.866, 0.07));
+  // engine bells, dark and cold at the berth
+  for (const sx of [-1, 1]) {
+    const b = latheSolid([
+      { r: 0, y: -0.012, kind: 10 }, { r: 0.016, y: -0.012, kind: 10 }, { r: 0.016, y: 0.004, kind: 10 },
+      { r: 0.021, y: 0.032, kind: 11 }, { r: 0.018, y: 0.032, kind: 11 }, { r: 0.007, y: 0.012, kind: 11 }, { r: 0, y: 0.012 },
+    ], 20);
+    const F = b.attributes.aFacade;
+    for (let k = 0; k < F.count; k++) F.setXY(k, F.getX(k) * facadeLen, F.getY(k) * facadeLen);
+    b.rotateX(-Math.PI / 2);
+    b.translate(sx * 0.03, 0, -0.5);
+    parts.push(b);
   }
-  // fins
-  const fin = latheFacade([{ r: 0.001, y: -0.5 }, { r: 0.2, y: -0.35 }, { r: 0.12, y: -0.1 }, { r: 0.001, y: 0.05 }].map((p) => ({ ...p, kind: 1 })), 3, { sx: 1, sz: 0.04 });
-  {
-    const F = fin.attributes.aFacade;
-    for (let k = 0; k < F.count; k++) F.setXY(k, F.getX(k) * facadeLen * 0.2, F.getY(k) * facadeLen);
-  }
-  const m = mergeClean([g, fin]);
-  m.rotateX(Math.PI / 2); // length along +Z
+  const m = mergeClean(parts);
   m.scale(len, len, len);
   return m;
 }
 
 // ------------------------------------------------------------- beacons ----
+// Aircraft beacons on every summit: a slow, smooth swell of light (no hard blink).
 export function createBeacons(points) {
   const n = points.length / 3;
   const seeds = new Float32Array(n);
-  for (let i = 0; i < n; i++) seeds[i] = Math.random();
+  const rnd = mulberry32(8123);
+  for (let i = 0; i < n; i++) seeds[i] = rnd();
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(points, 3));
   g.setAttribute('aSeed', new THREE.BufferAttribute(seeds, 1));
@@ -475,10 +878,11 @@ attribute float aSeed; uniform float uTime; varying float vI; varying float vRed
 void main() {
   vec4 mv = viewMatrix * modelMatrix * vec4(position, 1.0);
   gl_Position = projectionMatrix * mv;
-  float blink = step(0.82, fract(uTime * 0.55 + aSeed));
+  // breathing between 35 % and full over 3-4 s, each beacon on its own phase
+  float b = 0.5 - 0.5 * cos(6.28318 * (uTime * (0.24 + 0.08 * aSeed) + aSeed));
+  vI = 0.35 + 0.65 * b * b;
   vRed = step(0.35, aSeed);
-  vI = blink;
-  gl_PointSize = clamp(9000.0 / -mv.z, 2.0, 14.0);
+  gl_PointSize = clamp(9000.0 / max(-mv.z, 1.0), 2.0, 14.0);
 }`,
     fragmentShader: /* glsl */ `
 uniform float uCityLights; uniform float uNight; varying float vI; varying float vRed;
@@ -502,8 +906,10 @@ export function buildInfrastructure(scene, groundHeight, rawHeight) {
   promMesh.castShadow = true; promMesh.receiveShadow = true;
   scene.add(promMesh);
 
-  const gateMat = createFacadeMaterial('silver', 401, { litFrac: 0.5, band: 160 });
-  const gate = new THREE.Mesh(buildGate(), gateMat);
+  // the Gate's rhythm comes from its frame rings, so no hanging-garden bands on the glazing
+  const gateMat = createFacadeMaterial('silver', 401, { litFrac: 0.5, band: 1e5 });
+  const gateBuilt = buildGate();
+  const gate = new THREE.Mesh(gateBuilt.geo, gateMat);
   gate.castShadow = true; gate.receiveShadow = true;
   gate.name = 'Gate of Concord';
   scene.add(gate);
@@ -514,31 +920,31 @@ export function buildInfrastructure(scene, groundHeight, rawHeight) {
   scene.add(lotusMesh);
 
   const sp = buildSkyport();
-  const skyport = new THREE.Mesh(sp.geo, createFacadeMaterial('silver', 403, { litFrac: 0.75 }));
+  const skyport = new THREE.Mesh(sp.geo, createFacadeMaterial('silver', 403, { litFrac: 0.75, band: 1e5 }));
   skyport.position.set(SKYPORT.x, SKYPORT.y, SKYPORT.z);
   skyport.castShadow = true; skyport.receiveShadow = true;
+  skyport.name = 'Skyport Meridian';
   scene.add(skyport);
-  // docked ships
+  // docked ships, alongside the ring (+Z along the ring, bows alternating), each resting in its
+  // cradle and touching its gangway
   const shipMat = createFacadeMaterial('pearl', 404, { litFrac: 0.8, band: 1e5, colW: 2.6, floorH: 3.2, uplight: 0 });
   const docked = new THREE.InstancedMesh(shipGeometry(1), shipMat, sp.berths.length);
-  const m4 = new THREE.Matrix4(), q = new THREE.Quaternion();
+  const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), Y = new THREE.Vector3(0, 1, 0), P = new THREE.Vector3();
   sp.berths.forEach((b, i) => {
-    const len = 90 + (i % 3) * 45;
-    // tangential: ship's +Z along the ring direction (-sin a, 0, cos a)
-    q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), -b.a);
-    m4.compose(b.p.clone().add(new THREE.Vector3(SKYPORT.x, SKYPORT.y, SKYPORT.z)), q, new THREE.Vector3(len, len, len));
+    q.setFromAxisAngle(Y, -b.a + (b.flip ? Math.PI : 0));
+    m4.compose(P.copy(b.p).add(skyport.position), q, new THREE.Vector3(b.len, b.len, b.len));
     docked.setMatrixAt(i, m4);
   });
-  docked.castShadow = true;
+  docked.castShadow = true; docked.receiveShadow = true;
+  docked.computeBoundingSphere();
   scene.add(docked);
 
   const colliders = [
     { x: SKYPORT.x, z: SKYPORT.z, y0: SKYPORT.y - 150, y1: SKYPORT.y + 200, radius: 100 },
   ];
-  const beacons = [];
-  beacons.push(GATE.x, GATE.height - 4, GATE.z, GATE.x - GATE.span / 2, 20, GATE.z, GATE.x + GATE.span / 2, 20, GATE.z);
-  beacons.push(SKYPORT.x, SKYPORT.y + 192, SKYPORT.z);
-  for (let s = 0; s < 12; s++) { const a = (s / 12) * TAU; beacons.push(SKYPORT.x + Math.cos(a) * SKYPORT.r, SKYPORT.y + 14, SKYPORT.z + Math.sin(a) * SKYPORT.r); }
+  // beacons on the Gate's crowns, the skyport's spire and round its deck parapet
+  const beacons = [...gateBuilt.beacons];
+  for (let i = 0; i < sp.beacons.length; i += 3) beacons.push(sp.beacons[i] + SKYPORT.x, sp.beacons[i + 1] + SKYPORT.y, sp.beacons[i + 2] + SKYPORT.z);
   return { promenades: prom.paths, promLamps: prom.lamps, stations: prom.stations, pads: lotus.pads, colliders, beacons, berths: sp.berths };
 }
 
