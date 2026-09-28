@@ -156,6 +156,12 @@ export function clean(geo) {
   const g = geo.index ? geo : geo;
   for (const k of Object.keys(g.attributes)) if (!['position', 'normal', 'aFacade'].includes(k)) g.deleteAttribute(k);
   if (!g.attributes.normal) g.computeVertexNormals();
+  // a zero or non-finite normal normalizes to NaN in the shader and renders black
+  const nr = g.attributes.normal;
+  for (let i = 0; i < nr.count; i++) {
+    const x = nr.getX(i), y = nr.getY(i), z = nr.getZ(i), l = Math.hypot(x, y, z);
+    if (!(l > 1e-6)) nr.setXYZ(i, 0, 1, 0);
+  }
   if (!g.index) {
     const idx = [];
     for (let i = 0; i < g.attributes.position.count; i++) idx.push(i);

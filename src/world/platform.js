@@ -348,10 +348,16 @@ export function sweepLoop(loop, section, { ox = 0, oz = 0, closed = true, u0 = 0
       const kk = k % n;
       const [mx, mz, miter] = nrm[kk];
       const face = secs[kk][f];
-      const [oa, ya] = face.a, [ob, yb] = face.b;
-      const dO = ob - oa, dY = yb - ya;
-      const L = Math.hypot(dO, dY) || 1;
-      const no = dY / L, ny = -dO / L;
+      // a face collapsed to a point here (a parapet gap) borrows its direction from the
+      // nearest station where it has length, so no vertex carries a zero normal
+      let fs = face;
+      for (let j = 1; j < n && Math.hypot(fs.b[0] - fs.a[0], fs.b[1] - fs.a[1]) < 1e-5; j++) {
+        const c1 = secs[(kk + j) % n][f], c2 = secs[(kk - j + n) % n][f];
+        fs = Math.hypot(c1.b[0] - c1.a[0], c1.b[1] - c1.a[1]) >= 1e-5 ? c1 : c2;
+      }
+      const dO = fs.b[0] - fs.a[0], dY = fs.b[1] - fs.a[1];
+      const L = Math.hypot(dO, dY);
+      const no = L > 1e-5 ? dY / L : 0, ny = L > 1e-5 ? -dO / L : 1;
       const horiz = Math.abs(ny) > 0.7;
       for (const [o, y] of [face.a, face.b]) {
         pos.push(ox + loop[kk][0] + mx * o * miter, y, oz + loop[kk][1] + mz * o * miter);
