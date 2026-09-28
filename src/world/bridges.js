@@ -4,6 +4,10 @@ import { extrudeAlong, frameAt, maglevStation, deckPortal } from './infrastructu
 import { createFacadeMaterial } from './facade.js';
 import { terrainHeight } from './terrain.js';
 import { sweepLoop } from './platform.js';
+import { signalLights } from './wardLandmarks.js';
+
+// steady red aviation lights on everything that stands 100 m and more over the sea
+const AVIATION = [1.0, 0.16, 0.1], MAST_LANTERN = [1.0, 0.82, 0.58];
 
 // The bridges of Greater Meridian: a promenade deck and a maglev from the atoll rim to each
 // ward (and from Tidewater on to Sunward), each bridge its own structure:
@@ -49,6 +53,7 @@ function sampler(path) {
   const L = cum[cum.length - 1];
   return {
     L,
+    lights: [],
     at(u) {
       const s = Math.min(Math.max(u, 0), 1) * L;
       let i = 1;
@@ -75,33 +80,69 @@ const seaFloor = (x, z, radius = 35) => {
 const waterOrGround = (x, z, ground) => Math.max(ground(x, z), 0);
 
 // ------------------------------------------------------------------- parts --
+/**
+ * A dark bronze fender collar at the waterline, let into a rising lathe profile: the pier
+ * reads as founded in the sea (a tide band), and boats have something to rub against.
+ */
+function waterCollar(profile) {
+  const rAt = (y) => {
+    for (let i = 1; i < profile.length; i++) {
+      const a = profile[i - 1], b = profile[i];
+      if (y >= a.y && y <= b.y) return a.r + (b.r - a.r) * ((y - a.y) / Math.max(b.y - a.y, 1e-6));
+    }
+    return null;
+  };
+  const r0 = rAt(-1.6), r1 = rAt(1.9);
+  if (r0 === null || r1 === null) return profile;
+  return [
+    ...profile.filter((q) => q.y < -1.6),
+    { r: r0, y: -1.6, kind: 1 }, { r: r0 + 0.45, y: -1.45, kind: 10 }, { r: r1 + 0.45, y: 1.75, kind: 10 }, { r: r1, y: 1.9, kind: 1 },
+    ...profile.filter((q) => q.y > 1.9),
+  ];
+}
 function pierLotus(parts, p, base) {
   const visibleBase = Math.max(base, -30);
   let last = -Infinity;
-  parts.push(latheFacade([
+  parts.push(latheFacade(waterCollar([
     { r: 7.5, y: base - 18, kind: 1 }, { r: 6.2, y: base + 0.5, kind: 1 },
     ...(base < visibleBase ? [{ r: 6.2, y: visibleBase + 0.5, kind: 1 }] : []),
     { r: 4.2, y: visibleBase + (p.y - visibleBase) * 0.55, kind: 1 },
     { r: 5.6, y: p.y - 7.5, kind: 1 }, { r: 12.5, y: p.y - 3.4, kind: 1 }, { r: 12.5, y: p.y - 2.9, kind: 5 },
-  ].filter(q => q.y >= last ? ((last=q.y),true) : false).flatMap((q, i, a) => (i === a.length - 1 ? capTop([q]) : [q])), 16).translate(p.x, 0, p.z));
+  ].filter(q => q.y >= last ? ((last=q.y),true) : false)).flatMap((q, i, a) => (i === a.length - 1 ? capTop([q]) : [q])), 16).translate(p.x, 0, p.z));
 }
 function pierStone(parts, p, base, t) {
   // a pier with pointed cutwaters, battered, with a string course under the deck
   const visibleBase = Math.max(base, -30);
-  const g = latheFacade([
+  const g = latheFacade(waterCollar([
     { r: 9.5, y: base - 18, kind: 1 }, { r: 8.5, y: base + 2, kind: 1 },
     ...(base < visibleBase ? [{ r: 8.5, y: visibleBase + 2, kind: 1 }] : []),
     { r: 6.4, y: p.y - 9, kind: 5 }, { r: 7.2, y: p.y - 8, kind: 1 }, { r: 7.2, y: p.y - 2.9, kind: 1 },
-  ].flatMap((q, i, a) => (i === a.length - 1 ? capTop([q]) : [q])), 12, { sx: 1.75, sz: 0.62 });
+  ]).flatMap((q, i, a) => (i === a.length - 1 ? capTop([q]) : [q])), 12, { sx: 1.75, sz: 0.62 });
   g.rotateY(-Math.atan2(t.x, -t.z));
   parts.push(g.translate(p.x, 0, p.z));
+}
+/**
+ * A trestle where the deck runs low over the rim's shore: two founded columns under the
+ * deck's web, joined by a cap beam that meets the web's underside.
+ */
+function trestle(parts, p, side, ground) {
+  const top = p.y - 3.2;
+  for (const s of [-1, 1]) {
+    const c = p.clone().addScaledVector(side, s * 7.2);
+    let g = ground(c.x, c.z);
+    for (let i = 0; i < 8; i++) g = Math.min(g, ground(c.x + Math.cos(i / 8 * TAU) * 1.6, c.z + Math.sin(i / 8 * TAU) * 1.6));
+    parts.push(latheFacade(capTop([{ r: 1.7, y: g - 2.5, kind: 1 }, { r: 1.7, y: g + 0.35, kind: 1 }, { r: 1.25, y: g + 0.6, kind: 1 }, { r: 1.05, y: top - 1.0, kind: 1 }]), 12).translate(c.x, 0, c.z));
+  }
+  const t = V(side.z, 0, -side.x);
+  const Q = (u, v) => [p.x + t.x * u + side.x * v, p.z + t.z * u + side.z * v];
+  parts.push(prismGeo([Q(-1.3, -9.4), Q(1.3, -9.4), Q(1.3, 9.4), Q(-1.3, 9.4)], top - 1.05, top + 0.02, 1, 1));
 }
 function pierCoral(parts, p, base, t, side, rnd) {
   // The branching crown belongs to the visible water/deck composition. Only
   // the buried trunk follows deep seabed relief, so the coral silhouette stays.
   const visibleBase = Math.max(base, -30);
   const trunkTop = visibleBase + (p.y - visibleBase) * 0.45;
-  parts.push(latheFacade([{ r: 8, y: base - 16, kind: 1 }, { r: 6.5, y: base + 0.5, kind: 1 }, { r: 4.5, y: trunkTop, kind: 1 }], 14).translate(p.x, 0, p.z));
+  parts.push(latheFacade(waterCollar([{ r: 8, y: base - 16, kind: 1 }, { r: 6.5, y: base + 0.5, kind: 1 }, { r: 4.5, y: trunkTop, kind: 1 }]), 14).translate(p.x, 0, p.z));
   for (const [ls, la] of [[-9, -8], [0, 9], [9, -6]]) {
     const top = p.clone().addScaledVector(side, ls).addScaledVector(t, la).add(V(0, -3.3, 0));
     const mid = V(p.x, trunkTop, p.z).lerp(top, 0.5).add(V(0, 4, 0));
@@ -128,36 +169,50 @@ function catenary(parts, a, b, sag, lat, side, n = 60, r = 0.9) {
 }
 
 // ---------------------------------------------------------------- styles --
+/** Structure that must stand clear of the deck and its parapets (checked by the span audit). */
+const clearOfDeck = (g) => { g.userData.clearOfDeck = true; return g; };
+
+/** A beam under the deck between a pylon's two legs: the deck's bearing at the pylon. */
+function deckBearingBeam(parts, p, side, halfSpan, r = 1.3) {
+  const y = p.y - 3.2 - r + 0.05;
+  parts.push(sweepTube([p.clone().addScaledVector(side, -halfSpan).setY(y), p.clone().addScaledVector(side, halfSpan).setY(y)], () => r, 10, { kind: 1 }));
+}
+
 function styleStayed(parts, S, ground, colliders) {
-  const towers = [0.3, 0.7];
+  // Two faceted crystal pylons, 0.28 L apart, each carrying the deck on fans of sixteen
+  // stays a side that meet at mid-span: the main span is hung throughout, never a girder.
+  const half = 0.14, towers = [0.5 - half, 0.5 + half];
+  const reach = half * S.L - 8, first = 34, nStay = 16, pitch = (reach - first) / nStay;
   for (const u of towers) {
     const { p, t, side } = S.at(u);
     const base = seaFloor(p.x, p.z);
-    const H = 150;
-    // inverted Y: two legs outside the deck merging above it, a faceted spire above
-    const apex = p.clone().add(V(0, 62, 0));
-    for (const s of [-1, 1]) {
-      const foot = p.clone().addScaledVector(side, s * 19).setY(base - 4);
-      const knee = p.clone().addScaledVector(side, s * 17.5).setY(p.y - 4);
-      parts.push(sweepTube([foot, knee, apex], (q) => 4.2 - 1.6 * q, 6, { kind: 1 }));
-    }
-    const spire = latheFacade([{ r: 5.8, y: 0, kind: 1 }, { r: 4.6, y: (H - 50) * 0.45, kind: 0 }, { r: 3.4, y: (H - 50) * 0.8, kind: 2 }, { r: 0.4, y: H - 62 + 12, kind: 2 }], 6);
+    const H = 196;
+    // inverted Y: two legs outside the deck (clear of its parapets) merging above it,
+    // a faceted spire above carrying the stay anchorages
+    const apex = p.clone().add(V(0, 64, 0));
+    const foot = (s) => p.clone().addScaledVector(side, s * 21.5).setY(base - 4), knee = (s) => p.clone().addScaledVector(side, s * 19.6).setY(p.y + 2.4);
+    for (const s of [-1, 1]) parts.push(clearOfDeck(sweepTube([foot(s), knee(s), apex], (q) => 4.2 - 1.6 * q, 8, { kind: 1 })));
+    // the deck's bearing between the legs (leg centre at deck-web depth ~19.6 m out)
+    deckBearingBeam(parts, p, side, 19.4, 1.4);
+    const sp = H - 64;
+    const spire = latheFacade([{ r: 5.8, y: 0, kind: 1 }, { r: 4.9, y: sp * 0.42, kind: 0 }, { r: 4.1, y: sp * 0.78, kind: 0 }, { r: 3.2, y: sp * 0.86, kind: 2 }, { r: 2.2, y: sp * 0.95, kind: 2 }, { r: 0.4, y: sp + 10, kind: 2 }], 6);
     spire.rotateY(-Math.atan2(t.z, t.x));
     parts.push(spire.translate(apex.x, apex.y, apex.z));
-    parts.push(latheFacade(capTop([{ r: 12, y: base - 20, kind: 1 }, { r: 10, y: base + 3, kind: 1 }, { r: 10, y: base + 4, kind: 1 }]), 12, { sx: 1.9, sz: 0.8 }).rotateY(-Math.atan2(side.z, side.x)).translate(p.x, 0, p.z));
-    colliders.push({ x: p.x, z: p.z, y0: base, y1: p.y + H + 12, radius: 26 });
-    // fans of stays to both deck edges, fore and aft
-    for (let k = 1; k <= 12; k++) {
-      const hy = apex.y + 18 + k * 5.2;
+    parts.push(latheFacade(capTop([{ r: 12, y: base - 20, kind: 1 }, { r: 10, y: base + 3, kind: 1 }, { r: 10, y: base + 4, kind: 1 }]), 12, { sx: 2.1, sz: 0.8 }).rotateY(-Math.atan2(side.z, side.x)).translate(p.x, 0, p.z));
+    colliders.push({ x: p.x, z: p.z, y0: base, y1: p.y + H + 12, radius: 28 });
+    S.lights.push({ x: apex.x, y: apex.y + sp + 10.8, z: apex.z, c: AVIATION, s: 2.6 }, { x: apex.x, y: apex.y + sp * 0.62, z: apex.z, c: AVIATION, s: 1.8 });
+    // fans of stays to both deck edges, fore and aft; the anchorages climb the spire
+    for (let k = 1; k <= nStay; k++) {
+      const hy = apex.y + 14 + k * 5.8;
       const head = apex.clone().setY(hy);
       for (const dir of [-1, 1]) {
-        const du = (dir * (40 + k * 24)) / S.L;
-        const q = S.at(u + du);
-        for (const s of [-1, 1]) stays(parts, head.clone().addScaledVector(side, s * 1.5), q.p.clone().addScaledVector(q.side, s * 13.8).add(V(0, 0.6, 0)));
+        const q = S.at(u + (dir * (first + k * pitch)) / S.L);
+        for (const s of [-1, 1]) stays(parts, head.clone().addScaledVector(side, s * 1.5), q.p.clone().addScaledVector(q.side, s * 13.8).add(V(0, 0.6, 0)), 0.34);
       }
     }
   }
-  return { free: [[0.3 - 330 / S.L, 0.3 + 330 / S.L], [0.7 - 330 / S.L, 0.7 + 330 / S.L], [0.3, 0.7]], pier: pierLotus, towers };
+  const r = reach / S.L;
+  return { carried: [[towers[0] - r, towers[1] + r]], points: towers, pier: pierLotus, towers };
 }
 
 function styleArches(parts, S, ground) {
@@ -190,21 +245,27 @@ function styleArches(parts, S, ground) {
       }
     }
   }
-  return { free: [], pierAt: piers, pier: (pp, p, base, t) => pierStone(pp, p, base, t) };
+  return { pierAt: piers, pier: (pp, p, base, t) => pierStone(pp, p, base, t), spacing: span };
 }
 
 function suspensionTower(parts, S, u, H, colliders, ring) {
   const { p, t, side } = S.at(u);
   const base = seaFloor(p.x, p.z);
+  // The legs splay to 23.5 m at the sea floor so that, where the deck passes between
+  // them, their faces stand clear of its parapets; they close to the cable planes at
+  // 15.5 m, where the saddles take the main cables.
+  const fy = base - 4, ty = p.y + H, legAt = (y) => 23.5 - 8 * (y - fy) / (ty - fy);
   for (const s of [-1, 1]) {
-    const foot = p.clone().addScaledVector(side, s * 17).setY(base - 4);
-    const top = p.clone().addScaledVector(side, s * 15.5).setY(p.y + H);
-    parts.push(sweepTube([foot, top], (q) => 3.8 - 1.4 * q, 8, { kind: 1 }));
+    const foot = p.clone().addScaledVector(side, s * 23.5).setY(fy);
+    const top = p.clone().addScaledVector(side, s * 15.5).setY(ty);
+    parts.push(clearOfDeck(sweepTube([foot, top], (q) => 3.8 - 1.4 * q, 10, { kind: 1 })));
   }
+  deckBearingBeam(parts, p, side, legAt(p.y - 4.5) - 0.4, 1.3);
   for (const f of [-0.35, 0.3, 0.72, 0.97]) {
     const y = p.y + H * f;
     if (y < p.y + 6 && y > p.y - 6) continue;
-    const a = p.clone().addScaledVector(side, -15.8).setY(y), b = p.clone().addScaledVector(side, 15.8).setY(y);
+    const hl = legAt(y) + 0.3;
+    const a = p.clone().addScaledVector(side, -hl).setY(y), b = p.clone().addScaledVector(side, hl).setY(y);
     parts.push(sweepTube([a, b], () => 1.9, 8, { kind: f > 0.9 && !ring ? 2 : 1 }));
   }
   if (ring) {
@@ -225,6 +286,7 @@ function suspensionTower(parts, S, u, H, colliders, ring) {
   }
   parts.push(latheFacade(capTop([{ r: 13, y: base - 20, kind: 1 }, { r: 11, y: base + 3.5, kind: 1 }, { r: 11, y: base + 4.5, kind: 1 }]), 12, { sx: 2.0, sz: 0.8 }).rotateY(-Math.atan2(side.z, side.x)).translate(p.x, 0, p.z));
   colliders.push({ x: p.x, z: p.z, y0: base, y1: p.y + H + 30, radius: 26 });
+  for (const s of [-1, 1]) { const q = p.clone().addScaledVector(side, s * 15.5); S.lights.push({ x: q.x, y: p.y + H + 3.2, z: q.z, c: AVIATION, s: 2.2 }, { x: q.x + side.x * s * 2.6, y: p.y + H * 0.5, z: q.z + side.z * s * 2.6, c: AVIATION, s: 1.5 }); }
   return { p, side, top: p.y + H };
 }
 
@@ -274,7 +336,8 @@ function cables(parts, S, towers, anchorU, sagMid) {
 function styleSuspension(parts, S, ground, colliders) {
   const tw = [0.28, 0.72].map((u) => ({ u, ...suspensionTower(parts, S, u, 165, colliders, true) }));
   cables(parts, S, tw, [0.12, 0.88], 7);
-  return { free: [[0.2, 0.8]], pier: pierLotus, towers: tw.map((t) => t.u) };
+  // hangers every 18 m carry the whole deck between the anchorages
+  return { carried: [[0.12, 0.88]], points: tw.map((t) => t.u), pier: pierLotus, towers: tw.map((t) => t.u) };
 }
 
 function styleGrand(parts, S, ground, colliders) {
@@ -284,10 +347,11 @@ function styleGrand(parts, S, ground, colliders) {
     const { p, side } = S.at(t.u);
     parts.push(latheFacade([{r:5.8,y:p.y+205*.97-1,kind:1},{r:5.4,y:p.y+207.2,kind:2}],12).translate(p.x,0,p.z));
     parts.push(latheFacade([{ r: 5.5, y: 0, kind: 1 }, { r: 5, y: 10, kind: 2 }, { r: 3.4, y: 16, kind: 2 }, { r: 0.4, y: 26, kind: 1 }], 12).translate(p.x, p.y + 205 + 2, p.z));
+    S.lights.push({ x: p.x, y: p.y + 205 + 28.8, z: p.z, c: AVIATION, s: 2.8 });
     void side;
   }
   cables(parts, S, tw, [0.1, 0.9], 8);
-  return { free: [[0.15, 0.85]], pier: pierLotus, towers: tw.map((t) => t.u) };
+  return { carried: [[0.1, 0.9]], points: tw.map((t) => t.u), pier: pierLotus, towers: tw.map((t) => t.u) };
 }
 
 function styleTiedArch(parts, S, ground, colliders) {
@@ -300,10 +364,11 @@ function styleTiedArch(parts, S, ground, colliders) {
       for (let i = 0; i <= 40; i++) {
         const t = i / 40;
         const q = S.at(u0 + (u1 - u0) * t);
-        const lat = s * (15.2 - 5.5 * Math.sin(Math.PI * t));
+        // springing 17.2 m out (clear of the parapets), leaning in to 9.7 m at the crown
+        const lat = s * (17.2 - 7.5 * Math.sin(Math.PI * t));
         rib.push(q.p.clone().addScaledVector(q.side, lat).setY(q.p.y + 1.2 + rise * Math.sin(Math.PI * t)));
       }
-      parts.push(sweepTube(rib, (t) => 2.6 - 0.9 * Math.sin(Math.PI * t), 10, { kind: 1 }));
+      parts.push(clearOfDeck(sweepTube(rib, (t) => 2.6 - 0.9 * Math.sin(Math.PI * t), 10, { kind: 1 })));
       ribs.push(rib);
       for (let i = 2; i < 40; i += 2) {
         const q = S.at(u0 + ((u1 - u0) * i) / 40);
@@ -312,45 +377,58 @@ function styleTiedArch(parts, S, ground, colliders) {
       }
     }
     for (let i = 12; i <= 28; i += 4) parts.push(sweepTube([ribs[0][i], ribs[1][i]], () => 0.9, 6, { kind: i === 20 ? 2 : 1 }));
+    for (const rib of ribs) S.lights.push({ x: rib[20].x, y: rib[20].y + 2.2, z: rib[20].z, c: AVIATION, s: 2.0 });
     for (const u of [u0, u1]) {
       const { p, side } = S.at(u);
       const base = seaFloor(p.x, p.z);
-      parts.push(latheFacade(capTop([{ r: 13, y: base - 20, kind: 1 }, { r: 11, y: base + 2, kind: 1 }, { r: 9.5, y: p.y - 3.4, kind: 1 }, { r: 16, y: p.y - 0.8, kind: 1 }, { r: 16, y: p.y - 0.2, kind: 5 }]), 14, { sx: 1.6, sz: 0.9 }).rotateY(-Math.atan2(side.z, side.x)).translate(p.x, 0, p.z));
+      parts.push(latheFacade(capTop([{ r: 13, y: base - 20, kind: 1 }, { r: 11, y: base + 2, kind: 1 }, { r: 9.5, y: p.y - 3.4, kind: 1 }, { r: 16, y: p.y - 1.05, kind: 1 }, { r: 16, y: p.y - 0.45, kind: 5 }]), 14, { sx: 1.6, sz: 0.9 }).rotateY(-Math.atan2(side.z, side.x)).translate(p.x, 0, p.z));
       colliders.push({ x: p.x, z: p.z, y0: base, y1: p.y + rise + 6, radius: 22 });
     }
   }
-  return { free: arches, pier: pierLotus };
+  return { carried: arches, points: arches.flat(), pier: pierLotus, tubeLat: 24 };
 }
 
-function styleExtradosed(parts, S, ground, colliders) {
-  const n = 7;
+function styleExtradosed(parts, S, ground, colliders, clear) {
+  // A colonnade of low twin masts on every pier, ~215 m apart the whole way: each span
+  // carried by the stiff box of the deck at its piers and mid-span, and on short harp
+  // stays in between, so the stays of neighbouring masts never cross.
+  const s0 = 140, spans = Math.max(2, Math.round((S.L - 2 * s0) / 215)), pitch = (S.L - 2 * s0) / spans;
   const us = [];
-  for (let k = 0; k < n; k++) us.push(0.14 + (0.72 * k) / (n - 1));
+  for (let k = 0; k <= spans; k++) {
+    const u = (s0 + k * pitch) / S.L, { p } = S.at(u);
+    if (clear(p) < 14) continue;
+    us.push(u);
+  }
+  const reach = Math.min(100, pitch / 2 - 10), nStay = 7, first = 26, step = (reach - first) / (nStay - 1);
+  const carried = [];
   for (const u of us) {
     const { p, t, side } = S.at(u);
     for (const s of [-1, 1]) {
-      const b = p.clone().addScaledVector(side, s * 15.2);
-      const mast = latheFacade([{ r: 1.9, y: -4, kind: 1 }, { r: 1.5, y: 30, kind: 1 }, { r: 1.2, y: 40, kind: 2 }, { r: 0.3, y: 48, kind: 1 }], 8);
-      parts.push(mast.translate(b.x, p.y, b.z));
+      // masts stand on the pier head, their shafts clear of the deck's parapet
+      const b = p.clone().addScaledVector(side, s * 16.9);
+      const mast = latheFacade([{ r: 1.9, y: -3.4, kind: 1 }, { r: 1.5, y: 30, kind: 1 }, { r: 1.25, y: 38.5, kind: 1 }, { r: 1.25, y: 40, kind: 2 }, { r: 1.05, y: 43.5, kind: 2 }, { r: 0.3, y: 48, kind: 1 }], 8);
+      parts.push(clearOfDeck(mast.translate(b.x, p.y, b.z)));
+      S.lights.push({ x: b.x, y: p.y + 48.6, z: b.z, c: MAST_LANTERN, s: 1.1 });
       // harp stays: parallel, fore and aft
-      for (let k = 1; k <= 7; k++) {
-        const hy = p.y + 12 + k * 4;
+      for (let k = 0; k < nStay; k++) {
+        const hy = p.y + 14 + k * 3.6;
         for (const dir of [-1, 1]) {
-          const q = S.at(u + (dir * (18 + k * 16)) / S.L);
+          const q = S.at(u + (dir * (first + k * step)) / S.L);
           stays(parts, b.clone().setY(hy), q.p.clone().addScaledVector(q.side, s * 14.2).add(V(0, 1.2, 0)), 0.26);
         }
       }
     }
     const base = seaFloor(p.x, p.z);
-    parts.push(latheFacade(capTop([{ r: 10, y: base - 18, kind: 1 }, { r: 8.5, y: base + 2, kind: 1 }, { r: 6.5, y: p.y - 6, kind: 1 }, { r: 16.5, y: p.y - 3.6, kind: 1 }, { r: 16.5, y: p.y - 2.9, kind: 5 }]), 14, { sx: 1.1, sz: 0.6 }).rotateY(-Math.atan2(side.z, side.x)).translate(p.x, 0, p.z));
+    parts.push(latheFacade(capTop(waterCollar([{ r: 10, y: base - 18, kind: 1 }, { r: 8.5, y: base + 2, kind: 1 }, { r: 6.5, y: p.y - 6, kind: 1 }, { r: 16.5, y: p.y - 3.6, kind: 1 }, { r: 16.5, y: p.y - 2.9, kind: 5 }])), 14, { sx: 1.22, sz: 0.6 }).rotateY(-Math.atan2(side.z, side.x)).translate(p.x, 0, p.z));
     colliders.push({ x: p.x, z: p.z, y0: base, y1: p.y + 50, radius: 22 });
+    carried.push([u - reach / S.L, u + reach / S.L]);
     void t;
   }
-  return { free: [], pierAt: us, pier: pierLotus, skipPierNear: us };
+  return { carried, points: us, pier: pierLotus, tubeLat: 24 };
 }
 
 function styleLotus(parts, S) {
-  return { free: [], pier: pierCoral, spacing: 190 };
+  return { pier: pierCoral, spacing: 190 };
 }
 
 // ---------------------------------------------------------------- build --
@@ -430,6 +508,7 @@ export function buildWardBridges(scene, bridgePaths, recs, ground, world, { onCo
   };
   const colliders = [];
   const lamps = [];
+  const lights = [];
   const stations = [];
   const lod = [];
   const meshes = [];
@@ -439,6 +518,7 @@ export function buildWardBridges(scene, bridgePaths, recs, ground, world, { onCo
     componentWard = bp.ward;
     const { path, head } = bp;
     const S = sampler(path);
+    S.lights = lights;
     const style = STYLE[bp.ward];
     const N = path.length - 1;
     decks.push({ ward: bp.ward, path, style });
@@ -446,24 +526,46 @@ export function buildWardBridges(scene, bridgePaths, recs, ground, world, { onCo
     parts.push(extrudeAlong(path, DECK, (i) => DECK[i][2]));
     // the structure of this bridge
     componentKind = 'structure';
-    const res = { stayed: styleStayed, arches: styleArches, suspension: styleSuspension, grand: styleGrand, tiedArch: styleTiedArch, extradosed: styleExtradosed, lotus: styleLotus }[style](parts, S, ground, colliders);
-    // piers wherever the deck flies, outside the free (cable-carried) spans
-    const inFree = (u) => (res.free || []).some(([a, b]) => u > a && u < b);
-    const pierUs = [];
-    if (res.pierAt) pierUs.push(...res.pierAt);
-    else {
-      const sp = res.spacing || 230;
-      for (let s = sp; s < S.L - 40; s += sp) pierUs.push(s / S.L);
-    }
+    // what lies under the deck: the rim's shore, the open sea, or a ward's platform (its
+    // quay reaches out to the sea wall; nothing may be founded on or against it)
+    const platformAt = (x, z, pad = 0) => recs.some((r) => { const lx = x - r.w.x, lz = z - r.w.z; return Math.abs(lx) < r.half && Math.abs(lz) < r.half && r.sea.sample(lx, lz) < pad; });
+    const clear = (p) => p.y - 3.2 - Math.max(ground(p.x, p.z), 0);
+    const res = { stayed: styleStayed, arches: styleArches, suspension: styleSuspension, grand: styleGrand, tiedArch: styleTiedArch, extradosed: styleExtradosed, lotus: styleLotus }[style](parts, S, ground, colliders, clear);
+    // ---- supports: every metre of the deck is carried. Cable- and arch-hung stretches
+    // and the style's own piers are carried; the girder between them never spans more
+    // than one pier pitch. The deck leaves the bridgehead (or a ward's quay) and lands
+    // on the ward's terrace wall across its quay, with a pier founded 16 m off the sea wall.
     componentKind = 'support';
-    for (const u of pierUs) {
-      if (inFree(u)) continue;
-      if (res.skipPierNear && style !== 'extradosed' && res.skipPierNear.some((q) => Math.abs(q - u) * S.L < 60)) continue;
-      const { p, t, side } = S.at(u);
-      const base = seaFloor(p.x, p.z);
-      if (p.y - Math.max(ground(p.x, p.z), 0) < 12) continue;
-      if (style === 'extradosed') continue;       // its pylons carry their own piers
-      res.pier(parts, p, base, t, side);
+    const spacing = Math.min(res.spacing || 200, 200);
+    let sA = 18, sB = S.L - 18;
+    for (let s = 0; s < S.L * 0.3; s += 2) { const q = S.at(s / S.L).p; if (!platformAt(q.x, q.z, 16)) { sA = Math.max(sA, s); break; } }
+    for (let s = S.L; s > S.L * 0.7; s -= 2) { const q = S.at(s / S.L).p; if (!platformAt(q.x, q.z, 16)) { sB = Math.min(sB, s); break; } }
+    const cover = [];
+    for (const [a, b] of res.carried || []) cover.push([a * S.L, b * S.L]);
+    for (const u of [...(res.points || []), ...(res.pierAt || [])]) cover.push([u * S.L - 12, u * S.L + 12]);
+    cover.sort((x, y) => x[0] - y[0]);
+    const pierS = [];
+    const startPier = !head;                 // a link bridge leaves a ward's quay, not a podium
+    let reach = sA;
+    const fill = (a, b, lastIsPier) => {
+      const n = Math.max(1, Math.ceil((b - a) / spacing));
+      for (let k = 1; k <= (lastIsPier ? n : n - 1); k++) pierS.push(a + (b - a) * k / n);
+    };
+    if (startPier) pierS.push(sA);
+    for (const [a, b] of cover) {
+      if (b <= sA || a >= sB) continue;
+      if (a > reach + 24) fill(reach, a, false);
+      reach = Math.max(reach, b);
+    }
+    if (sB > reach + 4) fill(reach, sB, true);
+    for (const u of res.pierAt || []) pierS.push(u * S.L);
+    for (const sp of pierS) {
+      const u = sp / S.L, { p, t, side } = S.at(u);
+      if (platformAt(p.x, p.z, 10)) continue;
+      const c = clear(p);
+      if (c < 0.5) continue;                 // the web rests on the rim's grade here
+      if (c < 7 || ground(p.x, p.z) > 0.5) { trestle(parts, p, side, (x, z) => (ground(x, z) > 0.5 ? ground(x, z) : seaFloor(x, z, 3))); continue; }
+      res.pier(parts, p, seaFloor(p.x, p.z), t, side);
     }
     const ends = [];
     const rec = recs.find((r) => r.w.id === bp.ward);
@@ -481,9 +583,11 @@ export function buildWardBridges(scene, bridgePaths, recs, ground, world, { onCo
     const uArc = [0];
     for (let i = 1; i <= N; i++) uArc.push(uArc[i - 1] + path[i].distanceTo(path[i - 1]));
     const towerBump = (i) => (res.towers || []).reduce((m, u) => Math.max(m, ss(95, 45, Math.abs(uArc[i] - u * S.L))), 0);
+    const nearTower = (i) => (res.towers || []).some((u) => Math.abs(uArc[i] - u * S.L) < 9);
     const crossover = bp.ward === 'sunward';
+    const tubeLat = res.tubeLat || 21;
     const latAt = (t, i) => {
-      const normal=21+11*(ss(.07,0,t)+ss(.93,1,t))+6*towerBump(i);
+      const normal=tubeLat+(32-tubeLat)*(ss(.07,0,t)+ss(.93,1,t))+6*towerBump(i);
       // The departure is between the canal houses and the promenade. Ease
       // outward once clear of the fixed portal so its 6 m tube has real breathing
       // room beside the canal-house eaves before climbing over the deck.
@@ -522,7 +626,9 @@ export function buildWardBridges(scene, bridgePaths, recs, ground, world, { onCo
       } else if (crossover && railRise(t)>2) {
         const a=path[i].clone().addScaledVector(side,Math.sign(lat)*12.2).add(V(0,-1.6,0));
         parts.push(sweepTube([a,a.clone().lerp(tp,.55).add(V(0,-3,0)),tp.clone().add(V(0,-2.6,0))],()=>.85,8,{kind:1}));
-      } else if (Math.abs(lat) < 22.5 && railRise(t)<=2) {
+      } else if (nearTower(i)) {
+        continue;                             // the tube passes the pylon legs on the spans' brackets
+      } else if (Math.abs(lat) < 28.5 && railRise(t)<=2) {
         const a = path[i].clone().addScaledVector(side, Math.sign(lat)*12.2).add(V(0, -1.6, 0));   // inside the deck's sloped web
         parts.push(sweepTube([a, a.clone().lerp(tp, 0.5).add(V(0, -1.6, 0)), tp.clone().add(V(0, -2.6, 0))], () => 0.55, 6, { kind: 1 }));
       } else {
@@ -582,5 +688,7 @@ export function buildWardBridges(scene, bridgePaths, recs, ground, world, { onCo
   scene.add(mesh);
   meshes.push(mesh);
   if (world && world.colliders) world.colliders.push(...colliders);
-  return { meshes, lod, stations, lamps, decks, colliders, interfaces };
+  const sl = signalLights(lights);
+  if (sl) { sl.name = 'Ward bridge lights'; scene.add(sl); meshes.push(sl); }
+  return { meshes, lod, stations, lamps, decks, colliders, interfaces, lights };
 }

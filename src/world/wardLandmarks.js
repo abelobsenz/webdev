@@ -6,6 +6,7 @@ import { patchedMaterial } from './materials.js';
 import { sweepLoop } from './platform.js';
 import { inArc } from './wards.js';
 import { U } from '../core/uniforms.js';
+import { marinersLantern, voyageHall, seaTheatre, shellPavilion, pierSheds } from './wardLandmarksB.js';
 
 // The signature places of the Outer Wards and the furniture of their waterfronts: the Great
 // Observatory, the Tidehall, the heliostat field and the Heliodrome, the Cascade, the harbour
@@ -1052,14 +1053,20 @@ export function buildWardLandmarks(scene, rec, P, G, { palette, world } = {}) {
       case 'gnomon': both((B) => gnomon(B, W(L), y)); break;
       case 'cascade': both((B, pp, lod) => cascade(B, pp, L, rec, lod)); break;
       case 'terminal': both((B, pp, lod) => terminal(B, W(L), y, lod)); break;
+      case 'marinersLantern': both((B, pp, lod) => marinersLantern(B, pp, W(L), y, lod, lod ? null : lights)); break;
+      case 'voyageHall': both((B, pp, lod) => voyageHall(B, pp, W(L), y, lod)); break;
+      case 'pierSheds': both((B, pp, lod) => pierSheds(B, { list: L.list.map((q) => ({ ...q, x: w.x + q.x, z0: w.z + q.z0, z1: w.z + q.z1 })) }, QY, lod)); break;
+      case 'shellPavilion': both((B, pp, lod) => shellPavilion(B, pp, W(L), y, lod, lod ? null : lights)); break;
       case 'cranes': for (const c of L.list) both((B, pp, lod) => crane(B, { ...c, x: w.x + c.x, z: w.z + c.z }, lod)); break;
       case 'arch': both((B, pp, lod) => triumphalArch(B, W(L), y, lod)); break;
       case 'opera': both((B, pp, lod) => opera(B, lod ? [] : partsAll, W(L), y, lod)); break;
-      case 'amphitheatre': amphitheatre(near, partsAll, W(L), false); break;
+      case 'amphitheatre': if (L.rOuter) both((B, pp, lod) => seaTheatre(B, pp, W(L), lod, lod ? null : lights, sweepLoop)); else amphitheatre(near, partsAll, W(L), false); break;
       case 'domes': domes(partsAll, L.list.map((d) => ({ ...d, x: w.x + d.x, z: w.z + d.z })), lights); break;
       case 'monuments':
         for (const m of L.list) {
           const mx = w.x + m.x, mz = w.z + m.z, my = levelY(m.x, m.z);
+          // the raised island inside a rond-point's ring road, kerbed and paved
+          if (m.island) partsAll.push(latheFacade([{ r: m.island, y: my - 0.4, kind: 1 }, { r: m.island, y: my + 0.2, kind: 1 }, { r: m.island - 0.5, y: my + 0.2, kind: 9 }, { r: 0, y: my + 0.2, kind: 9 }], 48));
           if (m.kind === 'obelisk') {
             partsAll.push(latheFacade([{ r: 4.2, y: 0, kind: 1 }, { r: 4.2, y: 0.6, kind: 1 }, { r: 3.8, y: 0.6, kind: 6 }, { r: 1.6, y: 0.6, kind: 6 }, { r: 1.6, y: 1.8, kind: 1 }, { r: 1.2, y: 1.8, kind: 1 }], 32).translate(mx, my - 0.2, mz));
             partsAll.push(latheFacade([{ r: 0.95, y: 1.8, kind: 1 }, { r: 0.55, y: 18, kind: 1 }, { r: 0.001, y: 19.4, kind: 2 }], 4, { phase: Math.PI / 4 }).translate(mx, my - 0.2, mz));
