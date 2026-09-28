@@ -165,7 +165,7 @@ void main() {
   }
 
   // --- sun glitter (GGX; distance-filtered roughness keeps a stable glade) ---
-  vec3 H = normalize(V + uSunDir);
+  vec3 H = normalize(V + uSunDir + vec3(0.0, 1e-4, 0.0));
   float NdH = max(dot(N, H), 0.0);
   float r0 = mix(0.018, 0.06, ocean);
   float rough = sqrt(r0 * r0 + slopeVar + smoothstep(500.0, 9000.0, dist) * 0.004);
@@ -182,9 +182,7 @@ void main() {
   spec = min(spec, vec3(1400.0));
 
   // --- water body: turquoise over sand, indigo in the channels and the open sea ---
-  float path = depth / max(cosT, 0.15);
   vec3 absorb = vec3(0.30, 0.055, 0.030);
-  vec3 Tw = exp(-absorb * path * 1.2);
   vec3 sunIrr = uSunColor * uSunIlluminance * max(uSunDir.y, 0.0) * cs;
   vec3 skyIrr = skyRadiance(uSkyViewLUT, Rg + 0.002, vec3(0.0, 1.0, 0.0), vec3(0.0, 1.0, 0.0), uSunDir) * uSunIlluminance * 3.0 + uNightAmbient * 4.0;
   float deepness = smoothstep(6.0, 22.0, depth);
@@ -196,6 +194,9 @@ void main() {
   // --- refraction: the (terrain-absorbed) lagoon floor seen through the ripples ---
   vec3 floorCol = vec3(0.0);
   float floorDepth = depth;
+  // without refraction the surface blends over the floor: deep water turns opaque so the
+  // sky dome never shows through where there is no floor mesh (open sea, deep channels)
+  float floorVis = 1.0 - smoothstep(30.0, 75.0, depth);
   if (uHasRefraction > 0.5) {
     vec2 suv = gl_FragCoord.xy / uScreenSize;
     float waterVZ = dot(vWorld - cameraPosition, uCamFwd);
@@ -209,16 +210,39 @@ void main() {
     float vz2 = viewZFromDepth(sd2);
     float tBehind = vz2 / max(dot(-V, uCamFwd), 1e-3);
     float yBehind = cameraPosition.y - V.y * tBehind;
-    floorDepth = sd2 >= 0.999999 ? depth : clamp(-yBehind, 0.0, depth + 50.0);
+    // nothing behind the surface (open sea beyond the modelled floor, past the rim of a
+    // ward's reef apron): the sky dome would show through the water as white cloud-shaped
+    // blotches, so such pixels take the full water-body colour instead
+    // (the sky dome does not always sit at depth 1: a point "behind" the water that lies above
+    // it or near the far plane is sky, and must not read as a zero-depth shore either, which
+    // lit the foam up as white blotches all over the open water)
+    bool noFloor = sd2 >= 0.999999 || yBehind > -0.05 || vz2 > uNearFar.y * 0.9;
+    floorDepth = noFloor ? max(depth, 80.0) : clamp(-yBehind, 0.0, depth + 50.0);
+    floorVis = noFloor ? 0.0 : floorVis * (1.0 - smoothstep(30.0, 75.0, floorDepth));
+    floorCol *= floorVis;
   }
+  // light reaching the eye from the floor (the floor shades its own absorption); where the
+  // floor is out of sight the in-scattered body colour replaces it completely
+  float path = (uHasRefraction > 0.5 ? floorDepth : depth) / max(cosT, 0.15);
+  vec3 Tw = exp(-absorb * path * 1.2) * floorVis;
 
   // --- foam: shorelines, around anything standing in the water, sparse whitecaps ---
   float shoreD = min(depth, floorDepth);
   float shore = 1.0 - smoothstep(0.0, 1.6, shoreD);
   float fn = vnoise(p * 0.18 + vec2(uTime * 0.3, 0.0)) * vnoise(p * 0.05 - uTime * 0.05);
   float bands = smoothstep(0.5, 0.9, sin(shoreD * 5.0 - uTime * 1.3 + fn * 4.0) * 0.5 + 0.5);
-  float foam = shore * mix(0.3, 1.0, bands) * smoothstep(0.1, 0.5, fn + shore * 0.3);
-  foam += ocean * smoothstep(0.82, 0.95, vnoise(p * 0.03 + uTime * 0.08) * vnoise(p * 0.11 - uTime * 0.1) * 2.2) * 0.35 * fade1;
+  // fine lace inside the foam (bubbles and streaks), faded to its mean by the pixel footprint
+  float lace = vnoise(p * 1.9 + vec2(uTime * 0.21, -uTime * 0.17)) * 0.6 + vnoise(p * 4.3 - uTime * 0.13) * 0.4;
+  float laceFade = 1.0 - smoothstep(0.15, 0.5, length(fwidth(p)));
+  lace = mix(0.5, lace, laceFade);
+  float foam = shore * mix(0.3, 1.0, bands) * smoothstep(0.1, 0.5, fn + shore * 0.3) * mix(1.0, smoothstep(0.2, 0.75, lace) * 1.25, 0.6);
+  // whitecaps: small wind-stretched breaking crests on the open sea, laced and short-lived
+  // (the old 30 m noise blobs read as flat white rafts floating on the water)
+  vec2 wp = vec2(p.x * 0.07 - uTime * 0.9, p.y * 0.19);
+  float crest = vnoise(wp) * vnoise(wp * 2.3 + vec2(uTime * 0.31, 0.0));
+  float groups = smoothstep(0.45, 0.75, vnoise(p * 0.004 + uTime * 0.01));
+  float wc = smoothstep(0.34, 0.5, crest) * groups * mix(0.6, 1.0, lace);
+  foam += ocean * wc * 0.22 * fade1;
   foam = clamp(foam, 0.0, 1.0);
   vec3 foamCol = vec3(0.9) * (sunIrr * 0.25 + skyIrr * 0.35);
 
@@ -227,7 +251,7 @@ void main() {
   col = mix(col, foamCol, foam * 0.8);
   // the lagoon floor applies its own spectral absorption (terrain shader), so the
   // surface only needs to pass through what the Fresnel reflection leaves
-  float transmit = (1.0 - F) * (1.0 - foam);
+  float transmit = (1.0 - F) * (1.0 - foam) * (uHasRefraction > 0.5 ? 1.0 : floorVis);
   float alpha = 1.0 - transmit;
 
   // --- aerial perspective ---
