@@ -352,6 +352,19 @@ function oBary(a, b, c, d, x, z) {
   const w2 = bary(b, d, c);
   return b[1] * w2[0] + d[1] * w2[1] + c[1] * w2[2];
 }
+// Surface queries come in dense patches (ground cover samples a camera tile of it), so the
+// fine vertices they interpolate are memoised; the values are identical to the mesh's.
+const OFV_CACHE = new Map();
+function ofvCached(I, J) {
+  const k = J * 8192 + I;
+  let v = OFV_CACHE.get(k);
+  if (v === undefined) {
+    if (OFV_CACHE.size > 60000) OFV_CACHE.clear();
+    v = outerFineVertex(I, J);
+    OFV_CACHE.set(k, v);
+  }
+  return v;
+}
 /** Height of the outer mesh surface exactly as its near (fine) LOD draws it. */
 export function outerSurfaceHeight(x, z) {
   outerLayout();
@@ -363,7 +376,7 @@ export function outerSurfaceHeight(x, z) {
   const i = Math.min(Math.floor(fi), A - 1), j = Math.min(Math.floor(fj), R - 1);
   if (OLAYOUT.fine[j * A + i]) {
     const I = Math.min(Math.max(Math.floor(fi * K), i * K), i * K + K - 1), J = Math.min(Math.max(Math.floor(fj * K), j * K), j * K + K - 1);
-    return oBary(outerFineVertex(I, J), outerFineVertex(I + 1, J), outerFineVertex(I, J + 1), outerFineVertex(I + 1, J + 1), x, z);
+    return oBary(ofvCached(I, J), ofvCached(I + 1, J), ofvCached(I, J + 1), ofvCached(I + 1, J + 1), x, z);
   }
   return oBary(oCoarse(i, j), oCoarse(i + 1, j), oCoarse(i, j + 1), oCoarse(i + 1, j + 1), x, z);
 }

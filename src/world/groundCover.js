@@ -2,7 +2,9 @@ import * as THREE from 'three';
 import { patchedMaterial } from './materials.js';
 import { NATURE_GLSL, NATURE_U } from './natureGlsl.js';
 import { NOISE_GLSL } from '../shaders/noise.glsl.js';
-import { INNER, TERRAIN_DATA } from './terrain.js';
+import { INNER, TERRAIN_DATA, FAR_ISLANDS } from './terrain.js';
+import { outerCities, renderedHeight } from './outerCities.js';
+import { SKYLINE_KEEPOUT } from './skyline.js';
 import { PLAZA_R } from './layout.js';
 import { FullscreenPass, FS_VERT } from '../core/fullscreen.js';
 import { U } from '../core/uniforms.js';
@@ -123,6 +125,24 @@ float gcHeight(vec2 p, out vec3 nrm) {
   nrm = normalize(nrm);
   return h;
 }
+// The far islands have no surveyed grid: a camera-following tile sampled on the CPU from
+// renderedHeight() (the surface actually drawn), r = height, g = metres to the nearest
+// built footprint / quay (< 0 inside). Bilinear over its 4 m texels.
+uniform sampler2D uLocal;
+uniform vec4 uLocalR;       // x0, z0, texel step, texels per side (0 = no tile)
+bool gcLocal(vec2 p, out float h, out vec3 nrm, out float keep) {
+  vec2 g = (p - uLocalR.xy) / uLocalR.z;
+  if (uLocalR.w < 2.0 || any(lessThan(g, vec2(0.0))) || any(greaterThanEqual(g, vec2(uLocalR.w - 1.0)))) return false;
+  vec2 c = floor(g), f = g - c;
+  ivec2 i = ivec2(c);
+  vec2 a = texelFetch(uLocal, i, 0).rg, b = texelFetch(uLocal, i + ivec2(1, 0), 0).rg;
+  vec2 cc = texelFetch(uLocal, i + ivec2(0, 1), 0).rg, d = texelFetch(uLocal, i + ivec2(1, 1), 0).rg;
+  vec2 v = mix(mix(a, b, f.x), mix(cc, d, f.x), f.y);
+  h = v.x;
+  keep = min(v.y, min(min(a.x, b.x), min(cc.x, d.x)) < 0.3 ? -1.0 : 16.0);   // never at the waterline
+  nrm = normalize(vec3(-mix(b.x - a.x, d.x - cc.x, f.y), uLocalR.z, -mix(cc.x - a.x, d.x - b.x, f.x)));
+  return true;
+}
 ${PACK_GLSL}
 `;
 
@@ -207,12 +227,17 @@ void main() {
   vec2 ij = floor(vUv * uN);
   vec2 cid = uOriginCell + ij;
   vec2 p = gcRoot(cid, uCell);
-  if (abs(p.x) > uInfoHalf - 20.0 || abs(p.y) > uInfoHalf - 20.0) { gl_FragColor = vec4(0.0); return; }
   vec3 n;
-  float h = gcHeight(p, n);
-  if (h < 0.6) { gl_FragColor = vec4(h, 0.0, 0.0, 0.0); return; }
-  float occ = gcOcc(p);
-  if (occ < 0.4) { gl_FragColor = vec4(h, 0.0, 0.0, 0.0); return; }
+  float h;
+  if (abs(p.x) < uInfoHalf - 20.0 && abs(p.y) < uInfoHalf - 20.0) {
+    h = gcHeight(p, n);
+    if (h < 0.6 || gcOcc(p) < 0.4) { gl_FragColor = vec4(h, 0.0, 0.0, 0.0); return; }
+  } else {
+    // outer land: natural grassland only (gcClassify sees no grid, streets or forest mask there)
+    float keep;
+    if (!gcLocal(p, h, n, keep)) { gl_FragColor = vec4(0.0); return; }
+    if (h < 0.6 || keep < 0.4) { gl_FragColor = vec4(h, 0.0, 0.0, 0.0); return; }
+  }
   vec3 col; float forestD, strand, natW, uw;
   vec4 k = gcClassify(p, h, n, col, forestD, strand, natW, uw);
   float r = hash12(cid * 0.731 + 5.0);
@@ -489,6 +514,9 @@ function layerMaterial(transform, place, uniforms, { flower = false } = {}) {
 }
 
 // --------------------------------------------------------------------- the system --
+// far-island tile: texel spacing and recentring step (m); nothing nearer the capital than
+// LT_RMIN (the Outer Wards reach 17.5 km, the far islands' shores start at 22 km)
+const LT_STEP = 4, LT_SNAP = 64, LT_RMIN = 19000;
 const LAYERS = [
   // grass: dense multi-blade tufts close by, simpler blades further out
   { kind: 'grass', layer: 0, cell: 0.22, rIn: 0, rOut: 38, blades: 3, segs: 4, width: 0.016 },
@@ -507,6 +535,7 @@ export class GroundCover {
     this.common = {
       uInfo: { value: world.info.tex }, uNature: { value: TERRAIN_DATA.natureTex }, uHeight: { value: TERRAIN_DATA.heightTex },
       uOcc: { value: this.occ }, uInfoHalf: { value: INNER.half }, uHN: { value: INNER.n },
+      uLocal: { value: null }, uLocalR: { value: new THREE.Vector4(0, 0, LT_STEP, 0) },
       uStreets: NATURE_U.uStreets, uStreetHalf: NATURE_U.uStreetHalf, uStreetFrame: NATURE_U.uStreetFrame, uBloom: NATURE_U.uBloom,
     };
     this.layers = [];
@@ -563,8 +592,11 @@ export class GroundCover {
     if (!this.enabled || !camera) return;
     const r = this.renderer;
     const fovPix = (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) * 0.5)) / Math.max(r.domElement.height, 1);
-    const alt = camera.position.y - Math.max(this.world.groundHeight(camera.position.x, camera.position.z), 0);
+    const cp = camera.position;
+    const outside = Math.max(Math.abs(cp.x), Math.abs(cp.z)) > INNER.half - 60;
+    const alt = cp.y - Math.max(outside ? renderedHeight(cp.x, cp.z) : this.world.groundHeight(cp.x, cp.z), 0);
     const visible = alt < 260 * this.scaleQ;
+    if (visible) this._updateLocal(cp.x, cp.z);
     for (const L of this.layers) {
       L.mesh.visible = visible;
       L.shared.uPixAng.value = fovPix;
@@ -582,6 +614,64 @@ export class GroundCover {
         L.dirty = false;
       }
     }
+  }
+
+  // The far-island height / keep-out tile around the camera (see gcLocal). Recentred in 64 m
+  // steps; each refill is ~25k memoised surface samples (a few ms) and reclassifies the layers.
+  _updateLocal(x, z) {
+    const R = this.common.uLocalR.value;
+    const reach = Math.max(...LAYERS.map((d) => d.rOut * this.scaleQ + 16 * d.cell)) + LT_SNAP / 2 + 2 * LT_STEP;
+    const isl = FAR_ISLANDS.find(([ix, iz, ir]) => Math.hypot(x - ix, z - iz) < ir * 3 + reach);
+    if (!isl || Math.hypot(x, z) < LT_RMIN - reach) {
+      if (R.w !== 0) { R.w = 0; this.invalidate(); }
+      return;
+    }
+    const N = 2 * Math.ceil(reach / LT_STEP) + 1;
+    const cx = Math.round(x / LT_SNAP) * LT_SNAP, cz = Math.round(z / LT_SNAP) * LT_SNAP;
+    let lt = this.lt;
+    if (lt && lt.N === N && lt.cx === cx && lt.cz === cz && R.w === N) return;
+    if (!lt || lt.N !== N) {
+      if (lt) lt.tex.dispose();
+      const data = new Float32Array(N * N * 4);
+      const tex = new THREE.DataTexture(data, N, N, THREE.RGBAFormat, THREE.FloatType);
+      tex.magFilter = tex.minFilter = THREE.NearestFilter;
+      tex.generateMipmaps = false;
+      lt = this.lt = { N, data, tex };
+      this.common.uLocal.value = tex;
+    }
+    lt.cx = cx; lt.cz = cz;
+    const half = ((N - 1) / 2) * LT_STEP, x0 = cx - half, z0 = cz - half;
+    // keep-out: districts, landmarks, villas and lighthouses (skyline.js), and the quays with
+    // the 70 m quay top behind them, pre-culled to the tile
+    if (!this.quays) {
+      this.quays = [];
+      for (const c of outerCities().islands) for (let k = 0; k < c.quayLine.length - 1; k++) this.quays.push([...c.quayLine[k], ...c.quayLine[k + 1]]);
+    }
+    const lim = half * 1.42 + 20;
+    const circ = SKYLINE_KEEPOUT.filter((c) => Math.hypot(c.x - cx, c.z - cz) < lim + c.r);
+    const segs = this.quays.filter((q) => Math.hypot((q[0] + q[2]) / 2 - cx, (q[1] + q[3]) / 2 - cz) < lim + 200);
+    const d = lt.data;
+    for (let j = 0; j < N; j++) {
+      const pz = z0 + j * LT_STEP;
+      for (let i = 0; i < N; i++) {
+        const px = x0 + i * LT_STEP, k = (j * N + i) * 4;
+        d[k] = renderedHeight(px, pz);
+        let keep = 16;
+        if (Math.hypot(px, pz) < LT_RMIN) keep = -16;
+        else {
+          for (const c of circ) { const o = Math.hypot(px - c.x, pz - c.z) - c.r; if (o < keep) keep = o; }
+          for (const q of segs) {
+            const vx = q[2] - q[0], vz = q[3] - q[1], t = Math.min(1, Math.max(0, ((px - q[0]) * vx + (pz - q[1]) * vz) / (vx * vx + vz * vz || 1)));
+            const o = Math.hypot(px - q[0] - vx * t, pz - q[1] - vz * t) - 80;
+            if (o < keep) keep = o;
+          }
+        }
+        d[k + 1] = Math.max(keep, -16);
+      }
+    }
+    lt.tex.needsUpdate = true;
+    R.set(x0, z0, LT_STEP, N);
+    this.invalidate();
   }
 
   /** Streets or bloom changed: reclassify everything on the next frame. */
