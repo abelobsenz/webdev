@@ -110,6 +110,7 @@ float lightLattice(vec3 p, float cellKm, float r0, float fp, float seed) {
   if (res <= 0.0) return 1.0;
   vec3 base = floor(q - 0.5);
   float acc = 0.0;
+  r0 /= cellKm;                                  // light radius in cell units
   float rr = max(r0, fc * 0.8);
   for (int i = 0; i < 2; i++) for (int j = 0; j < 2; j++) for (int k = 0; k < 2; k++) {
     vec3 cell = base + vec3(float(i), float(j), float(k));
@@ -269,13 +270,13 @@ void main() {
         float suit = (1.0 - smoothstep(0.35, 1.6, hl)) * (1.0 - smoothstep(0.78, 0.88, abs(up.y)));
         float side = 0.2 + 0.8 * smoothstep(-0.3, 0.6, up.x);
         // towns cluster: a low-frequency pattern breaks the lit coasts into strings of places
-        float clus = smoothstep(0.42, 0.8, snoise(up * 38.0) * 0.5 + 0.5 + 0.25 * snoise(up * 110.0));
-        float dens = suit * side * (band * 0.9 * clus + 0.03);
+        float clus = smoothstep(0.6, 0.9, snoise(up * 30.0) * 0.5 + 0.5 + 0.22 * snoise(up * 95.0));
+        float dens = suit * side * (band * 0.5 * clus + 0.02);
         for (int i = 0; i < ${TOWNS.length}; i++) {
           float dk = acos(clamp(dot(up, uTown[i].xyz), -1.0, 1.0)) * RM;
-          dens += uTown[i].w * (exp(-dk * dk / 60.0) * 1.2 + exp(-dk * dk / 1500.0) * 0.25) * (i == 0 ? 0.35 : 1.0);
+          dens += uTown[i].w * (exp(-dk * dk / 60.0) * 1.2 + exp(-dk * dk / 1500.0) * 0.25) * (i == 0 ? 0.12 : 1.0);
         }
-        float pat = 0.55 * lightLattice(up, 3.0, 0.12, fp, 0.0) + 0.45 * lightLattice(up, 0.9, 0.035, fp, 17.0);
+        float pat = 0.55 * lightLattice(up, 3.0, 0.03, fp, 0.0) + 0.45 * lightLattice(up, 0.9, 0.012, fp, 17.0);
         // the Landing draws its own lamps and windows close up
         float own = nearSite > 0.0 ? smoothstep(2.0, 4.5, siteD) : 1.0;
         landCol += vec3(1.0, 0.7, 0.42) * dens * pat * night * 0.12 * own;

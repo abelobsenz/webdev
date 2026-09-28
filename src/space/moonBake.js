@@ -272,7 +272,7 @@ Surf terrain(vec3 p) {
       h += hc * (1.0 - flood) * quiet;
       s.inner = max(s.inner, inner * quiet * (1.0 - blend));
       s.fresh = max(s.fresh, 0.6 * (1.0 - smoothstep(0.01, 0.04, age)) * (1.0 - smoothstep(1.0, 2.0, x)) * quiet);
-      if (o < 4 && hh2.x > 0.86 && age > 0.3) s.lake = max(s.lake, smoothstep(0.5, 0.8, inner) * quiet * (1.0 - blend));
+      if (o < 4 && hh2.x > 0.92 && age > 0.3) s.lake = max(s.lake, smoothstep(0.5, 0.8, inner) * quiet * (1.0 - blend));
     }
   }
   // the Landing's coastal plain: level ground a few metres above the Bay

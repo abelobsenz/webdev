@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { U } from '../core/uniforms.js';
 import { NOISE_GLSL } from '../shaders/noise.glsl.js';
+import { R_MOON } from './sim.js';
 
 // Material for everything built on and around the Moon (Medii Landing, the Tranquillity
 // Exchange and the ring districts), in metres, drawn in the km-scale orbital scene with a
@@ -59,12 +60,19 @@ void main() {
   float det = 1.0 - smoothstep(0.4, 1.2, px);
   float detP = 1.0 - smoothstep(0.8, 2.3, px);
   // the Moon's horizon, and the Sun reddened by the thin air as it sinks
-  vec3 upV = normalize(vView - uMoonView);
+  // the Sun's elevation above this point's own horizon: on the ground the local horizontal,
+  // on the ring 380 km up a horizon depressed by 35 degrees
+  vec3 pRel = vView - uMoonView;
+  float rr = length(pRel);
+  vec3 upV = pRel / max(rr, 1e-3);
   float mu = dot(upV, uSunView);
-  float sunVis = smoothstep(-0.008, 0.01, mu);
-  vec3 sunCol = mix(vec3(1.0, 0.6, 0.34), vec3(1.0, 0.975, 0.94), smoothstep(-0.005, 0.14, mu));
+  float hh = rr - ${R_MOON.toFixed(1)};
+  float dip = hh > 1.0 ? acos(clamp(${R_MOON.toFixed(1)} / rr, 0.0, 1.0)) : sqrt(max(2.0 * hh / ${R_MOON.toFixed(1)}, 0.0));
+  float elev = asin(clamp(mu, -1.0, 1.0)) + dip;
+  float sunVis = smoothstep(-0.006, 0.006, elev);
+  vec3 sunCol = mix(vec3(1.0, 0.6, 0.34), vec3(1.0, 0.975, 0.94), smoothstep(0.0, 0.14, elev));
   vec3 sunL = uSunE * sunCol * sunVis;
-  float night = 1.0 - smoothstep(-0.05, 0.04, mu);
+  float night = 1.0 - smoothstep(-0.05, 0.04, elev);
   vec3 alb = vec3(0.72, 0.71, 0.68);
   float rough = 0.45, metal = 0.05;
   vec3 em = vec3(0.0);
@@ -196,7 +204,7 @@ void main() {
   float dE = length(toE);
   vec3 eDir = toE / max(dE, 1.0);
   vec3 earthL = uSunE * vec3(0.55, 0.7, 1.0) * 9.0e-4 * uEarthLit * smoothstep(-0.05, 0.1, dot(upV, eDir));
-  vec3 skyL = uSunE * vec3(0.03, 0.05, 0.1) * smoothstep(-0.1, 0.3, mu);
+  vec3 skyL = uSunE * vec3(0.03, 0.05, 0.1) * smoothstep(-0.1, 0.3, mu) * (1.0 - smoothstep(20.0, 80.0, hh));
   float ndl = max(dot(N, uSunView), 0.0);
   vec3 H = normalize(V + uSunView);
   float sp = pow(max(dot(N, H), 0.0), mix(80.0, 8.0, rough)) * mix(0.6, 0.15, rough);

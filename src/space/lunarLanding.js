@@ -92,7 +92,7 @@ function prism(B, poly, top, bot, kTop, kSide) {
   for (let i = 0; i < n; i++) {
     const [xa, za] = poly[i], [xb, zb] = poly[(i + 1) % n];
     const len = Math.hypot(xb - xa, zb - za);
-    const nrm = new THREE.Vector3(zb - za, 0, -(xb - xa)).multiplyScalar(-sgn).normalize();
+    const nrm = new THREE.Vector3(zb - za, 0, -(xb - xa)).multiplyScalar(sgn).normalize();
     const a0 = B.v(xa, gy(xa, za) + bot, za, L, 0, kSide), a1 = B.v(xa, gy(xa, za) + top, za, L, top - bot, kSide);
     const b0 = B.v(xb, gy(xb, zb) + bot, zb, L + len, 0, kSide), b1 = B.v(xb, gy(xb, zb) + top, zb, L + len, top - bot, kSide);
     B.tri(a0, b0, b1, nrm); B.tri(a0, b1, a1, nrm);
@@ -169,6 +169,8 @@ function column(B, a, b, w0, w1, k) {
 export function buildMediiLanding() {
   const B = new CB();
   const lamps = [];
+  const plan = [];                  // footprints (u, v rectangles, metres) for the overlap checks
+  const foot = (kind, u, v, w, d, alongU = true) => plan.push(alongU ? { kind, u0: u - w / 2, u1: u + w / 2, v0: v - d / 2, v1: v + d / 2 } : { kind, u0: u - d / 2, u1: u + d / 2, v0: v - w / 2, v1: v + w / 2 });
   const rnd = mulberry(4270);
   const at = (u, v, h) => { const [x, z] = UV(u, v); return new THREE.Vector3(x, gy(x, z) + h, z); };
   const lamp = (u, v, h, color, i = 1.2, r = 1.6, extra = {}) => lamps.push({ p: at(u, v, h), r, color, i, ...extra });
@@ -182,7 +184,7 @@ export function buildMediiLanding() {
   slabUV(B, -750, 750, -650, V_MID, T_LIFT);                                          // the Lift terrace
   slabUV(B, -U_TOWN, -750, -250, V_MID, T_MID);                                       // wings of the middle town
   slabUV(B, 750, U_TOWN, -250, V_MID, T_MID);
-  slabUV(B, -1600, 450, -1700, -650, T_LIFT);                                         // the domes quarter
+  slabUV(B, -1600, 450, -1700, -650, T_LIFT, { kTop: LK.COURT });                     // the domes quarter: gardens round the domes
 
   // --- stairs where the Boulevard steps down between terraces (flights of 0.25 m risers) ---
   const flight = (vEdge, hHigh, hLow) => {
@@ -226,6 +228,7 @@ export function buildMediiLanding() {
 
   // --- courtyard blocks either side of the Boulevard ---
   const house = (u, v, h0, w, d, storeys, alongU, roofKind) => {
+    foot('house', u, v, w, d, alongU);
     const [x, z] = UV(u, v);
     B.at(x, gy(x, z) + h0, z, 0, ROT_UV + (alongU ? 0 : Math.PI / 2), 0);
     const H = storeys * 3.6 + 1.2;
@@ -401,6 +404,7 @@ export function buildMediiLanding() {
   })();
   // civic halls at the corners of the Lift terrace: stone halls under glazed roofs
   for (const [u, v] of [[-500, -420], [500, -420], [-500, 330], [500, 330]]) {
+    foot('hall', u, v, 150, 96);
     const [x, z] = UV(u, v);
     B.at(x, gy(x, z) + T_LIFT, z, 0, ROT_UV, 0);
     B.box(0, 9, 0, 150, 19, 96, LK.STONE);
@@ -413,6 +417,7 @@ export function buildMediiLanding() {
   // --- the domes of the old settlement, linked by glazed arcades ---
   const DOMES = [[-650, -1150, 210], [-1250, -1000, 150], [-150, -1050, 130], [-1250, -1450, 110], [-300, -1470, 95]];
   for (const [u, v, R] of DOMES) {
+    foot('dome', u, v, 2 * R + 12, 2 * R + 12);
     const [x, z] = UV(u, v);
     B.at(x, gy(x, z) + T_LIFT, z);
     B.push(new THREE.Matrix4().makeRotationX(-Math.PI / 2));
@@ -452,6 +457,7 @@ export function buildMediiLanding() {
   // --- landing fields: plinths, blast walls open toward their roads, service roads ---
   const PADS = [[-1350, -2500], [-500, -2900], [350, -2500]];
   PADS.forEach(([u, v], idx) => {
+    foot('pad', u, v, 552, 552);
     const [x, z] = UV(u, v);
     const y0 = gy(x, z);
     B.at(x, y0, z, 0, ROT_UV, 0);
@@ -579,5 +585,5 @@ export function buildMediiLanding() {
   }
 
   const geo = B.geometry();
-  return { geo, lamps, liftTop, radius: 38, gateKm: 36 };
+  return { geo, lamps, liftTop, radius: 38, gateKm: 36, plan };
 }

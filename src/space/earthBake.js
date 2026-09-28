@@ -27,6 +27,7 @@ uniform int uNumCyc;
 uniform int uNumArc;
 uniform vec4 uPorts[7];
 uniform vec4 uWild[10];
+uniform vec4 uSc[5];
 uniform float uTexelKm;
 varying vec2 vUv;
 ${SNOISE_GLSL}
@@ -80,17 +81,38 @@ float cloudPotential(vec3 d, float seed, out float hurricane) {
   vec3 w2 = vec3(sfbm(p * 9.0 + 5.3, 3), sfbm(p * 9.0 + 2.2, 3), sfbm(p * 9.0 + 8.8, 3));
   float mid = sfbm(p * 8.0 + w2 * 0.5 + seed * 1.3, 6) * 0.5 + 0.5;
   float cells = sridged(p * 34.0 + seed * 3.0, 4);
-  float n = large * 0.62 + mid * 0.38;
-  // zonal climate: ITCZ (a little north in June), dry subtropics, stormy mid-latitudes
-  float itcz = exp(-pow(abs(lat - 0.1) / 0.075, 2.0));
+  float n = large * 0.74 + mid * 0.26;
+  float lon = atan(-p.z, p.x);
+  // zonal climate: ITCZ (a little north in June, wandering with longitude and broken into
+  // convective clusters), dry subtropics, stormy mid-latitudes
+  float itczLat = 0.1 + 0.06 * sin(lon * 2.0 + 0.7) + 0.04 * sfbm(vec3(lon * 3.0, seed, 1.0), 2);
+  float itcz = exp(-pow(abs(lat - itczLat) / 0.07, 2.0));
+  float clusters = smoothstep(0.42, 0.72, sfbm(p * 11.0 + seed * 2.1, 4) * 0.5 + 0.5);
   float subtrop = exp(-pow(abs(alat - 0.43) / 0.12, 2.0));
   float storm = exp(-pow(abs(alat - 0.96) / 0.22, 2.0));
   float polar = smoothstep(1.15, 1.4, alat);
-  float bias = 0.03 + 0.26 * itcz - 0.22 * subtrop + 0.16 * storm + 0.05 * polar;
+  float bias = 0.03 + 0.34 * itcz * clusters - 0.06 * itcz - 0.22 * subtrop + 0.16 * storm + 0.05 * polar;
+  // marine stratocumulus decks over the cold eastern boundary currents: closed cells
+  float deck = 0.0;
+  for (int i = 0; i < 5; i++) deck = max(deck, uSc[i].w * exp(-pow(length((vec2(lat, lon) - uSc[i].xy) / uSc[i].z), 2.0)));
+  float wor = 1.0;
+  {
+    vec3 cq = d * 95.0 + seed;
+    vec3 ci = floor(cq);
+    float f1 = 9.0, f2 = 9.0;
+    for (int k = 0; k < 27; k++) {
+      vec3 c = ci + vec3(float(k / 9) - 1.0, float((k / 3) % 3) - 1.0, float(k % 3) - 1.0);
+      vec3 o = c + fract(sin(vec3(dot(c, vec3(127.1, 311.7, 74.7)), dot(c, vec3(269.5, 183.3, 246.1)), dot(c, vec3(113.5, 271.9, 124.6)))) * 43758.5453);
+      float dd = length(cq - o);
+      if (dd < f1) { f2 = f1; f1 = dd; } else if (dd < f2) f2 = dd;
+    }
+    wor = smoothstep(0.05, 0.35, f2 - f1);            // bright cell interiors, dark lanes between
+  }
   float pot = n * 0.8 + cells * 0.2 + bias;
-  // storm tracks become streaky fronts
-  float front = pow(max(1.0 - abs(sfbm(p * vec3(2.2, 7.0, 2.2) + seed * 1.7, 5)), 0.0), 6.0) * storm;
-  pot += front * 0.35;
+  pot = mix(pot, 0.56 + 0.12 * wor + 0.16 * (large - 0.5) + 0.08 * (mid - 0.5), deck * 0.85 * (1.0 - itcz));
+  // storm tracks: fronts as broad bands, not filaments
+  float front = pow(max(1.0 - abs(sfbm(p * vec3(2.2, 6.0, 2.2) + seed * 1.7, 4)), 0.0), 4.0) * storm;
+  pot += front * 0.22;
   return pot;
 }
 
@@ -130,11 +152,18 @@ void main() {
   // --- deserts / aridity ---
   float n1 = sfbm(d * 7.0 + 4.0, 5);
   float n2 = sfbm(d * 36.0 + 11.0, 4);
-  float desert = 0.0;
+  // desert basins with warped, soft margins (no box edges): the dry heart, a steppe and
+  // savanna fringe, broken by highlands and the green belts people planted
+  float latW = latD + 4.5 * sfbm(d * 3.3 + 21.0, 4), lonW = lonD + 6.5 * sfbm(d * 3.3 + 37.0, 4);
+  float region = 0.0;
   for (int i = 0; i < 10; i++) {
     vec4 b = uDeserts[i];
-    desert = max(desert, boxMask(latD, lonD, b, 4.0));
+    region = max(region, boxMask(latW, lonW, b, 9.0) * (0.6 + 0.4 * b.w));
   }
+  // the dry core follows the subtropical high and the distance from the sea, not the box
+  float band = exp(-pow(abs(abs(latW) - 24.0) / 10.5, 2.0));
+  float inland = smoothstep(0.45, 0.92, mC + 0.12 * sfbm(d * 9.0, 3));
+  float desert = clamp(region * (0.2 + 0.8 * band) * inland * 1.25, 0.0, 1.0);
   float subtrop = exp(-pow(abs(alat - 24.0) / 8.0, 2.0)) * smoothstep(0.5, 0.95, mC);
   float arid = clamp(max(desert * (0.75 + 0.35 * n1), subtrop * 0.55) + n2 * 0.12, 0.0, 1.0);
   arid *= smoothstep(0.1, 0.6, mc + 0.2);
@@ -156,18 +185,22 @@ void main() {
       vec3 dv = d - c.xyz;
       float dk2 = dot(dv, dv) * 40589641.0;                         // km^2
       float w = c.w;
-      float rc = 9.0 + 16.0 * w, rm = 34.0 + 90.0 * w;
+      float rc = 6.0 + 10.0 * w, rm = 20.0 + 48.0 * w;
       if (dk2 > rm * rm * 9.0) continue;
       float core = exp(-dk2 / (rc * rc));
       float metro = exp(-dk2 / (rm * rm));
       float modern = fract(sin(float(i) * 12.9898) * 43758.5453);
+      // an irregular built-up footprint with a hard edge (lit districts, dark parkland and
+      // water between them), not a soft halo
+      float edgeN = sfbm(d * 330.0 + float(i) * 1.7, 3);
+      float urban = smoothstep(0.3, 0.42, metro + 0.28 * edgeN + 0.2 * arter);
       float dist = (0.55 + 0.45 * grain) * (0.7 + 0.6 * arter);
-      warm += w * (core * 0.75 + metro * 0.22 * dist * (1.0 - 0.5 * modern));
-      cool += w * metro * (0.14 + 0.45 * modern) * dist + w * core * 0.3 * modern;
+      warm += w * (core * 0.6 + urban * 0.3 * dist * (1.0 - 0.5 * modern));
+      cool += w * urban * (0.12 + 0.4 * modern) * dist + w * core * 0.3 * modern;
     }
     // coastal and river towns everywhere people can live: cellular points ~95 km apart
     {
-      vec3 q = d * 67.0;
+      vec3 q = d * 105.0;
       vec3 cq = floor(q);
       float towns = 0.0, tcool = 0.0;
       for (int x = -1; x <= 1; x++) for (int y = -1; y <= 1; y++) for (int z = -1; z <= 1; z++) {
@@ -182,8 +215,8 @@ void main() {
       }
       float valley = pow(max(sridged(d * 16.0 + 5.0, 3), 0.0), 5.0);     // river valleys inland
       float place = habit * max(coastNear, valley * 0.8 + 0.12);
-      warm += towns * place * 0.15 * (1.0 - 0.4 * clamp(tcool, 0.0, 1.0));
-      cool += tcool * place * 0.1;
+      warm += towns * place * 0.3 * (1.0 - 0.4 * clamp(tcool, 0.0, 1.0));
+      cool += tcool * place * 0.16;
     }
     // sea-steads and floating cities on the continental shelves
     {
@@ -203,7 +236,6 @@ void main() {
     }
     // settled countryside: a faint even glow; the coast road
     warm += habit * 0.0012 * (0.4 + 1.2 * grain);
-    net += habit * coastBand * 0.05;
     // maglev corridors between the metros: great-circle filaments, dim where they run under the sea
     for (int i = 0; i < 400; i++) {
       if (i >= uNumArc) break;
@@ -219,8 +251,8 @@ void main() {
       // stations and towns strung along the line every ~45 km
       float along = acos(clamp(dot(normalize(pp), A.xyz), -1.0, 1.0)) * 6371.0;
       float bq = fract(along / 45.0 + float(i) * 0.37) - 0.5;
-      float beads = 0.3 + 0.7 * exp(-bq * bq * 30.0);
-      net += A.w * 0.45 * beads * exp(-dk * dk / (wk * wk)) * (0.25 + 0.75 * land) * (1.0 - 0.8 * wild) * (N.w / wk);
+      float beads = 0.12 + 0.88 * exp(-bq * bq * 60.0);
+      net += A.w * 0.22 * beads * beads * exp(-dk * dk / (wk * wk)) * (0.15 + 0.85 * land) * (1.0 - 0.8 * wild) * (N.w / wk);
     }
     // the Halo's ground ports: tether stations, the brightest nodes after Meridian
     for (int i = 0; i < 7; i++) {
@@ -285,7 +317,7 @@ void main() {
   vec3 borealC = vec3(0.036, 0.058, 0.032);
   vec3 savanna = vec3(0.15, 0.135, 0.065);
   vec3 steppe = vec3(0.2, 0.18, 0.11);
-  vec3 sand = vec3(0.52, 0.39, 0.22);
+  vec3 sand = vec3(0.47, 0.36, 0.21);
   vec3 redsand = vec3(0.46, 0.25, 0.12);
   vec3 tundraC = vec3(0.15, 0.14, 0.115);
   vec3 rock = vec3(0.2, 0.18, 0.155);
@@ -300,6 +332,8 @@ void main() {
   float dune = smoothstep(0.45, 0.8, arid);
   vec3 dsand = mix(sand, redsand, smoothstep(0.2, 0.7, sfbm(d * 5.0 + 17.0, 3) + (lonD > 110.0 && latD < -10.0 ? 0.6 : 0.0)));
   dsand *= 0.8 + 0.35 * (sfbm(d * 60.0, 4) * 0.5 + 0.5);
+  // hamada and massifs: dark rock plateaus between the sand seas
+  dsand = mix(dsand, vec3(0.22, 0.16, 0.11), smoothstep(0.56, 0.74, sfbm(d * 13.0 + 3.0, 4) * 0.5 + 0.5) * 0.75);
   c = mix(c, dsand, dune);
   c *= 0.78 + 0.44 * (n2 * 0.5 + 0.5);
   // mountains: bare rock and snow above a latitude-dependent snowline
@@ -461,6 +495,8 @@ export class EarthBake {
         uNumArc: { value: this.data.numArc },
         uPorts: { value: HALO_PORTS.map((p) => { const v = bodyDir(0, p.lon * D2R, new THREE.Vector3()); return new THREE.Vector4(v.x, v.y, v.z, p.name === 'Meridian' ? 0 : 1); }) },
         uWild: { value: WILDS.map((b) => new THREE.Vector4(b[0], b[1], b[2], b[3])) },
+        // stratocumulus decks: lat, lon (rad), extent (rad), strength: California, Peru, Namibia, Canaries, Western Australia
+        uSc: { value: [[27, -128, 11, 1], [-17, -85, 13, 1], [-17, 5, 11, 0.9], [22, -24, 8, 0.7], [-27, 103, 9, 0.7]].map(([la, lo, e, w]) => new THREE.Vector4(la * D2R, lo * D2R, e * D2R, w)) },
         uTexelKm: { value: (Math.PI / 2 / size) * 6371 },
       },
       depthTest: false, depthWrite: false,
