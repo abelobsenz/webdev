@@ -306,6 +306,19 @@ export class Moon {
     return cover * phase * 1.2;
   }
 
+  // Down among the sunlit terraces of Medii Landing the eye stops down a further ~0.8 EV: pale
+  // stone and paving fill the view there, not the dark-and-bright mix of a whole planet.
+  exposureScale(cam, space) {
+    if (!this.landing || !this.landingData) return 1;
+    this.landing.getWorldPosition(_lp);
+    const d = _lp.distanceTo(cam.position);
+    if (d > 80) return 1;
+    const mu = _lp.sub(space.sim.moonPos).normalize().dot(space.sim.sunDir);
+    const near = 1 - THREE.MathUtils.smoothstep(d, 8, 80);
+    const sunUp = THREE.MathUtils.smoothstep(mu, 0.02, 0.2);
+    return 1 - 0.42 * near * sunUp;
+  }
+
   update(sim, realTime) {
     this.group.position.copy(sim.moonPos);
     this.group.quaternion.copy(sim.moonQuat);

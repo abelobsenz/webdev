@@ -84,7 +84,9 @@ void cloudPotential(vec3 d, float seed, out float P, out float S, out float O, o
     vec3 cd = c.xyz / R;
     float r = length(p - cd);
     float fall = exp(-r * r / (R * R));
-    float ang = c.w * fall * (1.0 + 0.8 * exp(-r * r / (R * R * 0.1)));
+    // (a tropical cyclone winds its cloud a turn or so, not so far that the texture shears to threads)
+    float cw = abs(c.w) > 7.0 ? c.w * 0.55 : c.w;
+    float ang = cw * fall * (1.0 + 0.8 * exp(-r * r / (R * R * 0.1)));
     p = rotAround(p, cd, ang);
     if (r > R * 4.5) continue;
     float hemi = cd.y >= 0.0 ? 1.0 : -1.0;
@@ -100,13 +102,15 @@ void cloudPotential(vec3 d, float seed, out float P, out float S, out float O, o
       // ragged edge, two or three rainbands broken into convective cells, the canopy over all
       float th = atan(y, x) * hemi;
       float edgeN = sfbm(p * 40.0 + float(i), 3);
-      float cdo = 1.0 - smoothstep(0.4, 0.72, rr + 0.12 * edgeN);
-      float wall = exp(-pow((rr - 0.11) / 0.05, 2.0));
       float spiral = 0.5 + 0.5 * cos(2.0 * th + 5.0 * log(rr + 0.04) + 1.3 * edgeN);
+      // the overcast's edge runs out along the bands (a spiral, not a disc), its top lumpy with
+      // the overshooting towers
+      float cdo = 1.0 - smoothstep(0.38, 0.8, rr + 0.14 * edgeN - 0.3 * spiral * smoothstep(0.2, 0.55, rr));
+      float wall = exp(-pow((rr - 0.1) / 0.05, 2.0));
       float arms = pow(spiral, 3.0) * smoothstep(0.3, 0.55, rr) * exp(-rr / 0.9) * smoothstep(0.25, 0.7, brk + 0.2 * spiral);
-      trop = max(trop, max(cdo * 1.0 + wall * 0.25, arms * 0.85));
+      trop = max(trop, max(cdo * (0.78 + 0.3 * brk) + wall * 0.25, arms * 0.85));
       tcS = max(tcS, max(cdo, arms * 0.7));
-      eye = max(eye, 1.0 - smoothstep(0.035, 0.075, rr));
+      eye = max(eye, (1.0 - smoothstep(0.025, 0.07, rr)) * 0.8);
       // the canopy spreads a little beyond the overcast, its outflow fibrous
       canopy = max(canopy, (1.0 - smoothstep(0.35, 1.1, rr + 0.25 * edgeN)) * (0.75 + 0.25 * spiral));
     } else if (c.w * hemi > 0.0) {
@@ -125,7 +129,8 @@ void cloudPotential(vec3 d, float seed, out float P, out float S, out float O, o
       shieldC = max(shieldC, (shield * 0.85 + tail * 0.4 + hook * 0.3) * st);
       dry = max(dry, slot * st);
       // the cold air behind the front, streaming out over the sea: open cells
-      coldAir = max(coldAir, smoothstep(0.05, 0.5, xc - x) * smoothstep(-2.8, -0.4, y) * (1.0 - smoothstep(0.0, 0.8, y)) * exp(-rr / 2.2) * st);
+      // (a tongue a radius or two behind the front, over the mid-latitude sea only)
+      coldAir = max(coldAir, smoothstep(0.05, 0.5, xc - x) * smoothstep(-1.7, -0.5, y) * (1.0 - smoothstep(0.0, 0.8, y)) * exp(-rr / 1.1) * smoothstep(0.55, 0.75, alat) * st);
     } else {
       calm = max(calm, fall);                                               // subsiding high
     }
@@ -150,13 +155,15 @@ void cloudPotential(vec3 d, float seed, out float P, out float S, out float O, o
   float storm = exp(-pow((alat - 0.93) / 0.2, 2.0)) * (lat < 0.0 ? 1.15 : 0.85);
   float polar = smoothstep(1.12, 1.35, alat);
   float n = large * 0.62 + mid * 0.38;
-  float pot = 0.46 + (n - 0.5) * 1.5 + 0.05 * (fine - 0.5);
-  pot += 0.09 * storm + 0.07 * polar - 0.24 * subtrop - 0.04 * trades;
+  // (centred below the threshold with a wide spread: broad clear skies and broad cloud, little
+  // of the field left hovering at the edge, where it would read as a grey veil from afar)
+  float pot = 0.45 + (n - 0.5) * 1.75 + 0.05 * (fine - 0.5);
+  pot += 0.1 * storm + 0.07 * polar - 0.3 * subtrop - 0.04 * trades;
   // ITCZ: bright complexes, fair-weather cumulus between them
-  pot = mix(pot, mix(0.45 + 0.08 * (fine - 0.5), 0.8, mcs) + 0.1 * (n - 0.5), itcz * 0.9);
-  // trade cumulus: patchy fields just over the threshold (a soft grey texture from afar, and
-  // discrete puffs close up), thinned under the highs
-  float tradeP = 0.42 + 0.14 * (mid - 0.5) + 0.07 * smoothstep(0.55, 0.8, fine);
+  pot = mix(pot, mix(0.405 + 0.1 * (fine - 0.5), 0.8, mcs) + 0.1 * (n - 0.5), itcz * 0.9);
+  // trade cumulus: patchy fields that reach the threshold in clusters (a soft grey texture
+  // from afar, discrete puffs close up) with clear sea between, thinned under the highs
+  float tradeP = 0.39 + 0.18 * (mid - 0.5) + 0.1 * smoothstep(0.55, 0.8, fine);
   pot = mix(pot, tradeP, trades * (1.0 - itcz) * 0.8);
   // storm tracks: long frontal bands
   float frontN = pow(max(1.0 - abs(sfbm(p * vec3(2.2, 6.0, 2.2) + seed * 1.7, 4)), 0.0), 4.0) * storm;
@@ -168,19 +175,23 @@ void cloudPotential(vec3 d, float seed, out float P, out float S, out float O, o
   float deck = 0.0;
   for (int i = 0; i < 5; i++) deck = max(deck, uSc[i].w * exp(-pow(length((vec2(lat, lon) - uSc[i].xy) / uSc[i].z), 2.0)));
   deck *= 1.0 - itcz;
+  // (its outline ragged at every scale, not the oval of the climatology)
+  deck = clamp(deck + (1.1 * (large - 0.5) + 0.7 * (mid - 0.5) + 0.2 * (fine - 0.5)) * smoothstep(0.02, 0.2, deck), 0.0, 1.0);
   float sheetP = 0.6 + 0.06 * (large - 0.5) + 0.05 * (mid - 0.5);
   // the sheet frays at its western and equatorward edge into open cells
-  float core = smoothstep(0.35, 0.8, deck + 0.15 * (mid - 0.5));
-  pot = mix(pot, mix(0.51 + 0.04 * (fine - 0.5), sheetP, core), smoothstep(0.08, 0.35, deck) * 0.92);
+  float core = smoothstep(0.35, 0.7, deck);
+  pot = mix(pot, mix(0.5 + 0.05 * (fine - 0.5), sheetP, core), smoothstep(0.12, 0.3, deck) * 0.92);
   // tropical cyclones override the field
-  pot = max(pot, 0.44 + 0.4 * trop);
+  // (only where there is one: a floor everywhere would lift every clear sky toward the edge)
+  pot = max(pot, mix(pot, 0.41 + 0.45 * trop, smoothstep(0.0, 0.12, trop)));
   pot -= eye * 0.6;
   P = pot;
   // regime
   S = clamp(max(max(core * smoothstep(0.08, 0.35, deck), frontS * 0.9), max(polar * 0.7, frontN * 0.6 + storm * 0.25)), 0.0, 1.0);
   S *= 1.0 - 0.8 * itcz * mcs;
   S = max(S, tcS);                                                          // the overcast and its bands are sheets
-  O = clamp(max(coldAir, (1.0 - core) * smoothstep(0.1, 0.3, deck) * 0.7) * (1.0 - frontS), 0.0, 1.0);
+  // (open cells in a belt along the sheet's frayed edge, not over the whole fringe)
+  O = clamp(max(coldAir, (1.0 - core) * smoothstep(0.12, 0.24, deck) * (1.0 - smoothstep(0.3, 0.55, deck)) * 0.45) * (1.0 - frontS), 0.0, 1.0);
   // --- cirrus: streaks along the jets, anvils over the convection, frontal shields, canopies ---
   float ci = sfbm(vec3(p.x * 5.0, p.y * 42.0, p.z * 5.0) + vec3(sfbm(p * 6.0, 3) * 2.0), 5) * 0.5 + 0.5;
   float jet = exp(-pow((alat - 0.62) / 0.2, 2.0)) + 0.15 * exp(-pow((lat - 0.1) / 0.17, 2.0));
@@ -371,8 +382,11 @@ void main() {
       if (dot(cross(A.xyz, pp), N.xyz) < 0.0 || dot(cross(pp, Bq.xyz), N.xyz) < 0.0) continue;
       float dk = abs(off) * 6371.0;
       float along = acos(clamp(dot(normalize(pp), A.xyz), -1.0, 1.0)) * 6371.0;
-      float bq = fract(along / 45.0 + float(i) * 0.37) - 0.5;
-      float beads = 0.4 + 0.6 * exp(-bq * bq * 60.0);
+      // stations at uneven intervals, towns of every size, so a line reads as a string of places
+      // rather than a dotted rule
+      float sa = along / 45.0 + float(i) * 0.37 + 0.35 * sin(along / 131.0 + float(i));
+      float bq = fract(sa) - 0.5;
+      float beads = 0.3 + 0.7 * exp(-bq * bq * 60.0) * (0.3 + 0.7 * hash11(floor(sa) + float(i) * 17.0));
       net += A.w * 0.2 * beads * beads * exp(-dk * dk / (wk * wk)) * (0.12 + 0.88 * land) * (1.0 - 0.75 * wild) * (N.w / wk);
     }
     // the Halo's ground ports: the brightest cities after Meridian, their avenues radiating from
@@ -592,7 +606,7 @@ function cyclones() {
   add(16, -128, 0.055, 9.5);
   add(19, 134, 0.06, 10.5);
   add(-14, 64, 0.05, -9.0);
-  add(24, 142, 0.05, 8.5);
+  add(27, 150, 0.05, 8.5);
   // subtropical highs (anticyclones spread cloud into rings)
   for (let i = 0; i < 6; i++) {
     const south = i % 2 === 1;

@@ -111,15 +111,15 @@ float landBias(vec3 b) {
   float lat = asin(clamp(b.y, -1.0, 1.0));
   return land * (-0.26 * arid + 0.06 * (1.0 - arid) * exp(-lat * lat / 0.04));
 }
-// fractal detail from ~60 km down to ~0.6 km, its spectrum peaked at cumulus sizes (3-6 km) so
-// resolved mesoscale octaves only mottle the field: x the resolved sum, y the RMS amplitude of
-// the octaves still below a few pixels
+// fractal detail from ~60 km down to ~0.6 km: the mesoscale octaves gather the cumulus into
+// clusters and streets with clear sea between, the cumulus octaves (3-6 km) make the puffs:
+// x the resolved sum, y the RMS amplitude of the octaves still below a few pixels
 vec2 cloudDetail(vec3 q, float fp, float streets) {
   float s = 0.0, u = 0.0, wl = 60.0;
   // cumulus lines up in streets along the (zonal) wind: the coarse octaves drawn out east-west
   vec3 x = q * (6371.0 / 60.0) * vec3(1.0, 1.0 + 1.4 * streets, 1.0);
   for (int i = 0; i < 7; i++) {
-    float a = i == 0 ? 0.35 : i == 1 ? 0.55 : i == 2 ? 0.8 : i == 3 ? 1.0 : i == 4 ? 1.0 : i == 5 ? 0.8 : 0.6;
+    float a = i == 0 ? 0.75 : i == 1 ? 0.8 : i == 2 ? 0.8 : i == 3 ? 0.8 : i == 4 ? 0.7 : i == 5 ? 0.55 : 0.4;
     // (the street octaves are filtered by their short, north-south wavelength)
     float wf = i <= 2 ? wl / (1.0 + 1.4 * streets) : wl;
     float f = 1.0 - smoothstep(wf * 0.08, wf * 0.22, fp);
@@ -151,23 +151,24 @@ vec2 lowCloud(vec3 b, float fp, float bias, bool fine) {
   float P = w.r + bias;
   float S = w.g, O = w.b;
   float A = mix(CU_A, 0.035, S);
-  vec2 dt = vec2(0.0, 2.02);
+  vec2 dt = vec2(0.0, 1.8);
 #if QUALITY > 0
   if (fine) dt = cloudDetail(q, fp, 1.0 - S);
 #endif
   float Pd = P + A * dt.x;
-  float edge = 0.012 + 0.45 * A * dt.y;
+  float edge = 0.012 + 0.3 * A * dt.y;
   // cells: open (cloud in the lanes round clear hearts) and closed (bright hearts, dark lanes)
   float cellRes = 0.0, lane = 0.0, heart = 0.62;
 #if QUALITY > 0
   if (fine && (O > 0.02 || S > 0.3)) {
     cellRes = 1.0 - smoothstep(3.0, 8.0, fp);
     if (cellRes > 0.0) {
-      vec2 cf = cellF(q * (6371.0 / 36.0));
+      vec2 cf = cellF(q * (6371.0 / 42.0));
       float brk = snoise(q * (6371.0 / 14.0) + 4.0);
-      // broken, uneven rings round the open cells; closed cells with thin dark seams
-      lane = (1.0 - smoothstep(0.03, 0.16 + 0.08 * brk, cf.y)) * smoothstep(-0.55, 0.2, brk);
-      heart = smoothstep(0.0, 0.12, cf.y);
+      // broad, broken, uneven rings of cumulus on the walls of the open cells round their clear
+      // hearts (the hearts themselves shrunk by the fine detail); closed cells with soft seams
+      lane = (1.0 - smoothstep(0.16, 0.46 + 0.12 * brk, cf.y)) * smoothstep(-0.8, 0.2, brk);
+      heart = smoothstep(0.02, 0.3, cf.y);
     }
   }
 #endif
@@ -175,7 +176,7 @@ vec2 lowCloud(vec3 b, float fp, float bias, bool fine) {
   edge += O * 0.08 * (1.0 - cellRes);
   float cover = smoothstep(0.5 - edge, 0.5 + edge, Pd);
   float thick = clamp((Pd - 0.5) / 0.3, 0.0, 1.0);
-  float tau = mix(mix(8.0, 3.0, S), 48.0, thick * thick) * mix(1.0, mix(0.72, 1.12, mix(0.75, heart, cellRes)), S * (1.0 - O));
+  float tau = mix(mix(8.0, 5.0, S), 48.0, thick * (0.5 + 0.5 * thick)) * mix(1.0, mix(0.72, 1.12, mix(0.75, heart, cellRes)), S * (1.0 - O));
   return vec2(cover, tau);
 }
 // High ice cloud on its own shell: thin, fibrous, drawn out along the wind. x = cover, y = tau
@@ -531,11 +532,12 @@ void main() {
   // brighter from afar, where a city is a pixel's mean, calmer close up so districts keep their
   // structure (a smooth function of range: nothing pops)
   float rangeK = mix(0.7, 1.35, smoothstep(3.0, 30.0, fp));
-  vec3 emis = ((vec3(1.0, 0.6, 0.28) * lw * 4.2 + vec3(0.66, 0.88, 1.0) * lc * 3.6) * micro + vec3(0.72, 0.86, 1.0) * ln * 1.6) * rangeK;
+  vec3 emis = ((vec3(1.0, 0.6, 0.28) * lw * 4.2 + vec3(0.66, 0.88, 1.0) * lc * 3.6) * micro + vec3(0.72, 0.86, 1.0) * ln * 1.05) * rangeK;
   // a soft shoulder, so a metro's heart stays warm-white instead of clipping to a white splat
+  // (and stays under the bloom's threshold: no metro flares into a star)
   {
     float le = max(emis.r, max(emis.g, emis.b));
-    emis *= 1.0 / (1.0 + le / 1.1);
+    emis *= 1.0 / (1.0 + le / 0.75);
   }
   emis += meridianNight(b, fp);
 

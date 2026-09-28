@@ -150,7 +150,7 @@ void main() {
     win *= 1.0 - plinth;
     float meanWin = 0.36 * (1.0 - plinth);
     float wv = mix(meanWin, win, det);
-    alb = vec3(0.7, 0.67, 0.6) * (0.94 + 0.08 * mix(0.5, hash12(floor(f / vec2(16.0, 14.4)) + 2.0), detP));
+    alb = vec3(0.62, 0.595, 0.535) * (0.94 + 0.08 * mix(0.5, hash12(floor(f / vec2(16.0, 14.4)) + 2.0), detP));
     alb = mix(alb, vec3(0.06, 0.07, 0.08), wv * 0.9);
     alb *= 1.0 - 0.12 * plinth;
     rough = mix(0.7, 0.1, wv); metal = 0.0;
@@ -165,7 +165,7 @@ void main() {
   } else if (k < 22.5) {
     // paving: pale setts in a running bond, a darker gutter band every 20 m
     float sett = max(gridLine(f.x, 1.2, 0.03, fw.x), gridLine(f.y + 0.6 * step(0.5, fract(f.x / 2.4)), 0.8, 0.03, fw.y)) * (1.0 - smoothstep(0.02, 0.06, px));
-    alb = vec3(0.4, 0.38, 0.34) * (1.0 - 0.18 * sett) * mix(1.0, 0.94 + 0.1 * vnoise(f * 0.05), 1.0 - smoothstep(3.0, 9.0, px));
+    alb = vec3(0.3, 0.285, 0.255) * (1.0 - 0.18 * sett) * mix(1.0, 0.94 + 0.1 * vnoise(f * 0.05), 1.0 - smoothstep(3.0, 9.0, px));
     rough = 0.75;
   } else if (k < 23.5) {
     // landing pad: dark composite, a painted ring every 50 m, the central target

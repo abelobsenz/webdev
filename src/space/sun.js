@@ -74,10 +74,17 @@ void main() {
   float mu = clamp(dot(n, V), 0.0, 1.0);
   vec3 p = normalize(vLocal);
   float px = max(length(fwidth(vLocal)) * ${R_SUN.toFixed(1)}, 1.0);     // km per pixel
-  // limb darkening (quadratic law per channel), the limb warmer
+  // limb darkening (a power law per channel, as the photosphere's temperature falls outward
+  // the limb dims to a deep orange)
   float m1 = 1.0 - mu;
-  vec3 limb = vec3(1.0) - vec3(0.47, 0.58, 0.7) * m1 - vec3(0.2, 0.18, 0.12) * m1 * m1;
+  // (steeper than the true law: the display's log tone curve flattens a disc this bright, and
+  // this is what the eye is used to from filtered photographs)
+  vec3 limb = pow(vec3(max(mu, 0.015)), vec3(0.75, 1.0, 1.4));
   float I = 1.0;
+  // the supergranular network (~30,000 km): bright faculae along its lanes, seen toward the limb
+  float fN = 1.0 - smoothstep(4000.0, 9000.0, px);
+  float net = fN > 0.0 ? (1.0 - cellsN(p * (${R_SUN.toFixed(1)} / 30000.0) + 11.0)) * fN : 0.0;
+  I += net * 0.32 * m1 * m1;
   // granulation (~1,400 km cells) and the mesogranular mottle (~7,000 km), each fading to
   // its mean while it still spans a few pixels; the pattern evolves slowly
   float fG = 1.0 - smoothstep(250.0, 700.0, px);
@@ -121,7 +128,7 @@ void main() {
   }
   I += fac * 0.22 * pow(m1, 1.5);
   // the disc's own edge, a pixel wide
-  vec3 col = vec3(1.0, 0.94, 0.84) * limb * I * uDiscL;
+  vec3 col = vec3(1.0, 0.92, 0.8) * limb * I * uDiscL;
   gl_FragColor = vec4(col, 0.0);   // the Sun never occludes its own glare
 }
 `;
@@ -166,7 +173,9 @@ void main() {
   // corona: streamers fixed on the Sun, falling off steeply; polar plumes
   float st = sfbm(dirW * 2.5 + vec3(0.0, uTime * 0.002, 0.0), 3) * 0.5 + 0.5;
   float helmet = exp(-pow(dirW.y / 0.45, 2.0));
-  float plume = pow(0.5 + 0.5 * snoise(dirW * vec3(26.0, 4.0, 26.0)), 3.0) * smoothstep(0.65, 0.92, abs(dirW.y)) * (1.0 - smoothstep(0.3, 1.2, px * 26.0));
+  // (the plumes are broad soft rays over the poles: a low azimuthal frequency, so they never
+  // turn to a fur of fine radial hairs)
+  float plume = pow(0.5 + 0.5 * snoise(vec3(dirW.xz * 7.0, 3.0)), 2.0) * smoothstep(0.7, 0.95, abs(dirW.y));
   float cor = pow(max(b, 1.0), -3.3) * (0.35 + 0.9 * st * (0.5 + helmet)) + 0.4 * plume * pow(max(b, 1.0), -2.5);
   cor += 0.02 * pow(max(b, 1.0), -1.6);
   col += vec3(1.0, 0.94, 0.86) * cor * 0.07 * smoothstep(5.0, 3.0, b);
@@ -403,10 +412,11 @@ export class SunSwarm {
     this.near = this.near * this.near * (3 - 2 * this.near);
     this.sunGroup.position.copy(sim.sunPos);
     this.uniforms.uTime.value = realTime;
-    // close to the Sun the eye stops down: the disc centre is exposed to sit just below white
-    // (from the analytic exposure; the meter never lifts it), and the glare with it
+    // close to the Sun the eye stops down: the disc centre is exposed onto the tone curve's
+    // shoulder, warm white, so the limb's darkening to orange reads across the disc (from the
+    // analytic exposure; the meter never lifts it), and the glare with it
     const E = U.uSunIlluminance.value;
-    const closeDim = 1.15 / (E * 2600 * Math.max(space.exposure || 1, 0.2));
+    const closeDim = 1.9 / (E * 2600 * Math.max(space.exposure || 1, 0.2));
     const dim = THREE.MathUtils.lerp(1, closeDim, this.near);
     this.uniforms.uDim.value = dim;
     this.uniforms.uDiscL.value = E * 2600 * dim;

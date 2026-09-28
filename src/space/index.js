@@ -665,7 +665,10 @@ export class SpaceMode {
     }
     lit = THREE.MathUtils.clamp(lit, 0, 1);
     this.litEstimate = lit;
-    return THREE.MathUtils.lerp(2.4, 0.4, Math.pow(lit, 0.7));
+    // a module can stop the eye further down (a sunlit pale town filling the view)
+    let k = 1;
+    for (const m of this.modules) if (m.exposureScale) k *= m.exposureScale(cam, this);
+    return THREE.MathUtils.lerp(2.4, 0.4, Math.pow(lit, 0.7)) * k;
   }
 
   renderToScreen(dt) { this.renderScene(dt, null); }

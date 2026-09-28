@@ -143,11 +143,19 @@ vec3 farmland(vec2 q, vec3 base, float fp) {
   mat2 R2 = mat2(cos(ang), -sin(ang), sin(ang), cos(ang));
   vec2 sz = vec2(0.16 + 0.22 * hash12(eid + 5.0), 0.09 + 0.12 * hash12(eid + 9.0));
   vec2 g = R2 * q / sz;
+  // each row of fields set off from the last (strips and closes, not a chessboard)
+  g.x += hash12(vec2(floor(g.y), eid.x * 3.1 + eid.y)) * 0.9;
   vec2 id = floor(g);
   vec2 f = fract(g);
   float h = hash12(id + eid * 17.0);
-  vec3 crop = h < 0.3 ? vec3(0.05, 0.075, 0.028) : h < 0.55 ? vec3(0.075, 0.085, 0.04) : h < 0.8 ? vec3(0.1, 0.095, 0.055) : vec3(0.04, 0.06, 0.024);
-  crop *= 0.92 + 0.16 * hash12(id + 9.0);
+  // crops a season apart: young and full green, ripening gold, fresh tilth, pasture, orchard,
+  // close in brightness so the pattern reads by hue
+  vec3 crop = h < 0.24 ? vec3(0.055, 0.08, 0.03) : h < 0.42 ? vec3(0.07, 0.086, 0.036) : h < 0.6 ? vec3(0.092, 0.088, 0.046)
+            : h < 0.72 ? vec3(0.074, 0.064, 0.042) : h < 0.88 ? vec3(0.062, 0.078, 0.036) : vec3(0.046, 0.066, 0.03);
+  crop *= 0.94 + 0.12 * hash12(id + 9.0);
+  // drill rows 8 m apart along each field, while they span three pixels or more
+  float rowsK = 1.0 - smoothstep(0.0013, 0.0027, fp);
+  if (rowsK > 0.0) crop *= 1.0 - rowsK * 0.08 * (0.5 + 0.5 * sin(f.y * sz.y * 785.0));
   // hedgerows: a pixel-filtered dark line at the field edges
   vec2 fwv = vec2(fp) / sz;
   vec2 e2 = min(f, 1.0 - f);
@@ -222,6 +230,10 @@ void main() {
       bed = mix(bed, mix(vec3(0.3, 0.27, 0.2), vec3(0.05, 0.06, 0.05), smoothstep(0.005, 0.12, -hs)), nearSite);
       vec3 fa = farmland(loc.xz, alb, fp);
       alb = mix(alb, fa, (1.0 - smoothstep(9.0, 18.0, siteD)) * smoothstep(2.6, 4.0, siteD));
+      // inside the farmland: the town's own parkland and commons, lawn and meadow round the
+      // terraces and the domes (not the bare ground of the bake, a pale halo round the town)
+      vec3 park = mix(vec3(0.05, 0.078, 0.03), vec3(0.075, 0.088, 0.042), snoise(vec3(loc.xz * 2.2, 5.0)) * 0.5 + 0.5);
+      alb = mix(alb, park, 1.0 - smoothstep(2.6, 4.0, siteD));
       // the shore: a strip of pale shingle
       alb = mix(alb, vec3(0.3, 0.28, 0.22), (1.0 - smoothstep(0.01, 0.05 + fp, -bd)) * nearSite);
     }

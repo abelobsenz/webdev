@@ -106,14 +106,18 @@ vec3 sk_milkyWay(vec3 c, float px) {
   float rift = exp(-pow((b - 0.02 - 0.02 * sin(l * 4.0)) / 0.045, 2.0)) * smoothstep(-0.35, -0.1, l) * (1.0 - smoothstep(1.35, 1.6, l));
   float oph = exp(-(pow(l + 0.04, 2.0) / 0.02 + pow(b - 0.14, 2.0) / 0.006));
   float coal = exp(-(pow(l + 1.0, 2.0) + pow(b + 0.017, 2.0)) / 0.0012);
-  float fil = sk_fbm(c * 18.0 + 13.0, 4) * 0.65 + mix(0.5, sk_fbm(c * 60.0 + 3.0, 3), fineK * 0.8 + 0.2) * 0.35;
+  // (the dust drawn out along the plane: its noise squeezed across it, so the lanes run as
+  // filaments rather than a chain of blots)
+  vec3 cq = c + SK_GN * gz * 1.1;
+  float fil = sk_fbm(cq * 15.0 + 13.0, 4) * 0.65 + mix(0.5, sk_fbm(cq * 52.0 + 3.0, 3), fineK * 0.8 + 0.2) * 0.35;
   float filF = smoothstep(0.3, 0.78, fil);
   float tau = (lane * 0.8 + rift * 1.3 + oph * 1.1) * (0.2 + 1.3 * filF) + coal * 1.8;
   tau *= (1.0 - 0.6 * exp(-pow(al - 3.14159, 2.0) / 0.4));   // little dust toward the anticentre
   float ext = exp(-tau);
-  // colour: blue-white disc, a warm old bulge, dust reddening what it does not hide
-  vec3 col = mix(vec3(0.74, 0.82, 1.0), vec3(1.0, 0.9, 0.76), clamp(exp(-l * l / 0.3) * 0.8 + bulge * 0.3, 0.0, 1.0));
-  col = mix(col, col * vec3(1.0, 0.84, 0.66), (1.0 - ext) * ext * 1.6);
+  // colour: a pearly blue-white disc, the old bulge a pale gold, dust reddening a little of
+  // what it does not hide (kept light: dim warm light reads as brown smoke)
+  vec3 col = mix(vec3(0.8, 0.86, 1.0), vec3(1.0, 0.93, 0.83), clamp(exp(-l * l / 0.15) * 0.6 + bulge * 0.35, 0.0, 1.0));
+  col = mix(col, col * vec3(1.0, 0.9, 0.8), (1.0 - ext) * ext * 1.2);
   vec3 L = col * I * ext;
   // emission nebulae along the plane (Lagoon, Eta Carinae, North America, Orion) and the
   // faint hydrogen glow of the arms
@@ -263,7 +267,7 @@ vec3 sk_background(vec3 d, float px) {
   col += sk_starLayer(c, 380.0, 0.005, 0.3, px, crowd * 0.8);
   col += sk_starLayer(c, 800.0, 0.003, 0.12, px, crowd);
   col += sk_starLayer(c, 1500.0, 0.0022, 0.05, px, crowd * 1.3) * (1.0 - smoothstep(0.0012, 0.003, px));
-  col += sk_milkyWay(c, px) * 0.028;
+  col += sk_milkyWay(c, px) * 0.025;
   col += sk_extragalactic(c, px) * 0.04;
   col += sk_planets(d, px);
   // zodiacal light: dust along the ecliptic, brightening and widening toward the Sun, and
