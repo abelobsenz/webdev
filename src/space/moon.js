@@ -39,24 +39,34 @@ uniform vec3 uEarthDir;      // direction from the Moon to the Earth (world)
 uniform float uEarthPhase;   // lit fraction of the Earth seen from the Moon
 uniform vec4 uMaria[${MARIA.length}];
 uniform vec4 uRingN;         // lunar ring axis (world) + radius
+uniform mat3 uRot;           // Moon frame -> world
 varying vec3 vN;
 varying vec3 vWorld;
 varying vec3 vLocal;
 ${NOISE_GLSL}
 ${SNOISE_GLSL}
 
-float craters(vec3 p, float scale, out float rim) {
+// Crater field: bowl and rim masks for the albedo, plus the slope of a bowl-and-rim height
+// profile (height in units of the crater radius) so the relief catches the light.
+float craters(vec3 p, float scale, out float rim, out vec3 slope) {
   vec3 q = p * scale;
   vec3 c = floor(q - 0.5);
-  float bowl = 0.0; rim = 0.0;
+  float bowl = 0.0; rim = 0.0; slope = vec3(0.0);
   for (int i = 0; i < 2; i++) for (int j = 0; j < 2; j++) for (int k = 0; k < 2; k++) {
     vec3 cell = c + vec3(float(i), float(j), float(k));
     vec3 h = hash33(cell);
     float rr = 0.16 + 0.3 * h.x * h.x;
-    float d = length(q - cell - h) / rr;
+    vec3 dv = q - cell - h;
+    float dl = length(dv);
+    float d = dl / rr;
     float on = step(0.35, h.y);
+    float x = (d - 1.0) * 5.0;
+    float g = exp(-x * x);
     bowl = max(bowl, (1.0 - smoothstep(0.0, 1.0, d)) * on);
-    rim = max(rim, exp(-pow(abs(d - 1.0) * 5.0, 2.0)) * on);
+    rim = max(rim, g * on);
+    // h(d) = -0.9 (1 - d^2) inside + 0.35 exp(-x^2); dh/dd, bounded, zero at the centre
+    float dh = (d < 1.0 ? 1.8 * d : 0.0) - 3.5 * x * g;
+    slope += on * 0.2 * dh * dv / max(dl, 1e-4);
   }
   return bowl;
 }
@@ -64,17 +74,31 @@ float craters(vec3 p, float scale, out float rim) {
 void main() {
   vec3 n = normalize(vN);
   vec3 p = vLocal;
+  // maria: the old basins, domain-warped and with a wobbling shore so none reads as a circle
+  vec3 pw = normalize(p + 0.075 * vec3(snoise(p * 2.6 + 5.0), snoise(p * 2.6 + 11.0), snoise(p * 2.6 + 23.0)));
+  float wob = 1.0 + 0.38 * sfbm(pw * 4.5 + 2.0, 3);
   float sea = 0.0;
   for (int i = 0; i < ${MARIA.length}; i++) {
     vec4 m = uMaria[i];
-    float d = acos(clamp(dot(p, m.xyz), -1.0, 1.0));
-    sea = max(sea, 1.0 - smoothstep(m.w * 0.75, m.w * 1.05, d));
+    float d = sqrt(max(2.0 - 2.0 * dot(pw, m.xyz), 0.0));   // chord ~ angle
+    float r = m.w * wob;
+    sea = max(sea, 1.0 - smoothstep(r * 0.72, r * 1.08, d));
   }
   float coast = sfbm(p * 9.0, 5) * 0.28 + snoise(p * 40.0) * 0.06;
   float seaF = smoothstep(0.45, 0.55, sea + coast);
-  float rimA, rimB;
-  float cA = craters(p, 7.0, rimA);
-  float cB = craters(p + 3.1, 19.0, rimB);
+  float rimA, rimB, rimC;
+  vec3 sA, sB, sC;
+  float cA = craters(p, 7.0, rimA, sA);
+  float cB = craters(p + 3.1, 19.0, rimB, sB);
+  float cC = craters(p + 7.3, 52.0, rimC, sC);
+  // relief fades to the smooth sphere once a crater cell spans only a few pixels
+  float fpx = length(fwidth(p));
+  vec3 slope = sA * (1.0 - smoothstep(0.08, 0.2, fpx * 7.0))
+             + sB * (1.0 - smoothstep(0.08, 0.2, fpx * 19.0))
+             + sC * 0.8 * (1.0 - smoothstep(0.08, 0.2, fpx * 52.0));
+  slope *= 1.0 - 0.85 * seaF;               // the flooded basins are flat water
+  slope -= dot(slope, p) * p;
+  vec3 nP = normalize(uRot * normalize(p - slope));
   float h = sfbm(p * 3.0 + 1.3, 5) * 0.5 + 0.5;
   float h2 = sfbm(p * 11.0 + 7.7, 4) * 0.5 + 0.5;
   vec3 green = mix(vec3(0.045, 0.085, 0.03), vec3(0.12, 0.13, 0.06), h);
@@ -82,9 +106,9 @@ void main() {
   vec3 rock = vec3(0.3, 0.29, 0.27);
   vec3 land = mix(green, tan, smoothstep(0.45, 0.7, h * 0.7 + h2 * 0.5));
   land = mix(land, rock, smoothstep(0.62, 0.8, h + rimA * 0.3 + rimB * 0.15));
-  land *= 0.85 + 0.25 * (rimA * 0.6 + rimB * 0.4) - 0.2 * (cA * 0.5 + cB * 0.3);
+  land *= 0.85 + 0.25 * (rimA * 0.6 + rimB * 0.4 + rimC * 0.25) - 0.2 * (cA * 0.5 + cB * 0.3);
   // crater lakes on the highlands
-  float lake = step(0.6, cA) * step(0.5, hash13(floor(p * 7.0)));
+  float lake = smoothstep(0.55, 0.68, cA) * step(0.5, hash13(floor(p * 7.0)));
   vec3 seaC = mix(vec3(0.006, 0.02, 0.045), vec3(0.012, 0.05, 0.06), smoothstep(0.55, 0.45, sea + coast));
   vec3 alb = mix(land, seaC, max(seaF, lake * 0.9));
   float lat = abs(p.y);
@@ -96,13 +120,14 @@ void main() {
   float cl = smoothstep(0.6, 0.82, sfbm(cp * 5.0 + vec3(0.0, 0.0, uCloudT * 0.1), 5) * 0.5 + 0.5 + 0.06 * (1.0 - seaF)) * 0.75;
   float ndl = dot(n, uSunDir);
   vec3 sunL = vec3(1.0, 0.97, 0.93) * uSunE;
-  float wrap = max(ndl, 0.0);
+  // relief lighting, held to the geometric terminator so bumps never light the night side
+  float wrap = max(dot(nP, uSunDir), 0.0) * smoothstep(-0.03, 0.06, ndl);
   float twilight = smoothstep(-0.12, 0.1, ndl);
   vec3 col = alb / 3.14159 * sunL * wrap;
   col = mix(col, vec3(0.9) / 3.14159 * sunL * clamp((ndl + 0.1) / 1.1, 0.0, 1.0), cl * 0.9);
   // specular seas
   vec3 V = normalize(cameraPosition - vWorld);
-  vec3 H = normalize(V + uSunDir);
+  vec3 H = normalize(V + uSunDir + vec3(0.0, 1e-5, 0.0));
   col += sunL * pow(max(dot(n, H), 0.0), 180.0) * 0.5 * seaF * (1.0 - cl) * step(0.0, ndl);
   // earthshine on the night side
   col += alb * vec3(0.4, 0.55, 0.9) * uSunE * 0.0025 * uEarthPhase * max(dot(n, uEarthDir), 0.0);
@@ -110,8 +135,13 @@ void main() {
   float night = 1.0 - smoothstep(-0.08, 0.06, ndl);
   float coastBand = 1.0 - smoothstep(0.0, 0.08, abs(sea + coast - 0.5));
   // town lights: individual towns where they are resolved, their mean glow where they are not
-  float cellsD = 1.0 - smoothstep(0.11, 0.33, length(fwidth(p * 220.0)));   // cells >= 3 px
-  float cells = mix(0.45, step(0.55, hash13(floor(p * 220.0))), cellsD) * smoothstep(0.5, 0.85, snoise(p * 22.0) * 0.5 + 0.5);
+  // round lights at 3D jittered points (a plane through a lattice of balls), their mean where unresolved
+  vec3 lq = p * 220.0;
+  vec3 lc = floor(lq);
+  vec3 lh = hash33(lc);
+  float lamp = smoothstep(0.34, 0.12, length(lq - lc - 0.25 - 0.5 * lh)) * step(0.45, lh.x) * 8.0;
+  float cellsD = 1.0 - smoothstep(0.11, 0.33, length(fwidth(lq)));   // cells >= 3 px
+  float cells = mix(0.22, lamp, cellsD) * smoothstep(0.5, 0.85, snoise(p * 22.0) * 0.5 + 0.5);
   float villD = 1.0 - smoothstep(0.11, 0.33, length(fwidth(p * 30.0)));
   float towns = (coastBand * 0.9 + (1.0 - seaF) * 0.15 * mix(0.25, step(0.75, hash13(floor(p * 30.0))), villD)) * cells;
   towns *= 1.0 + 1.5 * step(0.0, p.x);          // most people live facing home
@@ -258,7 +288,7 @@ export class Moon {
     this.uniforms = {
       uSunDir: { value: new THREE.Vector3(1, 0, 0) }, uSunE: U.uSunIlluminance, uTime: { value: 0 }, uCloudT: { value: 0 },
       uEarthDir: { value: new THREE.Vector3(1, 0, 0) }, uEarthPhase: { value: 0.5 }, uMaria: { value: maria },
-      uRingN: { value: new THREE.Vector4(0, 1, 0, R_MOON + 380) },
+      uRingN: { value: new THREE.Vector4(0, 1, 0, R_MOON + 380) }, uRot: { value: new THREE.Matrix3() },
     };
     this.mesh = new THREE.Mesh(new THREE.SphereGeometry(R_MOON, 192, 96), new THREE.ShaderMaterial({ vertexShader: VERT, fragmentShader: FRAG, uniforms: this.uniforms }));
     this.mesh.renderOrder = 4;
@@ -304,6 +334,7 @@ export class Moon {
     this.group.quaternion.copy(sim.moonQuat);
     this.group.updateMatrixWorld(true);
     const u = this.uniforms;
+    u.uRot.value.setFromMatrix4(this.group.matrixWorld);
     u.uSunDir.value.copy(sim.sunDir);
     u.uTime.value = realTime;
     u.uCloudT.value = (sim.t / 86400 / 6) % 100;
