@@ -224,6 +224,13 @@ void main() {
     float fin2 = gridLine(f.x, 3.0, 0.3, fw.x) * det;
     float heat = 0.55 + 0.45 * sin(f.x * 0.003 + 1.3);
     alb *= 1.0 - 0.3 * fin2;
+    // relief: corrugated fins every 3 m and raised coolant channels every 24 m, faded to flat
+    // (their average) before they drop under a few pixels
+    float rF = 1.0 - smoothstep(0.35, 0.9, fw.x);
+    float cp = fract(f.y / 24.0 + 0.5) - 0.5;
+    float rC = 1.0 - smoothstep(1.5, 4.0, fw.y);
+    bump.x += 0.3 * sin(f.x * 2.0944) * rF;
+    bump.y += -clamp(cp * 24.0 / 2.0, -1.0, 1.0) * exp(-cp * cp * 60.0) * 0.6 * rC;
     em = vec3(1.0, 0.36, 0.12) * (0.14 + 0.5 * ch) * heat * (0.8 + 0.2 * sin(uTime * 0.3 + f.x * 0.002));
   }
   craftExtraKinds(k, f, fw, px, alb, rough, metal, em);
