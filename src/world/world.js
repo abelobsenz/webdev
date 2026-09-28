@@ -8,6 +8,7 @@ import { buildTowers } from './towers.js';
 import { planCity, towerFootprint } from './urban.js';
 import { wardTowerDefs, wardBridgePaths, buildMetro, wardHeight } from './metro.js';
 import { buildSkyline } from './skyline.js';
+import { buildHillCountry } from './hillCountry.js';
 import { buildTransit } from './transit.js';
 import { buildRimForecourts } from './rimForecourts.js';
 import { signalLights } from './wardLandmarks.js';
@@ -172,6 +173,9 @@ export class World {
     }
     // and the metropolitan horizon beyond: towns of towers on the far islands and massif
     this.skyline = buildSkyline(this.scene);
+    // civilisation across the outer hills: villages, farms, fields, roads, summit monasteries
+    this.hillCountry = buildHillCountry(this.scene);
+    this.updaters.push({ applyQuality: (s) => this.hillCountry.applyQuality(s), update: (dt, t) => this.hillCountry.update(dt, t, this.app.camera) });
     progress(0.7); await tick();
     // --- nature (vegetation after all architecture, so it can keep clear of it) ---
     this.clearance = buildClearance(this.scene, (x, z) => this.sampler.get(x, z));
