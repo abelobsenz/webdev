@@ -1077,10 +1077,14 @@ function warehouse(B, L, R, H, lod) {
   const fl = Math.max(2, Math.round(H / FH));
   const top = fl * FH;
   B.box(-w / 2, w / 2, -d / 2, d / 2, 0, top, K.PUNCHED, K.STONE);
+  // a plinth course round the foot (proud, so the walls read as masonry on a base)
+  B.box(-w / 2 - 0.25, w / 2 + 0.25, -d / 2 - 0.25, d / 2 + 0.25, 0, 0.9, K.STONE, K.PAVING);
   const nv = 3;
+  // the vaults stay below the stepped gables so the parapets hide their ends from every side
+  const rise = Math.min((d / nv) * 0.34, 3.0);
   for (let i = 0; i < nv; i++) {
     const z0 = -d / 2 + (i * d) / nv, z1 = z0 + d / nv;
-    B.vault(-w / 2 + 0.3, w / 2 - 0.3, z0 + 0.15, z1 - 0.15, top, (d / nv) * 0.34, i === 1 ? K.PV : K.METAL, lod ? 4 : 8);
+    B.vault(-w / 2 + 0.3, w / 2 - 0.3, z0 + 0.15, z1 - 0.15, top, rise, i === 1 ? K.PV : K.METAL, lod ? 4 : 8);
   }
   // stepped parapet gables at both ends
   for (const sx of [-1, 1]) {
@@ -1089,14 +1093,25 @@ function warehouse(B, L, R, H, lod) {
     B.box(x0, x1, -d * 0.22, d * 0.22, top + 1.6, top + 3.4, K.PUNCHED, K.STONE);
   }
   if (lod) return top + 3.4;
-  // loading doors and a steel canopy on brackets along the street face
+  // brick piers between the loading bays, proud of both long walls, from the plinth to the eaves
   const nd = Math.max(2, Math.floor(w / 9));
+  for (let i = 0; i <= nd; i++) {
+    const x = -w / 2 + 0.45 + (i * (w - 0.9)) / nd;
+    B.box(x - 0.45, x + 0.45, d / 2, d / 2 + 0.4, 0.9, top, K.STONE, K.STONE, { bottom: true });
+    B.box(x - 0.45, x + 0.45, -d / 2 - 0.4, -d / 2, 0.9, top, K.STONE, K.STONE, { bottom: true });
+  }
+  // loading doors (steel leaves proud of the wall) and a hoist loft door above each
   for (let i = 0; i < nd; i++) {
     const x = -w / 2 + ((i + 0.5) * w) / nd;
-    B.box(x - 1.8, x + 1.8, d / 2 - 0.05, d / 2 + 0.05, 0, 3.9, K.METAL, K.METAL);
+    B.box(x - 1.8, x + 1.8, d / 2, d / 2 + 0.14, 0.9, 3.9, K.METAL, K.METAL);
+    if (fl >= 3) {
+      B.box(x - 0.9, x + 0.9, d / 2, d / 2 + 0.12, 2 * FH + 0.3, 3 * FH - 0.4, K.TIMBER, K.TIMBER);
+      B.box(x - 0.12, x + 0.12, d / 2, d / 2 + 1.4, 3 * FH - 0.3, 3 * FH, K.METAL, K.METAL, { bottom: true });
+    }
   }
-  B.box(-w / 2, w / 2, d / 2, d / 2 + 2.8, 4.6, 4.85, K.METAL, K.METAL, { bottom: true });
-  for (let i = 0; i <= nd; i++) { const x = -w / 2 + (i * w) / nd; B.box(x - 0.1, x + 0.1, d / 2, d / 2 + 2.6, 4.2, 4.6, K.METAL, K.METAL); }
+  // the steel canopy along the street face, hung from the piers on brackets
+  B.box(-w / 2, w / 2, d / 2 + 0.4, d / 2 + 2.8, 4.6, 4.85, K.METAL, K.METAL, { bottom: true });
+  for (let i = 0; i <= nd; i++) { const x = -w / 2 + 0.45 + (i * (w - 0.9)) / nd; B.box(x - 0.1, x + 0.1, d / 2 + 0.4, d / 2 + 2.6, 4.2, 4.6, K.METAL, K.METAL, { bottom: true }); }
   return top + 3.4;
 }
 
@@ -1106,28 +1121,34 @@ function reef(B, L, R, H, lod) {
   const w = L.w, d = L.d;
   const fl = Math.max(2, Math.round(H / FH));
   const hMax = fl * FH;
-  B.prism(rrect(w - 0.6, d - 0.6, Math.min(w, d) * 0.3), 0, 0.9, K.STONE, K.PAVING);
+  // a gently rounded plinth (small corner radius, so no dome overhangs a corner)
+  B.prism(rrect(w - 0.6, d - 0.6, Math.min(w, d) * 0.12), 0, 0.9, K.STONE, K.PAVING);
   const domes = [];
   const nD = 2 + Math.floor(R() * 3);
   for (let i = 0; i < nD && domes.length < 5; i++) {
     const r = Math.min(w, d) * (0.22 + R() * 0.18);
-    const cx = (R() - 0.5) * (w - 2 * r - 1), cz = (R() - 0.5) * (d - 2 * r - 1);
+    const cx = (R() - 0.5) * Math.max(0, w - 2 * r * 1.08 - 1.6), cz = (R() - 0.5) * Math.max(0, d - 2 * r * 1.08 - 1.6);
     domes.push({ cx, cz, r });
   }
   domes.sort((a, b) => b.r - a.r);
   let top = 0;
   domes.forEach((dm, i) => {
-    const h = Math.max(4, hMax * (i === 0 ? 1 : 0.55 + R() * 0.35)) - dm.r * 0.6;
-    const prof = [[dm.r * 1.02, 0.9, K.STONE], [dm.r, 0.9, K.PUNCHED], [dm.r * 0.98, h, K.PUNCHED]];
-    for (let k = 1; k <= 7; k++) { const a = (k / 7) * (Math.PI / 2) * 0.9; prof.push([dm.r * Math.cos(a), h + dm.r * 0.75 * Math.sin(a), k % 2 ? K.GLASS : K.STONE]); }
-    const tr = dm.r * Math.cos((Math.PI / 2) * 0.9);
-    prof.push([tr * 0.8, h + dm.r * 0.75 * 0.99 + 0.3, K.LANTERN], [0.05, h + dm.r * 0.75 + 0.8, K.LANTERN]);
+    // the drum wall is at least 3.5 m tall whatever the dome's size (never inverted)
+    const h = Math.max(3.5, hMax * (i === 0 ? 1 : 0.55 + R() * 0.35) - dm.r * 0.6);
+    const r = dm.r, hb = h + 0.5;
+    // a battered foot onto the plinth, the drum, a proud shell belt, then the ribbed dome
+    const prof = [[r * 1.06, 0.9, K.STONE], [r, 1.4, K.STONE], [r * 0.98, h, K.PUNCHED], [r * 1.05, h, K.STONE], [r * 1.05, h + 0.42, K.STONE], [r * 0.98, hb, K.STONE]];
+    for (let k = 1; k <= 7; k++) { const a = (k / 7) * (Math.PI / 2) * 0.9; prof.push([r * 0.98 * Math.cos(a), hb + r * 0.75 * Math.sin(a), k % 2 ? K.GLASS : K.STONE]); }
+    const tr = r * 0.98 * Math.cos((Math.PI / 2) * 0.9), ty = hb + r * 0.75 * Math.sin((Math.PI / 2) * 0.9);
+    prof.push([tr * 1.25, ty + 0.05, K.STONE], [tr * 0.8, ty + 0.5, K.LANTERN], [0.05, ty + 0.9, K.LANTERN]);
     B.lathe(dm.cx, dm.cz, prof, lod ? 8 : 18);
-    top = Math.max(top, h + dm.r * 0.8);
+    top = Math.max(top, ty + 0.9);
   });
   if (!lod) {
-    // a shell canopy over the door toward the street
-    B.lathe(0, d / 2 - 1.2, [[2.6, 2.8, K.STONE], [2.4, 3.2, K.STONE], [0.05, 3.5, K.STONE]], 10);
+    // a shell canopy over the door toward the street: closed underside, on two slim posts
+    const zc = d / 2 - 1.2;
+    B.lathe(0, zc, [[0.05, 2.8, K.STONE], [2.6, 2.8, K.STONE], [2.4, 3.2, K.STONE], [0.05, 3.5, K.STONE]], 10);
+    for (const sx of [-1.9, 1.9]) B.lathe(sx, zc + 0.6, [[0.14, 0.9, K.METAL], [0.1, 2.85, K.METAL]], 6);
   }
   return top;
 }
@@ -1137,30 +1158,45 @@ function reef(B, L, R, H, lod) {
 function mansion(B, L, R, H, lod) {
   const w = L.w, d = L.d;
   const fl = Math.max(4, Math.round(H / FH));
-  const top = fl * FH;
-  B.box(-w / 2, w / 2, -d / 2, d / 2, 0, FH * 1.2, K.STONE, K.STONE, { noTop: true });
-  B.box(-w / 2 + 0.25, w / 2 - 0.25, d / 2 - 0.3, d / 2 - 0.2, 0.3, FH, K.GLASS, K.GLASS);
-  B.box(-w / 2, w / 2, -d / 2, d / 2, FH * 1.2, top, K.PUNCHED, K.STONE, { noTop: true });
+  const top = fl * FH, hb = FH * 1.2;
+  // rusticated base, proud of the upper walls; its top is the ledge the upper walls stand on
+  B.box(-w / 2 - 0.2, w / 2 + 0.2, -d / 2 - 0.2, d / 2 + 0.2, 0, hb, K.STONE, K.STONE);
+  B.box(-w / 2, w / 2, -d / 2, d / 2, hb, top, K.PUNCHED, K.STONE, { noTop: true });
   // cornice and mansard
-  B.box(-w / 2 - 0.5, w / 2 + 0.5, -d / 2 - 0.5, d / 2 + 0.6, top, top + 0.7, K.STONE, K.STONE, { bottom: true });
+  B.box(-w / 2 - 0.5, w / 2 + 0.5, -d / 2 - 0.5, d / 2 + 0.5, top, top + 0.7, K.STONE, K.STONE, { bottom: true });
   B.frustum(w, d, w - 3.2, d - 3.2, top + 0.7, top + 4.4, K.METAL, K.METAL);
   B.frustum(w - 3.2, d - 3.2, w - 5, d - 5, top + 4.4, top + 5.6, K.METAL, K.METAL);
   if (lod) return top + 5.6;
+  // glazed shopfronts in the base, set proud between the rusticated piers
+  const nb = Math.max(2, Math.floor(w / 5));
+  for (let i = 0; i < nb; i++) {
+    const x = -w / 2 + ((i + 0.5) * w) / nb, bw = (w / nb) * 0.34;
+    B.box(x - bw, x + bw, d / 2 + 0.2, d / 2 + 0.32, 0.45, hb - 0.55, K.GLASS, K.STONE);
+  }
   for (const k of [2, fl - 1]) {
     if (k < 2) continue;
     const y = k * FH;
     B.box(-w / 2, w / 2, d / 2, d / 2 + 1.1, y - 0.18, y, K.STONE, K.PAVING, { bottom: true });
     B.box(-w / 2, w / 2, d / 2 + 1.0, d / 2 + 1.1, y, y + 1.0, K.METAL, K.METAL);
   }
-  // dormers in the mansard
+  // pedimented dormers on both slopes of the mansard (fronts stand clear of the slope)
   const n = Math.max(2, Math.floor(w / 4.4));
   for (let i = 0; i < n; i++) {
     const x = -w / 2 + 2.2 + (i * (w - 4.4)) / Math.max(1, n - 1);
-    B.box(x - 0.8, x + 0.8, d / 2 - 1.9, d / 2 - 0.9, top + 1.1, top + 3.3, K.PUNCHED, K.METAL);
+    for (const sz of [1, -1]) {
+      const za = sz * (d / 2 - 0.35), zb = sz * (d / 2 - 2.1);
+      B.box(x - 0.8, x + 0.8, Math.min(za, zb), Math.max(za, zb), top + 1.0, top + 3.0, K.PUNCHED, K.METAL);
+      const pa = sz * (d / 2 - 0.25), pb = sz * (d / 2 - 2.1);
+      B.vprism([[x - 0.95, top + 3.0], [x + 0.95, top + 3.0], [x, top + 3.7]], Math.min(pa, pb), Math.max(pa, pb), K.METAL, K.STONE);
+    }
   }
-  // chimney stacks along the ridge
-  for (const sx of [-0.3, 0.3]) B.box(sx * w - 0.6, sx * w + 0.6, -0.8, 0.8, top + 5.6, top + 7.2, K.STONE, K.STONE);
-  return top + 7.2;
+  // chimney stacks on the mansard flat, with a proud cap
+  const cxs = w / 2 - 3.4 > 1 ? [-(w / 2 - 3.4), w / 2 - 3.4] : [0];
+  for (const cx of cxs) {
+    B.box(cx - 0.6, cx + 0.6, -0.8, 0.8, top + 5.6, top + 7.0, K.STONE, K.STONE);
+    B.box(cx - 0.72, cx + 0.72, -0.92, 0.92, top + 7.0, top + 7.3, K.STONE, K.STONE, { bottom: true });
+  }
+  return top + 7.3;
 }
 
 // Westmere: a gallery palazzo - rusticated base, a piano nobile of giant pilasters,
@@ -1168,17 +1204,24 @@ function mansion(B, L, R, H, lod) {
 function gallery(B, L, R, H, lod) {
   const w = L.w, d = L.d;
   const fl = Math.max(3, Math.round(H / FH));
-  const top = fl * FH;
-  B.box(-w / 2, w / 2, -d / 2, d / 2, 0, FH * 1.4, K.STONE, K.STONE, { noTop: true });
-  B.box(-w / 2, w / 2, -d / 2, d / 2, FH * 1.4, top, K.PUNCHED, K.STONE, { noTop: true });
+  const top = fl * FH, hb = FH * 1.4;
+  B.box(-w / 2, w / 2, -d / 2, d / 2, 0, hb, K.PUNCHED, K.STONE, { noTop: true });
+  // the string course between the base and the piano nobile
+  B.box(-w / 2 - 0.25, w / 2 + 0.25, -d / 2 - 0.25, d / 2 + 0.25, hb - 0.35, hb, K.STONE, K.STONE, { bottom: true });
+  B.box(-w / 2, w / 2, -d / 2, d / 2, hb, top, K.PUNCHED, K.STONE, { noTop: true });
   B.box(-w / 2 - 0.7, w / 2 + 0.7, -d / 2 - 0.7, d / 2 + 0.8, top, top + 1.1, K.STONE, K.STONE, { bottom: true });
   B.box(-w / 2 + 0.6, w / 2 - 0.6, -d / 2 + 0.6, d / 2 - 0.6, top + 1.1, top + 3.2, K.PUNCHED, K.STONE);
   if (lod) return top + 3.2;
+  // giant pilasters from the string course up into the cornice
   const n = Math.max(3, Math.round(w / 4.8));
   for (let i = 0; i <= n; i++) {
     const x = -w / 2 + 0.4 + (i * (w - 0.8)) / n;
-    B.box(x - 0.42, x + 0.42, d / 2, d / 2 + 0.45, FH * 1.4, top - 0.2, K.STONE, K.STONE);
+    B.box(x - 0.42, x + 0.42, d / 2, d / 2 + 0.45, hb, top, K.STONE, K.STONE);
   }
+  // the entrance porch: a balcony slab on two columns before a pair of timber doors
+  B.box(-1.4, 1.4, d / 2, d / 2 + 0.12, 0, hb - 1.2, K.TIMBER, K.STONE);
+  B.box(-2.6, 2.6, d / 2 + 0.25, d / 2 + 1.6, hb - 0.8, hb - 0.35, K.STONE, K.PAVING, { bottom: true });
+  for (const sx of [-2.1, 2.1]) B.lathe(sx, d / 2 + 1.1, [[0.3, 0, K.STONE], [0.24, 0.4, K.STONE], [0.2, hb - 1.0, K.STONE], [0.32, hb - 0.8, K.STONE]], 10);
   for (let i = 0; i <= Math.floor(w / 0.9); i++) { const x = -w / 2 + 0.8 + i * 0.9; if (x > w / 2 - 0.8) break; B.lathe(x, d / 2 + 0.2, [[0.14, top + 1.1, K.STONE], [0.08, top + 1.5, K.STONE], [0.14, top + 1.9, K.STONE]], 6); }
   B.box(-w / 2 + 0.4, w / 2 - 0.4, d / 2 - 0.1, d / 2 + 0.4, top + 1.9, top + 2.1, K.STONE, K.STONE, { bottom: true });
   return top + 3.2;
@@ -1192,13 +1235,17 @@ function museum(B, L, R, H, lod) {
   B.prism(rrect(w + 2, d + 2, 0.5), 0, 1.4, K.STONE, K.PAVING);
   B.box(-w / 2, w / 2, -d / 2, d / 2 - 8, 1.4, h, K.PUNCHED, K.STONE);
   B.box(-w / 2 - 0.6, w / 2 + 0.6, -d / 2 - 0.6, d / 2 - 7.4, h, h + 1.2, K.STONE, K.STONE, { bottom: true });
-  // central drum and dome
-  const r = Math.min(d * 0.32, 14);
-  B.lathe(0, -2, [[r + 0.6, h + 1.2, K.STONE], [r, h + 1.2, K.PUNCHED], [r, h + 8, K.PUNCHED], [r + 0.6, h + 8.4, K.STONE]], lod ? 12 : 28);
+  // central drum and dome, centred over the hall and kept inside its roof
+  const zc = -4, r = Math.max(4, Math.min(d * 0.32, 14, (d - 8) / 2 - 1.5, w / 2 - 2));
+  // drum: a chamfered foot (no flat ring lying on the cornice), a cornice ring on top closed to the dome
+  B.lathe(0, zc, [[r + 0.6, h + 1.2, K.STONE], [r, h + 1.6, K.STONE], [r, h + 8, K.PUNCHED], [r + 0.6, h + 8.4, K.STONE], [r, h + 8.4, K.STONE]], lod ? 12 : 28);
   const prof = [];
-  for (let i = 0; i <= 8; i++) { const a = (i / 8) * (Math.PI / 2) * 0.94; prof.push([r * Math.cos(a), h + 8.4 + r * 0.9 * Math.sin(a), K.GLASS]); }
-  B.lathe(0, -2, prof, lod ? 12 : 28);
-  B.lathe(0, -2, [[r * 0.2, h + 8.4 + r * 0.9, K.LANTERN], [r * 0.14, h + 11 + r * 0.9, K.LANTERN], [0.05, h + 12 + r * 0.9, K.STONE]], 10);
+  const aTop = (Math.PI / 2) * 0.94, yTop = h + 8.4 + r * 0.9 * Math.sin(aTop);
+  for (let i = 0; i <= 8; i++) { const a = (i / 8) * aTop; prof.push([r * Math.cos(a), h + 8.4 + r * 0.9 * Math.sin(a), i % 2 ? K.GLASS : K.METAL]); }
+  prof.push([0.05, yTop, K.STONE]);
+  B.lathe(0, zc, prof, lod ? 12 : 28);
+  // the lantern: closed underneath, glazed drum, a finial
+  B.lathe(0, zc, [[0.05, yTop, K.STONE], [r * 0.2, yTop, K.STONE], [r * 0.2, yTop + 0.3, K.LANTERN], [r * 0.14, yTop + 2.6, K.LANTERN], [0.05, yTop + 3.6, K.STONE]], 10);
   // portico: columns, entablature, pediment
   const pw = Math.min(34, w * 0.4);
   B.box(-pw / 2 - 1, pw / 2 + 1, d / 2 - 8, d / 2 - 0.5, h - 1.6, h, K.STONE, K.STONE, { bottom: true });
@@ -1209,10 +1256,10 @@ function museum(B, L, R, H, lod) {
       const x = -pw / 2 + (i * pw) / (n - 1);
       B.lathe(x, d / 2 - 1.6, [[0.85, 1.4, K.STONE], [0.75, 2.0, K.STONE], [0.62, h - 2.2, K.STONE], [0.9, h - 1.6, K.STONE]], 12);
     }
-    // the steps up to the portico
-    for (let k = 0; k < 4; k++) B.box(-pw / 2 - 2, pw / 2 + 2, d / 2 - 0.5 + k * 0.45, d / 2 + 0.2 + k * 0.45, 0, 1.4 - k * 0.35, K.STONE, K.PAVING);
+    // the steps down from the plinth, each tread its own block in front of the last
+    for (let k = 0; k < 3; k++) B.box(-pw / 2 - 2, pw / 2 + 2, d / 2 + 1 + k * 0.5, d / 2 + 1.5 + k * 0.5, 0, 1.4 - (k + 1) * 0.35, K.STONE, K.PAVING);
   }
-  return h + 12 + r * 0.9;
+  return yTop + 3.6;
 }
 
 // ---------------------------------------------------------------- driver --
