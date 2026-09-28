@@ -17,7 +17,7 @@ import { U } from '../core/uniforms.js';
 // closed convex pieces with outward winding. Chunked (4 km) for culling; the fine detail
 // (walls, vines, orchard trees) drops out beyond a few kilometres, the fields keep the read.
 
-const BX0 = -24000, BX1 = 16000, BZ0 = -26000, BZ1 = -7700, GS = 80, CH = 4000;
+const BX0 = -29000, BX1 = 16000, BZ0 = -26000, BZ1 = -2400, GS = 80, CH = 4000;
 const TAU = Math.PI * 2;
 const NX = Math.round((BX1 - BX0) / GS) + 1, NZ = Math.round((BZ1 - BZ0) / GS) + 1;
 const srgb = (r, g, b) => [r ** 2.2, g ** 2.2, b ** 2.2];
@@ -149,7 +149,7 @@ export function buildHillCountry(scene, { onComponent = null } = {}) {
     const dx = bx - ax, dz = bz - az, t = Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / (dx * dx + dz * dz || 1)));
     return Math.hypot(x - ax - dx * t, z - az - dz * t);
   };
-  const blocked = (x, z, townR = 2200) => {
+  const blocked = (x, z, townR = 1450) => {
     if (Math.max(Math.abs(x), Math.abs(z)) < INNER.half + 300) return true;
     for (const f of FAR_ISLANDS) if (Math.hypot(x - f[0], z - f[1]) < f[2] * 1.8) return true;
     for (const m of oc.massif) {
@@ -194,7 +194,7 @@ export function buildHillCountry(scene, { onComponent = null } = {}) {
   for (let z = BZ0 + 300; z < BZ1 - 300; z += 360) for (let x = BX0 + 300; x < BX1 - 300; x += 360) {
     const px = x + (rnd() - 0.5) * 240, pz = z + (rnd() - 0.5) * 240;
     const h = renderedHeight(px, pz);
-    if (h < 25 || h > 950 || blocked(px, pz, 2500)) continue;
+    if (h < 25 || h > 950 || blocked(px, pz, 1750)) continue;
     const [gx, gz] = slopeAt(px, pz), s = Math.hypot(gx, gz);
     if (s > 0.16) continue;
     // spurs and saddles: flat ground with a view; favour the kinder altitudes
@@ -202,7 +202,7 @@ export function buildHillCountry(scene, { onComponent = null } = {}) {
   }
   cands.sort((a, b) => b.score - a.score);
   for (const c of cands) {
-    if (villages.length >= 34) break;
+    if (villages.length >= 48) break;
     if (villages.some((v) => Math.hypot(v.x - c.x, v.z - c.z) < 1500)) continue;
     villages.push({ ...c, r: 80 + rnd() * 110 });
   }
@@ -211,7 +211,7 @@ export function buildHillCountry(scene, { onComponent = null } = {}) {
   // least-cost routes on the 80 m grid: steep grades are expensive, so the roads wind along
   // the contours and switch back up the slopes; shared cells become trunks (no doubled roads)
   const passable = new Uint8Array(NX * NZ);
-  for (let j = 0; j < NZ; j++) for (let i = 0; i < NX; i++) passable[j * NX + i] = H[j * NX + i] > 12 && !blocked(BX0 + i * GS, BZ0 + j * GS, 1900) ? 1 : 0;
+  for (let j = 0; j < NZ; j++) for (let i = 0; i < NX; i++) passable[j * NX + i] = H[j * NX + i] > 12 && !blocked(BX0 + i * GS, BZ0 + j * GS, 1300) ? 1 : 0;
   const onRoad = new Uint8Array(NX * NZ);
   const cellOf = (x, z) => Math.round((z - BZ0) / GS) * NX + Math.round((x - BX0) / GS);
   const gCost = new Float32Array(NX * NZ), from = new Int32Array(NX * NZ), stamp = new Int32Array(NX * NZ);
@@ -1049,6 +1049,8 @@ export function buildHillCountry(scene, { onComponent = null } = {}) {
     const stone = mk(C.stone.geometry(), detailMat, 'Hill country: plinths, terraces and retaining walls', true);
     const detail = mk(C.detail.geometry(), detailMat, 'Hill country: walls, vines and orchards', false);
     const drape = mk(C.drape.geometry(), drapeMat, 'Hill country: roads and fields', false);
+    // the lagoon's reflection pass draws the coarse land: the countryside is for the main view
+    for (const m of [arch, stone, detail, drape]) if (m) m.layers.set(1);
     if (arch) tris += arch.geometry.index.count / 3;
     if (stone) tris += stone.geometry.index.count / 3;
     if (detail) detailTris += detail.geometry.index.count / 3;
@@ -1071,7 +1073,7 @@ export function buildHillCountry(scene, { onComponent = null } = {}) {
   let detailR = 5000, farR = 28000;
   const shadowR = 8000;
   const api = {
-    lod, villages, shrines, farms, buildingSites, fieldSites, roads:allRoads, entrances, routes, villageCenters, orchardTrees, tris, detailTris, houses, fields, roadLen, isFree: (x, z, r) => free(x, z, r),
+    lod, villages, shrines, farms, buildingSites, fieldSites, roads:allRoads, entrances, routes, villageCenters, orchardTrees, lamps, tris, detailTris, houses, fields, roadLen, isFree: (x, z, r) => free(x, z, r),
     applyQuality(s) { const q = Math.max(0.4, Math.min(1, s.lowrise ?? 1)); detailR = 5000 * q; farR = 28000 * (0.7 + 0.3 * q); },
     update(dt, t, camera) {
       if (!camera) return;

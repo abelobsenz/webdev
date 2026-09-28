@@ -76,7 +76,7 @@ if(!rimOnly){
     if(r.route?.kind==='door-walk'){if(!walkControl)walkControl=r.route;if(r.route===walkControl)walkControlParts.push({geometry:r.geometry.clone()});}
   }});
   check(hill.entrances.length===hill.buildingSites.length,'every inhabited site has an entrance',{sites:hill.buildingSites.length,entrances:hill.entrances.length,failures:hill.buildingSites.filter(s=>s.accessFailure)});
-  check(hill.villageCenters.length===34,'all village centres composed',hill.villageCenters.length);
+  check(hill.villageCenters.length===hill.villages.length,'all village centres composed',hill.villageCenters.length);
   assert.equal(hill.shrines.length,7,'all seven original summit institutions remain');
   assert.ok(hill.shrines.some(s=>!s.observatory&&Math.hypot(s.x+2545.8673114329576,s.z+18944.588391557336)<.001),'the original monastery remains at its surveyed summit');
   check(hill.tris+hill.detailTris<4_200_000,'bounded hill geometry cost',hill.tris+hill.detailTris);

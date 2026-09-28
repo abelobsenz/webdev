@@ -1,5 +1,6 @@
 import { patchedMaterial, FACADE_GLSL } from './materials.js';
 import { NATURE_GLSL, NATURE_U } from './natureGlsl.js';
+import { HILL_U } from './hills/cover.js';
 
 // The ground of MERIDIAN: coral sand and reef, strand, meadow, rainforest canopy,
 // cloud forest, stratified basalt cliffs and the garden city's walks and lawns.
@@ -17,6 +18,14 @@ vec4 infoAt(vec2 xz) {
   vec2 uv = (xz + uInfoHalf) / (2.0 * uInfoHalf);
   if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) return vec4(-100.0, 0.0, -1.0, 0.0);
   return texture(uInfo, uv);
+}
+// the northern mainland's land cover (hills/cover.js): r woods, g bare rock, b alpine meadow, a mainland
+uniform sampler2D uHillCover;
+uniform vec4 uHillBox;
+vec4 hillCoverAt(vec2 xz) {
+  vec2 uv = (xz - uHillBox.xy) * uHillBox.zw;
+  if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) return vec4(0.0);
+  return texture(uHillCover, uv);
 }
 vec4 natureAt(vec2 xz, float h) {
   vec2 uv = (xz + uInfoHalf) / (2.0 * uInfoHalf);
@@ -156,6 +165,9 @@ const COLOR = /* glsl */ `
     float clear = smoothstep(0.52, 0.68, fbm2_3(wp.xz * 0.0011 + 17.0) + 0.35 * slope - 0.15 * m2);
     forestD *= 1.0 - clear * (0.35 + 0.55 * mountainZone) * (1.0 - cloudF * 0.7);
   }
+  // on the northern mainland the woods' own density (the trees stand exactly where it says)
+  vec4 hillC = info.z < 0.0 ? hillCoverAt(wp.xz) : vec4(0.0);
+  if (hillC.a > 0.5) forestD = hillC.r * (1.0 - nearStreet);
 
   // zone weights
   float beachTop = 1.5 + 1.3 * m2 + 1.4 * expo;
@@ -164,6 +176,8 @@ const COLOR = /* glsl */ `
   float rockT = slope + (m2 - 0.5) * 0.2 + (m3 - 0.5) * 0.08 * midF;
   float wRock = smoothstep(mix(0.30, 0.48, mountainZone), mix(0.44, 0.64, mountainZone), rockT) * smoothstep(0.3, 3.0, h);
   wRock = max(wRock, smoothstep(1850.0, 2250.0, h + m1 * 320.0) * 0.8);
+  // the bare rock and scree of the mainland's peaks and cliffs, broken by the turf between
+  wRock = max(wRock, hillC.g * smoothstep(0.3, 3.0, h) * mix(0.7, 1.0, smoothstep(0.35, 0.6, m3 + 0.25 * slope)));
 
   // ---------------- sand, wet sand and wrack line ----------------
   vec3 sandDry = mix(vec3(0.68, 0.62, 0.50), vec3(0.78, 0.72, 0.61), m2) * mix(1.0, 0.9 + 0.2 * m3, midF);
@@ -249,6 +263,14 @@ const COLOR = /* glsl */ `
     grass = mix(grass, vec3(0.2, 0.22, 0.08), strand * 0.55);
     grass = mix(grass, vec3(0.16, 0.17, 0.08), smoothstep(1700.0, 2000.0, h));    // montane heath
     {
+      // the mainland's alpine meadows above the tree line: tawny grass, heath and cushion
+      // plants in drifts (averaged to their tone once a drift is a few pixels)
+      float dr = mix(0.5, vnoise(wp.xz * 0.045 + 5.0), 1.0 - smoothstep(4.0, 14.0, fw));
+      vec3 alp = mix(vec3(0.23, 0.2, 0.1), vec3(0.13, 0.15, 0.06), dr);
+      alp = mix(alp, vec3(0.2, 0.13, 0.12), smoothstep(0.7, 0.85, vnoise(wp.xz * 0.013 - 3.0)) * 0.5);   // heather
+      grass = mix(grass, alp, hillC.b * 0.85);
+    }
+    {
       float mz = smoothstep(20.0, 160.0, h);
       float pa = fbm2_3(wp.xz * 0.0021 + 31.0);
       float pb = vnoise(wp.xz * 0.0063 - 17.0);
@@ -275,6 +297,8 @@ const COLOR = /* glsl */ `
     vec3 veg = mix(grass, floorC, forestD * 0.9 * (1.0 - outerL));
     vec3 wood = mix(grass * vec3(0.7, 0.84, 0.72), floorC, 0.18) * (0.9 + 0.2 * mix(0.5, vnoise(wp.xz / 23.0), 1.0 - smoothstep(4.0, 12.0, fw)));
     veg = mix(veg, wood, forestD * outerL * 0.8);
+    // under the mainland's woods: the shaded floor between the crowns (reads as the wood's mass)
+    veg = mix(veg, vec3(0.032, 0.058, 0.02) * (0.85 + 0.3 * m3), forestD * outerL * step(0.5, hillC.a) * 0.62);
     ao *= 1.0 - 0.12 * forestD * outerL;
     c = mix(c, veg, wVeg);
   }
@@ -341,7 +365,7 @@ const COLOR = /* glsl */ `
       }
     }
     float mossM = smoothstep(0.45, 0.75, vnoise(vec2(hc * 0.045, wp.y * 0.05)) + 0.35 * cloudF + 0.25 * (1.0 - slope));
-    rockC = mix(rockC, vec3(0.08, 0.14, 0.05), mossM * 0.65 * (1.0 - smoothstep(1900.0, 2250.0, h)));
+    rockC = mix(rockC, vec3(0.08, 0.14, 0.05), mossM * 0.65 * (1.0 - smoothstep(1900.0, 2250.0, h)) * (1.0 - 0.75 * hillC.g));
     vec3 upT = normalize(vec3(0.0, 1.0, 0.0) - Ng * Ng.y + vec3(1e-4));
     float db = vnoise(vec2((sy + 0.7) * 0.42, 3.1)) - vnoise(vec2((sy - 0.7) * 0.42, 3.1));
     float db2 = vnoise(vec2((sy + 2.0) * 0.085, 0.5)) - vnoise(vec2((sy - 2.0) * 0.085, 0.5));
@@ -607,7 +631,7 @@ const PRE_AERIAL = /* glsl */ `
 `;
 
 export function createTerrainShaderMaterial(infoTex, natureTex, half) {
-  const uniforms = { uInfo: { value: infoTex }, uNature: { value: natureTex }, uInfoHalf: { value: half }, uBloom: NATURE_U.uBloom, uStreets: NATURE_U.uStreets, uStreetFrame: NATURE_U.uStreetFrame, uStreetHalf: NATURE_U.uStreetHalf };
+  const uniforms = { uInfo: { value: infoTex }, uNature: { value: natureTex }, uInfoHalf: { value: half }, uBloom: NATURE_U.uBloom, uStreets: NATURE_U.uStreets, uStreetFrame: NATURE_U.uStreetFrame, uStreetHalf: NATURE_U.uStreetHalf, uHillCover: HILL_U.uHillCover, uHillBox: HILL_U.uHillBox };
   return patchedMaterial({ color: 0xffffff, roughness: 0.9, metalness: 0.0, envMapIntensity: 0.6 }, {
     key: 'terrain2',
     uniforms,

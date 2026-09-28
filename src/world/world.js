@@ -9,6 +9,7 @@ import { planCity, towerFootprint } from './urban.js';
 import { wardTowerDefs, wardBridgePaths, buildMetro, wardHeight } from './metro.js';
 import { buildSkyline } from './skyline.js';
 import { buildHillCountry } from './hillCountry.js';
+import { buildHills } from './hills/index.js';
 import { buildTransit } from './transit.js';
 import { buildRimForecourts } from './rimForecourts.js';
 import { signalLights } from './wardLandmarks.js';
@@ -202,6 +203,9 @@ export class World {
     this.trees = new TreeField(this.scene, this.settings);
     this.trees.build([...this.placeTrees(), ...planIslandTrees(this.skyline.isFree)]);   // + woods on the far islands' heights
     this.updaters.push({ applyQuality: (s) => this.trees.applyQuality(s), update: (dt, t) => this.trees.update(dt, t, this.app.camera) });
+    // the northern mainland's land cover, planted countryside and woods (hills/)
+    this.hills = buildHills(this);
+    this.updaters.push({ applyQuality: (s) => this.hills.applyQuality(s), update: (dt, t) => this.hills.update(dt, t, this.app.camera) });
     progress(0.78); await tick();
     // Floating gardens
     this.floating = buildFloatingIslands(FLOATING_ISLANDS, this.scene, this.trees);
