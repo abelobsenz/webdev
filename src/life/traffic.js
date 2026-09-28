@@ -490,8 +490,13 @@ export class Traffic {
         for (let s = 0; s < petal.route.length; s += 15) { petal.route.at(s, q, tmpT); const dd = (q.x - t.def.x) ** 2 + (q.z - t.def.z) ** 2; if (dd < bd) { bd = dd; near.copy(q); } }
         const out = new THREE.Vector3(near.x - t.def.x, 0, near.z - t.def.z).normalize();
         const localY = hp - t.baseY;
-        const rr = (t.collide ? t.collide(localY) : (t.def.radius || 60)) + 42;
+        // the collider is a smooth envelope; twisting / lobed facades bulge past it, so take the widest
+        // section over the pad's depth (hull hangs 5.5 m, cars hover above) with a 15% allowance
+        let rc = t.def.radius || 60;
+        if (t.collide) { rc = 0; for (let dy = -30; dy <= 30; dy += 10) rc = Math.max(rc, t.collide(localY + dy)); }
+        let rr = rc * 1.15 + 15 + 30;
         const pad = new THREE.Vector3(t.def.x + out.x * rr, hp, t.def.z + out.z * rr);
+        for (let k = 0; k < 12 && this.clear && this.clear.clearance(pad, { terrain: false, skyport: false }) < 26; k++) { rr += 8; pad.set(t.def.x + out.x * rr, hp, t.def.z + out.z * rr); }
         this.pads.push({ p: pad.clone(), r: 15, out: out.clone(), name: t.def.name || `tower-${t.def.seed}` });
         this.dockRamp(petal.route, pad.clone().add(new THREE.Vector3(0, 1.2, 0)), out, { name: `skydock-${t.def.seed}`, cars: 3, dwell: 14 });
       }
@@ -890,7 +895,7 @@ void main() {
 {
   vec3 col = vHoop.y < 0.5 ? vec3(0.45, 0.9, 0.86) : vec3(1.0, 0.8, 0.5);
   // a slow chase of light running along the corridor in the direction of travel
-  float chase = pow(fract(vHoop.x / 2600.0 - uTime * 0.045), 16.0);
+  float chase = pow(0.5 + 0.5 * cos(6.2831853 * (vHoop.x / 2600.0 - uTime * 0.045)), 16.0);   // smooth travelling crest, no sawtooth reset
   float dist = distance(vWPos, cameraPosition);
   float far = 1.0 - smoothstep(700.0, 1800.0, dist);
   float ringFar = 1.0 - smoothstep(250.0, 700.0, dist);
@@ -923,7 +928,7 @@ void main() {
     if (!this.pads.length) return;
     const parts = [];
     for (const pd of this.pads) {
-      const prof = [[0.2, -5.5], [4, -4.8], [11, -2.4], [pd.r, -0.4], [pd.r + 0.4, 0.2], [pd.r - 0.4, 0.7], [0.2, 0.7]].map(([r, y]) => new THREE.Vector2(r, y));
+      const prof = [[0, -5.5], [4, -4.8], [11, -2.4], [pd.r, -0.4], [pd.r + 0.4, 0.2], [pd.r - 0.4, 0.7], [0, 0.7]].map(([r, y]) => new THREE.Vector2(r, y));
       const g = new THREE.LatheGeometry(prof, 40);
       const ringG = new THREE.TorusGeometry(pd.r * 0.72, 0.18, 4, 48).rotateX(Math.PI / 2).translate(0, 0.75, 0);
       const pylon = new THREE.CylinderGeometry(0.25, 0.25, 3.5, 6).translate(pd.r - 1.2, 2.4, 0);
@@ -949,7 +954,7 @@ void main() {
         color: 'diffuseColor.rgb = vPad < 0.5 ? vec3(0.88, 0.87, 0.84) : vec3(0.1);',
         emissive: /* glsl */ `
 if (vPad > 0.5 && vPad < 1.5) totalEmissiveRadiance += vec3(0.45, 0.9, 0.86) * (0.25 + 1.4 * uCityLights) * (0.75 + 0.25 * sin(uTime * 1.5));
-if (vPad > 1.5) totalEmissiveRadiance += vec3(1.0, 0.25, 0.1) * (1.0 + 3.0 * uCityLights) * step(0.5, fract(uTime * 0.7));`,
+if (vPad > 1.5) totalEmissiveRadiance += vec3(1.0, 0.25, 0.1) * (1.0 + 3.0 * uCityLights) * (0.3 + 0.7 * pow(0.5 + 0.5 * sin(uTime * 2.2), 3.0));`,   // steady breathing beacon, never a hard blink
       },
     });
     const mesh = new THREE.Mesh(geo, mat);
