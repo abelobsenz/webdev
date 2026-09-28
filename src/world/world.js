@@ -206,7 +206,7 @@ export class World {
     // --- nature (vegetation after all architecture, so it can keep clear of it) ---
     this.clearance = buildClearance(this.scene, (x, z) => this.sampler.get(x, z));
     this.trees = new TreeField(this.scene, this.settings);
-    this.trees.build([...this.placeTrees(), ...planIslandTrees(this.skyline.isFree)]);   // + woods on the far islands' heights
+    this.trees.build([...this.placeTrees(), ...planIslandTrees(this.skyline.isFree), ...this.skyline.cityTrees]);   // + woods on the far islands' heights, island-city planting
     this.updaters.push({ applyQuality: (s) => this.trees.applyQuality(s), update: (dt, t) => this.trees.update(dt, t, this.app.camera) });
     // the northern mainland's land cover, planted countryside and woods (hills/)
     this.hills = buildHills(this);

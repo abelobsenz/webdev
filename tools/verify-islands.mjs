@@ -7,6 +7,7 @@ import { islandPrism, rectangle, pointSegmentDistance } from '../src/world/islan
 import { planIslandTrees } from '../src/world/islandTrees.js';
 import { SPECIES } from '../src/world/treeGeometry.js';
 import { auditGeometry } from './geometry-audit.mjs';
+import { auditSolids } from './island-kit-audit.mjs';
 
 const checks=[];
 const check=(name,fn)=>{fn();checks.push(name);};
@@ -69,13 +70,15 @@ const stats={triangles:result.tris,components:result.auditParts.length,foundatio
 for(const c of [...result.cities.islands,...result.cities.massif]){const costs={city:c.id,triangles:0,publicRoads:0,entranceStairs:0,accessLanes:0,foundations:0,otherArchitecture:0};for(const p of result.auditParts){if(!p.name.startsWith(c.name))continue;const g=p.geometry,n=(g.index?.count??g.attributes.position.count)/3;costs.triangles+=n;const kind=g.userData.islandStair?'entranceStairs':g.userData.islandRoad?(g.userData.islandAccess?'accessLanes':'publicRoads'):g.userData.islandFoundation?'foundations':'otherArchitecture';costs[kind]+=n;}stats.geometryCosts.push(costs);}
 
 check('every structural component is closed and consistently wound',()=>{
-  const failures=[];for(const p of result.auditParts){const a=topology(p.geometry);if(!valid(a)&&failures.length<15)failures.push({name:p.name,stair:p.geometry.userData.islandStair,...a});}
+  // (island-kit geometries hold many touching solids: each recorded solid is audited on its own)
+  const failures=[];for(const p of result.auditParts){if(p.geometry.userData.islandSolids){for(const f of auditSolids(p.geometry,{limit:5}).failures)if(failures.length<15)failures.push({name:p.name,...f});continue;}const a=topology(p.geometry);if(!valid(a)&&failures.length<15)failures.push({name:p.name,stair:p.geometry.userData.islandStair,...a});}
   assert.equal(failures.length,0,JSON.stringify(failures,null,2));
 });
 check('foundations support their actual projected geometry',()=>{
   const failures=[];for(const p of foundations){const a=foundationSupport(p.geometry);if((a.air>.025||a.buried>.08)&&failures.length<15)failures.push({name:p.geometry.userData.islandFoundation.name,air:a.air,buried:a.buried});}
   assert.equal(failures.length,0,JSON.stringify(failures,null,2));
-  const temple=foundations.find(p=>p.geometry.userData.islandFoundation.name==='Thalassa sea temple foundation');assert(temple);
+  // (Thalassa's temple acropolis is audited with the island-kit solids: tools/verify-island-cities.mjs)
+  const temple=foundations.find(p=>p.geometry.userData.islandFoundation.name==='Austral spire foundation');assert(temple);
   const raised=temple.geometry.clone().translate(0,100,0);assert(foundationSupport(raised).air>40,'an unsupported translated foundation must be detected');
   const austral=foundations.find(p=>p.geometry.userData.islandFoundation.name==='Austral spire foundation');assert(austral);
   assert(foundationSupport(austral.geometry).top>50,'the podium must clear its uphill perimeter');
