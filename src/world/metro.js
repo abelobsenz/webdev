@@ -386,6 +386,29 @@ function frames(pts) {
   });
 }
 
+// one mooring in the frame of the sea wall (x along it, z outward, y up; the wall face is
+// at z = 0 at the quay kerb and battered outward below): bronze bollard on the quay, mooring
+// ring on its staple and a stone scupper spout, each closed, vertex-coloured
+let _mooringGeo = null, _mooringMat = null;
+function mooringGeometry() {
+  if (_mooringGeo) return _mooringGeo;
+  const col = (g, c) => { const n = g.attributes.position.count, a = new Float32Array(n * 3); for (let i = 0; i < n; i++) { a[i * 3] = c[0]; a[i * 3 + 1] = c[1]; a[i * 3 + 2] = c[2]; } g.setAttribute('color', new THREE.BufferAttribute(a, 3)); return g; };
+  const prep = (g) => { g = g.index ? g.toNonIndexed() : g; g.deleteAttribute('uv'); return g; };
+  const bronze = [0.23, 0.2, 0.17], stone = [0.62, 0.6, 0.56];
+  const prof = [[0.001, QUAY_Y - 0.03], [0.17, QUAY_Y - 0.03], [0.17, QUAY_Y + 0.05], [0.14, QUAY_Y + 0.12], [0.13, QUAY_Y + 0.46], [0.2, QUAY_Y + 0.52], [0.2, QUAY_Y + 0.6], [0.12, QUAY_Y + 0.68], [0.001, QUAY_Y + 0.7]].map(([r, y]) => new THREE.Vector2(r, y));
+  const bol = prep(new THREE.LatheGeometry(prof, 10)); bol.translate(0, 0, -1.3);
+  // the wall face at y: z = 2.4 (QUAY_Y - 0.7 - y) / (QUAY_Y + 15.3)
+  const face = (y) => (2.4 * (QUAY_Y - 0.7 - y)) / (QUAY_Y + 15.3);
+  const ring = prep(new THREE.TorusGeometry(0.2, 0.032, 5, 12)); ring.translate(0, QUAY_Y - 1.7, face(QUAY_Y - 1.7) + 0.07);
+  const stap = prep(new THREE.BoxGeometry(0.14, 0.12, 0.16)); stap.translate(0, QUAY_Y - 1.44, face(QUAY_Y - 1.44) + 0.02);
+  const spout = prep(new THREE.BoxGeometry(0.34, 0.2, 0.42)); spout.translate(4.5, QUAY_Y - 1.1, face(QUAY_Y - 1.1) + 0.12);
+  const g = mergeGeometries([col(bol, bronze), col(ring, bronze), col(stap, bronze), col(spout, stone)]);
+  return (_mooringGeo = g);
+}
+function mooringMaterial() {
+  return (_mooringMat ??= new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.45, metalness: 0.35 }));
+}
+
 function buildPlatform(rec, P) {
   const { w, sea, levels, design } = rec;
   const ox = w.x, oz = w.z;
@@ -504,7 +527,7 @@ function buildPlatform(rec, P) {
         for (let j = 0; j < n; j++) {
           const o0 = -0.6 + (j * 90) / n, o1 = -0.6 + ((j + 1) * 90) / n;
           const yt = QUAY_Y + 0.4 - (2.6 * (j + 0.5)) / n;
-          boxAlong(walls, f.p, f.t, f.n, sgn * 3.2 - 2.6, sgn * 3.2 + 2.6, o0, o1, SEABED_Y - 0.5, yt, 1, ox, oz);
+          boxAlong(walls, f.p, f.t, f.n, sgn * 2.4 - 2.8, sgn * 2.4 + 2.8, o0, o1, SEABED_Y - 0.5, yt, 1, ox, oz);
         }
       }
     } else {
@@ -524,15 +547,25 @@ function buildPlatform(rec, P) {
       }
     }
   }
-  // ---- quay stairs up the terrace wall (near detail) and their far wedges
+  // ---- quay stairs up the terrace wall (near detail) and their far wedges. The flight is
+  // let 0.1 m into the wall (the wall curves away from the straight flight), every tread has
+  // a stone nosing that oversails its riser, and a stepped balustrade closes the open side.
   for (const f of quayStairs) {
-    const n = 20;
+    const n = 20, oi = -0.1, oo = 3.3, ob = 3.02;
     for (let j = 0; j < n; j++) {
-      const u0 = -11 + j * 0.5;
-      boxAlong(near, f.p, f.t, f.n, u0, u0 + 0.5, 0.15, 3.3, QUAY_Y - 0.1, QUAY_Y + (j + 1) * 0.3, 1, ox, oz, 9);
+      const u0 = -11 + j * 0.5, yt = Math.min(QUAY_Y + (j + 1) * 0.3, WARD_TOP - 0.02);
+      boxAlong(near, f.p, f.t, f.n, u0 + 0.05, u0 + 0.5, oi, ob, QUAY_Y - 0.1, yt, 1, ox, oz, 9);
+      boxAlong(near, f.p, f.t, f.n, u0, u0 + 0.05, oi, ob, QUAY_Y - 0.1, yt - 0.05, 1, ox, oz, 9);
+      boxAlong(near, f.p, f.t, f.n, u0 - 0.04, u0 + 0.05, oi, ob, yt - 0.05, yt, 1, ox, oz, 1);
+      boxAlong(near, f.p, f.t, f.n, u0, u0 + 0.5, ob, oo, QUAY_Y - 0.1, yt + 0.95, 1, ox, oz);
     }
-    boxAlong(near, f.p, f.t, f.n, -0.5, 1.6, 0.15, 3.3, QUAY_Y - 0.1, WARD_TOP - 0.02, 1, ox, oz, 9);
-    boxAlong(far, f.p, f.t, f.n, -11, 1.6, 0.15, 3.3, QUAY_Y - 0.1, WARD_TOP - 0.02, 1, ox, oz, 1);
+    // the landing runs the width of the parapet gap (u -1.1..2.7), closed by an end balustrade
+    boxAlong(near, f.p, f.t, f.n, -1, 2.9, oi, ob, QUAY_Y - 0.1, WARD_TOP - 0.02, 1, ox, oz, 9);
+    boxAlong(near, f.p, f.t, f.n, -1, 2.9, ob, oo, QUAY_Y - 0.1, WARD_TOP + 0.93, 1, ox, oz);
+    boxAlong(near, f.p, f.t, f.n, 2.9, 3.15, oi, oo, QUAY_Y - 0.1, WARD_TOP + 0.93, 1, ox, oz);
+    // far: the same flight in five blocks and the landing
+    for (let i = 0; i < 5; i++) boxAlong(far, f.p, f.t, f.n, -11 + i * 2, -9 + i * 2, oi, oo, QUAY_Y - 0.1, Math.min(QUAY_Y + (4 * i + 4) * 0.3, WARD_TOP - 0.02), 1, ox, oz);
+    boxAlong(far, f.p, f.t, f.n, -1, 3.15, oi, oo, QUAY_Y - 0.1, WARD_TOP - 0.02, 1, ox, oz);
   }
   // ---- stairs between the terraces
   for (const s of P.stairs) {
@@ -545,12 +578,17 @@ function buildPlatform(rec, P) {
     const n = Math.max(4, Math.round(rise / 0.3));
     const run = n * 0.42;
     for (let j = 0; j < n; j++) {
-      const u0 = -run - 1.2 + j * 0.42;
-      boxAlong(near, s.wall, side, t, -s.hw, s.hw, u0, u0 + 0.42 + (j === n - 1 ? 1.25 : 0), s.y0 - 0.1, s.y0 + (j + 1) * (rise / n) - 0.02, 1, ox, oz, 9);
+      const u0 = -run - 1.2 + j * 0.42, yt = s.y0 + (j + 1) * (rise / n) - 0.02;
+      boxAlong(near, s.wall, side, t, -s.hw, s.hw, u0 + 0.05, u0 + 0.42 + (j === n - 1 ? 1.25 : 0), s.y0 - 0.1, yt, 1, ox, oz, 9);
+      boxAlong(near, s.wall, side, t, -s.hw, s.hw, u0, u0 + 0.05, s.y0 - 0.1, yt - 0.05, 1, ox, oz, 9);
+      boxAlong(near, s.wall, side, t, -s.hw, s.hw, u0 - 0.04, u0 + 0.05, yt - 0.05, yt, 1, ox, oz, 1);
     }
-    // cheek walls and their far massing
+    // cheek walls and their far massing (three blocks following the flight)
     for (const sg of [-1, 1]) boxAlong(near, s.wall, side, t, sg * s.hw - 0.5, sg * s.hw + 0.5, -run - 1.2, 0.1, s.y0 - 0.1, s.y1 + 0.45, 1, ox, oz);
-    boxAlong(far, s.wall, side, t, -s.hw - 0.5, s.hw + 0.5, -run - 1.2, 0.1, s.y0 - 0.1, s.y0 + rise * 0.5, 1, ox, oz);
+    for (let i = 0; i < 3; i++) {
+      const u0 = -run - 1.2 + (run * i) / 3, u1 = i === 2 ? 0.1 : -run - 1.2 + (run * (i + 1)) / 3;
+      boxAlong(far, s.wall, side, t, -s.hw - 0.5, s.hw + 0.5, u0, u1, s.y0 - 0.1, s.y0 + (rise * (i + 1)) / 3 - 0.02, 1, ox, oz);
+    }
   }
   // ---- the reef apron under the water round the ward and its basins
   const seabed = [];
@@ -602,7 +640,29 @@ function buildPlatform(rec, P) {
       }
     }
   }
-  return { walls, quay, grounds, sand, seabed, near, far, quayLamps, quayWalks, spans, quayStairs, seaLoops, topLoops };
+  // ---- moorings every 14 m round the sea walls, between the lamps: a bollard on the quay,
+  // a ring on the wall face and a scupper spout draining the quay
+  const moorings = [];
+  {
+    const q = sea.clone().combine(levels[0].grid, (s, t) => Math.max(s, -t));
+    const inSpan = (x, z) => spans.some((s) => s.pts.some((p) => Math.abs(p[0] - x) < 14 && Math.abs(p[1] - z) < 14));
+    for (const loop of seaLoops) {
+      const fr = frames([...loop, loop[0]]);
+      let acc = 7;
+      for (let i = 1; i < fr.length; i++) {
+        acc += Math.hypot(fr[i].p[0] - fr[i - 1].p[0], fr[i].p[1] - fr[i - 1].p[1]);
+        if (acc < 14) continue;
+        const f = fr[i];
+        const x = f.p[0] - f.n[0] * 1.3, z = f.p[1] - f.n[1] * 1.3;
+        if (q.sample(x, z) > -0.9 || q.sample(f.p[0] - f.n[0] * 2.4, f.p[1] - f.n[1] * 2.4) > -0.5) continue;
+        if (seaGapAt(f.p[0], f.p[1]) > 0 || inSpan(f.p[0], f.p[1])) continue;
+        if (quayLamps.some((l) => Math.abs(l.lx - x) < 4 && Math.abs(l.lz - z) < 4)) continue;
+        acc = 0;
+        moorings.push({ x: ox + f.p[0], z: oz + f.p[1], yaw: Math.atan2(f.n[0], f.n[1]) });
+      }
+    }
+  }
+  return { walls, quay, grounds, sand, seabed, near, far, quayLamps, quayWalks, spans, quayStairs, seaLoops, topLoops, moorings };
 }
 
 // ------------------------------------------------------------ ground material --
@@ -934,6 +994,14 @@ export function buildMetro(scene, towers, bridgePaths, ground, world = null) {
       const farM = G.far.length ? add(new THREE.Mesh(mergeClean(G.far), platMat), `${w.name} stairs far`) : null;
       nearM.castShadow = true; nearM.receiveShadow = true;
       out.lod.push({ near: nearM, far: farM, center: new THREE.Vector3(w.x, 10, w.z), radius: rec.R(0) * 1.1 });
+    }
+    if (G.moorings.length) {
+      const mm = new THREE.InstancedMesh(mooringGeometry(), mooringMaterial(), G.moorings.length);
+      const o3 = new THREE.Object3D();
+      G.moorings.forEach((m, i) => { o3.position.set(m.x, 0, m.z); o3.rotation.set(0, m.yaw, 0); o3.updateMatrix(); mm.setMatrixAt(i, o3.matrix); });
+      mm.computeBoundingSphere();
+      add(mm, `${w.name} moorings`);
+      out.lod.push({ near: mm, far: null, center: new THREE.Vector3(w.x, 10, w.z), radius: rec.R(0) * 1.15, nearDist: 1200 });
     }
     lap('platform meshes');
     // ---- signature buildings, canal bridges, harbour furniture
