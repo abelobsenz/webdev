@@ -98,6 +98,7 @@ function boxGeo(x0, x1, y0, y1, z0, z1, kind, topKind = kind) {
 /** A double-sided curved surface (wings, petals): fn(u, v) -> Vector3, thickness t. */
 function bladeGeo(nu, nv, fn, t, kindFront, kindBack) {
   const parts = [];
+  const skins = { 1: [], '-1': [] }, mid = [];
   for (const side of [1, -1]) {
     const pos = [], fac = [], idx = [];
     for (let j = 0; j <= nv; j++) for (let i = 0; i <= nu; i++) {
@@ -107,6 +108,8 @@ function bladeGeo(nu, nv, fn, t, kindFront, kindBack) {
       const dv = fn(u, Math.min(v + 0.01, 1)).sub(fn(u, Math.max(v - 0.01, 0)));
       const n = new THREE.Vector3().crossVectors(du, dv).normalize().multiplyScalar(side * t * 0.5);
       pos.push(p.x + n.x, p.y + n.y, p.z + n.z);
+      skins[side].push(new THREE.Vector3(p.x + n.x, p.y + n.y, p.z + n.z));
+      if (side > 0) mid.push(p);
       fac.push(u * 120, v * 40 + p.y * 0.0, side > 0 ? kindFront : kindBack);
     }
     const cols = nu + 1;
@@ -122,7 +125,65 @@ function bladeGeo(nu, nv, fn, t, kindFront, kindBack) {
     g.computeVertexNormals();
     parts.push(g);
   }
+  // the rim: a flat strip joining the two skins round all four edges, so no sliver is open
+  const cols = nu + 1, F = skins[1], B = skins['-1'];
+  const rim = [];
+  const edge = (a, b, ref) => rim.push(quadGeo(F[a], F[b], B[b], B[a], mid[a].clone().add(mid[b]).multiplyScalar(0.5).sub(mid[ref]), kindBack));
+  for (let i = 0; i < nu; i++) { edge(i, i + 1, cols + i); edge(nv * cols + i, nv * cols + i + 1, (nv - 1) * cols + i); }
+  for (let j = 0; j < nv; j++) { edge(j * cols, (j + 1) * cols, j * cols + 1); edge(j * cols + nu, (j + 1) * cols + nu, j * cols + nu - 1); }
+  parts.push(...rim);
   return mergeClean(parts);
+}
+
+/** One flat quad (own vertices, so its normal stays crisp), wound to face along `want`. */
+function quadGeo(a, b, c, d, want, kind) {
+  const n = new THREE.Vector3().subVectors(c, a).cross(new THREE.Vector3().subVectors(d, b));
+  const flip = n.dot(want) < 0;
+  const q = flip ? [a, d, c, b] : [a, b, c, d];
+  const pos = [], fac = [];
+  const L = a.distanceTo(b);
+  for (let k = 0; k < 4; k++) { pos.push(q[k].x, q[k].y, q[k].z); fac.push(k === 1 || k === 2 ? L : 0, q[k].y, kind); }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('aFacade', new THREE.Float32BufferAttribute(fac, 3));
+  g.setIndex([0, 2, 1, 0, 3, 2]);
+  g.computeVertexNormals();
+  // computeVertexNormals follows the index winding: make sure it agrees with `want`
+  if (new THREE.Vector3().fromBufferAttribute(g.attributes.normal, 0).dot(want) < 0) { g.setIndex([0, 1, 2, 0, 2, 3]); g.computeVertexNormals(); }
+  return g;
+}
+
+/**
+ * A closed band (parapet, ledge): outer wall, top, inner wall and underside between two
+ * matching polygons in plan. Every face is its own quad.
+ */
+function bandGeo(outer, inner, yb, yt, kind, kindTop = kind) {
+  const parts = [], n = outer.length;
+  const V = (p, y) => new THREE.Vector3(p[0], y, p[1]);
+  for (let i = 0; i < n; i++) {
+    const o0 = outer[i], o1 = outer[(i + 1) % n], i0 = inner[i], i1 = inner[(i + 1) % n];
+    const out = new THREE.Vector3((o0[0] + o1[0]) / 2 - (i0[0] + i1[0]) / 2, 0, (o0[1] + o1[1]) / 2 - (i0[1] + i1[1]) / 2);
+    parts.push(quadGeo(V(o0, yb), V(o1, yb), V(o1, yt), V(o0, yt), out, kind));
+    parts.push(quadGeo(V(i0, yt), V(i1, yt), V(i1, yb), V(i0, yb), out.clone().negate(), kind));
+    parts.push(quadGeo(V(o0, yt), V(o1, yt), V(i1, yt), V(i0, yt), new THREE.Vector3(0, 1, 0), kindTop));
+    parts.push(quadGeo(V(o0, yb), V(o1, yb), V(i1, yb), V(i0, yb), new THREE.Vector3(0, -1, 0), kind));
+  }
+  return mergeClean(parts);
+}
+
+/** Radial collision envelope by height band: collide(y) must cover every part, not only the core. */
+function envelope(top, bands = 64) {
+  const e = new Float32Array(bands);
+  const band = (y) => Math.min(bands - 1, Math.max(0, Math.floor((y / top) * bands)));
+  return {
+    add(y, r) { const b = band(y); if (r > e[b]) e[b] = r; },
+    addPts(pts, r) { for (const p of pts) this.add(p.y, Math.hypot(p.x, p.z) + r); },
+    fn(base) {
+      // widen each band by its neighbours so a sparse sample never leaves a hole
+      const s = Float32Array.from(e, (v, b) => Math.max(v, e[b - 1] || 0, e[b + 1] || 0));
+      return (y) => Math.max(base(y), s[band(y)]);
+    },
+  };
 }
 
 const polyN = (n, r, ph = 0, sx = 1, sz = 1) => { const o = []; for (let i = 0; i < n; i++) { const a = ph + (i / n) * TAU; o.push([Math.cos(a) * r * sx, Math.sin(a) * r * sz]); } return o; };
@@ -131,6 +192,7 @@ const polyN = (n, r, ph = 0, sx = 1, sz = 1) => { const o = []; for (let i = 0; 
 function crystalTower(t, rnd) {
   const H = t.height, R = t.radius;
   const parts = [];
+  const env = envelope(H);
   const shaft = (cx, cz, h, r0, lean, leanA, ph, glowFrom) => {
     const secs = [];
     const levels = 26;
@@ -142,6 +204,7 @@ function crystalTower(t, rnd) {
       const off = lean * y;
       const pts = polyN(6, r, tw).map(([x, z]) => [cx + x + Math.cos(leanA) * off, cz + z + Math.sin(leanA) * off]);
       secs.push({ y, pts, kind: v > glowFrom ? 0 : 0 });
+      for (const [x, z] of pts) env.add(y, Math.hypot(x, z) + Math.max(1.2, r0 * 0.035));
     }
     parts.push(facetLoft(secs));
     // the termination: six facets closing to a point
@@ -178,7 +241,8 @@ function crystalTower(t, rnd) {
     parts.push(facetLoft([{ y: y0, pts: hex, kind: 1 }, { y: y1, pts: hex, kind: 1 }], { capTop: true, kindTop: s === 2 ? 3 : 9 }));
   }
   void main;
-  return { geo: mergeClean(parts), top: H, collide: (y) => (y < H * 0.8 ? R * 0.48 * (1 - 0.3 * Math.pow(y / H, 2)) : R * 0.2) };
+  for (let y = 0; y <= 9; y += 3) env.add(y, R * 1.18);
+  return { geo: mergeClean(parts), top: H, collide: env.fn((y) => (y < H * 0.8 ? R * 0.48 * (1 - 0.3 * Math.pow(Math.max(y, 0) / H, 2)) : R * 0.2)) };
 }
 
 // --------------------------------------------------------------------- twin --
@@ -204,13 +268,13 @@ function twinTower(t, rnd) {
       }
       secs.push({ y, pts, kind: v > 0.82 ? 2 : 0 });
     }
-    parts.push(loftSections(secs, { capTop: false }));
+    parts.push(loftSections(secs, { capTop: true, kindTop: 2 }));
     // tide lines: lit rings every 72 m
     for (let y = 60; y < H * 0.84; y += 72) {
       const v = y / (H * 0.9);
       const k = (1 - 0.55 * v) * (1 + 0.25 * Math.exp(-v * 12));
       const ring = [];
-      for (let i = 0; i <= 64; i++) { const a = (i / 64) * TAU; ring.push(new THREE.Vector3(spine(v, s) + Math.cos(a) * (rx * k + 1.4), y, Math.sin(a) * (rz * k + 1.4))); }
+      for (let i = 0; i <= 64; i++) { const a = (i / 64) * TAU; ring.push(new THREE.Vector3(spine(v, s) + Math.cos(a) * (rx * k * 1.036 + 1.0), y, Math.sin(a) * (rz * k * 1.036 + 1.0))); }
       parts.push(sweepTube(ring, () => 1.1, 5, { kind: 2 }));
     }
   }
@@ -229,10 +293,10 @@ function twinTower(t, rnd) {
   for (let i = 0; i < 40; i++) { const a = (i / 40) * TAU; const c = Math.cos(a); plinth.push([Math.sign(c) * d0 + Math.cos(a) * R * 0.95, Math.sin(a) * R * 0.95]); }
   parts.push(loftSections([{ y: -4, pts: plinth, kind: 5 }, { y: 10, pts: plinth, kind: 5 }, { y: 10.8, pts: plinth.map(([x, z]) => [x * 1.01, z * 1.02]), kind: 1 }], { capTop: false }));
   parts.push(capGeo(plinth.map(([x, z]) => [x * 1.01, z * 1.02]), 10.8, 1));
-  const pool = [];
-  for (let i = 0; i < 32; i++) { const a = (i / 32) * TAU; pool.push([Math.cos(a) * d0 * 0.55, Math.sin(a) * R * 0.5]); }
-  parts.push(loftSections([{ y: 10.8, pts: pool, kind: 1 }, { y: 11.3, pts: pool, kind: 1 }], { capTop: false }));
-  parts.push(capGeo(pool, 11.1, 6));
+  // the pool: a kerb (outer face, top, inner face) round a sunken water surface, clear of both feet
+  const pr = R * 0.46, psx = (d0 * 0.46) / pr;
+  parts.push(latheFacade([{ r: pr, y: 10.6, kind: 1 }, { r: pr, y: 11.6, kind: 1 }, { r: pr - 1.2, y: 11.6, kind: 1 }, { r: pr - 1.2, y: 11.1, kind: 1 }], 48, { sx: psx }));
+  parts.push(latheFacade([{ r: pr - 1.2, y: 11.1, kind: 6 }, { r: 0.1, y: 11.1, kind: 6 }], 48, { sx: psx }));
   return { geo: mergeClean(parts), top: H * 1.06, collide: (y) => (y < H * 0.85 ? d0 * (1 - Math.pow(y / (H * 0.9), 1.5)) + rx : R * 0.4) };
 }
 
@@ -254,7 +318,7 @@ function receiverTower(t, rnd) {
   parts.push(loftSections(secs, { capTop: false }));
   // the receiver: a glowing drum banded in dark metal
   const rr = R * 0.5, y0 = shaftTop, y1 = shaftTop + H * 0.08;
-  parts.push(latheFacade([{ r: R * 0.34, y: y0 - 2, kind: 10 }, { r: rr, y: y0 + 4, kind: 10 }, { r: rr, y: y1 - 4, kind: 2 }, { r: R * 0.36, y: y1 + 3, kind: 10 }], 48));
+  parts.push(latheFacade([{ r: 0.1, y: y0 - 2.4, kind: 10 }, { r: R * 0.34, y: y0 - 2, kind: 10 }, { r: rr, y: y0 + 4, kind: 10 }, { r: rr, y: y1 - 4, kind: 2 }, { r: R * 0.36, y: y1 + 3, kind: 10 }], 48));
   for (let k = 1; k < 6; k++) {
     const y = y0 + 4 + ((y1 - y0 - 8) * k) / 6;
     const ring = [];
@@ -380,13 +444,16 @@ function mastTower(t, rnd) {
     const a = (k / 3) * TAU + Math.PI / 6;
     const p0 = new THREE.Vector3(Math.cos(a) * rh, yh, Math.sin(a) * rh), p1 = new THREE.Vector3(Math.cos(a) * (rh + 26), yh + 2, Math.sin(a) * (rh + 26));
     parts.push(sweepTube([p0, p1], () => 3, 8, { kind: 1 }));
-    parts.push(latheFacade([{ r: 5, y: -2, kind: 1 }, { r: 5.5, y: 0, kind: 2 }, { r: 4, y: 2, kind: 1 }], 12).translate(p1.x, p1.y, p1.z));
+    parts.push(latheFacade([{ r: 0.1, y: -3.2, kind: 1 }, { r: 5, y: -2, kind: 1 }, { r: 5.5, y: 0, kind: 2 }, { r: 4, y: 2, kind: 1 }, { r: 0.1, y: 2.6, kind: 1 }], 12).translate(p1.x, p1.y, p1.z));
     berths.push({ a, r: rh + 26, y: yh + 2 });
   }
   parts.push(latheFacade([{ r: R * 0.2, y: H * 0.92, kind: 1 }, { r: R * 0.06, y: H * 0.98, kind: 1 }, { r: 0.4, y: H * 1.05, kind: 2 }], 16));
   // podium
   parts.push(latheFacade([{ r: R * 1.6, y: -6, kind: 1 }, { r: R * 1.6, y: 2, kind: 1 }, { r: R * 1.5, y: 2.3, kind: 9 }, { r: R * 1.2, y: 2.4, kind: 9 }, { r: R * 1.18, y: 9, kind: 5 }, { r: R * 1.1, y: 9.3, kind: 3 }, { r: 0.2, y: 9.5, kind: 3 }], 72));
-  return { geo: mergeClean(parts), top: H * 1.05, berths, collide: (y) => (y < H * 0.9 ? rAt(y) * 1.1 : R * 0.2) };
+  const env = envelope(H * 1.05);
+  for (let y = -4; y < H * 0.13; y += 4) env.add(y, R * (1.45 - 0.9 * Math.pow(Math.max(y + 4, 0) / (H * 0.13), 0.7) + 0.16));
+  for (let y = yh - 8; y <= yh + 8; y += 4) env.add(y, rh + 26 + 6);
+  return { geo: mergeClean(parts), top: H * 1.05, berths, collide: env.fn((y) => (y < H * 0.9 ? rAt(Math.max(y, 0)) * 1.1 : R * 0.2)) };
 }
 
 // -------------------------------------------------------------------- coral --
@@ -403,6 +470,8 @@ function coralTower(t, rnd) {
   prof.push({ r: R * 0.5, y: trunkTop + 30, kind: 5 }, { r: 0.4, y: trunkTop + 34, kind: 1 });
   parts.push(latheFacade(prof, 40));
   const tips = [];
+  const env = envelope(H * 1.02);
+  for (const p of prof) env.add(p.y, p.r);
   const branch = (p0, dir, len, r0, depth) => {
     const pts = [p0.clone()];
     const d = dir.clone();
@@ -414,6 +483,7 @@ function coralTower(t, rnd) {
       pts.push(p);
     }
     parts.push(sweepTube(pts, (u) => r0 * (1 - 0.45 * u), 12, { kind: 5 }));
+    env.addPts(pts, r0 * 1.3);
     // lit polyp at the tip, habitation pods along the way
     const tip = pts[pts.length - 1];
     parts.push(latheFacade([{ r: 0.2, y: -r0 * 0.9, kind: 1 }, { r: r0 * 0.95, y: -r0 * 0.3, kind: 0 }, { r: r0 * 1.0, y: r0 * 0.4, kind: 2 }, { r: r0 * 0.4, y: r0 * 1.1, kind: 2 }, { r: 0.1, y: r0 * 1.3, kind: 2 }], 16).translate(tip.x, tip.y, tip.z));
@@ -440,7 +510,7 @@ function coralTower(t, rnd) {
   }
   // root flare podium
   parts.push(latheFacade([{ r: R * 1.95, y: -6, kind: 1 }, { r: R * 1.95, y: 1, kind: 1 }, { r: R * 1.85, y: 1.3, kind: 3 }, { r: 0.2, y: 1.6, kind: 3 }], 56));
-  return { geo: mergeClean(parts), top: H * 1.02, tips, collide: (y) => (y < trunkTop ? R * 1.0 : R * 0.6) };
+  return { geo: mergeClean(parts), top: H * 1.02, tips, collide: env.fn((y) => (y < trunkTop ? R * 1.0 : R * 0.6)) };
 }
 
 // --------------------------------------------------------------------- deco --
@@ -456,8 +526,7 @@ function decoTower(t, rnd) {
     const o = oct(hw, ch);
     parts.push(facetLoft([{ y: y0 - (v0 === 0 ? 6 : 0), pts: o, kind: 0 }, { y: y1, pts: o, kind: 0 }], { capTop: true, kindTop: 3 }));
     // ledge and parapet at every setback
-    const ol = oct(hw + 1.6, ch + 0.6);
-    parts.push(facetLoft([{ y: y1 - 3, pts: ol, kind: 1 }, { y: y1 + 1.2, pts: ol, kind: 1 }]));
+    parts.push(bandGeo(oct(hw + 1.6, ch + 0.6), oct(hw - 0.9, ch - 0.25), y1 - 3, y1 + 1.2, 1));
     // fins: five per face, up the whole tier
     for (let fce = 0; fce < 4; fce++) {
       const a = (fce / 4) * TAU;
@@ -478,17 +547,19 @@ function decoTower(t, rnd) {
   const lhw = lastHw * 0.78;
   parts.push(facetLoft([{ y: y0, pts: oct(lhw * 0.7, lhw * 0.2), kind: 2 }, { y: y1, pts: oct(lhw * 0.62, lhw * 0.18), kind: 2 }], { capTop: true, kindTop: 2 }));
   for (let k = 0; k < 16; k++) {
-    const a = (k / 16) * TAU;
-    const arc = [];
-    for (let i = 0; i <= 10; i++) {
-      const s = i / 10;
-      const y = y0 + (y1 - y0) * (s < 0.5 ? s * 1.6 : 0.8 + (s - 0.5) * 0.4);
-      arc.push(new THREE.Vector3(Math.cos(a) * lhw, s < 0.5 ? y : y0 + (y1 - y0) * (1.6 - s * 1.2), Math.sin(a) * lhw));
-    }
+    const a = (k / 16) * TAU, a2 = ((k + 1) / 16) * TAU;
     parts.push(sweepTube([new THREE.Vector3(Math.cos(a) * lhw, y0, Math.sin(a) * lhw), new THREE.Vector3(Math.cos(a) * lhw * 0.9, y1 + 6, Math.sin(a) * lhw * 0.9)], () => 1.6, 6, { kind: 1 }));
-    void arc;
+    // a pointed arch springing from this post to the next, its crown under the spire's collar
+    const arc = [], ys = y0 + (y1 - y0) * 0.55, yc = y1 + 2.5;
+    for (let i = 0; i <= 12; i++) {
+      const s = i / 12, aa = a + (a2 - a) * s;
+      const y = ys + (yc - ys) * Math.sin(Math.PI * Math.min(s, 1 - s)) ** 0.7;
+      const f = 1 - 0.1 * (y - y0) / (y1 + 6 - y0); // follow the posts' inward lean
+      arc.push(new THREE.Vector3(Math.cos(aa) * lhw * f, y, Math.sin(aa) * lhw * f));
+    }
+    parts.push(sweepTube(arc, () => 0.9, 5, { kind: 2 }));
   }
-  parts.push(latheFacade([{ r: lhw * 1.05, y: y1 + 4, kind: 1 }, { r: lhw * 1.05, y: y1 + 8, kind: 1 }, { r: lhw * 0.5, y: y1 + 20, kind: 1 }, { r: R * 0.05, y: H * 0.99, kind: 1 }, { r: 0.4, y: H * 1.05, kind: 2 }], 16));
+  parts.push(latheFacade([{ r: 0.2, y: y1 + 3.8, kind: 1 }, { r: lhw * 1.05, y: y1 + 4, kind: 1 }, { r: lhw * 1.05, y: y1 + 8, kind: 1 }, { r: lhw * 0.5, y: y1 + 20, kind: 1 }, { r: R * 0.05, y: H * 0.99, kind: 1 }, { r: 0.4, y: H * 1.05, kind: 2 }], 16));
   // podium with grand stairs
   parts.push(latheFacade([{ r: R * 1.1, y: -6, kind: 1 }, { r: R * 1.1, y: 1.5, kind: 1 }, { r: R * 1.05, y: 1.7, kind: 9 }, { r: R * 0.95, y: 1.8, kind: 9 }, { r: R * 0.93, y: 10, kind: 5 }, { r: R * 0.85, y: 10.3, kind: 3 }, { r: 0.2, y: 10.5, kind: 3 }], 8, { phase: Math.PI / 8 }));
   return { geo: mergeClean(parts), top: H * 1.05, collide: (y) => (y < H * 0.86 ? R * 0.62 : R * 0.3) };
