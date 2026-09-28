@@ -19,7 +19,7 @@ export const U = {
   uHaze: { value: 1.0 },                     // aerosol density multiplier
   uCloudShadow: { value: 1.0 },              // enable cloud-shadow term
   uCloudOffset: { value: new THREE.Vector2(0, 0) },
-  uCloudCoverage: { value: 0.42 },
+  uCloudCoverage: { value: 0.26 },
   uCameraAltitude: { value: 0 },
   uWind: { value: new THREE.Vector2(0.8, 0.3) },
   // --- rendering agent: volumetric cloud shadow map (see src/life/clouds.js) ---
