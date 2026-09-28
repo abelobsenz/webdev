@@ -52,14 +52,20 @@ export function frameAt(path, k) {
   return { t, side };
 }
 
-/** A gateway astride the deck: two tapered pylons joined by a shallow arch with a lantern. */
-function portal(parts, p, side, base) {
-  const h = 13.5, half = 15.8;
+/**
+ * A gateway astride the deck: two tapered pylons joined by a shallow arch with a lantern.
+ * With `ground` the pylons stand clear of the parapets on their own footings on the ground
+ * (their foot buried, the top closed); without it they spring from the deck level (bridges).
+ */
+function portal(parts, p, side, base, ground = null) {
+  const h = 13.5, half = ground ? 17.2 : 15.8;
   for (const s of [-1, 1]) {
     const c = p.clone().addScaledVector(side, s * half);
+    const foot = ground ? Math.min(ground(c.x, c.z), base - 1.4) : base - 1;
     const pyl = latheFacade([
-      { r: 1.9, y: base - 1, kind: 1 }, { r: 1.7, y: base + 1.2, kind: 1 }, { r: 1.2, y: base + h * 0.72, kind: 1 },
-      { r: 1.35, y: base + h * 0.74, kind: 2 }, { r: 1.2, y: base + h * 0.8, kind: 1 }, { r: 0.35, y: base + h, kind: 1 }, { r: 0.05, y: base + h + 1.5, kind: 1 },
+      ...(ground ? [{ r: 0.1, y: foot - 1.2, kind: 1 }, { r: 2.3, y: foot - 1.2, kind: 1 }, { r: 2.3, y: foot + 0.6, kind: 1 }, { r: 1.95, y: foot + 0.9, kind: 1 }] : [{ r: 1.9, y: foot, kind: 1 }]),
+      { r: 1.7, y: base + 1.2, kind: 1 }, { r: 1.2, y: base + h * 0.72, kind: 1 },
+      { r: 1.35, y: base + h * 0.74, kind: 2 }, { r: 1.2, y: base + h * 0.8, kind: 1 }, { r: 0.35, y: base + h, kind: 1 }, { r: 0.02, y: base + h + 1.5, kind: 1 },
     ], 12);
     pyl.translate(c.x, 0, c.z);
     parts.push(pyl);
@@ -254,8 +260,10 @@ function buildPromenades(groundHeight) {
     }
     // gateways at both ends, stations where the tube comes down
     const f0 = frameAt(path, 3), f1 = frameAt(path, N - 2);
-    portal(parts, path[3], f0.side, path[3].y + 0.2);
-    portal(parts, path[N - 1], f1.side, path[N - 1].y + 0.2);
+    // the pylons stand clear of the parapets on their own footings (at 15.8 m they overhung
+    // the deck's edge fascia, their feet in mid-air beside it)
+    portal(parts, path[3], f0.side, path[3].y + 0.2, groundHeight);
+    portal(parts, path[N - 1], f1.side, path[N - 1].y + 0.2, groundHeight);
     // terminals: the line runs into the pod through its portal ring. On the plaza the
     // pod sits on the paving beside the deck; on the island it sits on the landing
     // square's platform, with the pod reaching on into town.
