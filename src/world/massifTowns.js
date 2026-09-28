@@ -465,7 +465,7 @@ export function buildMassifTowns(scene, towns, lights) {
   let tris = 0;
   towns.forEach((m, i) => {
     const { baseGeo, nearGeo, center } = buildTown(m, mulberry32(3030 + i * 19), lights);
-    const mat = createFacadeMaterial(m.palette, 950 + i, { litFrac: 0.62, band: 128 });
+    const mat = createFacadeMaterial('fieldstone', 950 + i, { litFrac: 0.62, band: 128 });
     const mk = (geo, name) => {
       const me = new THREE.Mesh(geo, mat);
       me.name = name;

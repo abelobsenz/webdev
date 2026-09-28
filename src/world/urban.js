@@ -682,6 +682,8 @@ function streetSeed(st) {
   return h >>> 0;
 }
 
+function polyLength(pts) { let L = 0; for (let i = 1; i < pts.length; i++) L += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]); return L; }
+
 /** How far a rim arcology's forecourt terrace reaches beyond its town core (towerBase). */
 export const RIM_TERRACE = 17;
 

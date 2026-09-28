@@ -30,6 +30,8 @@ export const PALETTES = {
   sand: { glass: [0.50, 0.56, 0.60], rib: [0.88, 0.82, 0.72], light: [1.0, 0.70, 0.44], vein: [1.0, 0.78, 0.5] },
   // Westmere: warm white marble with dark bronze glass
   marble: { glass: [0.44, 0.46, 0.48], rib: [0.97, 0.95, 0.91], light: [1.0, 0.82, 0.6], vein: [1.0, 0.85, 0.6] },
+  // the massif towns: local fieldstone and slate, so their terraces don't read as white contour lines
+  fieldstone: { glass: [0.42, 0.46, 0.48], rib: [0.58, 0.54, 0.47], light: [1.0, 0.78, 0.52], vein: [1.0, 0.8, 0.55] },
 };
 
 const FACADE_PARS = /* glsl */ `

@@ -23,7 +23,7 @@ const srgb = (r, g, b) => [r ** 2.2, g ** 2.2, b ** 2.2];
 const FIELD_COL = {
   1: srgb(0.64, 0.56, 0.34), // ripe grain
   2: srgb(0.38, 0.48, 0.24), // green crop
-  3: srgb(0.48, 0.43, 0.58), // lavender
+  3: srgb(0.42, 0.40, 0.49), // lavender
   4: srgb(0.41, 0.33, 0.25), // ploughed
   5: srgb(0.45, 0.41, 0.29), // vineyard ground
   6: srgb(0.35, 0.46, 0.24), // orchard grass
@@ -660,6 +660,27 @@ export function buildHillCountry(scene) {
       diffuseColor.rgb *= mix(1.0, 1.0 - amp * 0.5 + amp * s, fade);
     }
     diffuseColor.rgb *= 0.93 + 0.07 * sin(vHC.x * 0.05 + vHC.y * 0.11);
+  }
+}`,
+      // the rows stand proud: a bump across them (ridges and furrows), faded with the pixel footprint
+      normal: /* glsl */ `
+{
+  float hk = floor(vHC.z + 0.5);
+  float per = hk < 0.5 ? 0.0 : hk < 1.5 ? 1.1 : hk < 2.5 ? 0.9 : hk < 3.5 ? 1.8 : hk < 4.5 ? 0.8 : hk < 5.5 ? 2.6 : hk < 6.5 ? 7.0 : 0.0;
+  if (per > 0.0) {
+    float fw = max(fwidth(vHC.y), 1e-4);
+    float amp = (hk > 2.5 && hk < 3.5 ? 0.45 : hk > 4.5 && hk < 5.5 ? 0.5 : 0.2) * clamp(1.0 - 2.0 * fw / per, 0.0, 1.0);
+    float dh = -amp * 3.14159 / per * sin(6.2832 * vHC.y / per);
+    vec3 dpx = dFdx(vWPos), dpy = dFdy(vWPos);
+    float dvx = dFdx(vHC.y), dvy = dFdy(vHC.y);
+    vec3 Nw = normalize(vWNrm);
+    vec3 r1 = cross(dpy, Nw), r2 = cross(Nw, dpx);
+    float det = dot(dpx, r1);
+    if (abs(det) > 1e-10 && amp > 0.0) {
+      vec3 gv = (dvx * r1 + dvy * r2) / det;
+      vec3 nb = Nw - gv * dh;
+      if (dot(nb, nb) > 1e-8) normal = normalize((viewMatrix * vec4(normalize(nb), 0.0)).xyz);
+    }
   }
 }`,
     },

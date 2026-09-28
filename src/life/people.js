@@ -203,6 +203,9 @@ const NORMAL = /* glsl */ `
   if (amp > 0.0 && dot(nn, nn) > 1e-24) normal = normalize(nn);
 }`;
 
+// share of the planned crowd actually placed on every walk (a quarter keeps streets lively and cheap)
+const POPULATION = 0.25;
+
 export class People {
   constructor(scene, settings, world) {
     this.scene = scene;
@@ -448,12 +451,18 @@ export class People {
     this.material = mats[0];
     this.meshes = [];
     let total = 0;
+    const _v = new THREE.Vector3();
+    const rowSph = new Map();
+    const rowSphere = (row) => {
+      if (!rowSph.has(row)) { const b = new THREE.Box3(); for (const q of paths[row].pts) b.expandByPoint(q); rowSph.set(row, b.getBoundingSphere(new THREE.Sphere())); }
+      return rowSph.get(row);
+    };
     for (const g of groups) {
       const P0 = [], P1 = [];
       for (const r of g.rows) {
         const L = lengths[r.row];
         const P = paths[r.row];
-        const n = Math.max(1, Math.round(L * r.density * (P.half > 6 ? 1.6 : 1)));
+        const n = Math.max(1, Math.round(L * r.density * (P.half > 6 ? 1.6 : 1) * POPULATION));
         // walkers keep to lanes 0.8 m apart; everyone in a lane walks the same way at the
         // same pace, evenly spaced, so no one walks through anyone in their own lane, and
         // the lanes of the two directions lie on opposite sides of the centre line.
@@ -477,21 +486,34 @@ export class People {
         for (let j = 0; j < nIdle; j++) person(((j + rnd() * 0.5) / nIdle + ph) * cycle, 0, idleLat * (rnd() < 0.5 ? -1 : 1));
       }
       if (!P0.length) continue;
-      const a0 = new THREE.InstancedBufferAttribute(new Float32Array(P0), 4), a1 = new THREE.InstancedBufferAttribute(new Float32Array(P1), 4);
-      geoSets.forEach((geo, far) => {
+      const addMesh = (p0, p1, far, center, radius) => {
+        const geo = geoSets[far];
         const ig = new THREE.InstancedBufferGeometry();
         ig.index = geo.index;
         for (const k of Object.keys(geo.attributes)) ig.setAttribute(k, geo.attributes[k]);
-        ig.setAttribute('aP0', a0);
-        ig.setAttribute('aP1', a1);
-        ig.instanceCount = P0.length / 4;
+        ig.setAttribute('aP0', new THREE.InstancedBufferAttribute(new Float32Array(p0), 4));
+        ig.setAttribute('aP1', new THREE.InstancedBufferAttribute(new Float32Array(p1), 4));
+        ig.instanceCount = p0.length / 4;
         const mesh = new THREE.Mesh(ig, mats[far]);
         mesh.frustumCulled = false;
         mesh.layers.set(1);
-        mesh.userData = { center: g.center, radius: g.radius, count: ig.instanceCount, far: !!far };
+        mesh.userData = { center, radius, count: ig.instanceCount, far: !!far };
         scene.add(mesh);
         this.meshes.push(mesh);
-      });
+      };
+      // the far set draws the whole district; the near (full-body) set is split into ~300 m cells
+      // by the walkers' rows, so only the cells round the camera pay for full bodies
+      addMesh(P0, P1, 1, g.center, g.radius);
+      const cells = new Map();
+      for (let i = 0; i < P0.length / 4; i++) {
+        const sp = rowSphere(P0[i * 4]);
+        const key = `${Math.floor(sp.center.x / 300)},${Math.floor(sp.center.z / 300)}`;
+        if (!cells.has(key)) cells.set(key, { p0: [], p1: [], box: new THREE.Box3() });
+        const c = cells.get(key);
+        for (let j = 0; j < 4; j++) { c.p0.push(P0[i * 4 + j]); c.p1.push(P1[i * 4 + j]); }
+        c.box.expandByPoint(_v.copy(sp.center).addScalar(sp.radius)).expandByPoint(_v.copy(sp.center).addScalar(-sp.radius));
+      }
+      for (const c of cells.values()) { const sp = c.box.getBoundingSphere(new THREE.Sphere()); addMesh(c.p0, c.p1, 0, sp.center, sp.radius); }
       total += P0.length / 4;
     }
     this.total = total;

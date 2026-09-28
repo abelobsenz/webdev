@@ -157,6 +157,7 @@ export class World {
     this.rimCourts = buildRimForecourts(this.scene, this.towers, raw, bridgeAvoid);
     this.updaters.push({ update: () => this.app.camera && this.rimCourts.update(this.app.camera) });
     this.streetscape = buildStreetscape(this.scene, this.plan, raw, [...this.infra.promLamps, ...this.rimCourts.lamps]);
+    this.colliders.push(...(this.streetscape.colliders || []));   // square fountains, obelisks, kiosks
     // Greater Meridian: the Outer Wards (platforms, their towns, landmarks, bridges, stations)
     this.metro = buildMetro(this.scene, this.wardTowers, this.wardBridgePaths.map((b) => b), gh, this);
     this.wardTowns = { placements: this.metro.towns.flatMap((t) => t.placements), isFree: (x, z, r) => this.metro.isFree(x, z, r) };
