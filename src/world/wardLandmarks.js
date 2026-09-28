@@ -207,37 +207,54 @@ function campanile(B, L, y, lod) {
 function heliodrome(B, parts, L, y, lod) {
   const { x, z, rot, s } = L;
   B.frame(x, y, z, -rot + Math.PI / 2);
-  // five tiers of golden stone with a stair up every face
-  const tiers = 5, th = 7;
+  // five tiers of golden stone with a stair up every face; each tier carries a moulded
+  // cornice and a rhythm of pilasters so the faces read as masonry, not as slabs
+  const tiers = 5, th = 7, sw = 7;
   for (let k = 0; k < tiers; k++) {
-    const w = s - k * 16;
-    B.prism(rrect(w, w, 1.5), -0.5 + k * th, (k + 1) * th, K.STONE, K.PAVING);
-    if (!lod) B.walls(rrect(w - 1.2, w - 1.2, 1.2), (k + 1) * th, (k + 1) * th + 0.9, K.STONE);
+    const w = s - k * 16, t = (k + 1) * th;
+    B.prism(rrect(w, w, 1.5), -0.5 + k * th, t, K.STONE, K.PAVING);
+    if (lod) continue;
+    B.walls(rrect(w - 1.2, w - 1.2, 1.2), t, t + 0.9, K.STONE);
+    B.prism(rrect(w + 1.0, w + 1.0, 2.0), t - 1.3, t - 0.35, K.STONE, K.STONE, { bottom: true });
+    const y0 = k === 0 ? -0.5 : k * th;
+    for (let f = 0; f < 4; f++) {
+      B.frame(x, y, z, -rot + Math.PI / 2 + (f * Math.PI) / 2);
+      for (let u = -w / 2 + 5; u <= w / 2 - 5 + 1e-6; u += 8) {
+        if (Math.abs(u) < sw + 3) continue;
+        B.box(u - 0.7, u + 0.7, w / 2 - 0.2, w / 2 + 0.5, y0, t - 1.3, K.STONE, K.STONE);
+      }
+    }
+    B.frame(x, y, z, -rot + Math.PI / 2);
   }
+  const rTop = (s - (tiers - 1) * 16) / 2;
   for (let f = 0; f < 4; f++) {
     const a = (f / 4) * TAU;
     const c = Math.cos(a), sn = Math.sin(a);
-    // the stair: a ramp of steps from the plaza to the summit
+    const P = (u, v) => [u * sn + v * c, -u * c + v * sn];
+    // the stair: a ramp of steps from the plaza to the summit, between stepped cheek walls
     const n = lod ? 1 : 40;
     for (let i = 0; i < n; i++) {
       const t0 = i / n, t1 = (i + 1) / n;
-      const r0 = s / 2 + 12 - t0 * (s / 2 + 12 - (s - (tiers - 1) * 16) / 2), r1 = s / 2 + 12 - t1 * (s / 2 + 12 - (s - (tiers - 1) * 16) / 2);
+      const r0 = s / 2 + 12 - t0 * (s / 2 + 12 - rTop), r1 = s / 2 + 12 - t1 * (s / 2 + 12 - rTop);
       const y1 = t1 * tiers * th;
-      const q = [[-7, r0], [7, r0], [7, r1], [-7, r1]].map(([u, v]) => [u * sn + v * c * 1, -u * c + v * sn]);
-      B.prism(q, -0.5, y1, K.STONE, K.PAVING);
+      B.prism([P(-sw, r0), P(sw, r0), P(sw, r1), P(-sw, r1)], -0.5, y1, K.STONE, K.PAVING);
+      if (!lod) for (const e of [-1, 1]) B.prism([P(e * sw, r0), P(e * (sw + 1.2), r0), P(e * (sw + 1.2), r1), P(e * sw, r1)], -0.5, y1 + 1.0, K.STONE, K.STONE);
     }
   }
-  // the golden sun on a ring of columns
+  // the golden sun on a ring of columns, the ring kept inside the summit terrace
   const top = tiers * th;
-  const sr = s * 0.16;
+  const sr = s * 0.16, rr = rTop - 2.5, er = rr + 1.6, cH = sr * 0.9, eTop = top + sr * 1.2;
   const n = 12;
+  B.lathe(0, 0, [[er, top - 0.3, K.STONE], [er, top + 0.6, K.STONE], [0.1, top + 0.6, K.PAVING]], 32);
   for (let k = 0; k < n; k++) {
-    const a = (k / n) * TAU;
-    B.lathe(Math.cos(a) * sr * 1.3, Math.sin(a) * sr * 1.3, [[0.9, top, K.STONE], [0.7, top + sr * 0.9, K.STONE], [1.0, top + sr * 1.0, K.STONE]], 8);
+    const a = ((k + 0.5) / n) * TAU;
+    B.lathe(Math.cos(a) * rr, Math.sin(a) * rr, [[1.1, top + 0.6, K.STONE], [0.9, top + 1.4, K.STONE], [0.7, top + cH, K.STONE], [1.0, top + sr, K.STONE]], 8);
   }
-  B.lathe(0, 0, [[sr * 1.45, top + sr * 1.0, K.STONE], [sr * 1.45, top + sr * 1.2, K.STONE], [0.1, top + sr * 1.2, K.STONE]], 32);
+  B.lathe(0, 0, [[er, top + sr, K.STONE], [er, eTop, K.STONE], [0.1, eTop, K.STONE]], 32);
+  if (!lod) B.lathe(0, 0, [[er - 0.2, top + sr - 0.6, K.STONE], [er - 0.2, top + sr, K.STONE], [0.1, top + sr, K.STONE]], 32);
+  const R = rr * 0.9, cy = eTop + R * 0.97;
   const prof = [];
-  for (let i = 0; i <= 16; i++) { const a = -Math.PI / 2 + (i / 16) * Math.PI; prof.push([Math.max(0.05, sr * Math.cos(a)), top + sr * 2.25 + sr * Math.sin(a), K.LANTERN]); }
+  for (let i = 0; i <= 16; i++) { const a = -Math.PI / 2 + (i / 16) * Math.PI; prof.push([Math.max(0.05, R * Math.cos(a)), cy + R * Math.sin(a), K.LANTERN]); }
   B.lathe(0, 0, prof, lod ? 16 : 36);
   void parts;
 }
@@ -329,18 +346,55 @@ function terminal(B, L, y, lod) {
 function triumphalArch(B, L, y, lod) {
   const { x, z, w, h } = L;
   B.frame(x, y, z, Math.PI / 2);       // the passage runs along the Museum Mile (east-west)
-  const dp = 24, ow = w * 0.36, pier = (w - ow) / 2;
-  for (const s of [-1, 1]) B.box(s > 0 ? ow / 2 : -w / 2, s > 0 ? w / 2 : -ow / 2, -dp / 2, dp / 2, -0.5, h * 0.72, K.STONE, K.STONE);
-  B.box(-w / 2 - 0.8, w / 2 + 0.8, -dp / 2 - 0.8, dp / 2 + 0.8, h * 0.72, h * 0.76, K.STONE, K.STONE, { bottom: true });
-  B.box(-w / 2, w / 2, -dp / 2, dp / 2, h * 0.76, h, K.PUNCHED, K.STONE);
-  B.c = Math.cos(Math.PI / 2 + Math.PI / 2); B.s = Math.sin(Math.PI);
-  B.frame(x, y, z, Math.PI);
-  B.vault(-dp / 2, dp / 2, -ow / 2, ow / 2, h * 0.52, h * 0.2, K.STONE, lod ? 6 : 12);
-  B.frame(x, y, z, Math.PI / 2);
+  const dp = 24, ow = w * 0.36, top = h * 0.72, spring = h * 0.5, rise = ow / 2;
+  const crown = Math.min(spring + rise, top - 1.2);
+  const ry = crown - spring;
+  for (const s of [-1, 1]) {
+    const x0 = s > 0 ? ow / 2 : -w / 2, x1 = s > 0 ? w / 2 : -ow / 2;
+    B.box(x0, x1, -dp / 2, dp / 2, -0.5, top, K.STONE, K.STONE);
+    if (!lod) {
+      // stepped plinth round each pier (flush with the passage walls)
+      const o0 = s > 0 ? 0 : 2.6, o1 = s > 0 ? 2.6 : 0;
+      B.box(x0 - o0, x1 + o1, -dp / 2 - 2.6, dp / 2 + 2.6, -0.5, 0.6, K.STONE, K.PAVING);
+      B.box(x0 - o0 * 0.6, x1 + o1 * 0.6, -dp / 2 - 1.9, dp / 2 + 1.9, 0.6, 1.4, K.STONE, K.STONE);
+      // impost band at the springing, on both faces and inside the passage
+      B.box(x0 - (s < 0 ? 0 : 0.35), x1 + (s > 0 ? 0 : 0.35), -dp / 2 - 0.35, dp / 2 + 0.35, spring - 1.0, spring, K.STONE, K.STONE, { bottom: true });
+    }
+  }
+  // the arch: a solid spandrel block whose semicircular soffit closes the passage head
+  const seg = lod ? 8 : 20, arc = [];
+  for (let i = 0; i <= seg; i++) { const t = (i / seg) * Math.PI; arc.push([(ow / 2) * Math.cos(t), spring + ry * Math.sin(t)]); }
+  B.vprism([[ow / 2, top], [-ow / 2, top], ...arc.slice().reverse()], -dp / 2, dp / 2, K.STONE);
+  B.box(-w / 2 - 0.8, w / 2 + 0.8, -dp / 2 - 2.2, dp / 2 + 2.2, top, top + 1.6, K.STONE, K.STONE, { bottom: true });
+  B.box(-w / 2, w / 2, -dp / 2, dp / 2, top + 1.6, h, K.STONE, K.STONE);
+  B.box(-w / 2 - 0.6, w / 2 + 0.6, -dp / 2 - 0.6, dp / 2 + 0.6, h, h + 1.2, K.STONE, K.STONE, { bottom: true });
   if (!lod) {
-    // engaged columns on both faces, a quadriga of light on the attic
-    for (const fz of [-1, 1]) for (const cx of [-w / 2 + 2, -ow / 2 - 2, ow / 2 + 2, w / 2 - 2]) B.lathe(cx, fz * (dp / 2 + 0.8), [[1.0, 0, K.STONE], [0.85, 1, K.STONE], [0.75, h * 0.7, K.STONE], [1.1, h * 0.72, K.STONE]], 10);
-    B.box(-6, 6, -3, 3, h, h + 5, K.LANTERN, K.STONE);
+    // archivolt and keystone on both faces
+    const ring = [];
+    for (let i = 0; i <= seg; i++) { const t = (i / seg) * Math.PI; ring.push([(ow / 2 + 1.1) * Math.cos(t), spring + (ry + 1.1) * Math.sin(t)]); }
+    for (let i = seg; i >= 0; i--) ring.push([arc[i][0], arc[i][1]]);
+    for (const fz of [-1, 1]) {
+      const z0 = fz > 0 ? dp / 2 : -dp / 2 - 0.35, z1 = fz > 0 ? dp / 2 + 0.35 : -dp / 2;
+      B.vprism(ring, z0, z1, K.STONE);
+      B.vprism([[-1.1, crown - 0.4], [1.1, crown - 0.4], [1.6, top], [-1.6, top]], fz > 0 ? dp / 2 : -dp / 2 - 0.6, fz > 0 ? dp / 2 + 0.6 : -dp / 2, K.STONE);
+      // relief panels on the piers and the inscription tablet of the attic
+      for (const s of [-1, 1]) {
+        const u0 = s > 0 ? ow / 2 + 3.4 : -w / 2 + 3.4, u1 = s > 0 ? w / 2 - 3.4 : -ow / 2 - 3.4;
+        const zz0 = fz > 0 ? dp / 2 : -dp / 2 - 0.3, zz1 = fz > 0 ? dp / 2 + 0.3 : -dp / 2;
+        B.box(u0, u1, zz0, zz1, h * 0.26, spring - 2.2, K.STONE, K.STONE, { bottom: true });
+        B.box(u0 + 0.6, u1 - 0.6, fz > 0 ? dp / 2 + 0.3 : -dp / 2 - 0.5, fz > 0 ? dp / 2 + 0.5 : -dp / 2 - 0.3, spring - 7.5, spring - 3.2, K.STONE, K.STONE, { bottom: true });
+      }
+      B.box(-w * 0.3, w * 0.3, fz > 0 ? dp / 2 : -dp / 2 - 0.4, fz > 0 ? dp / 2 + 0.4 : -dp / 2, top + 3, h - 1.6, K.METAL, K.STONE, { bottom: true });
+      // engaged columns on stepped pedestals
+      for (const cx of [-w / 2 + 2, -ow / 2 - 2, ow / 2 + 2, w / 2 - 2]) {
+        const cz = fz * (dp / 2 + 0.8);
+        B.box(cx - 1.4, cx + 1.4, cz - 1.4, cz + 1.4, 0.6, 5, K.STONE, K.STONE);
+        B.lathe(cx, cz, [[1.0, 5, K.STONE], [0.85, 5.8, K.STONE], [0.75, top - 1.2, K.STONE], [1.15, top, K.STONE]], 12);
+      }
+    }
+    // a quadriga of light on the attic
+    B.box(-7, 7, -3.5, 3.5, h + 1.2, h + 2.4, K.STONE, K.STONE);
+    B.box(-6, 6, -3, 3, h + 2.4, h + 7, K.LANTERN, K.STONE);
   }
 }
 
