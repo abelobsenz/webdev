@@ -26,7 +26,7 @@ import { buildFloatingIslands } from './floating.js';
 import { INNER } from './terrain.js';
 import { renderedHeight } from './outerCities.js';
 import { planInnerCivic, buildInnerCivic } from './innerCivic.js';
-import { planShorePromenades } from './innerShore.js';
+import { planShorePromenades, buildShoreJetties } from './innerShore.js';
 
 import { buildInfrastructure, createBeacons } from './infrastructure.js';
 import { Traffic } from '../life/traffic.js';
@@ -168,6 +168,7 @@ export class World {
     // the inner islands' civic buildings stand at the heart of their civic squares (the square's
     // benches ring them, so they are marked before the streetscape furnishes the squares)
     this.civic = buildInnerCivic(this.scene, this.plan, raw, this.colliders);
+    this.jetties = buildShoreJetties(this.scene, this.shoreWalks, raw);
     this.updaters.push({ update: () => this.app.camera && this.civic.update(this.app.camera) });
     this.streetscape = buildStreetscape(this.scene, this.plan, raw, [...this.infra.promLamps, ...this.rimCourts.lamps]);
     this.colliders.push(...(this.streetscape.colliders || []));   // square fountains, obelisks, kiosks

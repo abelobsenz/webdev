@@ -1,3 +1,6 @@
+import * as THREE from 'three';
+import { createFacadeMaterial } from './facade.js';
+import { mergeClean, latheFacade } from './geom.js';
 import { ISLANDS } from './layout.js';
 import { ST } from './urban.js';
 
@@ -127,4 +130,82 @@ function shoreLoop(isl, ground) {
     while (acc >= STEP) { acc -= STEP; const t = 1 - acc / L; outP.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]); }
   }
   return outP;
+}
+
+// ------------------------------------------------------------------ jetties --
+// Timber jetties off the shore walks: every few hundred metres where the beach shelves into
+// boat-draught water within reach, a stair drops from the walk's seaward verge to a deck on
+// piles that runs straight out to a T-head, with boats moored alongside. Everything is closed
+// and stands on the seabed; the deck clears the water by 1.3 m.
+
+const DECK_Y = 1.3, DECK_HW = 1.6;
+
+function boxAt(parts, cx, cy, cz, w, h, d, yaw, kWall, kTop = kWall) {
+  const g = new THREE.BoxGeometry(w, h, d);
+  const p = g.attributes.position, n = g.attributes.normal, f = new Float32Array(p.count * 3);
+  for (let i = 0; i < p.count; i++) {
+    const ny = n.getY(i);
+    f[i * 3] = Math.abs(n.getX(i)) > 0.5 ? p.getZ(i) : p.getX(i);
+    f[i * 3 + 1] = Math.abs(ny) > 0.5 ? p.getZ(i) : p.getY(i) + h / 2;
+    f[i * 3 + 2] = ny > 0.5 ? kTop : kWall;
+  }
+  g.setAttribute('aFacade', new THREE.BufferAttribute(f, 3));
+  g.deleteAttribute('uv');
+  g.rotateY(yaw).translate(cx, cy, cz);
+  parts.push(g);
+}
+
+function boat(parts, x, z, yaw, len) {
+  const hull = latheFacade([{ r: 0.02, y: -0.5, kind: 1 }, { r: 0.42, y: -0.42, kind: 1 }, { r: 0.5, y: -0.1, kind: 1 }, { r: 0.46, y: 0.35, kind: 1 }, { r: 0.02, y: 0.5, kind: 1 }], 10, { sz: 0.34 });
+  hull.rotateZ(Math.PI / 2).scale(len, len * 0.12, len).rotateY(yaw).translate(x, 0.12, z);
+  parts.push(hull);
+  boxAt(parts, x - Math.cos(yaw) * len * 0.05, 0.12 + len * 0.1, z + Math.sin(yaw) * len * 0.05, len * 0.3, len * 0.1, len * 0.2, yaw, 0, 1);
+}
+
+export function buildShoreJetties(scene, walks, ground) {
+  const parts = [], near = [], out = { meshes: [], jetties: [] };
+  for (const st of walks) {
+    const P = st.pts;
+    for (let i = 20; i < P.length - 20; i += 55) {
+      const [x, z] = P[i], [x0, z0] = P[i - 2], [x1, z1] = P[i + 2];
+      let nx = -(z1 - z0), nz = x1 - x0; const l = Math.hypot(nx, nz) || 1; nx /= l; nz /= l;
+      // seaward: the side where the ground falls
+      if (ground(x + nx * 20, z + nz * 20) > ground(x - nx * 20, z - nz * 20)) { nx = -nx; nz = -nz; }
+      // find where the water is deep enough (seabed below -1.4) within 110 m
+      let end = 0;
+      for (let t = st.hw + 2; t < 110; t += 2) { if (ground(x + nx * t, z + nz * t) < -1.4) { end = t + 8; break; } }
+      if (!end || end < 18) continue;
+      const yaw = Math.atan2(-nz, nx), s0 = st.hw + 1.2;
+      // the stair from the walk (ground level at the verge) down to the deck
+      const gTop = ground(x + nx * s0, z + nz * s0);
+      let t = s0, y = gTop;
+      while (y - 0.25 > DECK_Y + 0.02 && t < s0 + 16) { const cx = x + nx * (t + 0.2), cz = z + nz * (t + 0.2); boxAt(parts, cx, (y - 0.25 + Math.min(ground(cx, cz), DECK_Y) - 1) / 2, cz, 0.4, y - 0.25 - Math.min(ground(cx, cz), DECK_Y) + 1, DECK_HW * 2, yaw, 1, 9); y -= 0.25; t += 0.4; }
+      const d0 = t;
+      // the deck and its piles; a T-head at the end
+      const len = end - d0;
+      if (len < 10) continue;
+      const mx = x + nx * (d0 + len / 2), mz = z + nz * (d0 + len / 2);
+      boxAt(parts, mx, DECK_Y - 0.2, mz, len, 0.4, DECK_HW * 2, yaw, 8, 8);
+      const hx = x + nx * (end + 2), hz = z + nz * (end + 2);
+      boxAt(parts, hx, DECK_Y - 0.2, hz, 4, 0.4, 14, yaw, 8, 8);
+      for (let u = d0 + 2; u <= end + 3; u += 5) for (const sgn of [-1, 1]) {
+        const w = u > end ? 6.4 : DECK_HW - 0.2, px = x + nx * u - nz * sgn * w, pz = z + nz * u + nx * sgn * w, g = ground(px, pz);
+        boxAt(near, px, (DECK_Y - 0.4 + g - 0.6) / 2, pz, 0.32, DECK_Y - 0.4 - g + 0.6, 0.32, yaw, 8);
+      }
+      // rails along the deck, bollards at the head, two boats moored on its lee
+      for (const sgn of [-1, 1]) boxAt(near, x + nx * (d0 + len / 2) - nz * sgn * (DECK_HW - 0.1), DECK_Y + 0.5, z + nz * (d0 + len / 2) + nx * sgn * (DECK_HW - 0.1), len, 0.08, 0.08, yaw, 10);
+      for (const sgn of [-1, 1]) boat(parts, hx + nx * 1 - nz * sgn * 9.5, hz + nz * 1 + nx * sgn * 9.5, yaw + Math.PI / 2, 7 + (i % 3));
+      out.jetties.push({ x: hx, z: hz, district: st.district });
+    }
+  }
+  const mat = createFacadeMaterial('sand', 811, { litFrac: 0.4, band: 1e5, uplight: 0 });
+  for (const [list, name, layer] of [[parts, 'Shore jetties', 0], [near, 'Shore jetty piles and rails', 1]]) {
+    if (!list.length) continue;
+    const m = new THREE.Mesh(mergeClean(list), mat);
+    m.name = name; m.castShadow = true; m.receiveShadow = true;
+    if (layer) m.layers.set(layer);
+    m.matrixAutoUpdate = false; m.updateMatrix();
+    scene.add(m); out.meshes.push(m);
+  }
+  return out;
 }
