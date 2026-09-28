@@ -24,7 +24,7 @@ import { buildFloatingIslands } from './floating.js';
 import { INNER } from './terrain.js';
 import { buildInfrastructure, createBeacons } from './infrastructure.js';
 import { Traffic } from '../life/traffic.js';
-import { Chorus } from '../life/chorus.js';
+import { Chorus, CHORUS_STEM_COLLIDERS } from '../life/chorus.js';
 import { Clouds } from '../life/clouds.js';
 import { People } from '../life/people.js';
 import { Skiffs } from '../life/skiffs.js';
@@ -131,6 +131,7 @@ export class World {
     // Promenades, the Gate, lotus pads, skyport
     this.infra = buildInfrastructure(this.scene, gh, (x, z) => this.sampler.get(x, z));
     this.colliders.push(...this.infra.colliders);
+    this.colliders.push(...CHORUS_STEM_COLLIDERS);   // the Chorus stem stands in the lagoon
     progress(0.45); await tick();
     // The town plan (streets, squares, lots, lamps) and the towns built on it
     const raw = (x, z) => this.sampler.get(x, z);

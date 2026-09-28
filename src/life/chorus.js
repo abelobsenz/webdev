@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { mulberry32, createNoise2D } from '../world/noise.js';
-import { aerialShaderMaterial } from '../world/materials.js';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { aerialShaderMaterial, patchedMaterial } from '../world/materials.js';
 import { CHORUS } from '../world/layout.js';
 
 /**
@@ -239,6 +240,130 @@ void main() {
   gl_FragColor = vec4(col, 1.0);
 }`;
 
+// ---- the Stem: the physical monument that carries the motes ------------------------------
+// A caisson plinth founded on the lagoon floor, a fluted tapering shaft with collars and six
+// buttress fins, and at the top the emitter crown: a shallow bowl whose inner face is the
+// source the motes rise from (every form's lowest point, y = -1, sits just above its lip).
+const STEM_TOP = CHORUS.y - CHORUS.scale * 1.035;            // crown lip, ~8 m below the forms
+const STEM_BASE = -16;                                        // footing, below the lagoon floor
+const shaftR = (y) => 11.5 - (y - 45) / (STEM_TOP - 36 - 45) * 5;
+
+function stemProfile() {
+  const T = STEM_TOP;
+  const p = [[0, STEM_BASE], [46, STEM_BASE], [46, 2.5], [43, 3.3], [40, 3.3], [40, 6], [31, 6], [31, 7.5], [24, 7.5],
+    [24, 10], [16, 12], [13, 20], [11.5, 45]];
+  for (const yc of [120, 200, 280, 360]) {
+    const r = shaftR(yc);
+    p.push([r, yc - 2.2], [r + 1.8, yc - 1.2], [r + 1.8, yc + 1.2], [r, yc + 2.2]);
+  }
+  p.push([shaftR(T - 36), T - 36], [7.4, T - 31], [12, T - 21], [26, T - 11], [40, T - 5], [46, T - 2.5], [46, T - 0.6],
+    [44, T], [40, T - 0.4], [30, T - 2.6], [15, T - 3.8], [0, T - 4.2]);
+  return p;
+}
+
+// Lathe with flat normals per profile segment (sharp steps stay sharp, no normals averaged
+// across corners, zero-length segments skipped), closed at both poles on the axis.
+function flatLathe(profile, segs) {
+  const pos = [], nrm = [];
+  for (let i = 0; i < profile.length - 1; i++) {
+    const [r0, y0] = profile[i], [r1, y1] = profile[i + 1];
+    const dx = r1 - r0, dy = y1 - y0, L = Math.hypot(dx, dy);
+    if (L < 1e-4) continue;
+    const nr = dy / L, ny = -dx / L;
+    for (let k = 0; k < segs; k++) {
+      const a0 = (k / segs) * TAU, a1 = ((k + 1) / segs) * TAU;
+      const s0 = Math.sin(a0), c0 = Math.cos(a0), s1 = Math.sin(a1), c1 = Math.cos(a1);
+      const A = [r0 * s0, y0, r0 * c0], B = [r0 * s1, y0, r0 * c1], C = [r1 * s1, y1, r1 * c1], D = [r1 * s0, y1, r1 * c0];
+      const nA = [nr * s0, ny, nr * c0], nB = [nr * s1, ny, nr * c1];
+      const tri = (P, Q, R, nP, nQ, nR) => { pos.push(...P, ...Q, ...R); nrm.push(...nP, ...nQ, ...nR); };
+      if (r0 > 1e-4) tri(A, B, C, nA, nB, nB);
+      if (r1 > 1e-4) tri(A, C, D, nA, nB, nA);
+    }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('normal', new THREE.Float32BufferAttribute(nrm, 3));
+  return g;
+}
+
+function stemFins() {
+  const sh = new THREE.Shape([[8, 5.8], [36, 5.8], [36, 9], [20, 30], [10, 84], [8, 84]].map(([x, y]) => new THREE.Vector2(x, y)));
+  const base = new THREE.ExtrudeGeometry(sh, { depth: 2.4, bevelEnabled: false });
+  base.deleteAttribute('uv');
+  base.translate(0, 0, -1.2);
+  const out = [];
+  for (let k = 0; k < 6; k++) out.push(base.clone().rotateY((k + 0.5) * TAU / 6));
+  return out;
+}
+
+const STEM_MAT = () => patchedMaterial({ color: 0xd9dde2, metalness: 0.5, roughness: 0.34 }, {
+  fragment: {
+    pars: /* glsl */ `
+const vec2 STEM_C = vec2(${CHORUS.x.toFixed(1)}, ${CHORUS.z.toFixed(1)});
+// 24 flutes round the shaft: returns the flute phase; tang = world tangent round the shaft,
+// fade = pixel-footprint fade (flutes collapse to the plain cylinder under ~2 px) x shaft band
+float stemFlute(vec3 wp, out vec2 tang, out float fade) {
+  vec2 d = wp.xz - STEM_C;
+  float r = max(length(d), 0.5);
+  tang = vec2(-d.y, d.x) / r;
+  float period = ${TAU.toFixed(6)} * r / 24.0;
+  fade = (1.0 - smoothstep(0.12, 0.45, length(fwidth(wp)) / period))
+       * smoothstep(22.0, 28.0, wp.y) * (1.0 - smoothstep(${(STEM_TOP - 42).toFixed(1)}, ${(STEM_TOP - 37).toFixed(1)}, wp.y));
+  return atan(d.y, d.x) * ${(24 / TAU).toFixed(6)};
+}
+`,
+    normal: /* glsl */ `
+{
+  vec2 tg; float fd;
+  float ph = stemFlute(vWPos, tg, fd);
+  if (fd > 0.0 && abs(vWNrm.y) < 0.4) {
+    float s = sin(ph * ${TAU.toFixed(6)}) * 0.5 * fd;
+    normal = normalize(normal + (viewMatrix * vec4(tg.x * s, 0.0, tg.y * s, 0.0)).xyz);
+  }
+}
+`,
+    emissive: /* glsl */ `
+{
+  vec2 tg; float fd;
+  float ph = stemFlute(vWPos, tg, fd);
+  float r = length(vWPos.xz - STEM_C);
+  float night = 0.1 + 0.9 * uCityLights;
+  // light seams in the flute troughs with a slow swell climbing to the crown; fades to its average
+  float seam = mix(0.08, smoothstep(0.86, 0.98, -cos(ph * ${TAU.toFixed(6)})), fd) * (1.0 - smoothstep(0.3, 0.45, abs(vWNrm.y)))
+             * smoothstep(22.0, 28.0, vWPos.y) * (1.0 - smoothstep(${(STEM_TOP - 42).toFixed(1)}, ${(STEM_TOP - 37).toFixed(1)}, vWPos.y));
+  float climb = 0.65 + 0.35 * sin(vWPos.y * 0.025 - uTime * 0.7);
+  // the emitter bowl (inner, upward-facing face of the crown) and the lit lip
+  float bowl = smoothstep(${(STEM_TOP - 4.3).toFixed(1)}, ${(STEM_TOP - 3.0).toFixed(1)}, vWPos.y) * smoothstep(0.6, 0.9, vWNrm.y) * (1.0 - smoothstep(41.0, 44.0, r));
+  float lip = smoothstep(${(STEM_TOP - 0.7).toFixed(1)}, ${(STEM_TOP - 0.1).toFixed(1)}, vWPos.y);
+  // concentric emitter rings across the lens (5 m pitch), faded to their mean by pixel footprint
+  float rf = clamp(fwidth(r) / 5.0, 0.0, 1.0);
+  float rings = mix(0.55 + 0.45 * cos(r * ${(TAU / 5).toFixed(6)}), 0.55, smoothstep(0.2, 0.5, rf));
+  float pulse = 0.88 + 0.12 * sin(uTime * 0.45);
+  totalEmissiveRadiance += vec3(0.7, 0.84, 1.0) * (seam * climb * 0.55 * uCityLights + (bowl * 0.5 * rings + lip * 0.6) * pulse * night);
+}
+`,
+  },
+});
+
+/** Cylinder colliders for the Stem (plinth, shaft, crown), for camera and lane clearance. */
+export const CHORUS_STEM_COLLIDERS = [
+  { x: CHORUS.x, z: CHORUS.z, y0: STEM_BASE, y1: 12, radius: 48 },
+  { x: CHORUS.x, z: CHORUS.z, y0: 12, y1: STEM_TOP - 30, radius: 18 },
+  { x: CHORUS.x, z: CHORUS.z, y0: STEM_TOP - 30, y1: STEM_TOP, radius: 48 },
+];
+
+function buildStem(scene) {
+  const g = mergeGeometries([flatLathe(stemProfile(), 64), ...stemFins()]);
+  const mesh = new THREE.Mesh(g, STEM_MAT());
+  mesh.position.set(CHORUS.x, 0, CHORUS.z);
+  mesh.name = 'chorus-stem';
+  mesh.castShadow = mesh.receiveShadow = true;
+  mesh.updateMatrixWorld(true);
+  mesh.matrixAutoUpdate = false;
+  scene.add(mesh);
+  return mesh;
+}
+
 export class Chorus {
   constructor(scene, settings) {
     this.count = 100000;
@@ -278,6 +403,7 @@ export class Chorus {
     this.points = new THREE.Points(g, this.material);
     this.points.frustumCulled = false;
     scene.add(this.points);
+    this.stem = buildStem(scene);
     this.index = 0;
     this.phase = 0;
     this._show(4);
