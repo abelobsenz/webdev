@@ -26,7 +26,9 @@ import { helianthCircuits, circuitPose, helianthRelays } from '../src/space/heli
 import { buildSolarCollector, buildFoundry } from '../src/space/workingStations.js';
 import { buildFoundryUnload } from '../src/space/foundryUnload.js';
 import { buildRefinery } from '../src/craft/craftGeometry.js';
-import { captureOpen, seleneLanes } from '../src/space/fleet.js';
+import { captureOpen, seleneLanes, petalLamps, TENDER_CAPTURE_AT, SELENE_RUN } from '../src/space/fleet.js';
+import { buildTender } from '../src/craft/craftGeometry.js';
+import { buildLunarRingDistricts } from '../src/space/lunarPort.js';
 
 const V = (x, y, z) => new THREE.Vector3(x, y, z), results = {};
 const closed = (name, g, tolerance = 1e-3) => {
@@ -452,6 +454,52 @@ const verts = (g, m = new THREE.Matrix4(), step = 1) => { const p = g.attributes
   assert.ok(Math.abs(captureOpen(0) - captureOpen(200)) < 1e-9, 'the capture cycle loops seamlessly');
   const lanes = seleneLanes({ hold: V(3.2, 5.5, 1.5), start: V(-2.5, 5.2, -2.2), dA: V(0.35, 1, 0.25).normalize(), dD: V(-0.3, 1, -0.3).normalize() });
   assert.ok(lanes.length === 64 && lanes.every((l) => l.p.length() > 5), 'Selene\'s tanker lanes: 32 beacon pairs clear of the works');
+}
+// ---- round 2 (continued): the capture tender, Selene's second tanker, the lunar ring's lamps
+{
+  // the petal floodlights sit on their arm's forearm tube (within 3 m of its drawn surface)
+  const te = buildTender(620);
+  let worst = 0;
+  for (const A of te.arms) {
+    const [l] = petalLamps(A, te.length), p = A.geo.attributes.position, ix = A.geo.index;
+    let dmin = Infinity;
+    const tri = new THREE.Triangle(), q = V(), vx = (k) => V(p.getX(k), p.getY(k), p.getZ(k));
+    for (let i = 0; i < ix.count; i += 3) { tri.set(vx(ix.getX(i)), vx(ix.getX(i + 1)), vx(ix.getX(i + 2))); tri.closestPointToPoint(l.p, q); dmin = Math.min(dmin, q.distanceTo(l.p)); }
+    worst = Math.max(worst, dmin);
+    assert.ok(l.dir.dot(l.p.clone().setZ(0).normalize()) < -0.5, 'petal floodlights face the cradle axis');
+  }
+  assert.ok(worst < 2.7, `petal floodlights sit on their arms (${worst.toFixed(2)} m from the tube's surface, inside the sprite's own radius)`);
+  results.petalLampSeatMetres = +worst.toFixed(2);
+  // the capture: tender 1's cradle (tender-local 398 m on its bow axis) is at the group's origin
+  // as the scene opens (the Fleet's station-keeping pose at t = 0)
+  const w = 2.1, off = V(0, 0.3 * Math.sin(2.0), 0).sub(TENDER_CAPTURE_AT).add(V(Math.sin(w) * 0.06, Math.sin(w * 0.7) * 0.03, Math.cos(w) * 0.06));
+  const e = new THREE.Euler(0.1 * Math.sin(w * 0.5), w * 0.2, 0.05 * Math.sin(w * 0.3));
+  const cradle = V(0, 0, 0.398).applyEuler(e).add(off);
+  assert.ok(cradle.length() < 0.01, `the capture sits at the Tenders view's centre (${(cradle.length() * 1000).toFixed(0)} m off)`);
+  results.captureCentreOffsetMetres = +(cradle.length() * 1000).toFixed(0);
+  // the relic is closing in the cradle as the scene opens (half closed), and the cycle still closes fully
+  assert.ok(captureOpen(0) > 0.3 && captureOpen(0) < 0.8, `the cradle is closing on the relic at t = 0 (${captureOpen(0).toFixed(2)})`);
+  // Selene's two tankers: never within 1 km of each other, never inside the works' 3.4 km envelope
+  const a = V(), b = V(), f = V();
+  let sep = Infinity, clear = Infinity;
+  for (let t = 0; t < SELENE_RUN.T; t += 0.5) {
+    const ua = (((t / SELENE_RUN.T) + SELENE_RUN.offsets[0]) % 1 + 1) % 1, ub = (((t / SELENE_RUN.T) + SELENE_RUN.offsets[1]) % 1 + 1) % 1;
+    voyage(ua, SELENE_RUN, a, f); voyage(ub, SELENE_RUN, b, f);
+    sep = Math.min(sep, a.distanceTo(b)); clear = Math.min(clear, a.length(), b.length());
+  }
+  assert.ok(sep > 1 && clear > 3.4 + 0.3, `Selene's tankers keep ${sep.toFixed(1)} km apart and ${clear.toFixed(1)} km off the works`);
+  results.seleneTankerSeparationKm = +sep.toFixed(1); results.seleneTankerClearanceKm = +clear.toFixed(1);
+  // the lunar ring's lamps are seated: rail signals on the bronze rails' crowns (R+25+45), parapet
+  // lamps on the edge shields' crowns (R+150+190), hall lanterns just over their domes' apexes
+  const Rm = 2117000, ld = buildLunarRingDistricts();
+  let rail = 0, parapet = 0;
+  for (const l of ld.lamps) {
+    const r = Math.hypot(l.p.x, l.p.z), z = Math.abs(l.p.y);
+    if (Math.abs(z - 1700) < 1) { rail++; assert.ok(Math.abs(r - (Rm + 70)) <= l.r + 0.01, 'rail lamp on the rail crown'); }
+    if (Math.abs(z - 5200) < 1) { parapet++; assert.ok(Math.abs(r - (Rm + 340)) <= l.r + 0.01, 'parapet lamp on the shield crown'); }
+    assert.ok(l.r <= 14, 'lunar ring lamps are small lights, not orbs');
+  }
+  assert.ok(rail === 768 * 4 && parapet === 768 * 4, 'a rail and a parapet lamp per half sector on both sides');
 }
 results.movementClearanceMetres = clearances;
 results.yardClampContactErrorMetres = +clampErr.toFixed(3);

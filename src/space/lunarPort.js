@@ -348,8 +348,10 @@ export function buildLunarRingDistricts(radiusKm=2117) {
       B.box(0,250,z-sd*916,350,140,36,CK.LANTERN);
       districts.push({center:V(0,85,z).applyMatrix4(m),base:V(0,-10,z).applyMatrix4(m),sector:j});
       // the hall's lit door toward the walk, and a lamp on its lantern
-      lamps.push({p:V(0,250,z-sd*960).applyMatrix4(m),r:40,color:LAMP.AMBER,i:2.2,breathe:.2,phase:(j*.37)%1});
-      lamps.push({p:V(0,945,z).applyMatrix4(m),r:30,color:LAMP.WHITE,i:1.3});
+      // (small true radii: from the deck these are door lights and a lantern, not orbs; from
+      // afar the sprite floor keeps them as points)
+      lamps.push({p:V(0,250,z-sd*940).applyMatrix4(m),r:14,color:LAMP.AMBER,i:2.4,breathe:.2,phase:(j*.37)%1});
+      lamps.push({p:V(0,944,z).applyMatrix4(m),r:12,color:LAMP.WHITE,i:1.5});
     }
     B.pop();
   }
@@ -357,9 +359,9 @@ export function buildLunarRingDistricts(radiusKm=2117) {
   // half sector (8.7 km), the rails' teal a half step out of phase with the walls' warm white
   for(let j=0;j<N*2;j++) {
     const a=(j+.5)/(N*2)*TAU,c=Math.cos(a),sn=Math.sin(a);
-    for(const zz of [-5200,5200])lamps.push({p:V(c*(R+345),zz,sn*(R+345)),r:36,color:LAMP.WHITE,i:1.2});
+    for(const zz of [-5200,5200])lamps.push({p:V(c*(R+350),zz,sn*(R+350)),r:10,color:LAMP.WHITE,i:1.5});
     const b=(j+1)/(N*2)*TAU;
-    for(const zz of [-1700,1700])lamps.push({p:V(Math.cos(b)*(R+80),zz,Math.sin(b)*(R+80)),r:26,color:LAMP.TEAL,i:1.1});
+    for(const zz of [-1700,1700])lamps.push({p:V(Math.cos(b)*(R+76),zz,Math.sin(b)*(R+76)),r:7,color:LAMP.TEAL,i:1.4});
   }
   return {geo:B.geometry(),districts,lamps};
 }
