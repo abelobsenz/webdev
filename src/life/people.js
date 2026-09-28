@@ -18,8 +18,12 @@ const W = 256;               // samples per path
 const TAU = Math.PI * 2;
 
 // ------------------------------------------------------------------ body --
-// Parts: 0 torso, 1 head, 2 left leg, 3 right leg, 4 left arm, 5 right arm, 6 robe, 7 hair
-function bodyGeometry() {
+// Parts: 0 torso, 1 head (and nose), 2 left leg, 3 right leg, 4 left arm, 5 right arm,
+// 6 robe, 7 hair cap, 8 long hair, 9 coat skirt. Every part is a closed solid: lathe
+// profiles end on the axis or loop back on themselves, so no hem or cuff shows a hole.
+// far: the distant set, same parts and massing with every second profile ring, fewer
+// segments, and no hands, nose or shoes-as-separate-soles detail
+function bodyGeometry(far = false) {
   const pos = [], nrm = [], part = [], idx = [];
   const add = (g, p) => {
     const base = pos.length / 3;
@@ -30,28 +34,36 @@ function bodyGeometry() {
     else for (let i = 0; i < P.count; i++) idx.push(base + i);
   };
   const lathe = (prof, seg, x = 0, z = 0, sx = 1, sz = 1) => {
+    if (far) { prof = prof.filter((_, i) => i % 2 === 0 || i === prof.length - 1); seg = Math.max(4, seg - 4); }
     const g = new THREE.LatheGeometry(prof.map(([r, y]) => new THREE.Vector2(r, y)), seg);
     g.scale(sx, 1, sz);
     g.translate(x, 0, z);
     return g;
   };
-  // torso: hips, waist, chest, shoulders, neck
-  add(lathe([[0.001, 0.86], [0.16, 0.88], [0.17, 0.98], [0.14, 1.1], [0.17, 1.28], [0.19, 1.38], [0.13, 1.45], [0.055, 1.49], [0.05, 1.54], [0.001, 1.55]], 7, 0, 0, 1, 0.66), 0);
-  // head and hair cap
-  const head = new THREE.SphereGeometry(0.105, 8, 6); head.scale(0.92, 1.1, 1.0); head.translate(0, 1.64, 0.01); add(head, 1);
-  const hair = new THREE.SphereGeometry(0.112, 8, 4, 0, TAU, 0, Math.PI * 0.52); hair.scale(0.95, 1.08, 1.04); hair.translate(0, 1.655, -0.005); add(hair, 7);
-  // legs (hip pivot at y 0.9) with feet
+  // torso: seat, hips, waist, chest, shoulders, trapezius, neck
+  add(lathe([[0.001, 0.84], [0.13, 0.855], [0.168, 0.9], [0.172, 0.98], [0.148, 1.08], [0.162, 1.2], [0.184, 1.3], [0.196, 1.37], [0.17, 1.43], [0.1, 1.465], [0.056, 1.49], [0.05, 1.55], [0.001, 1.56]], 10, 0, 0, 1, 0.64), 0);
+  // head with a nose (the head faces +z)
+  const head = new THREE.SphereGeometry(0.105, far ? 6 : 10, far ? 4 : 7); head.scale(0.9, 1.1, 1.0); head.translate(0, 1.64, 0.01); add(head, 1);
+  if (!far) { const nose = new THREE.ConeGeometry(0.017, 0.042, 4); nose.rotateX(Math.PI / 2); nose.translate(0, 1.63, 0.123); add(nose, 1); }
+  const hair = new THREE.SphereGeometry(0.113, far ? 6 : 10, far ? 2 : 4, 0, TAU, 0, Math.PI * 0.55); hair.scale(0.95, 1.08, 1.05); hair.translate(0, 1.655, -0.006); add(hair, 7);
+  // long hair falling to the shoulders behind the head
+  const long = new THREE.SphereGeometry(0.1, far ? 5 : 8, far ? 3 : 6); long.scale(1.0, 1.55, 0.5); long.translate(0, 1.56, -0.07); add(long, 8);
+  // legs (hip pivot at y 0.9): calf, knee, thigh, with shoes
   for (const [sx, p] of [[1, 2], [-1, 3]]) {
-    add(lathe([[0.001, 0.05], [0.05, 0.06], [0.055, 0.45], [0.075, 0.62], [0.085, 0.86], [0.001, 0.9]], 6, sx * 0.085, 0), p);
-    const foot = new THREE.BoxGeometry(0.085, 0.06, 0.22); foot.translate(sx * 0.085, 0.03, 0.045); add(foot, p);
+    add(lathe([[0.001, 0.06], [0.048, 0.065], [0.05, 0.14], [0.06, 0.3], [0.052, 0.47], [0.064, 0.52], [0.078, 0.66], [0.086, 0.84], [0.001, 0.9]], 7, sx * 0.086, 0), p);
+    add(lathe([[0.001, 0.0], [0.04, 0.004], [0.046, 0.03], [0.04, 0.068], [0.001, 0.075]], 6, sx * 0.086, 0.05, 1.05, 2.5), p);
   }
-  // arms (shoulder pivot at y 1.41) with hands
+  // arms (shoulder pivot at y 1.41): forearm, elbow, upper arm, with hands
   for (const [sx, p] of [[1, 4], [-1, 5]]) {
-    add(lathe([[0.001, 0.72], [0.034, 0.74], [0.04, 0.95], [0.05, 1.18], [0.058, 1.38], [0.001, 1.43]], 6, sx * 0.225, 0), p);
-    const hand = new THREE.SphereGeometry(0.042, 6, 4); hand.scale(0.8, 1.3, 0.9); hand.translate(sx * 0.225, 0.7, 0.0); add(hand, p);
+    add(lathe([[0.001, 0.75], [0.03, 0.76], [0.036, 0.84], [0.043, 0.98], [0.042, 1.04], [0.048, 1.2], [0.052, 1.36], [0.001, 1.44]], 7, sx * 0.232, 0), p);
+    if (!far) {
+    const hand = new THREE.SphereGeometry(0.04, 6, 5); hand.scale(0.62, 1.35, 1.0); hand.translate(sx * 0.232, 0.71, 0.008); add(hand, p);
+    }
   }
-  // robe skirt (shown for robed variants)
-  add(lathe([[0.3, 0.12], [0.24, 0.5], [0.18, 0.95], [0.001, 0.98]], 10, 0, 0, 1, 0.8), 6);
+  // robe (robed variants): a hem with thickness, flaring from the chest
+  add(lathe([[0.001, 0.14], [0.28, 0.13], [0.305, 0.12], [0.285, 0.34], [0.245, 0.62], [0.2, 0.9], [0.18, 1.02], [0.001, 1.04]], 12, 0, 0, 1, 0.82), 6);
+  // coat skirt (coat variants): a closed shell, outer face going up, inner face coming down
+  add(lathe([[0.178, 0.66], [0.2, 0.675], [0.186, 0.82], [0.168, 0.99], [0.15, 0.97], [0.162, 0.82], [0.178, 0.66]], 10, 0, 0, 1, 0.8), 9);
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   g.setAttribute('normal', new THREE.Float32BufferAttribute(nrm, 3));
@@ -63,19 +75,20 @@ function bodyGeometry() {
 // -------------------------------------------------------------- material --
 const VERT_PARS = /* glsl */ `
 uniform sampler2D uPaths;
-uniform float uCull;
+uniform float uCull; uniform float uNear; uniform float uFarSet;
 attribute vec4 aP0;      // path row, start (m), speed (m/s), lateral offset (m)
 attribute vec4 aP1;      // seed, height (m), variant + 10 * closed, path length (m)
 attribute float aPart;
-varying float vPart; varying float vSeed; varying float vVar; varying float vLocalY; varying float vFar;
-vec3 ppAt(float row, float u) {
+varying float vPart; varying float vSeed; varying float vVar;
+// path texel: xyz centre-line point, w cross slope (dy per metre to the path's right)
+vec4 ppAt(float row, float u) {
   float x = clamp(u, 0.0, 1.0) * ${(W - 1).toFixed(1)};
   float i = floor(x); float f = x - i;
-  vec3 a = texelFetch(uPaths, ivec2(int(i), int(row)), 0).xyz;
-  vec3 b = texelFetch(uPaths, ivec2(int(min(i + 1.0, ${(W - 1).toFixed(1)})), int(row)), 0).xyz;
+  vec4 a = texelFetch(uPaths, ivec2(int(i), int(row)), 0);
+  vec4 b = texelFetch(uPaths, ivec2(int(min(i + 1.0, ${(W - 1).toFixed(1)})), int(row)), 0);
   return mix(a, b, f);
 }
-vec3 pPos; vec3 pX; vec3 pZ; float pPhase; float pScale; float pSwing; float pIdle; bool pOff;
+vec3 pPos; vec3 pX; vec3 pZ; float pPhase; float pScale; float pSwing; float pIdle; bool pOff; vec2 pBuild;
 void personSetup() {
   float L = max(aP1.w, 1.0);
   float closed = step(9.5, aP1.z);
@@ -85,31 +98,41 @@ void personSetup() {
   if (closed > 0.5) { u = fract(s / L); dirS = spd < 0.0 ? -1.0 : 1.0; }
   else { float m = mod(s, 2.0 * L); u = (m < L ? m : 2.0 * L - m) / L; dirS = (m < L ? 1.0 : -1.0) * (spd < 0.0 ? -1.0 : 1.0); }
   float du = 1.5 / L;
-  vec3 a = ppAt(aP0.x, u - du), b = ppAt(aP0.x, u + du);
+  vec4 a = ppAt(aP0.x, u - du), b = ppAt(aP0.x, u + du);
   if (closed > 0.5) { a = ppAt(aP0.x, fract(u - du)); b = ppAt(aP0.x, fract(u + du)); }
-  vec3 t = b - a; t.y = 0.0;
+  vec3 t = b.xyz - a.xyz; t.y = 0.0;
   t = length(t) > 1e-4 ? normalize(t) : vec3(0.0, 0.0, 1.0);
   t *= dirS;
   pZ = t; pX = vec3(t.z, 0.0, -t.x);
-  pPos = ppAt(aP0.x, u) + pX * aP0.w;
+  // everyone keeps to one side of their direction of travel (the lateral offset rides on
+  // the facing frame); on an open path the offset eases to the centre line at the ends,
+  // so turning round is a U-turn, not a jump across the street
+  vec4 c = ppAt(aP0.x, u);
+  float dEnd = closed > 0.5 ? 1e4 : min(u, 1.0 - u) * L;
+  float lat = aP0.w * smoothstep(0.0, clamp(abs(aP0.w) * 1.5, 1.5, 10.0), dEnd);
+  pPos = c.xyz + pX * lat;
+  pPos.y += c.w * lat * dirS;          // follow the cross slope of the street
   pIdle = step(abs(spd), 0.05);
   pScale = aP1.y / 1.75;
   pPhase = pIdle > 0.5 ? uTime * 0.9 + aP1.x * 40.0 : abs(s) / (0.74 * pScale) * 3.14159;
-  pSwing = pIdle > 0.5 ? 0.04 : clamp(abs(spd) * 0.28, 0.2, 0.52);
+  pSwing = pIdle > 0.5 ? 0.04 : clamp(abs(spd) * 0.28, 0.2, 0.5);
+  pBuild = vec2(0.9 + 0.22 * fract(aP1.x * 5.93), 0.92 + 0.16 * fract(aP1.x * 8.31));
   float dist = distance(pPos, cameraPosition);
-  vFar = smoothstep(uCull * 0.8, uCull, dist);
-  pOff = dist > uCull;
+  // near set inside uNear, far set from uNear to the cull distance
+  pOff = dist > uCull || (uFarSet > 0.5 ? dist < uNear : dist >= uNear);
   vPart = aPart; vSeed = aP1.x; vVar = mod(aP1.z, 10.0);
 }
 vec3 rotX(vec3 v, float a) { float c = cos(a), s = sin(a); return vec3(v.x, v.y * c - v.z * s, v.y * s + v.z * c); }
 vec3 articulate(vec3 v, bool isNormal) {
   float part = aPart;
-  float robe = step(4.5, vVar);                 // variants 5..7 wear robes
-  if (part > 5.5 && part < 6.5 && robe < 0.5) return vec3(0.0);
+  float robe = step(4.5, vVar);                          // variants 5..7 wear robes
+  float coat = step(1.5, vVar) * step(vVar, 3.5);        // variants 2..3 wear long coats
+  float longHair = step(fract(aP1.x * 4.71), 0.45);
+  if ((part > 5.5 && part < 6.5 && robe < 0.5) || (part > 7.5 && part < 8.5 && longHair < 0.5) || (part > 8.5 && coat < 0.5)) return vec3(0.0);
   vec3 piv;
   if (part > 1.5 && part < 3.5) {
     float sgn = part < 2.5 ? 1.0 : -1.0;
-    float a = sgn * pSwing * sin(pPhase) * (robe > 0.5 ? 0.7 : 1.0);
+    float a = sgn * pSwing * sin(pPhase) * (robe > 0.5 ? 0.6 : coat > 0.5 ? 0.85 : 1.0);
     piv = vec3(0.0, 0.9, 0.0);
     v = isNormal ? rotX(v, a) : rotX(v - piv, a) + piv;
   } else if (part > 3.5 && part < 5.5) {
@@ -117,6 +140,10 @@ vec3 articulate(vec3 v, bool isNormal) {
     float a = sgn * pSwing * 0.75 * sin(pPhase) + (pIdle > 0.5 ? 0.06 * sin(pPhase * 0.5 + sgn) : 0.0);
     piv = vec3(0.0, 1.41, 0.0);
     v = isNormal ? rotX(v, a) : rotX(v - piv, a) + piv;
+  }
+  // build: broader or slighter shoulders, hips and limbs (the head keeps its size)
+  if (!(part > 0.5 && part < 1.5) && !(part > 6.5 && part < 8.5)) {
+    if (isNormal) { v.x /= pBuild.x; v.z /= pBuild.y; } else { v.x *= pBuild.x; v.z *= pBuild.y; }
   }
   if (!isNormal) {
     // stride bob and a slight sway
@@ -135,29 +162,56 @@ const COLOR = /* glsl */ `
   vec3 skin[6] = vec3[6](vec3(0.93, 0.76, 0.64), vec3(0.84, 0.64, 0.5), vec3(0.72, 0.52, 0.38), vec3(0.58, 0.4, 0.28), vec3(0.42, 0.28, 0.19), vec3(0.3, 0.2, 0.14));
   vec3 hair[6] = vec3[6](vec3(0.03, 0.025, 0.02), vec3(0.12, 0.07, 0.04), vec3(0.32, 0.12, 0.05), vec3(0.72, 0.56, 0.3), vec3(0.55, 0.55, 0.55), vec3(0.9, 0.9, 0.88));
   float h = vSeed;
+  float ly = vObjPos.y;
   vec3 top = cloth[int(fract(h * 7.13) * 11.99)];
   vec3 low = cloth[int(fract(h * 3.71 + 0.3) * 11.99)] * 0.8;
   vec3 sk = skin[int(fract(h * 5.31) * 5.99)];
   vec3 hr = hair[int(fract(h * 9.17) * 5.99)];
+  float sh = fract(h * 11.3);
+  vec3 shoe = sh < 0.6 ? vec3(0.07, 0.06, 0.055) : sh < 0.8 ? vec3(0.32, 0.2, 0.12) : vec3(0.82, 0.8, 0.76);
+  bool coat = vVar > 1.5 && vVar < 3.5;
+  if (coat) top = cloth[int(fract(h * 2.37 + 0.6) * 11.99)] * 0.85;
+  float sleeve = (fract(h * 6.7) < 0.3 && !coat && vVar < 4.5) ? 1.13 : 0.785;
   vec3 c = top;
   if (vPart > 0.5 && vPart < 1.5) c = sk;
-  else if (vPart > 1.5 && vPart < 3.5) c = vLocalY < 0.07 ? vec3(0.08, 0.07, 0.06) : (vVar > 4.5 ? top * 0.9 : low);
-  else if (vPart > 3.5 && vPart < 5.5) c = vLocalY < 0.77 ? sk : top * 0.95;
+  else if (vPart > 1.5 && vPart < 3.5) c = ly < 0.075 ? shoe : (vVar > 4.5 ? top * 0.9 : low);
+  else if (vPart > 3.5 && vPart < 5.5) c = ly < sleeve ? sk : top * 0.95;
   else if (vPart > 5.5 && vPart < 6.5) c = top * 0.92;
-  else if (vPart > 6.5) c = hr;
-  // a sash or trim band on many tunics
-  float band = step(0.55, fract(h * 13.7)) * (1.0 - smoothstep(0.012, 0.02, abs(vLocalY - 1.0))) * step(vPart, 0.5);
-  c = mix(c, cloth[int(fract(h * 17.9) * 11.99)], band);
+  else if (vPart > 6.5 && vPart < 8.5) c = hr;
+  // cuffs at the sleeve and a belt or sash on many tunics
+  float cuff = (vPart > 3.5 && vPart < 5.5) ? (1.0 - smoothstep(0.008, 0.016, abs(ly - sleeve - 0.012))) : 0.0;
+  float band = step(0.55, fract(h * 13.7)) * (1.0 - smoothstep(0.014, 0.022, abs(ly - 0.99))) * step(vPart, 0.5);
+  c = mix(c, cloth[int(fract(h * 17.9) * 11.99)], max(band, cuff));
   diffuseColor.rgb = c;
+}`;
+
+// fabric relief: soft vertical folds on clothing, bump-mapped from a procedural height
+// (derivatives taken outside any branch; the folds fade out once they fall under a pixel)
+const NORMAL = /* glsl */ `
+{
+  float legX = (vPart > 1.5 && vPart < 3.5) ? (vPart < 2.5 ? 0.086 : -0.086) : 0.0;
+  float clothF = (vPart < 0.5 || (vPart > 1.5 && vPart < 3.5 && vObjPos.y > 0.08) || (vPart > 5.5 && vPart < 6.5) || vPart > 8.5) ? 1.0 : 0.0;
+  float ph = atan(vObjPos.z, vObjPos.x - legX + 1e-5) * 9.0 + vObjPos.y * 5.0 + vSeed * 20.0;
+  float fw = fwidth(ph);
+  float amp = clothF * (vPart > 5.5 ? 0.007 : 0.003) * (1.0 - smoothstep(0.5, 1.5, fw));
+  float hgt = sin(ph) * amp;
+  vec3 dpx = dFdx(-vViewPosition), dpy = dFdy(-vViewPosition);
+  float dhx = dFdx(hgt), dhy = dFdy(hgt);
+  vec3 r1 = cross(dpy, normal), r2 = cross(normal, dpx);
+  float det = dot(dpx, r1);
+  vec3 nn = abs(det) * normal - sign(det) * (dhx * r1 + dhy * r2);
+  if (amp > 0.0 && dot(nn, nn) > 1e-24) normal = normalize(nn);
 }`;
 
 export class People {
   constructor(scene, settings, world) {
     this.scene = scene;
     const rnd = mulberry32(606);
-    const paths = [];           // { pts: Vector3[], closed, half }
+    const paths = [];           // { pts: Vector3[], closed, half, follow }
     const groups = [];          // { name, rows: [], people: [] }
-    const addPath = (pts, closed, half) => { paths.push({ pts, closed, half }); return paths.length - 1; };
+    // follow: the path lies on the natural ground, so every sample (and the cross slope
+    // under the walking width) is taken from the ground itself, not interpolated
+    const addPath = (pts, closed, half, follow = false) => { paths.push({ pts, closed, half, follow }); return paths.length - 1; };
     const ground = (x, z) => world.groundHeight(x, z);
     const stations = (world.infra && world.infra.stations) || [];
     const blocked = (x, z) => stations.some((s) => Math.hypot(s.x - x, s.z - z) < s.r + 2);
@@ -259,14 +313,15 @@ export class People {
           const closed = pts.length > 8 && pts[0].distanceTo(pts[pts.length - 1]) < 12;
           const avenue = st.cls === ST.AVENUE;
           const half = Math.max(1.2, st.hw - 1.0);
-          for (const seg of splitBlocked(pts, closed, half)) g.rows.push({ row: addPath(seg.pts, seg.closed, half), density: st.cls === ST.LANE ? 0.05 : avenue ? 0.1 : 0.075, avenue, hw: st.hw });
+          for (const seg of splitBlocked(pts, closed, half)) g.rows.push({ row: addPath(seg.pts, seg.closed, half, true), density: st.cls === ST.LANE ? 0.05 : avenue ? 0.1 : 0.075, avenue, hw: st.hw });
         }
         for (const q of plan.squares) {
           if (q.district !== list[0].district || q.kind === 'tower') continue;
+          // a walking ring between the bench circle (0.6 r) and the rim, idlers included
           const n = 40, pts = [];
-          const rr = q.r * 0.72;
+          const rr = q.r * 0.8, qh = Math.max(0.4, Math.min(q.r * 0.15 - 0.45, q.r * 0.2 - 1.85));
           for (let k = 0; k < n; k++) { const a = (k / n) * TAU; const x = q.x + Math.cos(a) * rr, z = q.z + Math.sin(a) * rr; pts.push(new THREE.Vector3(x, ground(x, z) + 0.03, z)); box.expandByPoint(pts[pts.length - 1]); }
-          for (const seg of splitBlocked(pts, true, q.r * 0.2)) g.rows.push({ row: addPath(seg.pts, seg.closed, q.r * 0.2), density: 0.18, idle: 0.3 });
+          for (const seg of splitBlocked(pts, true, qh)) g.rows.push({ row: addPath(seg.pts, seg.closed, qh, true), density: 0.18, idle: 0.3 });
         }
         if (!g.rows.length) continue;
         const sph = box.getBoundingSphere(new THREE.Sphere());
@@ -342,6 +397,18 @@ export class People {
         const a = pts[j - 1], b = pts[j];
         const o = (row * W + k) * 4;
         tex[o] = a.x + (b.x - a.x) * t; tex[o + 1] = a.y + (b.y - a.y) * t; tex[o + 2] = a.z + (b.z - a.z) * t; tex[o + 3] = 0;
+        if (P.follow) tex[o + 1] = ground(tex[o], tex[o + 2]) + 0.03;
+      }
+      if (!P.follow) return;
+      // cross slope to the right of the forward direction (shader: right = (t.z, -t.x))
+      const h = Math.min(Math.max(P.half, 0.5), 3);
+      for (let k = 0; k < W; k++) {
+        const o = (row * W + k) * 4, o0 = (row * W + Math.max(k - 1, 0)) * 4, o1 = (row * W + Math.min(k + 1, W - 1)) * 4;
+        const dx = tex[o1] - tex[o0], dz = tex[o1 + 2] - tex[o0 + 2], l = Math.hypot(dx, dz);
+        if (l < 1e-6) continue;
+        const nx = dz / l, nz = -dx / l;
+        const sl = (ground(tex[o] + nx * h, tex[o + 2] + nz * h) - ground(tex[o] - nx * h, tex[o + 2] - nz * h)) / (2 * h);
+        tex[o + 3] = Math.max(-0.5, Math.min(0.5, sl));
       }
     });
     this.pathTex = new THREE.DataTexture(tex, W, paths.length, THREE.RGBAFormat, THREE.FloatType);
@@ -349,35 +416,36 @@ export class People {
     this.pathTex.needsUpdate = true;
 
     // ---- people
-    const geo = bodyGeometry();
-    this.uniforms = { uPaths: { value: this.pathTex }, uCull: { value: 650 } };
-    const mat = patchedMaterial({ color: 0xffffff, roughness: 0.78, metalness: 0.0, envMapIntensity: 0.7 }, {
-      key: 'people2',
-      uniforms: this.uniforms,
+    const geoSets = [bodyGeometry(false), bodyGeometry(true)];
+    this.uniforms = { uPaths: { value: this.pathTex }, uCull: { value: 650 }, uNear: { value: 110 } };
+    const makeMat = (farSet) => patchedMaterial({ color: 0xffffff, roughness: 0.78, metalness: 0.0, envMapIntensity: 0.7 }, {
+      key: farSet ? 'people3f' : 'people3',
+      uniforms: { ...this.uniforms, uFarSet: { value: farSet ? 1 : 0 } },
       vertex: {
         pars: VERT_PARS,
         preNormal: 'personSetup(); objectNormal = articulate(objectNormal, true); objectNormal = pX * objectNormal.x + vec3(0.0, objectNormal.y, 0.0) + pZ * objectNormal.z;',
         transform: /* glsl */ `
-vLocalY = transformed.y;
 {
   vec3 v = articulate(transformed, false) * pScale;
   transformed = pOff ? vec3(0.0) : pPos + pX * v.x + vec3(0.0, v.y, 0.0) + pZ * v.z;
 }`,
       },
       fragment: {
-        pars: 'varying float vPart; varying float vSeed; varying float vVar; varying float vLocalY; varying float vFar;',
+        pars: 'varying float vPart; varying float vSeed; varying float vVar;',
         color: COLOR,
+        normal: NORMAL,
         emissive: /* glsl */ `
 {
   // luminous textile trim at collar and hem on a quarter of the citizens
   float glow = step(0.75, fract(vSeed * 23.3)) * step(vPart, 0.5);
-  float trim = (1.0 - smoothstep(0.008, 0.016, abs(vLocalY - 1.45))) + (1.0 - smoothstep(0.008, 0.016, abs(vLocalY - 0.9)));
+  float trim = (1.0 - smoothstep(0.008, 0.016, abs(vObjPos.y - 1.45))) + (1.0 - smoothstep(0.008, 0.016, abs(vObjPos.y - 0.9)));
   vec3 tc = fract(vSeed * 31.1) < 0.5 ? vec3(0.45, 0.85, 1.0) : vec3(1.0, 0.72, 0.4);
   totalEmissiveRadiance += tc * glow * trim * uCityLights * 0.9;
 }`,
       },
     });
-    this.material = mat;
+    const mats = [makeMat(false), makeMat(true)];
+    this.material = mats[0];
     this.meshes = [];
     let total = 0;
     for (const g of groups) {
@@ -386,30 +454,45 @@ vLocalY = transformed.y;
         const L = lengths[r.row];
         const P = paths[r.row];
         const n = Math.max(1, Math.round(L * r.density * (P.half > 6 ? 1.6 : 1)));
-        for (let k = 0; k < n; k++) {
-          const idle = rnd() < (r.idle ?? 0.08);
-          const speed = idle ? 0 : (0.9 + rnd() * 0.75) * (rnd() < 0.5 ? 1 : -1);
-          let lat = (rnd() * 2 - 1) * P.half;
-          if (r.avenue) lat = (rnd() < 0.5 ? -1 : 1) * (2.8 + rnd() * Math.max(0.5, r.hw - 3.8));
-          const variant = Math.floor(rnd() * 8);
-          P0.push(r.row, rnd() * L, speed, lat);
-          P1.push(rnd(), 1.55 + rnd() * 0.36 + (rnd() < 0.08 ? -0.5 : 0), variant + (P.closed ? 10 : 0), L);
+        // walkers keep to lanes 0.8 m apart; everyone in a lane walks the same way at the
+        // same pace, evenly spaced, so no one walks through anyone in their own lane, and
+        // the lanes of the two directions lie on opposite sides of the centre line.
+        // Idlers stand in their own band at the edge of the walking width.
+        const cycle = P.closed ? L : 2 * L;
+        const lo = r.avenue ? 2.8 : 0.4, hi = Math.max(lo, P.half - 0.8);
+        const lanes = [];
+        for (let l = lo; l <= hi + 1e-6; l += 0.8) for (const d of P.closed ? [1, -1] : [1]) lanes.push({ l, d, v: 0.9 + rnd() * 0.75, ph: rnd(), c: 0 });
+        const nIdle = Math.round(n * (r.idle ?? 0.08));
+        const cap = Math.max(1, Math.floor(cycle / 2.4));
+        for (let k = 0, left = n - nIdle; left > 0 && k < n * 4; k++) {
+          const ln = lanes[k % lanes.length];
+          if (ln.c < cap) { ln.c++; left--; }
         }
+        const person = (start, speed, lat) => {
+          P0.push(r.row, start, speed, lat);
+          P1.push(rnd(), 1.55 + rnd() * 0.36 + (rnd() < 0.08 ? -0.5 : 0), Math.floor(rnd() * 8) + (P.closed ? 10 : 0), L);
+        };
+        for (const ln of lanes) for (let j = 0; j < ln.c; j++) person(((j + rnd() * 0.35) / ln.c + ln.ph) * cycle, ln.v * ln.d, ln.l);
+        const idleLat = Math.max(P.half, hi + 0.8), ph = rnd();
+        for (let j = 0; j < nIdle; j++) person(((j + rnd() * 0.5) / nIdle + ph) * cycle, 0, idleLat * (rnd() < 0.5 ? -1 : 1));
       }
       if (!P0.length) continue;
-      const ig = new THREE.InstancedBufferGeometry();
-      ig.index = geo.index;
-      for (const k of Object.keys(geo.attributes)) ig.setAttribute(k, geo.attributes[k]);
-      ig.setAttribute('aP0', new THREE.InstancedBufferAttribute(new Float32Array(P0), 4));
-      ig.setAttribute('aP1', new THREE.InstancedBufferAttribute(new Float32Array(P1), 4));
-      ig.instanceCount = P0.length / 4;
-      const mesh = new THREE.Mesh(ig, mat);
-      mesh.frustumCulled = false;
-      mesh.layers.set(1);
-      mesh.userData = { center: g.center, radius: g.radius, count: ig.instanceCount };
-      scene.add(mesh);
-      this.meshes.push(mesh);
-      total += ig.instanceCount;
+      const a0 = new THREE.InstancedBufferAttribute(new Float32Array(P0), 4), a1 = new THREE.InstancedBufferAttribute(new Float32Array(P1), 4);
+      geoSets.forEach((geo, far) => {
+        const ig = new THREE.InstancedBufferGeometry();
+        ig.index = geo.index;
+        for (const k of Object.keys(geo.attributes)) ig.setAttribute(k, geo.attributes[k]);
+        ig.setAttribute('aP0', a0);
+        ig.setAttribute('aP1', a1);
+        ig.instanceCount = P0.length / 4;
+        const mesh = new THREE.Mesh(ig, mats[far]);
+        mesh.frustumCulled = false;
+        mesh.layers.set(1);
+        mesh.userData = { center: g.center, radius: g.radius, count: ig.instanceCount, far: !!far };
+        scene.add(mesh);
+        this.meshes.push(mesh);
+      });
+      total += P0.length / 4;
     }
     this.total = total;
     this.applyQuality(settings);
@@ -428,7 +511,7 @@ vLocalY = transformed.y;
     const cull = this.uniforms.uCull.value;
     for (const m of this.meshes) {
       const d = cp.distanceTo(m.userData.center) - m.userData.radius;
-      m.visible = this.enabled && d < cull;
+      m.visible = this.enabled && d < (m.userData.far ? cull : this.uniforms.uNear.value);
     }
   }
 }
