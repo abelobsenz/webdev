@@ -137,7 +137,7 @@ export class World {
     // bridges to the Outer Wards leave from the rim: the rim towns keep clear of them
     this.wardBridgePaths = wardBridgePaths(gh);
     // the rim bridgeheads (podium, deck start and maglev station) keep the rim towns clear
-    const heads = this.wardBridgePaths.filter((b) => b.head).map((b) => ({ x: b.head.x, z: b.head.z, r: Math.hypot(b.head.hw, b.head.hd) + 6, end: 'rim' }));
+    const heads = this.wardBridgePaths.filter((b) => b.head).map((b) => ({ x: b.head.x, z: b.head.z, r: Math.hypot(b.head.hw, b.head.hd) + 6, end: 'rim', head: b.head }));
     this.plan = planCity({ ground: raw, towers: this.towers, promenades: [...this.infra.promenades, ...this.wardBridgePaths.map((b) => b.path)], urbanMask, stations: [...this.infra.stations, ...heads] });
     NATURE_U.uStreets.value = this.plan.field.texture();
     NATURE_U.uStreetFrame.value = this.plan.field.frameTexture();
@@ -147,6 +147,7 @@ export class World {
     // the rim arcologies' forecourts: ring colonnades, fountains, obelisks, their lamps
     const bridgeAvoid = (x, z, r) => this.wardBridgePaths.some((b) => (b.head && Math.hypot(b.head.x - x, b.head.z - z) < r + 75) || b.path.slice(0, 30).some((p) => Math.hypot(p.x - x, p.z - z) < r + 22));
     this.rimCourts = buildRimForecourts(this.scene, this.towers, raw, bridgeAvoid);
+    this.updaters.push({ update: () => this.app.camera && this.rimCourts.update(this.app.camera) });
     this.streetscape = buildStreetscape(this.scene, this.plan, raw, [...this.infra.promLamps, ...this.rimCourts.lamps]);
     // Greater Meridian: the Outer Wards (platforms, their towns, landmarks, bridges, stations)
     this.metro = buildMetro(this.scene, this.wardTowers, this.wardBridgePaths.map((b) => b), gh, this);

@@ -219,6 +219,55 @@ function clipByGround(pts, ground, minH = 1.6, maxH = 60) {
 
 function polyLength(pts) { let L = 0; for (let i = 1; i < pts.length; i++) L += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]); return L; }
 
+/** How far a rim arcology's forecourt terrace reaches beyond its town core (towerBase). */
+export const RIM_TERRACE = 17;
+
+/** The arcologies on the atoll rim: each stands on a forecourt terrace (rimForecourts.js). */
+export function rimArcologies(towers) {
+  return towers.filter((t) => { const r0 = Math.hypot(t.def.x, t.def.z); return r0 >= 4700 && r0 <= 7000 && !t.def.ward; });
+}
+
+/** A tower's town core: the widest reach of its geometry near the base (as planCity excludes it). */
+export function towerBase(t) {
+  return Math.max(towerFootprint(t, 100), t.collide ? t.collide(0) : (t.def.radius || 60) * 1.4);
+}
+
+// Rim streets stop at the rim arcologies' terraces and at the raised bridgeheads of the ward
+// bridges instead of running on under them: a street of half-width hw is cut back to r + hw
+// from a tower stop (its paving ends a metre outside the terrace) and to hw + 0.5 m outside a
+// bridgehead podium. The cut ends all lie inside the tower squares and the stations'
+// exclusions, where no lot stands, so the lots laid along the whole streets are unchanged.
+// Returns the kept pieces, or null when nothing is cut.
+function clipAtStops(pts, hw, stops) {
+  const inside = (x, z) => stops.some((q) => {
+    if (q.r !== undefined) return Math.hypot(x - q.x, z - q.z) < q.r + hw;
+    const dx = x - q.x, dz = z - q.z;
+    return Math.abs(dx * q.u[0] + dz * q.u[1]) < q.hw + hw + 0.5 && Math.abs(dx * q.side[0] + dz * q.side[1]) < q.hd + hw + 0.5;
+  });
+  const bad = pts.map((p) => inside(p[0], p[1]));
+  if (!bad.some(Boolean)) return null;
+  // the exact crossing on a segment from an outside point a to an inside point b
+  const edge = (a, b) => {
+    let lo = 0, hi = 1;
+    for (let k = 0; k < 24; k++) { const m = (lo + hi) / 2; if (inside(a[0] + (b[0] - a[0]) * m, a[1] + (b[1] - a[1]) * m)) hi = m; else lo = m; }
+    return [a[0] + (b[0] - a[0]) * lo, a[1] + (b[1] - a[1]) * lo];
+  };
+  const out = [];
+  let cur = [];
+  for (let i = 0; i < pts.length; i++) {
+    if (!bad[i]) {
+      if (!cur.length && i > 0) cur.push(edge(pts[i], pts[i - 1]));
+      cur.push(pts[i]);
+    } else if (cur.length) {
+      cur.push(edge(pts[i - 1], pts[i]));
+      out.push(cur);
+      cur = [];
+    }
+  }
+  if (cur.length) out.push(cur);
+  return out.filter((seg) => seg.length >= 2 && polyLength(seg) > 8);
+}
+
 /** Oriented rectangle overlap (separating axes), with a gap. */
 export function obbOverlap(a, b, gap) {
   const axes = [[Math.cos(a.rot), -Math.sin(a.rot)], [Math.sin(a.rot), Math.cos(a.rot)], [Math.cos(b.rot), -Math.sin(b.rot)], [Math.sin(b.rot), Math.cos(b.rot)]];
@@ -362,11 +411,22 @@ export function planCity({ ground, towers, promenades, urbanMask, stations = [] 
       const am = (a0 + a1) / 2;
       squares.push({ x: Math.cos(am) * 5955, z: Math.sin(am) * 5955, r: 24, kind: 'village', district: d.id });
     }
+    // the rim's streets end at the arcologies' terraces and at the bridgeheads (clipAtStops):
+    // lots are still laid along the whole streets, the field, lamps and plan get the kept ends
+    const rimT = rimArcologies(towers);
+    const stops = rimT.map((t) => ({ x: t.def.x, z: t.def.z, r: towerBase(t) + RIM_TERRACE + 1 }));
+    for (const q of squares) if (q.kind === 'tower' && rimT.some((t) => t.def.x === q.x && t.def.z === q.z)) q.rimCourt = true;
+    for (const st of stations) if (st.head) stops.push(st.head);
+    for (const st of streets) {
+      if (st.district !== d.id) continue;
+      const keep = clipAtStops(st.pts, st.hw, stops);
+      if (keep) st.keep = keep;
+    }
   }
 
   // ---- bake the streets and squares
   const field = new StreetField(4096);
-  for (const s of streets) field.polyline(s.pts, s.hw);
+  for (const s of streets) for (const seg of s.keep || [s.pts]) field.polyline(seg, s.hw);
   for (const q of squares) field.square(q.x, q.z, q.r);
 
   // ---- lots along the frontages
@@ -455,6 +515,16 @@ export function planCity({ ground, towers, promenades, urbanMask, stations = [] 
     }
   }
 
+  // the clipped rim streets take their kept pieces from here on (extra pieces go to the end)
+  for (let i = streets.length - 1; i >= 0; i--) {
+    const st = streets[i];
+    if (!st.keep) continue;
+    const [first, ...rest] = st.keep;
+    delete st.keep;
+    for (const seg of rest) streets.push({ ...st, pts: seg });
+    if (first) st.pts = first; else streets.splice(i, 1);
+  }
+
   // ---- street lamps on the verges, squares ringed with lamps
   const lamps = [];
   const lampOk = (x, z) => field.edge(x, z) > 0.3 && field.squareAt(x, z) < 0.05 && !exclusions.some((e) => Math.hypot(e.x - x, e.z - z) < e.r - 6) && ground(x, z) > 1.2;
@@ -482,6 +552,7 @@ export function planCity({ ground, towers, promenades, urbanMask, stations = [] 
     }
   }
   for (const q of squares) {
+    if (q.rimCourt) continue;            // the rim terraces light themselves (rimForecourts.js)
     const n = Math.max(6, Math.floor((TAU * q.r) / 22));
     for (let k = 0; k < n; k++) {
       const a = (k / n) * TAU;
