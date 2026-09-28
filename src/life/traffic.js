@@ -356,13 +356,36 @@ export class Traffic {
 
   // ------------------------------------------------------------ clearance --
   promenadeClear(p) {
+    // the same minimum over the same (every other) promenade samples within 60 m, read from a
+    // 64 m bucket grid instead of scanning every path for every query
+    const proms = this.promenades;
+    let n = 0;
+    for (const path of proms) n += path.length;
+    let idx = this._promIdx;
+    if (!idx || idx.src !== proms || idx.n !== n) {
+      const cells = new Map();
+      for (const path of proms) {
+        for (let k = 0; k < path.length; k += 2) {
+          const q = path[k], key = Math.floor(q.x / 64) * 65536 + Math.floor(q.z / 64);
+          let b = cells.get(key);
+          if (!b) cells.set(key, (b = []));
+          b.push(q);
+        }
+      }
+      idx = this._promIdx = { src: proms, n, cells };
+    }
     let c = 1e9;
-    for (const path of this.promenades) {
-      for (let k = 0; k < path.length; k += 2) {
-        const q = path[k];
-        const dh = Math.hypot(p.x - q.x, p.z - q.z);
-        if (dh > 60) continue;
-        c = Math.min(c, Math.max(dh - 26, p.y - (q.y + 10)));
+    const cx = Math.floor(p.x / 64), cz = Math.floor(p.z / 64);
+    for (let i = cx - 1; i <= cx + 1; i++) {
+      for (let j = cz - 1; j <= cz + 1; j++) {
+        const b = idx.cells.get(i * 65536 + j);
+        if (!b) continue;
+        for (let k = 0; k < b.length; k++) {
+          const q = b[k];
+          const dh = Math.hypot(p.x - q.x, p.z - q.z);
+          if (dh > 60) continue;
+          c = Math.min(c, Math.max(dh - 26, p.y - (q.y + 10)));
+        }
       }
     }
     return c;

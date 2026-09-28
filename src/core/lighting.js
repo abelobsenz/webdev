@@ -21,6 +21,13 @@ const _center = new THREE.Vector3();
 const _nearCorners = [0, 1, 2, 3].map(() => new THREE.Vector3());
 const _farCorners = [0, 1, 2, 3].map(() => new THREE.Vector3());
 const _cascadeCorners = [0, 1, 2, 3, 4, 5, 6, 7].map(() => new THREE.Vector3());
+const _pv = new THREE.Matrix4();
+const _frustum = new THREE.Frustum();
+const _fwd = new THREE.Vector3();
+const _pos = new THREE.Vector3();
+const _ray = new THREE.Vector3();
+const _c1 = new THREE.Vector3();
+const _sphere = new THREE.Sphere();
 const CASCADES = 2;
 const FADE = 0.12;
 
@@ -187,6 +194,79 @@ export class Lighting {
     this.hemi.color.setRGB(0.05, 0.07, 0.1);
     this.hemi.groundColor.setRGB(0.26, 0.34, 0.32).multiply(_c);
     this.hemi.intensity = 0.02 + night * 0.04 + E * horizon * (0.05 + 0.1 * up);
+  }
+
+  /**
+   * Shadow caster culling, one rule for the whole scene: a mesh casts into the sun's shadow
+   * map only if the volume its shadow can sweep (its bounding sphere dragged along the sun's
+   * rays down to the sea) reaches the part of the view the cascades cover. three only tests
+   * casters against each cascade's square ortho box, which reaches far beside and behind the
+   * view, so distant towns and cities were drawn into both cascades from kilometres away.
+   * Culled casters have castShadow cleared for this frame's shadow pass only; call
+   * restoreShadowCasters() after rendering. GPU-positioned things (instanced geometry,
+   * frustumCulled=false meshes whose bounds are not their drawn extent, points, lines)
+   * keep their current behaviour.
+   */
+  cullShadowCasters(scene, camera) {
+    const culled = this._shadowCulled || (this._shadowCulled = []);
+    culled.length = 0;
+    if (!this.sun.castShadow || !this.sun.visible) return;
+    // caster list refreshed periodically (visibility and LOD switches are read every frame)
+    if (!this._casters || --this._castersTtl <= 0) {
+      const list = this._casters = [];
+      scene.traverse((o) => {
+        if (!o.isMesh || !o.castShadow || !o.frustumCulled || o.isInstancedMesh || o.isBatchedMesh || o.isSkinnedMesh) return;
+        const g = o.geometry;
+        if (!g || g.isInstancedBufferGeometry || g.morphAttributes?.position) return;
+        list.push(o);
+      });
+      this._castersTtl = 45;
+    }
+    // the part of the view that receives shadows: the camera frustum out to the shadow range.
+    // The top plane is dropped: the water reflects the view upward, so shadows above the top
+    // edge of the view still show in the lagoon.
+    const sh = this.sun.shadow;
+    const range = Math.min(sh.camera.far, camera.far) * 1.08;
+    _pv.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+    _frustum.setFromProjectionMatrix(_pv, camera.coordinateSystem, camera.reversedDepth);
+    camera.getWorldDirection(_fwd);
+    const planes = _frustum.planes;
+    // planes: 0 right, 1 left, 2 bottom, 3 top, 4 far, 5 near (three's Frustum order);
+    // the far plane moves to the shadow range (normal toward the camera)
+    _pos.setFromMatrixPosition(camera.matrixWorld);
+    planes[4].normal.copy(_fwd).negate();
+    planes[4].constant = _fwd.dot(_pos) + range;
+    const top = 3;
+    // direction the light travels (sun.position is the unit direction toward the sun)
+    _ray.copy(this.sun.position).normalize().negate();
+    const down = Math.max(-_ray.y, 0.03);
+    for (let n = 0; n < this._casters.length; n++) {
+      const o = this._casters[n];
+      if (!o.castShadow || !o.visible) continue;
+      const g = o.geometry;
+      if (g.boundingSphere === null) g.computeBoundingSphere();
+      _sphere.copy(g.boundingSphere).applyMatrix4(o.matrixWorld);
+      const r = _sphere.radius, c0 = _sphere.center;
+      if (!(r >= 0) || !Number.isFinite(r)) continue;
+      // the shadow reaches at most down to the lagoon floor, and never further than the
+      // cascades reach toward the light
+      const len = Math.min((c0.y + r + 60) / down, 14000);
+      _c1.copy(_ray).multiplyScalar(Math.max(len, 0)).add(c0);
+      let out = false;
+      for (let i = 0; i < 6; i++) {
+        if (i === top) continue;
+        const p = planes[i];
+        if (p.distanceToPoint(c0) < -r && p.distanceToPoint(_c1) < -r) { out = true; break; }
+      }
+      if (out) { o.castShadow = false; culled.push(o); }
+    }
+  }
+
+  restoreShadowCasters() {
+    const culled = this._shadowCulled;
+    if (!culled) return;
+    for (let i = 0; i < culled.length; i++) culled[i].castShadow = true;
+    culled.length = 0;
   }
 
   /** Re-generate the IBL environment from the sky scene when the sun has moved enough. */
