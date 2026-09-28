@@ -40,7 +40,9 @@ export const TOWERS = [
   { type: 'lens', x: -4150, z: 180, height: 740, radius: 95, seed: 11 },
   { type: 'canopy', x: -3480, z: -520, height: 560, radius: 40, seed: 12 },
   { type: 'lens', x: -2320, z: -2760, height: 930, radius: 115, seed: 13 },
-  { type: 'canopy', x: -2050, z: -2480, height: 600, radius: 44, seed: 14 },
+  // north-west of Oriel's lens, clear of the maglev terminal and the promenade landing on the
+  // south-east shore (it stood on both) and of the lens with its garden discs
+  { type: 'canopy', x: -2632, z: -2932, height: 600, radius: 44, seed: 14 },
   { type: 'lattice', x: 380, z: -3760, height: 1040, radius: 110, seed: 15, name: 'Thule Lattice' },
   { type: 'helix', x: 700, z: -3450, height: 800, radius: 56, petals: 5, twist: -1.2, seed: 16 },
   // on the atoll rim
