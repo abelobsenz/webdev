@@ -272,7 +272,8 @@ export class HearthWorks {
     // lamps: the sleeves and carriers, the feeder
     hearth.refuge.add(createLamps(sl.lamps, { minPx: 1.2, mask }));
     this.frame.add(createLamps(fd.lamps, { minPx: 1.2, mask }));
-    for (const o of [this.sleeves, this.stubs, this.feeder, this.stream, ...this.shuttles.map((s) => s.mesh)]) { o.frustumCulled = false; if (o !== this.stream) o.renderOrder = 3; }
+    // solid meshes cull against each depth slice (their bounds are exact); the stream expands on screen
+    for (const o of [this.sleeves, this.stubs, this.feeder, this.stream, ...this.shuttles.map((s) => s.mesh)]) { o.frustumCulled = o !== this.stream; if (o !== this.stream) o.renderOrder = 3; }
     this._m = new THREE.Matrix4();
   }
 

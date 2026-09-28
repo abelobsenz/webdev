@@ -101,6 +101,7 @@ export class HelianthTraffic {
       m.userData.sunDir = sunDir;
       const engines = addEngines(m, tug.glows, { scale: 0.7, length: 7, color: 0xffc080, core: 0xfff4e0, throttle: 0 });
       addLamps(m, tug.lamps, { minPx: 1.2 });
+      m.frustumCulled = true;
       station.add(m);
       return { mesh: m, c, engines, pos: V(0, 0, 0), fwd: V(0, 0, 1) };
     });
@@ -110,6 +111,7 @@ export class HelianthTraffic {
     const rm = craftMesh(placeMerge(relays.map((r) => ({ geo: buoy.geo, m: r.m }))), { accent: [1.0, 0.72, 0.4], lit: 0.5, fill: 0.075 });
     rm.userData.sunDir = sunDir;
     addLamps(rm, relays.map((r, k) => ({ p: r.top, r: 60, color: k % 2 ? LAMP.AMBER : LAMP.WHITE, i: 3.2, breathe: 0.4, phase: k / 4 })), { minPx: 1.4 });
+    rm.frustumCulled = true;
     station.add(rm);
     this.relays = rm;
     this._m = new THREE.Matrix4(); this._x = V(0, 0, 0); this._y = V(0, 0, 0);

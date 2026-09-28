@@ -23,7 +23,7 @@ import { Traffic } from './traffic.js';
 import { Lanes } from './lanes.js';
 import { WorkingStations } from './workingStations.js';
 import { GeoRoads, geoRoadTargets } from './geoRoads.js';
-import { ReleaseYard } from './releaseYard.js';
+import { ReleaseYard, releaseYardTarget } from './releaseYard.js';
 
 const smooth = (a, b, x) => { const t = Math.min(Math.max((x - a) / (b - a), 0), 1); return t * t * (3 - 2 * t); };
 const easeInOut = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
@@ -108,6 +108,7 @@ export class SpaceMode {
     T('sun', { position: (o) => o.copy(sim.sunPos), frame: identity, minDist: 3e6, maxDist: 1.2e8, defaultDist: 3.2e7, view: { az: 2.2, el: 0.55 } });
     for (const [k, o] of Object.entries(fleetTargets(this))) T(k, o);
     for (const [k, o] of Object.entries(geoRoadTargets(this))) T(k, o);
+    T('releaseYard', releaseYardTarget(this));
     // unlisted targets (no key): the junction on the Halo and the counterweight
     const meridQ = stationFrame(merid);
     T('junction', {
@@ -116,7 +117,7 @@ export class SpaceMode {
     });
     T('counter', {
       position: (o) => o.copy(merid).multiplyScalar(R_EARTH + COUNTERWEIGHT_ALT + 10).applyQuaternion(sim.earthQuat),
-      frame: (q) => q.copy(sim.earthQuat).multiply(meridQ), minDist: 20, maxDist: 400000, defaultDist: 88, view: { az: 0.1, el: 1.0 },   // the release yard across the frame, the Earth below, the cable falling to it
+      frame: (q) => q.copy(sim.earthQuat).multiply(meridQ), minDist: 20, maxDist: 400000, defaultDist: 84, view: { az: 0.1, el: 1.2 },   // the release yard across the frame, the Earth below, the cable falling to it
     });
     T('hearth', {
       position: (o) => o.copy(sim.hearthPos),

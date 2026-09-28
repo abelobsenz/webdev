@@ -48,6 +48,7 @@ export function addFoundryUnload(foundryGroup) {
   const d = buildFoundryUnload();
   const m = craftMesh(d.geo, { accent: [0.5, 1.0, 0.8], lit: 0.55 });
   addLamps(m, d.lamps, { minPx: 1.2 });
+  m.frustumCulled = true;
   foundryGroup.add(m);
   return { mesh: m, data: d };
 }

@@ -202,6 +202,8 @@ export class ReleaseYard {
     this.mesh.add(held);
     addLamps(held, liner.lamps, { minPx: 1.3 });
     this.held = held;
+    // (solid meshes cull against each depth slice; their bounds are exact)
+    for (const o of [this.mesh, held, ...this.rods]) o.frustumCulled = true;
     const _c = new THREE.Vector3();
     space.addBody('releaseYard', [this.group], () => this.group.localToWorld(_c.copy(d.cradles[0].center).multiplyScalar(KM * 0.8)), d.radius, { solid: true, hint: 0.5 });
     // the lane beacons (non-solid, 800 km long)
@@ -222,6 +224,7 @@ export class ReleaseYard {
     addLamps(m, liner.lamps, { minPx: 1.3 });
     this.ship.add(m);
     this.shipMesh = m;
+    m.frustumCulled = true;
     space.scene.add(this.ship);
     const _s = new THREE.Vector3();
     space.addBody('releasedLiner', [this.ship], () => this.ship.getWorldPosition(_s), 1.6, { solid: true, hint: 0.5 });
@@ -247,4 +250,17 @@ export class ReleaseYard {
     const px = pixelRadius(space.camera, this.ship.position, 1.2, space.size.y);
     this.shipMesh.visible = px > 0.3;
   }
+}
+
+/** Focus target: the cradles, seen along the release line with the Earth beyond (analytic pose). */
+export function releaseYardTarget(space) {
+  const sim = space.sim;
+  const up = bodyDir(0, MERIDIAN_LON), qS = new THREE.Quaternion().setFromUnitVectors(V(0, 1, 0), up), fq = stationFrame(up);
+  const { E } = yardAxes();
+  const local = E.clone().multiplyScalar(YARD.cradleAt * KM).applyQuaternion(qS).add(up.clone().multiplyScalar(R_EARTH + COUNTERWEIGHT_ALT + 10));
+  return {
+    position: (o) => o.copy(local).applyQuaternion(sim.earthQuat),
+    frame: (q) => q.copy(sim.earthQuat).multiply(fq),
+    minDist: 2, maxDist: 400000, defaultDist: 14, view: { az: -2.3, el: 0.42 },
+  };
 }
