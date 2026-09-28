@@ -3,6 +3,9 @@ import { createLamps, LAMP } from './lamps.js';
 import { CORRIDORS, stationFrame } from './stations.js';
 import { R_EARTH, GEO_ALT, MERIDIAN_LON, bodyDir } from './sim.js';
 import { HALO_PORTS } from './earthData.js';
+import { CB, CK } from '../craft/craftGeometry.js';
+import { lathe } from '../craft/craftClasses.js';
+import { craftMesh, placeMerge, KM } from './craftMesh.js';
 
 // Lane guidance: soft beacons that make the traffic corridors read as designed ways.
 //   Harbour   runway pairs along the arrival (amber) and departure (blue) corridors, a
@@ -13,26 +16,52 @@ import { HALO_PORTS } from './earthData.js';
 
 const _v = new THREE.Vector3();
 
-function corridorLamps(dir, color, inward) {
+/**
+ * A lane buoy (metres, axis +Y): a spindle with a bronze collar, a lantern crown carrying the
+ * beacon, and a gyro ring on three spokes. Closed solids throughout. Returns { geo, top }.
+ */
+export function buildBuoy() {
+  const B = new CB();
+  B.push(new THREE.Matrix4().makeRotationX(-Math.PI / 2));
+  lathe(B, [[0.1, -45, CK.DARK], [9, -42, CK.DARK], [12, -34, CK.BRONZE], [12, 18, CK.HULL], [15, 22, CK.BRONZE], [15, 26, CK.BRONZE], [9, 30, CK.HULL], [5, 40, CK.LANTERN], [0.1, 44, CK.LANTERN]], 14);
+  B.pop();
+  B.push(new THREE.Matrix4().makeRotationX(Math.PI / 2));
+  B.torus(26, 2.2, 32, 6, CK.BRONZE);
+  B.pop();
+  for (let k = 0; k < 3; k++) {
+    const a = (k / 3) * Math.PI * 2;
+    B.tube([new THREE.Vector3(Math.cos(a) * 11, 0, Math.sin(a) * 11), new THREE.Vector3(Math.cos(a) * 25, 0, Math.sin(a) * 25)], 1.4, 6, CK.DARK);
+  }
+  return { geo: B.geometry(), top: 44 };
+}
+
+/** Beacon buoys and their lamps along one corridor (Harbour frame, km). */
+function corridorLamps(dir, color, inward, buoys) {
   const d = dir.clone().normalize();
   const e1 = new THREE.Vector3().crossVectors(d, new THREE.Vector3(0, 1, 0)).normalize();
   const e2 = new THREE.Vector3().crossVectors(e1, d);
   const out = [];
   const n = 14;
+  // buoys grow along the road (seen by ships at speed from further off); lamps sit on their crowns
+  const put = (p, size, lamp) => {
+    buoys.push({ p, size });
+    out.push({ ...lamp, p: p.clone().add(new THREE.Vector3(0, (BUOY_TOP + 3) * size * KM, 0)), r: 0.011 * size });
+  };
   for (let i = 0; i < n; i++) {
     const s = 24 + i * i * 7.5;                     // closer together near the Harbour
     const ph = (inward ? i : n - i) / n * 1.6;
     for (const side of [-1, 1]) {
-      out.push({ p: d.clone().multiplyScalar(s).addScaledVector(e1, side * (2.4 + i * 0.25)), r: 0.11 + i * 0.012, color, i: 2.6, breathe: 0.4, phase: ph % 1 });
+      put(d.clone().multiplyScalar(s).addScaledVector(e1, side * (2.4 + i * 0.25)), 1 + i * 0.9, { color, i: 3.2, breathe: 0.4, phase: ph % 1 });
     }
   }
   // the gate ring at the corridor mouth
   for (let k = 0; k < 8; k++) {
     const a = (k / 8) * Math.PI * 2;
-    out.push({ p: d.clone().multiplyScalar(21).addScaledVector(e1, Math.cos(a) * 3.2).addScaledVector(e2, Math.sin(a) * 3.2), r: 0.1, color, i: 2.2, breathe: 0.3, phase: k / 8 });
+    put(d.clone().multiplyScalar(21).addScaledVector(e1, Math.cos(a) * 3.2).addScaledVector(e2, Math.sin(a) * 3.2), 1.4, { color, i: 3.0, breathe: 0.3, phase: k / 8 });
   }
   return out;
 }
+const BUOY_TOP = 44;
 
 export class Lanes {
   constructor(space) {
@@ -42,9 +71,15 @@ export class Lanes {
     this.harbourFrame = new THREE.Group();
     this.harbourFrame.position.copy(up).multiplyScalar(R_EARTH + GEO_ALT);
     stationFrame(up, this.harbourFrame.quaternion);
-    const lamps = [...corridorLamps(CORRIDORS.dA, LAMP.AMBER, true), ...corridorLamps(CORRIDORS.dD, LAMP.BLUE, false)];
+    const buoys = [];
+    const lamps = [...corridorLamps(CORRIDORS.dA, LAMP.AMBER, true, buoys), ...corridorLamps(CORRIDORS.dD, LAMP.BLUE, false, buoys)];
     this.harbourLamps = createLamps(lamps, { minPx: 1.4 });
     this.harbourFrame.add(this.harbourLamps);
+    // the buoys themselves (metres, one merged mesh in the lane frame)
+    const buoy = buildBuoy();
+    this.buoyData = buoys.map((b) => ({ ...b, m: new THREE.Matrix4().compose(b.p.clone().multiplyScalar(1000), new THREE.Quaternion(), new THREE.Vector3(b.size, b.size, b.size)) }));
+    this.buoys = craftMesh(placeMerge(this.buoyData.map((b) => ({ geo: buoy.geo, m: b.m }))), { accent: [1.0, 0.72, 0.45], lit: 0.4 });
+    this.harbourFrame.add(this.buoys);
     space.earthFixed.add(this.harbourFrame);
     space.addBody('lanesGeo', [this.harbourFrame], () => this.harbourFrame.getWorldPosition(_v), 1500);
     // port columns (body frame, km)

@@ -95,6 +95,13 @@ export class Elevator {
     for (let a = 0; a < 1000; a += 4) alts.push(a);
     for (let a = 1000; a < COUNTERWEIGHT_ALT; a *= 1.02) alts.push(a);
     alts.push(COUNTERWEIGHT_ALT);
+    // fine stations where people look at the cable from a few km: the Harbour, the Water Store
+    // below it and the counterweight (a per-vertex width 700 km off made the ribbon a hairline)
+    for (const [c, near, far] of [[GEO_ALT, 40, 600], [COUNTERWEIGHT_ALT, 60, 900]]) {
+      for (let d = -far; d <= far; d += (Math.abs(d) < near ? 0.5 : 10)) { const a = c + d; if (a > 1000 && a < COUNTERWEIGHT_ALT) alts.push(a); }
+    }
+    alts.sort((x, y) => x - y);
+    for (let i = alts.length - 1; i > 0; i--) if (alts[i] - alts[i - 1] < 0.2) alts.splice(i, 1);
     for (const a of alts) { pts.push(up.clone().multiplyScalar(R_EARTH + a)); along.push(a); }
     this.tetherMat = createRibbonMaterial({ widthKm: 0.03, minPx: 1.4, frag: TETHER_FRAG });
     const cables = [{pts,along,id:0}];
