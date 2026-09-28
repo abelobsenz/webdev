@@ -186,6 +186,10 @@ export function planTrees(world) {
   // medians, flowering trees or rain trees on the street verges, palms on the esplanades.
   if (plan) {
     for (const l of plan.lamps) occupy(l.x, l.z, 2.2, 6);
+    // benches and the streetscape's own lamps share the verge with the trees
+    const ss = world.streetscape || {};
+    for (const l of ss.lamps || []) occupy(l.x, l.z, 2.2, 6);
+    for (const b of ss.benches || []) occupy(b.x, b.z, 2.4, 6);
     const verge = [SP.flowering, SP.rainTree, SP.flowering, SP.araucaria];
     plan.streets.forEach((st, si) => {
       if (st.cls === 1) return;                          // lanes are too narrow
@@ -228,6 +232,11 @@ export function planTrees(world) {
   const mp = world.metro && world.metro.plan;
   if (mp) {
     for (const l of mp.lamps) occupy(l.x, l.z, 2.2, 6);
+    for (const S of world.metro.streetscapes || []) for (const b of S.benches || []) occupy(b.x, b.z, 2.4, 6);
+    const towns = world.wardTowns;
+    // clear of every ward building (trunk plus the lower crown)
+    const bldgFree = (x, z, r) => !towns || towns.isFree(x, z, r);
+    const surf = (x, z) => (mp.surfaceAt ? mp.surfaceAt(x, z) : 'lawn');
     const towerHit = (x, z, r) => (world.wardTowers || []).some((t) => Math.hypot(t.def.x - x, t.def.z - z) < (t.footprint || 60) + r + 4);
     const reserved = (x, z) => (mp.reservedAt ? mp.reservedAt(x, z) : 0);
     const levelOk = (x, z, y) => Math.abs(wardHeight(x, z) - y) < 0.1;
@@ -239,12 +248,14 @@ export function planTrees(world) {
       const avenue = st.cls === 3, esplanade = st.cls === 4;
       const sp = avenue || esplanade ? SP.palm : verge[si % verge.length];
       const spacing = avenue ? 13 : sp === SP.rainTree ? 18 : sp === SP.araucaria ? 16 : 14;
-      const offs = avenue ? [0] : [-(st.hw + 2.7), st.hw + 2.7];
+      // ward avenues have no planted median (the carriageway is one paved deck): both verges
+      const offs = [-(st.hw + 2.7), st.hw + 2.7];
       const baseS = sp === SP.palm ? 12 : sp === SP.rainTree ? 9.5 : sp === SP.araucaria ? 16 : 8;
       let acc = spacing * 0.5;
       for (let i2 = 1; i2 < P.length; i2++) {
         const dx = P[i2][0] - P[i2 - 1][0], dz = P[i2][1] - P[i2 - 1][1];
         const L = Math.hypot(dx, dz);
+        if (L < 1e-6) continue;
         acc += L;
         while (acc >= spacing) {
           acc -= spacing;
@@ -255,10 +266,13 @@ export function planTrees(world) {
             const x = x0 + nx * o, z = z0 + nz * o;
             if (!levelOk(x, z, y0)) continue;
             if (mp.field.squareAt(x, z) > 0.05) continue;
-            if (!avenue && mp.field.edge(x, z) < 2.0) continue;
+            if (mp.field.edge(x, z) < 2.0) continue;                       // a cross street, not a verge
+            const sf = surf(x, z);
+            if (!sf || sf === 'road' || sf === 'water') continue;
             if (reserved(x, z) === 2 || towerHit(x, z, 3)) continue;
-            if (!clear(x, z, 2.5, 6)) continue;
             const s2 = baseS * (0.92 + rnd() * 0.16);
+            if (!bldgFree(x, z, Math.min(crownRadius(sp, s2), 4) + 0.5)) continue;
+            if (!clear(x, z, 2.5, 6)) continue;
             push(x, z, sp, s2, { y: y0 - 0.15, layer: 6, spacing: 2.5, lean: sp === SP.palm ? rnd() * 0.04 : 0, rot: rnd() * Math.PI * 2 });
           }
         }
@@ -269,7 +283,7 @@ export function planTrees(world) {
       const sp = SP[t.sp] ?? SP.flowering;
       const y = wardHeight(t.x, t.z);
       if (!(y > 2)) continue;                              // rooted on the platform, never over water
-      if (!clear(t.x, t.z, 2.0, 6) || towerHit(t.x, t.z, 2)) continue;
+      if (!clear(t.x, t.z, 2.0, 6) || towerHit(t.x, t.z, 2) || !bldgFree(t.x, t.z, 1.5)) continue;
       push(t.x, t.z, sp, t.s * (0.94 + rnd() * 0.12), { y: y - 0.15, layer: 6, spacing: 2.2, rot: rnd() * Math.PI * 2 });
     }
     // groves in the parks, each ward with its own trees
@@ -277,7 +291,6 @@ export function planTrees(world) {
       aurora: [SP.araucaria, SP.flowering, SP.rainTree], tidewater: [SP.rainTree, SP.flowering, SP.banyan], sunward: [SP.palm, SP.flowering, SP.palm],
       seraph: [SP.flowering, SP.palm, SP.flowering], southmarch: [SP.rainTree, SP.araucaria, SP.flowering], coral: [SP.palm, SP.treeFern, SP.banana, SP.palm], westmere: [SP.rainTree, SP.araucaria, SP.flowering],
     };
-    const surf = (x, z) => (mp.surfaceAt ? mp.surfaceAt(x, z) : 'lawn');
     for (const pk of mp.parks || []) {
       const prim = pk.prim;
       if (!prim) continue;
@@ -294,6 +307,7 @@ export function planTrees(world) {
         const sp = list[Math.floor(rnd() * list.length)];
         const s2 = sp === SP.palm ? 11 + rnd() * 5 : sp === SP.araucaria ? 14 + rnd() * 6 : sp === SP.banyan ? 15 + rnd() * 4 : sp === SP.treeFern ? 4 + rnd() * 3 : sp === SP.banana ? 3.5 + rnd() * 1.5 : 8 + rnd() * 5;
         const cr = crownRadius(sp, s2);
+        if (reserved(x, z) === 2 || !bldgFree(x, z, Math.min(cr, 4) + 0.5)) continue;
         if (!clear(x, z, cr * 0.7, 7) || towerHit(x, z, cr)) continue;
         const y = wardHeight(x, z);
         if (!(y > 2)) continue;
@@ -301,7 +315,6 @@ export function planTrees(world) {
       }
     }
     // specimen trees on the lawns of the garden blocks, clear of every building
-    const towns = world.wardTowns;
     for (const d of mp.districts || []) {
       const R = d.R * 1.05;
       const n = Math.floor(R * R * 0.0016);
@@ -334,7 +347,7 @@ export function planTrees(world) {
         if (Math.abs(wardHeight(x, z) - qw.y) > 0.1) continue;
         const sp = (qw.ward === 'coral' || qw.ward === 'sunward' || qw.ward === 'seraph') ? SP.palm : SP.flowering;
         const s2 = sp === SP.palm ? 11 + rnd() * 3 : 7.5 + rnd() * 2;
-        if (!clear(x, z, 3.2, 6) || towerHit(x, z, 4)) continue;
+        if (!clear(x, z, 3.2, 6) || towerHit(x, z, 4) || !bldgFree(x, z, 3) || reserved(x, z) === 2) continue;
         push(x, z, sp, s2, { y: qw.y - 0.15, layer: 6, spacing: 3.2, lean: sp === SP.palm ? rnd() * 0.05 : 0 });
       }
     }

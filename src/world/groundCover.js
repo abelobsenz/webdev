@@ -654,6 +654,21 @@ export function buildHedges(world) {
     hedgeRun(pts, hgt, chunks.get(key));
   };
   const stations = (world.infra && world.infra.stations) || [];
+  // the street lamps stand on the verge line: every hedge breaks around a lamp pole
+  const LG = 8, lampGrid = new Map();
+  for (const l of [...(plan.lamps || []), ...((world.streetscape && world.streetscape.lamps) || [])]) {
+    const k = `${Math.floor(l.x / LG)},${Math.floor(l.z / LG)}`;
+    if (!lampGrid.has(k)) lampGrid.set(k, []);
+    lampGrid.get(k).push(l);
+  }
+  const nearLamp = (x, z) => {
+    const cx = Math.floor(x / LG), cz = Math.floor(z / LG);
+    for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) {
+      const l = lampGrid.get(`${cx + a},${cz + b}`);
+      if (l) for (const q of l) if (Math.hypot(q.x - x, q.z - z) < 1.3) return true;
+    }
+    return false;
+  };
   let total = 0;
   plan.streets.forEach((st, si) => {
     if (st.cls === 1) return;                                   // lanes have no verge beds
@@ -673,7 +688,7 @@ export function buildHedges(world) {
           const x = P[i - 1][0] + dx * t + nx * sgn * (st.hw + 0.66), z = P[i - 1][1] + dz * t + nz * sgn * (st.hw + 0.66);
           const e = f.edge(x, z);
           const ok = e > 0.45 && e < 0.9 && f.squareAt(x, z) < 0.05 && ground(x, z) > 1.8
-            && !stations.some((q) => Math.hypot(q.x - x, q.z - z) < q.r + 3);
+            && !nearLamp(x, z) && !stations.some((q) => Math.hypot(q.x - x, q.z - z) < q.r + 3);
           if (ok) run.push(new THREE.Vector3(x, ground(x, z), z)); else flush();
           acc = s + 2.0 - L;
         }
