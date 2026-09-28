@@ -75,7 +75,7 @@ vUv2 = uv; vKind = aKind; vBloomC = aBloom.rgb;
   vec3 wo = transpose(im) * windOffset(ip, aKind.z, 0.55);
   wo /= max(dot(im[0], im[0]), 1e-4);
   transformed += wo;
-  if (aKind.x > 0.5) transformed += normal * sin(uTime * 6.5 + aTan.w * 40.0 + ip.x * 0.3) * 0.05 * aKind.z;
+  if (aKind.x > 0.5) transformed += normal * sin(uTime * 5.0 + aTan.w * 40.0 + ip.x * 0.3) * 0.035 * aKind.z;
   vTanW = normalize(mat3(modelMatrix) * im * aTan.xyz);
 }`,
     },
@@ -102,7 +102,7 @@ float ign(vec2 p) { return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00
   if (ign(gl_FragCoord.xy) >= vFade) discard;
 }`,
       surface: /* glsl */ `
-roughnessFactor = vKind.x < 0.5 ? 0.92 : 0.62;
+roughnessFactor = vKind.x < 0.5 ? 0.92 : 0.7;
 `,
       normal: /* glsl */ `
 {
@@ -140,7 +140,10 @@ roughnessFactor = vKind.x < 0.5 ? 0.92 : 0.62;
     vec3 V = normalize(cameraPosition - vWPos);
     float back = pow(max(dot(-V, uSunDir), 0.0), 3.0);
     float wrap = max(0.0, -dot(normalize(vWNrm), uSunDir));
-    vec3 trans = diffuseColor.rgb * vec3(0.9, 1.05, 0.55) * uSunColor * uSunIlluminance * (back * 0.55 + wrap * 0.12) * smoothstep(0.35, 0.95, ao);
+    vec3 trans = diffuseColor.rgb * vec3(0.85, 1.0, 0.5) * uSunColor * uSunIlluminance * (back * 0.4 + wrap * 0.1) * smoothstep(0.35, 0.95, ao);
+    // grazing cards against a bright sky: bound the Fresnel sheen so thin leaves never wash out to white
+    reflectedLight.indirectSpecular *= 0.5;
+    reflectedLight.directSpecular *= 0.7;
     reflectedLight.directDiffuse += trans * cloudShadowAt(vWPos);
   }
 }`,
@@ -166,7 +169,7 @@ void farShape(inout vec3 p, inout vec3 n, vec3 ip) {
   if (aPart < 0.5) {
     bool star = prof >= 4;
     float tr = star ? 0.011 : (prof == 3 ? 0.03 : 0.024);
-    float top = star ? cb : cb + ch * 0.3;
+    float top = star ? cb : cb + ch * 0.5;   // ends at the crown centre: never pokes out below an umbrella crown
     float y = mix(-0.14, top, p.y);
     vec2 r = p.xz * tr * (1.0 - 0.35 * p.y) * (prof == 3 ? 1.6 : 1.0);
     float bend = star ? 0.09 * p.y * p.y * (0.5 + seed) : 0.0;

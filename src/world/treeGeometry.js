@@ -25,10 +25,11 @@ class GeoBuilder {
   tri(a, b, c) { this.I.push(a, b, c); }
   /**
    * Tube along points with parallel-transported frames.
-   * rad(t, theta, p) radius; opts: sides, layer, tileW, tileH (bark texture tile in m), col, sway(t,p), ao(t,p), v0
+   * rad(t, theta, p) radius; opts: sides, layer, tileW, tileH (bark texture tile in m), col, sway(t,p), ao(t,p), v0,
+   * cap (default true): close the far end with a low dome so no tube is ever seen open.
    */
   tube(pts, rad, opts = {}) {
-    const { sides = 8, layer = BARK.FISSURED, tileW = 1.2, tileH = 2.0, col = [1, 1, 1], sway = () => 0, ao = () => 1, v0 = 0 } = opts;
+    const { sides = 8, layer = BARK.FISSURED, tileW = 1.2, tileH = 2.0, col = [1, 1, 1], sway = () => 0, ao = () => 1, v0 = 0, cap = true } = opts;
     const n = pts.length;
     const T = [], Nf = [], Bf = [];
     for (let i = 0; i < n; i++) {
@@ -51,6 +52,7 @@ class GeoBuilder {
     const rep = Math.max(1, Math.round((2 * Math.PI * r0) / tileW));
     let s = v0;
     const base = this.n;
+    const endR = [], endD = [];
     for (let i = 0; i < n; i++) {
       if (i > 0) s += pts[i].distanceTo(pts[i - 1]);
       const t = i / (n - 1);
@@ -60,12 +62,31 @@ class GeoBuilder {
         const r = rad(t, th, pts[i]);
         const p = pts[i].clone().addScaledVector(dir, r);
         this.v(p, dir, (k / sides) * rep, s / tileH, col, T[i], 0, KIND.BARK, layer, sway(t, pts[i]), ao(t, pts[i]));
+        if (i === n - 1) { endR.push(r); endD.push(dir); }
       }
     }
     const cols = sides + 1;
     for (let i = 0; i < n - 1; i++) for (let k = 0; k < sides; k++) {
       const a = base + i * cols + k, b = a + 1, c = a + cols, d = c + 1;
       this.tri(a, c, b); this.tri(b, c, d);
+    }
+    if (cap) {
+      // end cap: a shoulder ring pulled in and forward, then a fan to the tip (a cut, healed stub)
+      const e = pts[n - 1], te = T[n - 1], ring = base + (n - 1) * cols;
+      const rm = endR.reduce((a, b) => a + b, 0) / endR.length;
+      const sw = sway(1, e), oc = ao(1, e) * 0.85;
+      const sh = this.n;
+      for (let k = 0; k <= sides; k++) {
+        const nn = endD[k].clone().multiplyScalar(0.6).addScaledVector(te, 0.8).normalize();
+        const p = e.clone().addScaledVector(endD[k], endR[k] * 0.62).addScaledVector(te, rm * 0.28);
+        this.v(p, nn, (k / sides) * rep, (s + rm * 0.4) / tileH, col, te, 0, KIND.BARK, layer, sw, oc);
+      }
+      const apex = this.v(e.clone().addScaledVector(te, rm * 0.4), te, 0.5 * rep, (s + rm * 0.8) / tileH, col, te, 0, KIND.BARK, layer, sw, oc);
+      for (let k = 0; k < sides; k++) {
+        const a = ring + k, b = a + 1, c = sh + k, d = c + 1;
+        this.tri(a, c, b); this.tri(b, c, d);
+        this.tri(c, apex, d);
+      }
     }
     return s;
   }
@@ -180,6 +201,8 @@ function trunk(B, rnd, { top, R0, taper = 0.55, lean = 0, buttress = 0, fins = 5
     const l = lean * Math.max(0, y / top) ** 2;
     pts.push(V3(Math.cos(la) * l + Math.sin(y * 0.4) * 0.05 * R0, y, Math.sin(la) * l + Math.cos(y * 0.33) * 0.05 * R0));
   }
+  // axis point at height y, so limbs grow out of the trunk centre on leaning trunks
+  const axisAt = (y) => { const l = lean * Math.max(0, y / top) ** 2; return V3(Math.cos(la) * l + Math.sin(y * 0.4) * 0.05 * R0, y, Math.sin(la) * l + Math.cos(y * 0.33) * 0.05 * R0); };
   const ph = rnd() * 6.28;
   B.tube(pts, (t, th, p) => {
     const y = p.y;
@@ -189,7 +212,9 @@ function trunk(B, rnd, { top, R0, taper = 0.55, lean = 0, buttress = 0, fins = 5
     r *= 1 + flare * (0.45 + buttress * 2.4 * fin) + 0.05 * Math.sin(th * 3 + y);
     return r;
   }, { sides, layer, tileW, tileH, col, sway: (t, p) => sway * Math.max(0, p.y / top) ** 2, ao: (t, p) => trunkAO(p.y) });
-  return pts[pts.length - 1];
+  const tip = pts[pts.length - 1];
+  tip.axisAt = axisAt;
+  return tip;
 }
 
 /** A limb (and its sub-branches) from p0 to p1; returns the end points of the finest twigs. */
@@ -229,7 +254,7 @@ function forestTree(rnd, variant) {
   for (let k = 0; k < nL; k++) {
     const a = (k / nL) * Math.PI * 2 + rnd() * 0.7;
     const el = 0.35 + rnd() * 0.4;
-    const start = V3(tp.x, top - 1.5 - rnd() * 2.5, tp.z);
+    const start = tp.axisAt(top - 1.5 - rnd() * 2.5);
     const len = 5.5 + rnd() * 2.5;
     const end = start.clone().add(V3(Math.cos(a) * Math.cos(el) * len, Math.sin(el) * len + 1.5, Math.sin(a) * Math.cos(el) * len));
     ends.push(...limb(B, rnd, start, end, 0.3, 0.1, { layer: variant ? BARK.SMOOTH : BARK.FISSURED, bend: 1.2, subs: 3 }));
@@ -425,19 +450,19 @@ function mangrove(rnd) {
     const a = (k / 13) * Math.PI * 2 + rnd() * 0.4;
     const y0 = 0.8 + rnd() * 2.2;
     const R = 1.8 + rnd() * 2.2 + y0 * 0.4;
-    const p0 = V3(Math.cos(a) * 0.15, y0, Math.sin(a) * 0.15);
+    const p0 = tp.axisAt(y0).add(V3(Math.cos(a) * 0.04, 0, Math.sin(a) * 0.04));
     const p2 = V3(Math.cos(a) * R, -1.6, Math.sin(a) * R);
     const p1 = V3(Math.cos(a) * R * 0.55, y0 + 0.8, Math.sin(a) * R * 0.55);
     const c = new THREE.QuadraticBezierCurve3(p0, p1, p2);
     const pts = [];
     for (let i = 0; i <= 8; i++) pts.push(c.getPoint(i / 8));
-    B.tube(pts, (t) => 0.07 + 0.03 * t, { sides: 5, layer: BARK.FLAKY, tileW: 0.5, tileH: 1.0, ao: () => 0.6 });
+    B.tube(pts, (t) => 0.07 + 0.03 * t, { sides: 5, layer: BARK.FLAKY, tileW: 0.5, tileH: 1.0, ao: () => 0.6, cap: false });
   }
   const crownC = V3(tp.x, 5.6, tp.z), crownR = V3(4.2, 2.6, 4.2);
   const ends = [];
   for (let k = 0; k < 5; k++) {
     const a = (k / 5) * Math.PI * 2 + rnd();
-    const s = V3(tp.x, top - 1, tp.z);
+    const s = tp.axisAt(top - 1);
     const e = s.clone().add(V3(Math.cos(a) * 3, 1.8 + rnd(), Math.sin(a) * 3));
     ends.push(...limb(B, rnd, s, e, 0.12, 0.05, { layer: BARK.FLAKY, bend: 0.6, subs: 2 }));
   }
@@ -490,13 +515,14 @@ function banyan(rnd) {
     // aerial roots hanging from the limb; the older ones reach the ground as pillars
     for (let j = 0; j < 7; j++) {
       const t = 0.2 + rnd() * 0.75;
-      const q = lp[Math.round(t * 8)].clone().add(V3((rnd() - 0.5) * 0.4, -0.4, (rnd() - 0.5) * 0.4));
+      const lr = 0.75 - 0.5 * (Math.round(t * 8) / 8);
+      const q = lp[Math.round(t * 8)].clone().add(V3((rnd() - 0.5) * lr * 0.5, -lr * 0.45, (rnd() - 0.5) * lr * 0.5));
       const reach = rnd() < 0.35;
       const len = reach ? q.y + 2.5 : 2 + rnd() * 5;
       const rr = reach ? 0.12 + rnd() * 0.16 : 0.025 + rnd() * 0.03;
       const pts = [];
       for (let i = 0; i <= 6; i++) { const u = i / 6; pts.push(q.clone().add(V3(Math.sin(u * 5 + j) * 0.08, -len * u, Math.cos(u * 4 + j) * 0.08))); }
-      B.tube(pts, (u) => rr * (reach ? 1 + 0.8 * u * u : 1 - 0.5 * u), { sides: reach ? 6 : 3, layer: BARK.ROOT, tileW: 0.5, tileH: 1.5, sway: (u) => (reach ? 0 : 0.2 + 0.6 * u), ao: () => 0.55 });
+      B.tube(pts, (u) => rr * (reach ? 1 + 0.8 * u * u : 1 - 0.5 * u), { sides: reach ? 6 : 3, layer: BARK.ROOT, tileW: 0.5, tileH: 1.5, sway: (u) => (reach ? 0 : 0.2 + 0.6 * u), ao: () => 0.55, cap: !reach });
     }
   }
   for (const e of ends) {
@@ -566,7 +592,7 @@ function banana(rnd) {
  */
 function farBlob() {
   const parts = [];
-  const trunkG = new THREE.CylinderGeometry(1, 1, 1, 6, 1, true).translate(0, 0.5, 0);
+  const trunkG = new THREE.CylinderGeometry(1, 1, 1, 6, 1, false).translate(0, 0.5, 0);
   const crownG = new THREE.IcosahedronGeometry(1, 2);
   const add = (g, part) => {
     const n = g.attributes.position.count;
@@ -581,7 +607,7 @@ function farBlob() {
 /** Palm / tree-fern far LOD: bent trunk plus a star of drooping frond blades (aPart 2). */
 function farStar() {
   const parts = [];
-  const trunkG = new THREE.CylinderGeometry(1, 1, 1, 5, 4, true).translate(0, 0.5, 0);
+  const trunkG = new THREE.CylinderGeometry(1, 1, 1, 5, 4, false).translate(0, 0.5, 0);
   const n = trunkG.attributes.position.count;
   trunkG.setAttribute('aPart', new THREE.Float32BufferAttribute(new Float32Array(n).fill(0), 1));
   parts.push(trunkG.toNonIndexed());
