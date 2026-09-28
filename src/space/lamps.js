@@ -40,6 +40,10 @@ void main() {
   // below the minimum size the lamp dims in proportion (smooth in distance, so it never
   // pops; linear rather than by area, so harbour lights still read from far off)
   float cover = pxTrue / pxDraw;
+  // a disc a pixel or two across rasterises as a plus sign: draw the sprite at least 2.6 px
+  // in radius and spread the same energy over it (area ratio), so small lamps read as round dots
+  float pxQuad = max(pxDraw, 2.6);
+  cover *= (pxDraw * pxDraw) / (pxQuad * pxQuad);
   // facing
   float face = 1.0;
   if (dot(iDir.xyz, iDir.xyz) > 0.25) {
@@ -52,7 +56,7 @@ void main() {
   // lift the sprite toward the camera so the hull it sits on never buries it
   vec3 toCam = normalize(-c.xyz);
   c.xyz += toCam * r * 1.5;
-  float ext = pxDraw / pxPerUnit;
+  float ext = pxQuad / pxPerUnit;
   c.xy += position.xy * ext;
   gl_Position = projectionMatrix * c;
 }
@@ -64,9 +68,11 @@ varying vec3 vC;
 void main() {
   float r2 = dot(vQ, vQ);
   if (r2 > 1.0 || vC.r + vC.g + vC.b < 1e-5) discard;
+  // the skirt falls to zero at the quad's rim (no square or cross-shaped edge)
+  float rim = 1.0 - r2;
   // a bright core with a soft skirt; normalised so the total stays close to the disc's
   float core = exp(-r2 * 7.0);
-  float skirt = exp(-r2 * 2.2) * 0.18;
+  float skirt = exp(-r2 * 2.2) * 0.18 * rim;
   gl_FragColor = vec4(vC * (core + skirt) * 2.4, 0.0);
 }
 `;

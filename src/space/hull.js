@@ -218,6 +218,33 @@ export function merge(list) {
   return g;
 }
 
+/**
+ * CB.tube with flat end caps on straight two-point tubes (CB.tube itself is open-ended, so
+ * truss ends, booms and gallery rails showed hollow from end-on). The cap rim reuses the
+ * tube's own frame, so it meets the wall with no sliver. Curved tubes are passed through.
+ */
+export function ctube(B, pts, r, seg = 8, k) {
+  B.tube(pts, r, seg, k);
+  if (pts.length !== 2 || typeof r === 'function') return;
+  const T = new THREE.Vector3().subVectors(pts[1], pts[0]);
+  if (T.lengthSq() < 1e-12) return;
+  T.normalize();
+  const n0 = new THREE.Vector3().crossVectors(T, Math.abs(T.y) < 0.9 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0)).normalize();
+  const b0 = new THREE.Vector3().crossVectors(T, n0);
+  const d = new THREE.Vector3();
+  for (const [p, dir] of [[pts[0], -1], [pts[1], 1]]) {
+    const c = B.v(p.x, p.y, p.z, 0, 0, k);
+    const first = B.pos.length / 3;
+    for (let i = 0; i < seg; i++) {
+      const a = (i / seg) * Math.PI * 2;
+      d.copy(n0).multiplyScalar(Math.cos(a)).addScaledVector(b0, Math.sin(a));
+      B.v(p.x + d.x * r, p.y + d.y * r, p.z + d.z * r, d.x * r, d.y * r, k);
+    }
+    const hint = T.clone().multiplyScalar(dir);
+    for (let i = 0; i < seg; i++) B.tri(c, first + i, first + ((i + 1) % seg), hint);
+  }
+}
+
 /** A cylinder between two points (for trusses, spokes). */
 export function beam(a, b, r, kind, seg = 6) {
   const d = new THREE.Vector3().subVectors(b, a);

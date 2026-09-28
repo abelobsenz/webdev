@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { CB, CK, buildTender } from '../craft/craftGeometry.js';
 import { lathe, buildShuttle, buildTug, buildFreighter, buildCourier } from '../craft/craftClasses.js';
 import { LAMP } from './lamps.js';
+import { ctube } from './hull.js';
 import { craftMesh, craftPart, addLamps, placeMerge, placeLamps, pixelRadius, KM } from './craftMesh.js';
 
 // THE GEOSTATIONARY HARBOUR, drawn in metres with the ships' own builder and material.
@@ -108,7 +109,7 @@ export function buildHarbour() {
   // longerons along the spindle between the terminals (visual rhythm, service rails)
   for (let k = 0; k < 8; k++) {
     const a = (k / 8) * TAU;
-    B.tube([V(Math.cos(a) * 930, -11000, Math.sin(a) * 930), V(Math.cos(a) * 930, 11000, Math.sin(a) * 930)], 60, 5, CK.DARK);
+    ctube(B, [V(Math.cos(a) * 930, -11000, Math.sin(a) * 930), V(Math.cos(a) * 930, 11000, Math.sin(a) * 930)], 60, 5, CK.DARK);
   }
   // ---- docking arms: four above the middle ring, four below, staggered
   const berths = [];
@@ -122,18 +123,18 @@ export function buildHarbour() {
     const side = V(-Math.sin(a), 0, Math.cos(a));
     arms.push({ a, y, L, d, side, up });
     // gallery tube and its keel truss
-    B.tube([d.clone().multiplyScalar(850).setY(y), d.clone().multiplyScalar(L).setY(y)], 230, 12, CK.HULL);
-    B.tube([d.clone().multiplyScalar(850).setY(y - (up ? -330 : 330)), d.clone().multiplyScalar(L - 400).setY(y - (up ? -330 : 330))], 70, 5, CK.DARK);
+    ctube(B, [d.clone().multiplyScalar(850).setY(y), d.clone().multiplyScalar(L).setY(y)], 230, 12, CK.HULL);
+    ctube(B, [d.clone().multiplyScalar(850).setY(y - (up ? -330 : 330)), d.clone().multiplyScalar(L - 400).setY(y - (up ? -330 : 330))], 70, 5, CK.DARK);
     for (let r = 2000; r < L - 300; r += 1400) {
       const p = d.clone().multiplyScalar(r).setY(y);
-      B.tube([p.clone(), p.clone().setY(y - (up ? -330 : 330))], 45, 4, CK.DARK);
+      ctube(B, [p.clone(), p.clone().setY(y - (up ? -330 : 330))], 45, 4, CK.DARK);
       // bronze girdles along the gallery
       B.at(p.x, p.y, p.z, 0, -a + Math.PI / 2, 0);
       lathe(B, [[238, -40, CK.BRONZE], [250, -30, CK.BRONZE], [250, 30, CK.BRONZE], [238, 40, CK.BRONZE]], 12);
       B.pop();
     }
     // windows strip: a lantern gallery on the arm's flank
-    B.tube([d.clone().multiplyScalar(1400).add(side.clone().multiplyScalar(200)).setY(y + 60), d.clone().multiplyScalar(L - 500).add(side.clone().multiplyScalar(200)).setY(y + 60)], 40, 6, CK.LANTERN);
+    ctube(B, [d.clone().multiplyScalar(1400).add(side.clone().multiplyScalar(200)).setY(y + 60), d.clone().multiplyScalar(L - 500).add(side.clone().multiplyScalar(200)).setY(y + 60)], 40, 6, CK.LANTERN);
     // arm head: a docking hub with a collar ring facing outward
     const head = d.clone().multiplyScalar(L).setY(y);
     B.at(head.x, head.y, head.z, 0, -a + Math.PI / 2, 0);
@@ -146,7 +147,7 @@ export function buildHarbour() {
       const sd = i === 4 ? 1 : (n % 2 ? 1 : -1);
       const base = d.clone().multiplyScalar(r).setY(y);
       const tip = base.clone().addScaledVector(side, sd * 900);
-      B.tube([base, tip], 110, 8, CK.HULL);
+      ctube(B, [base, tip], 110, 8, CK.HULL);
       B.at(tip.x, tip.y, tip.z);
       B.box(0, 0, 0, 380, 380, 380, CK.BRONZE);
       B.pop();
@@ -157,7 +158,7 @@ export function buildHarbour() {
   for (let k = 0; k < 4; k++) {
     const a = (k / 4) * TAU + Math.PI / 4;
     const d = V(Math.cos(a), 0, Math.sin(a));
-    B.tube([d.clone().multiplyScalar(900).setY(-10200), d.clone().multiplyScalar(3200).setY(-10200)], 160, 8, CK.DARK);
+    ctube(B, [d.clone().multiplyScalar(900).setY(-10200), d.clone().multiplyScalar(3200).setY(-10200)], 160, 8, CK.DARK);
     B.at(d.x * 7200, -10200, d.z * 7200, 0, -a, 0);
     B.box(0, 0, 0, 8000, 5200, 90, CK.RADIATOR);
     B.box(-4000, 0, 0, 160, 5400, 220, CK.BRONZE);
@@ -168,7 +169,7 @@ export function buildHarbour() {
   // ---- solar wing booms and gimbals (the wings themselves turn to face the Sun)
   const wingRoots = [];
   for (const sz of [-1, 1]) {
-    B.tube([V(0, 10400, sz * 900), V(0, 10400, sz * 3600)], 180, 10, CK.DARK);
+    ctube(B, [V(0, 10400, sz * 900), V(0, 10400, sz * 3600)], 180, 10, CK.DARK);
     B.at(0, 10400, sz * 3700);
     lathe(B, [[300, -420, CK.DARK], [420, -300, CK.BRONZE], [420, 300, CK.BRONZE], [300, 420, CK.DARK]], 16);
     B.pop();
@@ -197,8 +198,8 @@ export function buildHarbour() {
       const t = (k / nSp) * TAU;
       const d = V(Math.cos(t), 0, Math.sin(t));
       const p0 = d.clone().multiplyScalar(hubR).setY(yc), p1 = d.clone().multiplyScalar(R - b * 0.9).setY(yc);
-      W.tube([p0, p1], 120, 10, CK.HULL);
-      W.tube([p0.clone().add(V(0, 150, 0)), p1.clone().add(V(0, 150, 0))], 30, 4, CK.LANTERN);
+      ctube(W, [p0, p1], 120, 10, CK.HULL);
+      ctube(W, [p0.clone().add(V(0, 150, 0)), p1.clone().add(V(0, 150, 0))], 30, 4, CK.LANTERN);
       for (const f of [0.08, 0.92]) {
         const c = p0.clone().lerp(p1, f);
         W.at(c.x, c.y, c.z, 0, -t + Math.PI / 2, 0);
@@ -213,7 +214,7 @@ export function buildHarbour() {
 
   // ---- solar wings: each a boom with six panel bays, turned about its boom (local Z)
   const wing = new CB();
-  wing.tube([V(0, 0, 0), V(0, 0, 21500)], 90, 6, CK.DARK);
+  ctube(wing, [V(0, 0, 0), V(0, 0, 21500)], 90, 6, CK.DARK);
   for (let k = 0; k < 6; k++) {
     const z0 = 700 + k * 3500;
     wing.panel(-2100, -120, z0, z0 + 3300, 0, 40, CK.PANEL);
@@ -230,6 +231,7 @@ export function buildHarbour() {
 
   // ---- berthed ships: freighters and tenders alongside the fingers, small craft in the bays
   const shipsBig = [], shipsSmall = [], lamps = [];
+  const D = new CB();       // docking clamps between finger tips and berthed hulls (drawn metres)
   const fr = buildFreighter(1100), te = buildTender(620), sh = buildShuttle(110), tu = buildTug(80), co = buildCourier(44);
   const I = new THREE.Matrix4();
   const teFull = { geo: placeMerge([{ geo: te.geo, m: I }, ...te.arms.map((A) => ({ geo: A.geo, m: I }))]), lamps: [], length: te.length };
@@ -246,8 +248,15 @@ export function buildHarbour() {
     // ship lies parallel to the arm, outboard of the finger tip, hanging away from the rings
     const fwd = bth.d.clone().multiplyScalar(rnd() < 0.5 ? 1 : -1);
     const upv = V(0, bth.up ? 1 : -1, 0);
-    const off = bth.side.clone().multiplyScalar(bth.sd * (big ? 230 * sc + 240 : 150));
-    const pos = bth.tip.clone().add(off).addScaledVector(upv, big ? 90 : 60);
+    // the ship's flank lies a clamp's length off the finger-tip block (half 80 m drawn), on the
+    // block's axis, so the docking clamp below meets both (the tender used to sit inside it)
+    const halfW = big ? 191 * sc : 257;
+    const off = bth.side.clone().multiplyScalar(bth.sd * (80 + 45 + halfW));
+    const pos = bth.tip.clone().add(off);
+    ctube(D, [bth.tip.clone(), pos.clone().addScaledVector(bth.side, -bth.sd * halfW * 0.3)], big ? 42 : 30, 10, CK.HULL);
+    D.at(bth.tip.x + bth.side.x * bth.sd * 100, bth.tip.y, bth.tip.z + bth.side.z * bth.sd * 100, 0, Math.atan2(bth.side.x * bth.sd, bth.side.z * bth.sd), 0);
+    lathe(D, [[big ? 42 : 30, -22, CK.BRONZE], [big ? 62 : 46, -14, CK.BRONZE], [big ? 62 : 46, 14, CK.LANTERN], [big ? 42 : 30, 22, CK.BRONZE]], 16);
+    D.pop();
     const x = new THREE.Vector3().crossVectors(upv, fwd).normalize();
     _m.makeBasis(x, upv, fwd);
     _q.setFromRotationMatrix(_m);
@@ -305,13 +314,13 @@ export function buildHarbour() {
   for (const r of [pierArm.L - 2150, pierArm.L - 1350, pierArm.L - 550]) {
     const p0 = pierArm.d.clone().multiplyScalar(r).setY(pierArm.y);
     const p1 = p0.clone().addScaledVector(pierArm.side, -150).setY(pierArm.y - 140);
-    G.tube([p0, p1], 14, 8, CK.HULL);
+    ctube(G, [p0, p1], 14, 8, CK.HULL);
     G.at(p1.x, p1.y, p1.z);
     G.box(0, 0, 0, 34, 34, 34, CK.BRONZE);
     G.pop();
     lamps.push({ p: p1.clone().add(V(0, 26, 0)), r: 4, color: LAMP.AMBER, i: 2.2, breathe: 0.3, phase: r * 0.001 });
   }
-  const body = placeMerge([{ geo: bodyDesign, m: new THREE.Matrix4() }, { geo: G.geometry(), m: new THREE.Matrix4() }]);
+  const body = placeMerge([{ geo: bodyDesign, m: new THREE.Matrix4() }, { geo: G.geometry(), m: new THREE.Matrix4() }, { geo: D.geometry(), m: new THREE.Matrix4() }]);
   return { body, rings, wingGeo, wingRoots, shipsBigGeo, shipsSmallGeo, lamps, berths, arms, pier };
 }
 
