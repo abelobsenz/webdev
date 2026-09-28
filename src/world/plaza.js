@@ -666,7 +666,8 @@ const norm2 = (x, z) => { const l = Math.hypot(x, z) || 1; return [x / l, z / l]
  * Sweep a cross-section along a path in the xz-plane.
  *   path: [[x, z], ...] (a closed loop repeats no point); prof: [[d, y], ...], d along the
  *   path's outward side, y absolute, listed from the +d foot over the top to the -d foot (the
- *   foot is left open: it stands in the surface below). out(x, z, nx, nz) -> +1/-1 picks the
+ *   masonry foot is closed; clipped foliage retains its buried optical underside).
+ *   out(x, z, nx, nz) -> +1/-1 picks the
  *   outward side of the path (default: away from the loop's interior, or from the origin).
  *   smooth: shared normals across the profile (clipped hedges); else flat faces (stone).
  *   Sharp corners are mitred with separate normals either side; open paths get end caps.
@@ -674,6 +675,7 @@ const norm2 = (x, z) => { const l = Math.hypot(x, z) || 1; return [x / l, z / l]
 function sweep(B, path, closed, prof, { kind = 0, smooth = false, sharp = 0.5, u0 = 0, outward = null } = {}) {
   const n = path.length;
   if (n < 2) return;
+  if (!smooth && Math.hypot(prof.at(-1)[0] - prof[0][0], prof.at(-1)[1] - prof[0][1]) > 1e-8) prof = [...prof, prof[0]];
   const E = closed ? n : n - 1;
   // edge directions and outward normals
   let area = 0;
@@ -979,6 +981,35 @@ function stair(B, st) {
       prev = [a, b];
     }
   }
+  // Close the whole stair flight below the terrace, behind its first tread,
+  // and along both stepped sides. The original tread/riser geometry remains
+  // the walking surface, including its curved radial nosings.
+  const yBottom = TERRACE_Y - .05, rBack = RIM - .05, rFront = RIM + (n - 1) * tread;
+  for (let j = 1; j < Ls.length; j++) {
+    const l0 = Ls[j - 1], l1 = Ls[j];
+    const bottom = [[rBack,l0],[rFront,l0],[rFront,l1],[rBack,l1]].map(([r,L]) => {
+      const [x,z] = at(r,L); return B.v(x,yBottom,z,0,-1,0,L,r-rBack,4);
+    });
+    B.quad(...bottom);
+    const back = [[l0,yBottom],[l1,yBottom],[l1,PLAZA_Y-rise],[l0,PLAZA_Y-rise]].map(([L,y]) => {
+      const [x,z] = at(rBack,L), [nx,nz] = norm2(x,z); return B.v(x,y,z,-nx,0,-nz,L,y,4);
+    });
+    B.quad(...back);
+  }
+  for (const [L,sign] of [[Ls[0],-1],[Ls.at(-1),1]]) {
+    const profile = [[rBack,yBottom],[rBack,PLAZA_Y-rise]];
+    for (let i = 1; i < n; i++) {
+      const r = RIM + i * tread;
+      profile.push([r,PLAZA_Y-i*rise]);
+      if (i < n-1) profile.push([r,PLAZA_Y-(i+1)*rise]);
+    }
+    profile.push([rFront,yBottom]);
+    const ids = profile.map(([r,y]) => {const [x,z]=at(r,L);return B.v(x,y,z,tx*sign,0,tz*sign,r-rBack,y,4);});
+    // This descending step outline is visible in full from its bottom-back
+    // corner. A fan preserves every nosing vertex; ear clipping can discard
+    // almost-collinear diagonals after the world coordinates become Float32.
+    for (let i = 1; i < ids.length - 1; i++) B.tri(ids[0],ids[i],ids[i+1]);
+  }
   // cheek walls: a sloping balustrade wall either side, parallel to the avenue axis
   const run = (n - 1) * tread;                     // nosing of the top tread to the last riser
   for (const [L0, L1] of [[wp, wp + STAIR.cheek], [-wm, -wm - STAIR.cheek]]) {
@@ -1044,7 +1075,8 @@ export function buildPlaza(group) {
   // depth: it lies only 20 cm above the island's berm, which would show through from afar)
   const plazaMat = plazaMaterial(cuts);
   const disc = lathe([
-    [0.1, PLAZA_Y], [RIM - 0.1, PLAZA_Y], [RIM, PLAZA_Y - 0.05], [RIM, PLAZA_Y - 2.95], [RIM + 0.22, PLAZA_Y - 3.1], [RIM + 0.22, TERRACE_Y],
+    [0, PLAZA_Y], [RIM - 0.1, PLAZA_Y], [RIM, PLAZA_Y - 0.05], [RIM, PLAZA_Y - 2.95], [RIM + 0.22, PLAZA_Y - 3.1], [RIM + 0.22, TERRACE_Y],
+    [RIM + 0.22, -6], [0, -6],
   ], 512);
   const plaza = mark(new THREE.Mesh(disc, plazaMat));
   plaza.name = 'Axis plaza';
@@ -1056,6 +1088,7 @@ export function buildPlaza(group) {
   terraceMat.polygonOffsetUnits = -2;
   const terrace = mark(new THREE.Mesh(lathe([
     [RIM + 0.22, TERRACE_Y], [TERRACE_R, TERRACE_Y], [TERRACE_R + 0.6, TERRACE_Y - 0.7], [TERRACE_R + 1, -6],
+    [RIM + 0.22, -6], [RIM + 0.22, TERRACE_Y],
   ], 512), terraceMat));
   terrace.name = 'Axis plaza terrace';
   terrace.receiveShadow = true;

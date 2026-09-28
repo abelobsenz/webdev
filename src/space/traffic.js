@@ -442,6 +442,7 @@ export class Traffic {
       const y = this._y.copy(p).normalize();
       const x = this._x.crossVectors(y, z);
       if (x.lengthSq() < 1e-8) x.set(1, 0, 0).cross(z);
+      if (x.lengthSq() < 1e-8) x.set(0, 0, 1).cross(z);
       x.normalize();
       y.crossVectors(z, x);
       this._m.makeBasis(x, y, z).scale(this._s).setPosition(p.x - O.x, p.y - O.y, p.z - O.z);

@@ -6,6 +6,17 @@ import { PLAZA_R, PLAZA_Y } from './layout.js';
 import { SPECIES, SP } from './treeGeometry.js';
 import { wardHeight, WARD_TOP } from './metro.js';
 
+// A civic approach is public paving even where it crosses a street verge.
+// Include the root flare, rather than testing only the trunk centre.
+export function wardTreePathClear(surfaceAt, x, z, radius = 1.2) {
+  if (surfaceAt(x, z) === 'path') return false;
+  for (let i = 0; i < 8; i++) {
+    const a = i * Math.PI / 4;
+    if (surfaceAt(x + Math.cos(a) * radius, z + Math.sin(a) * radius) === 'path') return false;
+  }
+  return true;
+}
+
 // Where every tree in MERIDIAN grows, and why:
 //  - lagoon shores: mangrove stands in the shallows, coconut palms leaning seaward on the strand
 //  - forest: layered rainforest (canopy trees, emergent banyans, bamboo in the gullies,
@@ -235,7 +246,7 @@ export function planTrees(world) {
     for (const S of world.metro.streetscapes || []) for (const b of S.benches || []) occupy(b.x, b.z, 2.4, 6);
     const towns = world.wardTowns;
     // clear of every ward building (trunk plus the lower crown)
-    const bldgFree = (x, z, r) => !towns || towns.isFree(x, z, r);
+    const bldgFree = (x, z, r) => wardTreePathClear(surf, x, z) && (!towns || towns.isFree(x, z, r));
     const surf = (x, z) => (mp.surfaceAt ? mp.surfaceAt(x, z) : 'lawn');
     const towerHit = (x, z, r) => (world.wardTowers || []).some((t) => Math.hypot(t.def.x - x, t.def.z - z) < (t.footprint || 60) + r + 4);
     const reserved = (x, z) => (mp.reservedAt ? mp.reservedAt(x, z) : 0);
@@ -283,6 +294,7 @@ export function planTrees(world) {
       const sp = SP[t.sp] ?? SP.flowering;
       const y = wardHeight(t.x, t.z);
       if (!(y > 2)) continue;                              // rooted on the platform, never over water
+      if (reserved(t.x, t.z) === 2 || surf(t.x, t.z) === 'water' || surf(t.x, t.z) === 'road') continue;
       if (!clear(t.x, t.z, 2.0, 6) || towerHit(t.x, t.z, 2) || !bldgFree(t.x, t.z, 1.5)) continue;
       push(t.x, t.z, sp, t.s * (0.94 + rnd() * 0.12), { y: y - 0.15, layer: 6, spacing: 2.2, rot: rnd() * Math.PI * 2 });
     }
@@ -322,7 +334,7 @@ export function planTrees(world) {
       for (let k = 0; k < n; k++) {
         const a = rnd() * Math.PI * 2, r = Math.sqrt(rnd()) * R;
         const x = d.x + Math.cos(a) * r, z = d.z + Math.sin(a) * r;
-        if (surf(x, z) !== 'lawn') continue;
+        if (surf(x, z) !== 'lawn' || !wardTreePathClear(surf, x, z)) continue;
         if (mp.field.edge(x, z) < 6) continue;
         if (reserved(x, z)) continue;
         const sp = list[Math.floor(rnd() * list.length)];

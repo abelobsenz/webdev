@@ -1,11 +1,12 @@
 import * as THREE from 'three';
-import { latheFacade, sweepTube, mergeClean } from './geom.js';
+import { latheFacade, loftSections, sweepTube, mergeClean } from './geom.js';
 import { extrudeAlong, frameAt } from './infrastructure.js';
 import { createFacadeMaterial } from './facade.js';
 import { patchedMaterial } from './materials.js';
 import { terrainHeight } from './terrain.js';
-import { sweepLoop, capPolys } from './platform.js';
+import { sweepLoop } from './platform.js';
 import { outerCities, renderedHeight } from './outerCities.js';
+import { massifArrival } from './massifTowns.js';
 import { wardHeight, WARD_TOP, RING_BEARING } from './metro.js';
 import { U } from '../core/uniforms.js';
 
@@ -42,23 +43,24 @@ const gapAt = (gaps) => (x, z) => { let g = 0; for (const q of gaps) { const d =
 function stationIsland(parts, n, gaps) {
   const { x, z } = n;
   const gA = gapAt(gaps);
-  parts.push(sweepLoop(circle(0, 0, ISLAND_R), () => [
-    { a: [3.0, -14], b: [0, 2.3], kind: 1 },
-    { a: [0, 2.3], b: [0, 3.45], kind: 10 },
-    { a: [0, 3.45], b: [-0.7, 3.45], kind: 1 },
-    { a: [-0.7, 3.45], b: [-0.7, 2.95], kind: 1 },
-  ], { ox: x, oz: z }));
-  parts.push(capPolys([{ outer: circle(0, 0, ISLAND_R), holes: [circle(0, 0, TERRACE_R).reverse()] }], 3.0, 9, { ox: x, oz: z }));
+  // Continuous quay volume: the fender, coping and deck share their edges,
+  // including a seabed underside instead of independent open surface strips.
+  parts.push(latheFacade([
+    { r: ISLAND_R + 3, y: -14, kind: 1 }, { r: ISLAND_R, y: 2.3, kind: 10 },
+    { r: ISLAND_R, y: 3.45, kind: 1 }, { r: ISLAND_R - 0.7, y: 3.45, kind: 1 },
+    { r: ISLAND_R - 0.7, y: 3, kind: 9 }, { r: 0, y: 3, kind: 9 },
+  ], 72).translate(x, 0, z));
   parts.push(sweepLoop(circle(0, 0, TERRACE_R), (lx, lz) => {
     const g = gA(x + lx, z + lz);
     const ph = 0.45 * (1 - g), cw = 0.8 * (1 - g);
     return [
       { a: [0, 2.9], b: [0, 9 + ph], kind: 5 },
       { a: [0, 9 + ph], b: [-cw, 9 + ph], kind: 1 },
-      { a: [-cw, 9 + ph], b: [-cw, 8.95], kind: 1 },
+      { a: [-cw, 9 + ph], b: [-cw, 9], kind: 1 },
+      { a: [-cw, 9], b: [ROT_R - 0.6 - TERRACE_R, 9], kind: 3 },
+      { a: [ROT_R - 0.6 - TERRACE_R, 9], b: [ROT_R - 0.6 - TERRACE_R, 2.9], kind: 5 },
     ];
-  }, { ox: x, oz: z }));
-  parts.push(capPolys([{ outer: circle(0, 0, TERRACE_R), holes: [circle(0, 0, ROT_R - 0.6).reverse()] }], 9.0, 3, { ox: x, oz: z }));
+  }, { ox: x, oz: z, closeSection: true }));
 }
 
 /** The rotunda: a drum of glass under a glowing lens roof and a lantern spire. */
@@ -70,8 +72,9 @@ function rotunda(parts, n) {
     { r: 1.4, y: 34, kind: 1 }, { r: 0.9, y: 34.4, kind: 2 }, { r: 0.05, y: 38, kind: 1 },
   ], 48);
   parts.push(g.translate(n.x, 0, n.z));
-  // the concourse floor inside the drum (the terrace deck stops at the drum's foot)
-  parts.push(capPolys([{ outer: circle(0, 0, ROT_R, 48), holes: [] }], 9.6, 9, { ox: n.x, oz: n.z }));
+  // A shallow floor slab inside the drum; its underside is buried in the
+  // rotunda foundation and its walkable surface meets the entry gallery.
+  parts.push(latheFacade([{ r: ROT_R, y: 9.45, kind: 1 }, { r: ROT_R, y: 9.6, kind: 9 }, { r: 0, y: 9.6, kind: 9 }], 48).translate(n.x, 0, n.z));
   // ribs up the drum
   for (let k = 0; k < 16; k++) {
     const a = (k / 16) * TAU;
@@ -85,7 +88,7 @@ function guideway(parts, pts, ground, { pierEvery = 36, beam = [3.2, 2.4], avoid
   const hw = beam[0] / 2, d = beam[1];
   const sec = [[-hw, 0.0], [-hw * 0.45, 0.35], [hw * 0.45, 0.35], [hw, 0.0], [hw * 0.8, -d], [-hw * 0.8, -d]].reverse();
   const kinds = (i) => (i === 3 ? 10 : 1);
-  parts.push(extrudeAlong(pts, sec, kinds));
+  parts.push(extrudeAlong(pts, sec, kinds, { caps: pts[0].distanceToSquared(pts.at(-1)) > 1e-8 }));
   // the coil line along the top
   parts.push(sweepTube(pts.map((p) => p.clone().add(V(0, 0.42, 0))), () => 0.14, 4, { kind: 2 }));
   let acc = pierEvery * 0.5;
@@ -145,7 +148,7 @@ function footbridge(parts, a, b, ground, lamps) {
   }
   const sec = [[-6.2, 0.0], [-6.5, 1.1], [-6.5, 1.1], [-5.8, 1.25], [-5.8, 1.25], [-5.4, 0.2], [-5.4, 0.2], [5.4, 0.2], [5.4, 0.2], [5.8, 1.25], [5.8, 1.25], [6.5, 1.1], [6.5, 1.1], [6.2, 0.0], [4.5, -2.0], [-4.5, -2.0]];
   const kinds = [1, 2, 1, 2, 1, 1, 1, 15, 1, 1, 1, 2, 1, 2, 1, 1, 1];
-  parts.push(extrudeAlong(path, sec, (i) => kinds[i]));
+  parts.push(extrudeAlong(path, sec, (i) => kinds[i], { caps: true }));
   let acc = 0;
   for (let k = 1; k < path.length - 1; k++) {
     acc += path[k].distanceTo(path[k - 1]);
@@ -169,19 +172,35 @@ function footbridge(parts, a, b, ground, lamps) {
 function shorePodium(parts, cx, cz, rot, hw, hd, ground) {
   let hi = -1e9, lo = 1e9;
   const c = Math.cos(rot), s = Math.sin(rot);
-  for (let a = -hw; a <= hw; a += 8) for (let b = -hd; b <= hd; b += 8) { const g = ground(cx + a * c - b * s, cz + a * s + b * c); hi = Math.max(hi, g); lo = Math.min(lo, g); }
+  const nx = Math.ceil(hw * 2 / 8), nz = Math.ceil(hd * 2 / 8);
+  for (let i = 0; i <= nx; i++) for (let j = 0; j <= nz; j++) {
+    const a = -hw + i / nx * hw * 2, b = -hd + j / nz * hd * 2;
+    const g = ground(cx + a * c - b * s, cz + a * s + b * c);
+    hi = Math.max(hi, g); lo = Math.min(lo, g);
+  }
   const top = Math.max(hi, 3) + 2.5;
   const ring = [];
   const rr = 8;
   const cs = [[hw - rr, hd - rr, 0], [-hw + rr, hd - rr, 1], [-hw + rr, -hd + rr, 2], [hw - rr, -hd + rr, 3]];
   for (const [px, pz, q] of cs) for (let i = 0; i <= 5; i++) { const a = (q + i / 5) * (Math.PI / 2); const lx = px + Math.cos(a) * rr, lz = pz + Math.sin(a) * rr; ring.push([lx * c - lz * s, lx * s + lz * c]); }
-  parts.push(sweepLoop(ring, () => [
-    { a: [0, Math.min(lo, top - 3) - 3], b: [0, top - 1.2], kind: 5 },
-    { a: [0, top - 1.2], b: [0, top + 0.9], kind: 1 },
-    { a: [0, top + 0.9], b: [-0.8, top + 0.9], kind: 1 },
-    { a: [-0.8, top + 0.9], b: [-0.8, top - 0.05], kind: 1 },
-  ], { ox: cx, oz: cz }));
-  parts.push(capPolys([{ outer: ring, holes: [] }], top, 9, { ox: cx, oz: cz }));
+  parts.push(loftSections([
+    { y: Math.min(lo, top - 3) - 3, pts: ring, kind: 5 },
+    { y: top - 1.2, pts: ring, kind: 1 }, { y: top, pts: ring, kind: 1 },
+  ], { kindTop: 9 }).translate(cx, 0, cz));
+  const parapetRing = ring.flatMap((p, i) => {
+    const q = ring[(i + 1) % ring.length], count = Math.max(1, Math.ceil(Math.hypot(q[0] - p[0], q[1] - p[1]) / 3));
+    return Array.from({ length: count }, (_, j) => [p[0] + (q[0] - p[0]) * j / count, p[1] + (q[1] - p[1]) * j / count]);
+  });
+  parts.push(sweepLoop(parapetRing, (x, z) => {
+    const lx = x * c + z * s, lz = -x * s + z * c;
+    // The bridge approaches the positive local-X face; its full width passes
+    // through a lowered coping instead of colliding with the balustrade.
+    const opening = ss(hw - 10, hw - 2, lx) * (1 - ss(7, 10, Math.abs(lz)));
+    const y = top + 0.9 * (1 - opening);
+    return [{ a: [0, top - 0.05], b: [0, y], kind: 1 },
+      { a: [0, y], b: [-0.8, y], kind: 1 },
+      { a: [-0.8, y], b: [-0.8, top - 0.05], kind: 1 }];
+  }, { ox: cx, oz: cz, closeSection: true }));
   return top;
 }
 
@@ -218,12 +237,12 @@ function gondolaPylon(parts, p, dir, h, g, groundAt) {
   }
   const arm = [top.clone().addScaledVector(side, -7), top.clone().addScaledVector(side, 7)];
   parts.push(sweepTube(arm, () => 0.7, 6, { kind: 1 }));
-  for (const s of [-1, 1]) parts.push(latheFacade([{ r: 0.2, y: -0.5, kind: 10 }, { r: 1.4, y: -0.5, kind: 10 }, { r: 1.4, y: 0.5, kind: 2 }, { r: 0.2, y: 0.5, kind: 10 }], 12).rotateX(Math.PI / 2).rotateY(-Math.atan2(dir.z, dir.x) + Math.PI / 2).translate(top.x + side.x * s * 5, top.y - 0.9, top.z + side.z * s * 5));
+  for (const s of [-1, 1]) parts.push(latheFacade([{ r: 0.2, y: -0.5, kind: 10 }, { r: 1.4, y: -0.5, kind: 10 }, { r: 1.4, y: 0.5, kind: 2 }, { r: 0.2, y: 0.5, kind: 10 }], 12, { closedProfile: true }).rotateX(Math.PI / 2).rotateY(-Math.atan2(dir.z, dir.x) + Math.PI / 2).translate(top.x + side.x * s * 5, top.y - 0.9, top.z + side.z * s * 5));
   return top;
 }
 
 // ------------------------------------------------------------------ build --
-export function buildTransit(scene, world) {
+export function buildTransit(scene, world, { audit = false } = {}) {
   const recs = world.metro.wards.map((w) => w.rec);
   const ground = (x, z) => Math.max(renderedHeight(x, z), wardHeight(x, z), -30);
   const oc = outerCities();
@@ -396,12 +415,29 @@ export function buildTransit(scene, world) {
     const N = nodes.get(m.id);
     const P0 = N.podium;
     const base = V(P0.x + Math.cos(P0.rot) * 8, P0.top, P0.z + Math.sin(P0.rot) * 8);
-    const topG = renderedHeight(m.town.x, m.town.z);
-    const top = V(m.town.x, topG + 2, m.town.z);
+    const arrival = massifArrival(m);
+    // The civic square and station share the survey of both full footprints.
+    // A centre-only elevation buried Ridgeholm's entire hall under its square.
+    const top = V(m.town.x, arrival.level + 2.2, m.town.z);
     const dir = V(top.x - base.x, 0, top.z - base.z).normalize();
     const side = V(-dir.z, 0, dir.x);
     const Lh = Math.hypot(top.x - base.x, top.z - base.z);
     const nP = Math.max(3, Math.round(Lh / 330));
+    const nearPolygon = (x,z,q,pad) => {
+      let inside=false,min=Infinity;
+      for(let i=0,j=q.length-1;i<q.length;j=i++){
+        const a=q[j],b=q[i],dx=b[0]-a[0],dz=b[1]-a[1],u=Math.max(0,Math.min(1,((x-a[0])*dx+(z-a[1])*dz)/(dx*dx+dz*dz||1)));
+        min=Math.min(min,Math.hypot(x-a[0]-u*dx,z-a[1]-u*dz));
+        if((a[1]>z)!==(b[1]>z)&&x<(b[0]-a[0])*(z-a[1])/(b[1]-a[1])+a[0])inside=!inside;
+      }
+      return inside||min<=pad;
+    };
+    const cabinGround = (x,z) => {
+      let height=renderedHeight(x,z);
+      for(let k=0;k<8;k++){const a=k*Math.PI/4;height=Math.max(height,renderedHeight(x+Math.cos(a)*2.4,z+Math.sin(a)*2.4));}
+      for(const o of arrival.obstructions)if(nearPolygon(x,z,o.q,2.4))height=Math.max(height,o.top);
+      return height;
+    };
     // pylons: founded on the lowest rendered ground under their legs; heights raised until the
     // cabins (7.4 m under the sagging cable) clear the rendered slope by 6 m over every span
     const pyl = [];
@@ -413,22 +449,23 @@ export function buildTransit(scene, world) {
       pyl.push({ p, g, h: 38 + 10 * Math.sin(Math.PI * t) });
     }
     const headAt = (k) => (k === 0 ? base.clone().add(V(0, 12, 0)) : k === nP ? top.clone().add(V(0, 12, 0)) : V(pyl[k - 1].p.x, pyl[k - 1].g + pyl[k - 1].h - 0.9, pyl[k - 1].p.z));
-    for (let pass = 0; pass < 6; pass++) {
+    for (let pass = 0; pass < 24; pass++) {
       let raised = false;
       for (let k = 0; k < nP; k++) {
         const a = headAt(k), b = headAt(k + 1), span = a.distanceTo(b);
         let need = 0, tw = 0.5;
-        for (let i = 1; i < 16; i++) {
-          const t = i / 16, q = a.clone().lerp(b, t);
+        const samples=Math.max(16,Math.ceil(Math.hypot(b.x-a.x,b.z-a.z)/4));
+        for (let i = 1; i < samples; i++) {
+          const t = i / samples, q = a.clone().lerp(b, t);
           const y = q.y - span * 0.018 * 4 * t * (1 - t);
-          for (const sg of [-1, 1]) { const dn = renderedHeight(q.x + side.x * sg * 5, q.z + side.z * sg * 5) + 13.4 - y; if (dn > need) { need = dn; tw = t; } }
+          for (const sg of [-1, 1]) { const dn = cabinGround(q.x + side.x * sg * 5, q.z + side.z * sg * 5) + 13.4 - y; if (dn > need) { need = dn; tw = t; } }
         }
         if (need <= 0.05) continue;
         raised = true;
         const pa = k > 0 ? pyl[k - 1] : null, pb = k + 1 < nP ? pyl[k] : null;
         if (pa && pb) { pa.h += need + 0.5; pb.h += need + 0.5; }
-        else if (pa) pa.h += (need + 0.5) / Math.max(1 - tw, 0.25);
-        else if (pb) pb.h += (need + 0.5) / Math.max(tw, 0.25);
+        else if (pa) pa.h += (need + 0.5) / Math.max(1 - tw, 0.01);
+        else if (pb) pb.h += (need + 0.5) / Math.max(tw, 0.01);
       }
       if (!raised) break;
     }
@@ -447,9 +484,30 @@ export function buildTransit(scene, world) {
       parts.push(hall.translate(c.x + dir.x * 4 * sgn, 0, c.z + dir.z * 4 * sgn));
       if (sgn < 0) {
         // the top station stands on its own terrace podium
-        let lo = c.y - 14;
-        for (let a = 0; a < TAU; a += TAU / 16) lo = Math.min(lo, renderedHeight(c.x + Math.cos(a) * 20.8, c.z + Math.sin(a) * 20.8) - 3);
+        const lo = Math.min(c.y - 14, arrival.stationGround.min - 3);
         parts.push(latheFacade([{ r: 20, y: lo, kind: 5 }, { r: 20, y: c.y - 3, kind: 5 }, { r: 20.8, y: c.y - 2.6, kind: 1 }, { r: 20.8, y: c.y - 2.2, kind: 1 }, { r: 0.05, y: c.y - 2.2, kind: 9 }], 40).translate(c.x, 0, c.z));
+        // Broad threshold steps face the square's clear middle, independently
+        // of the gondola bearing. Their inner landing enters the actual offset
+        // elliptical hall; the founded outer foot rests in the square.
+        const down = V(arrival.down[0], 0, arrival.down[1]);
+        const across = V(-down.z, 0, down.x);
+        const da = down.dot(dir), db = down.dot(side), rx = 11 * 1.4, rz = 11;
+        const A = da * da / (rx * rx) + db * db / (rz * rz);
+        const B = 8 * da / (rx * rx), C = 16 / (rx * rx) - 1;
+        const threshold = (-B + Math.sqrt(B * B - 4 * A * C)) / (2 * A);
+        const topY = c.y + .6, count = Math.ceil((topY - arrival.level) / .18), tread = .36;
+        const outer = threshold + 1.6 + count * tread;
+        const quad = (a, b, half = 2.4) => [-1, 1].map(s => c.clone().addScaledVector(down, a).addScaledVector(across, s * half)).concat([1,-1].map(s => c.clone().addScaledVector(down, b).addScaledVector(across, s * half))).map(p => [p.x,p.z]);
+        const stairParts = [];
+        for (let k = 0; k < count; k++) {
+          const q = quad(outer - k * tread, threshold - .2);
+          const y = arrival.level + (k + 1) / count * (topY - arrival.level);
+          const stair = loftSections([{ y: arrival.level - .3, pts: q, kind: 1 }, { y, pts: q, kind: 9 }], { kindTop: 9 });
+          parts.push(stair); stairParts.push(stair);
+        }
+        arrival.threshold = { point: c.clone().addScaledVector(down, threshold).setY(topY),
+          foot: c.clone().addScaledVector(down, outer).setY(arrival.level), down, across,
+          width:4.8, riser:(topY-arrival.level)/count, tread, count, parts:stairParts };
       }
     }
     // cables: an up line and a down line 10 m apart, sagging between the heads
@@ -464,7 +522,7 @@ export function buildTransit(scene, world) {
     };
     const up = cable(1), down = cable(-1);
     parts.push(sweepTube(up, () => 0.22, 4, { kind: 10 }), sweepTube(down, () => 0.22, 4, { kind: 10 }));
-    gondolas.push({ id: m.id, up, down, base, top, dir, side });
+    gondolas.push({ id: m.id, up, down, base, top, dir, side, arrival });
   }
   // ---- the canal line: a light guideway looping over Tidewater's ring canal, with stops
   // above the canal bridges (a stair tower rises from each bridge deck to the platform)
@@ -555,5 +613,5 @@ export function buildTransit(scene, world) {
     meshes.push(bm);
   }
   if (world.colliders) world.colliders.push(...colliders);
-  return { meshes, nodes, routes, gondolas, canalLines, lights, lamps, stations, glowPaths, buoys, ports };
+  return { meshes, nodes, routes, gondolas, canalLines, lights, lamps, stations, glowPaths, buoys, ports, ...(audit ? { auditParts: parts } : {}) };
 }

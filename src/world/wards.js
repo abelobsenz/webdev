@@ -94,6 +94,7 @@ const aurora = {
   plan(ctx) {
     const { R, rnd } = ctx;
     const streets = [], squares = [], plazas = [], parks = [], sites = [], landmarks = [], lots = [], inlays = [], beds = [], zones = [], pools = [], trees = [];
+    const paths = [], accessRoutes = [];
     const circusR = 282;
     const O = ctx.observatory;
     const inCircus = (p) => Math.hypot(p[0], p[1]) < circusR + 10;
@@ -107,7 +108,9 @@ const aurora = {
     // lanes halving the long east-west blocks
     for (const g of gridLines({ ox: 75, sx: 150, sz: 1e9, ext: 1700, clsX: ST.LANE, clsZ: ST.LANE, keep })) if (g.axis === 'x') streets.push({ pts: g.pts, cls: ST.LANE, noBridges: true });
     // Meridian Way: the great north-south avenue, from the south quay through the Circus to the hill
-    streets.push({ pts: T.line(0, R(Math.PI / 2) - 40, 0, circusR + 4), cls: ST.AVENUE, hw: 12, name: 'Meridian Way' });
+    streets.push({ pts: T.line(0, R(Math.PI / 2) - 40, 0, 570), cls: ST.AVENUE, hw: 12, name: 'Meridian Way' });
+    for (const side of [-1, 1]) streets.push({ pts: T.curve([[0, 570], [side * 104, 540], [side * 104, 398], [0, 360]], 4), cls: ST.AVENUE, hw: 7, name: 'Library Crescent' });
+    streets.push({ pts: T.line(0, 360, 0, circusR + 4), cls: ST.AVENUE, hw: 12, name: 'Meridian Way' });
     streets.push({ pts: T.line(0, -circusR - 4, 0, O.z + 70), cls: ST.AVENUE, hw: 12, name: 'Meridian Way' });
     // the Ecliptic: from the bridge landing across the ward
     const L = ctx.landing;
@@ -147,11 +150,18 @@ const aurora = {
     }
     // the observatory on its hill, the stair up from Meridian Way
     landmarks.push({ type: 'observatory', x: O.x, z: O.z + 6, r: 44, y: 19 });
-    sites.push({ x: O.x, z: O.z, r: 132, margin: 0 });
+    sites.push({ x: O.x, z: O.z, r: 132, margin: 0, blockStreets: true, streetShape: SD.circle(O.x, O.z + 6, 84), name: 'Great Observatory' });
     // the Library of Aurora, south on Meridian Way
     landmarks.push({ type: 'library', x: 0, z: 468, rot: 0, w: 150, d: 42 });
-    sites.push({ box: { x: 0, z: 468, hw: 80, hd: 25 } });
+    sites.push({ box: { x: 0, z: 468, hw: 80, hd: 26 }, blockStreets: true, name: 'Library of Aurora' });
     plazas.push({ x: 0, z: 404, hw: 78, hd: 22, kind: 'forecourt' });
+    paths.push({ pts: T.line(-104, 404, 104, 404), w: 6 }, { pts: T.line(0, 404, 0, 442.2), w: 7 });
+    accessRoutes.push({ name: 'Library forecourt', pts: [[0, 404], [0, 442.2]], y: 9, halfWidth: 5 });
+    for (const side of [-1, 1]) {
+      const pts = [[0, O.z + 90], [side * 5.5, O.z + 77], [side * 5.5, O.z + 70]];
+      paths.push({ pts: T.curve(pts, 2), w: 2.5 });
+      accessRoutes.push({ name: 'Observatory entrance', pts, y: 19, halfWidth: 1.5 });
+    }
     // gardens: the Academy Gardens to the west, the Sky Garden by the harbour
     parks.push({ box: { x: -610, z: -250, hw: 150, hd: 104, round: 24 }, paths: [T.curve([[-760, -300], [-650, -210], [-520, -260], [-460, -180]]), T.curve([[-700, -150], [-600, -300], [-520, -350]])], pond: { x: -600, z: -250, r: 26 }, trees: 0.8 });
     pools.push({ x: -600, z: -250, r: 24 });
@@ -159,7 +169,10 @@ const aurora = {
     parks.push({ x: -420, z: 700, r: 90, paths: [T.curve([[-490, 660], [-420, 710], [-350, 690]])], trees: 1 });
     // colleges: cloistered quads in the blocks round the Circus
     for (const [cx, cz] of [[375, 195], [-375, 195], [375, -195], [-375, -195], [225, 325], [-225, 325], [225, -325], [-225, -325]]) {
-      lots.push({ x: cx, z: cz, w: 104, d: 84, rot: Math.abs(cx) > 300 ? (cx > 0 ? Math.PI / 2 : -Math.PI / 2) : (cz > 0 ? 0 : Math.PI), type: 'college', floors: 4, cls: ST.STREET });
+      lots.push({ x: cx, z: cz, w: 104, d: 84, rot: Math.abs(cx) > 300 ? (cx > 0 ? -Math.PI / 2 : Math.PI / 2) : (cz > 0 ? Math.PI : 0), type: 'college', floors: 4, cls: ST.STREET, civic: true, program: 'Academy quadrangle' });
+      const approach = Math.abs(cx) > 300 ? [[Math.sign(cx) * 300, cz], [cx - Math.sign(cx) * 42.7, cz]] : [[cx, Math.sign(cz) * 260], [cx, cz - Math.sign(cz) * 42.7]];
+      paths.push({ pts: approach, w: 3.5 });
+      accessRoutes.push({ name: 'Academy gate', pts: approach, y: 9, halfWidth: 2 });
     }
     const lotRule = {
       size: (cls, R) => (cls === ST.LANE ? [14 + R() * 12, 16 + R() * 8] : [22 + R() * 26, 22 + R() * 18]),
@@ -171,7 +184,7 @@ const aurora = {
       },
       floors: (Lt, R) => (Lt.floors ? Lt.floors : Lt.type === 'tower' ? 14 + Math.floor(R() * 10) : Lt.type === 'crystal' ? 3 + Math.floor(R() * 4) : 4 + Math.round(Lt.centre * (4 + R() * 7)) + Math.floor(R() * 3)),
     };
-    return { streets, squares, plazas, parks, sites, landmarks, lots, inlays, beds, zones, pools, trees, lotRule };
+    return { streets, squares, plazas, parks, sites, landmarks, lots, inlays, beds, zones, pools, trees, lotRule, paths, accessRoutes };
   },
 };
 
@@ -251,7 +264,7 @@ const tidewater = {
     plazas.push({ x: L.x - Math.cos(eb) * 56, z: L.z - Math.sin(eb) * 56, hw: 60, hd: 52, rot: eb, kind: 'landing' });
     const camp = [L.x - Math.cos(eb) * 56 + Math.cos(eb + Math.PI / 2) * 44, L.z - Math.sin(eb) * 56 + Math.sin(eb + Math.PI / 2) * 44];
     landmarks.push({ type: 'campanile', x: camp[0], z: camp[1], h: 96, s: 11 });
-    sites.push({ x: camp[0], z: camp[1], r: 12 });
+    sites.push({ x: camp[0], z: camp[1], r: 12, blockStreets: true, name: 'Campanile' });
     for (const [x, z, r] of [[-560, -40, 34], [520, -120, 34], [180, 560, 30], [-860, 180, 30], [760, -560, 30], [-300, 520, 28]]) squares.push({ x, z, r, kind: 'village' });
     squares.push({ x: 0, z: -30, r: 262, kind: 'crown', noLamps: true });
     // gardens
@@ -316,7 +329,16 @@ const sunward = {
     const b = ctx.b, L = ctx.landing;
     const hx = Math.cos(b) * 530, hz = Math.sin(b) * 530;
     landmarks.push({ type: 'heliodrome', x: hx, z: hz, rot: b, s: 96 });
-    sites.push({ box: { x: hx, z: hz, hw: 64, hd: 64, rot: b }, margin: 2 });
+    sites.push({ box: { x: hx, z: hz, hw: 64, hd: 64, rot: b }, margin: 2, blockStreets: true, name: 'Heliodrome' });
+    // An unbroken processional circuit serves the four stair feet; the crescent and
+    // radial streets join it instead of crossing the temple's stepped volume.
+    streets.push({ pts: T.ring(hx, hz, 104, 4), cls: ST.STREET, hw: 5, name: 'Heliodrome Procession', noLots: true });
+    const accessRoutes = [];
+    for (let k = 0; k < 4; k++) {
+      const a = b + k * Math.PI / 2, p = [[hx + Math.cos(a) * 104, hz + Math.sin(a) * 104], [hx + Math.cos(a) * 60, hz + Math.sin(a) * 60]];
+      paths.push({ pts: p, w: 6 });
+      accessRoutes.push({ name: 'Heliodrome public stair', pts: p, y: 9, halfWidth: 4 });
+    }
     squares.push({ x: hx, z: hz, r: 92, kind: 'plaza', noLamps: true });
     plazas.push({ x: L.x - Math.cos(b) * 46, z: L.z - Math.sin(b) * 46, hw: 52, hd: 46, rot: b, kind: 'landing' });
     const gx = L.x - Math.cos(b) * 50, gz = L.z - Math.sin(b) * 50;
@@ -338,7 +360,7 @@ const sunward = {
       type: (Lt, R) => (Lt.cls === ST.LANE ? pick(R, [['solar', 0.5], ['mews', 0.5]]) : pick(R, [['solar', 0.5], ['terrace', 0.2], ['ribbon', 0.15], ['tower', Lt.centre > 0.4 && Lt.w > 26 ? 0.1 : 0], ['pavilion', 0.05]])),
       floors: (Lt, R) => (Lt.type === 'tower' ? 12 + Math.floor(R() * 8) : 3 + Math.round(Lt.centre * (3 + R() * 5)) + Math.floor(R() * 2)),
     };
-    return { streets, squares, plazas, parks, sites, landmarks, lots, inlays, beds, zones, pools, trees, lotRule, paths };
+    return { streets, squares, plazas, parks, sites, landmarks, lots, inlays, beds, zones, pools, trees, lotRule, paths, accessRoutes };
   },
 };
 
@@ -363,6 +385,7 @@ const seraph = {
     const { R, rnd } = ctx;
     const streets = [], squares = [], plazas = [], parks = [], sites = [], landmarks = [], lots = [], inlays = [], beds = [], zones = [], pools = [], trees = [];
     const b = ctx.b, ca = ctx.cascade.a;
+    const paths = [], accessRoutes = [];
     const onCascade = (p) => Math.abs(angDiff(Math.atan2(p[1], p[0]), ca)) * Math.hypot(p[0], p[1]) < ctx.cascade.w * 0.5 + 16 && Math.hypot(p[0], p[1]) > 190;
     const keep = (p) => !onCascade(p);
     // grand stair axes every sixty degrees (the sixth is the Cascade)
@@ -396,6 +419,18 @@ const seraph = {
     zones.push({ prim: { bbox: [-1200, -1200, 1200, 1200], d: (x, z) => { const r = Math.hypot(x, z); if (r < 180) return 30; return Math.abs(angDiff(Math.atan2(z, x), ca)) * r - (ctx.cascade.w * 0.5 + 10); } }, v: 0, reserve: true });
     // pergola gardens on the terraces, flower beds along every terrace edge
     for (const [f, w] of [[0.64, 5], [0.355, 4]]) for (const run of T.split(T.arc(0, 0, (a) => R(a) * f, 0, TAU, 5), keep)) beds.push({ pts: run, w });
+    // A level garden promenade gives the broad first terrace a public purpose.
+    // It joins the radial stairs, with open pergola rooms between the towers.
+    const promenade = T.arc(0, 0, a => R(a) * .615, 0, TAU, 4);
+    for (const run of T.split(promenade, p => keep(p) && ctx.levelAt(...p, 4) === 16 && !ctx.blocked(...p, 4))) paths.push({ pts: run, w: 2.8 });
+    for (let k = 0; k < 6; k++) {
+      const a = b + (k + .5) * TAU / 6, r = R(a) * .615, x = Math.cos(a) * r, z = Math.sin(a) * r;
+      if (!keep([x, z]) || ctx.blocked(x, z, 20)) continue;
+      if (Array.from({ length: 24 }, (_, i) => i * TAU / 24).some(q => ctx.levelAt(x + Math.cos(q) * 14, z + Math.sin(q) * 14, 1) !== 16)) continue;
+      landmarks.push({ type: 'gardenBelvedere', name: 'Wind Garden', x, z, y: 16, rot: -a });
+      sites.push({ x, z, r: 14, margin: 1 });
+      accessRoutes.push({ name: 'Garden belvedere', pts: [[x + Math.sin(a) * 10, z - Math.cos(a) * 10], [x, z], [x - Math.sin(a) * 10, z + Math.cos(a) * 10]], y: 16, halfWidth: 1.8 });
+    }
     for (let k = 0; k < 6; k++) {
       const a = b + ((k + 0.5) * TAU) / 6;
       parks.push({ x: Math.cos(a) * 262, z: Math.sin(a) * 262, r: 40, trees: 1, paths: [T.arc(Math.cos(a) * 262, Math.sin(a) * 262, 22, 0, TAU, 4)] });
@@ -410,7 +445,7 @@ const seraph = {
       },
       floors: (Lt, R) => (Lt.type === 'ziggurat' ? 4 + Math.floor(R() * 5) : 3 + Math.floor(R() * 4)),
     };
-    return { streets, squares, plazas, parks, sites, landmarks, lots, inlays, beds, zones, pools, trees, lotRule };
+    return { streets, squares, plazas, parks, sites, landmarks, lots, inlays, beds, zones, pools, trees, lotRule, paths, accessRoutes };
   },
 };
 
@@ -481,7 +516,23 @@ const southmarch = {
     squares.push({ x: 0, z: -170, r: 175, kind: 'plaza', noLamps: true });
     // the passenger terminal on the west quay, warehouses along the rows
     landmarks.push({ type: 'terminal', x: -452, z: 470, rot: Math.PI / 2, w: 170, d: 58 });
-    sites.push({ box: { x: -452, z: 470, hw: 32, hd: 90 } });
+    sites.push({ box: { x: -452, z: 470, hw: 34, hd: 90 }, blockStreets: true, name: 'Passenger Terminal' });
+    for (const dz of [-54.4, 0, 54.4]) sites.push({ box: { x: -379.5, z: 470 + dz, hw: 46, hd: 4 }, margin: 3, name: 'Terminal transfer gallery' });
+    const paths = [], accessRoutes = [];
+    const passengerWalk = T.curve([[-455, 236], [-552, 315], [-552, 470], [-615, 650], [-710, 715], [-790, 865]], 4);
+    paths.push({ pts: passengerWalk, w: 4 });
+    paths.push({ pts: T.line(-552, 470, -481, 470), w: 7 });
+    accessRoutes.push({ name: 'Terminal garden entrance', pts: [[-552, 470], [-481, 470]], y: 9, halfWidth: 4 });
+    for (const z of [420, 520]) {
+      landmarks.push({ type: 'passengerShelter', name: 'Harbour waiting garden', x: -518, z, rot: Math.PI / 2 });
+      sites.push({ box: { x: -518, z, hw: 7, hd: 14 }, margin: 2 });
+      paths.push({ pts: T.line(-558, z, -481, z), w: 3 });
+      accessRoutes.push({ name: 'Passenger shelter', pts: [[-558, z], [-481, z]], y: 9, halfWidth: 1.5 });
+    }
+    // Sheltered rain gardens follow the landward passenger walk, leaving the
+    // quay road, cranes, galleries and turning water dedicated to the port.
+    for (const z of [355, 405, 565, 615]) beds.push({ box: { x: -582, z, hw: 9, hd: 17, round: 5 } });
+    for (const z of [345, 390, 555, 600, 645]) trees.push({ x: -600, z, sp: 'flowering', s: 10 });
     for (let z = 280; z < 780; z += 52) if (z < 370 || z > 570) lots.push({ x: -364 - 6 - 3.5 - 12, z, w: 46, d: 24, rot: Math.PI / 2, type: 'warehouse', floors: 3, cls: ST.STREET });
     for (let z = 280; z < 780; z += 52) lots.push({ x: 364 + 6 + 3.5 + 12, z, w: 46, d: 24, rot: -Math.PI / 2, type: 'warehouse', floors: 3, cls: ST.STREET });
     landmarks.push({ type: 'cranes', list: ctx.features.cranes });
@@ -501,7 +552,7 @@ const southmarch = {
       },
       floors: (Lt, R) => (Lt.type === 'tower' ? 15 + Math.floor(R() * 12) : Lt.type === 'warehouse' ? 3 + Math.floor(R() * 3) : 5 + Math.round(Lt.centre * (5 + R() * 8)) + Math.floor(R() * 3)),
     };
-    return { streets, squares, plazas, parks, sites, landmarks, lots, inlays, beds, zones, pools, trees, lotRule };
+    return { streets, squares, plazas, parks, sites, landmarks, lots, inlays, beds, zones, pools, trees, lotRule, paths, accessRoutes };
   },
 };
 
@@ -580,8 +631,15 @@ const coral = {
     const L = ctx.landing;
     streets.push({ pts: T.line(L.x, L.z, Math.cos(ctx.b) * 372, Math.sin(ctx.b) * 372, 6), cls: ST.AVENUE, hw: 9, name: 'Reef Way' });
     // causeways across the lagoon to the islet of the crown
-    const bridges = [];
-    for (const [a, hw] of [[ctx.b, 6], [ctx.b + 2.4, 5]]) bridges.push({ a: P(a, 352), b: P(a, 146), hw, y: 9, cls: ST.STREET, style: 'causeway' });
+    const bridges = [], paths = [], accessRoutes = [];
+    // The second arrival sits east of the northern navigation channel. Its old
+    // 2.4-radian bearing ended inside that channel with no receiving bank.
+    for (const [a, hw] of [[ctx.b, 6], [ctx.b + 2.15, 5]]) {
+      bridges.push({ a: P(a, 352), b: P(a, 146), hw, y: 9, cls: ST.STREET, style: 'causeway' });
+      const pts = [P(a, 352), P(a, 379)];
+      paths.push({ pts, w: hw });
+      accessRoutes.push({ name: 'Reef causeway arrival', pts, y: 9, halfWidth: Math.min(3, hw - 1) });
+    }
     squares.push({ x: 0, z: 0, r: 146, kind: 'crown', noLamps: true });
     plazas.push({ x: L.x - Math.cos(ctx.b) * 44, z: L.z - Math.sin(ctx.b) * 44, hw: 46, hd: 44, rot: ctx.b, kind: 'landing' });
     // reef gardens: sand paths between coral-coloured beds
@@ -599,7 +657,7 @@ const coral = {
       type: (Lt, R) => (Lt.cls === ST.LANE ? pick(R, [['reef', 0.7], ['mews', 0.3]]) : pick(R, [['reef', 0.6], ['terrace', 0.15], ['stack', 0.1], ['ribbon', 0.15]])),
       floors: (Lt, R) => (Lt.type === 'reef' ? 2 + Math.floor(R() * 4) : 3 + Math.floor(R() * 4)),
     };
-    return { streets, squares, plazas, parks, sites, landmarks, lots, inlays, beds, zones, pools, trees, lotRule, bridges };
+    return { streets, squares, plazas, parks, sites, landmarks, lots, inlays, beds, zones, pools, trees, lotRule, bridges , paths, accessRoutes };
   },
 };
 
@@ -632,16 +690,20 @@ const westmere = {
     const nearAmph = (p) => Math.hypot(p[0] - A.x, p[1] - A.z) < A.r1 + 12;
     const inMall = (p) => p[0] < -250 && p[0] > -1000 && Math.abs(p[1]) < 62;
     const inRond = (p) => Math.hypot(p[0], p[1]) < 250;
-    const keep = (p) => !nearAmph(p) && !inMall(p) && !inRond(p);
+    const museumPrecinct = (p) => p[0] > 250 && p[0] < 1130 && Math.abs(p[1]) < 106;
+    const operaPrecinct = (p) => Math.hypot(p[0] - (O.x - 10), p[1]) < 145;
+    const keep = (p) => !nearAmph(p) && !inMall(p) && !inRond(p) && !museumPrecinct(p) && !operaPrecinct(p);
     // Museum Mile: the great boulevard from the triumphal arch to the Civic Tower
-    streets.push({ pts: T.line(L.x - 30, L.z, 256, 0, 6), cls: ST.AVENUE, hw: 15, name: 'Museum Mile' });
+    streets.push({ pts: T.line(256, 0, 1140, 0, 4), cls: ST.AVENUE, hw: 7, name: 'Museum Mile', noLots: true });
+    streets.push({ pts: T.curve([[L.x - 16, L.z], [1130, L.z + 70], [1140, -100], [1140, 0]], 4), cls: ST.AVENUE, hw: 10, name: 'Concorde Approach', noLots: true });
+    for (const s of [-1, 1]) streets.push({ pts: T.line(270, s * 104, 1120, s * 104, 4), cls: ST.STREET, hw: 5, name: 'Museum Service Court', lotSide: s > 0 ? 1 : -1 });
     // the Mall: twin avenues either side of the Mere, the long reflecting pool
     for (const s of [-1, 1]) streets.push({ pts: T.line(-256, s * 66, -1010, s * 66, 6), cls: ST.AVENUE, hw: 8, name: 'the Mall' });
     pools.push({ box: { x: -630, z: 0, hw: 330, hd: 20, round: 2 } });
     parterres.push({ box: { x: -630, z: -40, hw: 330, hd: 12 } }, { box: { x: -630, z: 40, hw: 330, hd: 12 } });
     // the patte d'oie from the arch, diagonals from the rond-point
     const E = [L.x - 90, L.z];
-    for (const s of [-1, 1]) streets.push({ pts: T.line(E[0], E[1], 330, s * 520, 6), cls: ST.AVENUE, hw: 10, name: 'patte d\'oie' });
+    for (const s of [-1, 1]) for (const pts of T.split(T.line(1120, s * 104, 330, s * 520, 6), keep)) streets.push({ pts, cls: ST.AVENUE, hw: 10, name: 'patte d\'oie' });
     for (const a of [Math.PI / 4, 3 * Math.PI / 4, -Math.PI / 4, -3 * Math.PI / 4]) for (const run of T.split(T.radial(0, 0, a, 262, R(a) - 30, 6), keep)) streets.push({ pts: run, cls: ST.AVENUE, hw: 9, name: 'diagonal' });
     streets.push({ pts: T.ring(0, 0, 262, 6), cls: ST.ESPLANADE, hw: 8, name: 'Rond-Point de la Concorde' });
     for (const run of T.split(T.ring(0, 0, 720, 7), (p) => !nearAmph(p) && !inMall(p))) streets.push({ pts: run, cls: ST.AVENUE, hw: 10, name: 'Boulevard of the Arts' });
@@ -657,15 +719,24 @@ const westmere = {
     const ronds = [];
     for (const a of [Math.PI / 4, 3 * Math.PI / 4, -Math.PI / 4, -3 * Math.PI / 4, 0]) { const c = P(a, 720); ronds.push(c); squares.push({ x: c[0], z: c[1], r: 38, kind: 'rond' }); }
     plazas.push({ x: E[0] + 20, z: E[1], hw: 70, hd: 80, kind: 'landing' });
-    landmarks.push({ type: 'arch', x: E[0] - 10, z: E[1], rot: 0, w: 46, h: 44 });
-    sites.push({ box: { x: E[0] - 10, z: E[1], hw: 12, hd: 26 } });
+    landmarks.push({ type: 'arch', x: 1060, z: 0, rot: 0, w: 58, h: 48 });
+    // The arch passage is a deliberate open route. Reserve its flanking piers as
+    // solids, while the seven-metre-half-width procession passes between them.
+    for (const s of [-1, 1]) sites.push({ box: { x: 1060, z: s * 22, hw: 17, hd: 11 }, margin: 1, name: 'Concorde arch pier' });
     squares.push({ x: O.x + 120, z: 0, r: 70, kind: 'plaza', noLamps: true });
     landmarks.push({ type: 'opera', x: O.x - 10, z: 0, rot: Math.PI, s: 120 });
-    sites.push({ x: O.x - 10, z: 0, r: 128, margin: 0 });
+    sites.push({ x: O.x - 10, z: 0, r: 128, margin: 0, blockStreets: true, streetShape: SD.rbox(O.x - 10, 0, 67, 98, 0, 4), name: 'Opera Shell' });
     landmarks.push({ type: 'amphitheatre', ...A });
     sites.push({ x: A.x, z: A.z, r: A.r1 + 6 });
     // Museum Mile: museums with domes and porticoes both sides of the boulevard
-    for (let x = 320; x < L.x - 160; x += 124) for (const s of [-1, 1]) lots.push({ x, z: s * (15 + 7 + 30), w: 96, d: 50, rot: s > 0 ? Math.PI : 0, type: 'museum', floors: 4, cls: ST.AVENUE });
+    const paths = [], accessRoutes = [];
+    for (const x of [320, 444, 568, 816, 940]) for (const s of [-1, 1]) {
+      lots.push({ x, z: s * 56, w: 96, d: 50, rot: s > 0 ? Math.PI : 0, type: 'museum', floors: 4, cls: ST.AVENUE, civic: true, program: 'Museum Mile' });
+      const approach = [[x, s * 6], [x, s * 27.2]];
+      paths.push({ pts: approach, w: 10 });
+      accessRoutes.push({ name: 'Museum portico', pts: approach, y: 9, halfWidth: 7 });
+      for (const side of [-1, 1]) beds.push({ box: { x: x + side * 29, z: s * 19, hw: 12, hd: 4, round: 1 } });
+    }
     // gardens: the Mere Gardens, the Jardin du Nord
     parks.push({ box: { x: -700, z: -330, hw: 150, hd: 110, round: 20 }, trees: 1, paths: [T.line(-850, -330, -550, -330), T.line(-700, -440, -700, -220), T.arc(-700, -330, 60, 0, TAU, 5)] });
     pools.push({ x: -700, z: -330, r: 20 });
@@ -687,9 +758,56 @@ const westmere = {
       },
       floors: (Lt, R) => (Lt.floors ? Lt.floors : Lt.type === 'tower' ? 14 + Math.floor(R() * 8) : Lt.type === 'mansion' ? 5 + Math.floor(R() * 3) : 4 + Math.floor(R() * 3)),
     };
-    return { streets, squares, plazas, parks, sites, landmarks, lots, inlays, beds, zones, pools, trees, lotRule, parterres };
+    return { streets, squares, plazas, parks, sites, landmarks, lots, inlays, beds, zones, pools, trees, lotRule, parterres, paths, accessRoutes };
   },
 };
 
 export const DESIGNS = { aurora, tidewater, sunward, seraph, southmarch, coral, westmere };
+
+// A small civic institution in each ward gives the district a readable human-scale
+// destination. Sites are chosen from authored neighbourhoods, before parcel allocation;
+// each has a grounded court, its own architectural program and a walk to a real street.
+const COURTS = {
+  aurora: { name: 'Meridian Instrument House', theme: 'astronomy', r: 38, candidates: [[-845, -455], [-835, 585], [845, -455]] },
+  tidewater: { name: 'House of the Tide Tables', theme: 'tidal', r: 38, candidates: [[-375, 100], [300, 460], [-475, -600], [850, 260]] },
+  sunward: { name: 'Solar Guild Hall', theme: 'solar', r: 38, candidates: [[-625, 55], [-720, -190], [-520, -410]] },
+  seraph: { name: 'Garden of the Six Winds', theme: 'garden', r: 36, candidates: [[-275, 165], [-240, -210], [225, -235], [200, 235]] },
+  southmarch: { name: 'Harbour Exchange', theme: 'harbour', r: 44, candidates: [[-780, 590], [-710, 780], [-940, 315]] },
+  coral: { name: 'Reef Conservatory', theme: 'reef', r: 40, candidates: [[-510, 330], [525, 175], [-285, -530]] },
+  westmere: { name: 'Sculptors Loggia', theme: 'civic', r: 38, candidates: [[-425, 335], [-460, -195], [-1035, -330]] },
+};
+
+export function refineWardCourts(ctx, raw) {
+  const C = COURTS[ctx.w.id];
+  if (!C) return raw;
+  const shape = (s) => s.prim || (s.poly ? SD.polygon(s.poly) : s.box ? SD.rbox(s.box.x, s.box.z, s.box.hw, s.box.hd, s.box.rot || 0, s.box.round ?? 4) : SD.circle(s.x, s.z, s.r));
+  for (const [x, z] of C.candidates) {
+    const y = ctx.levelAt(x, z, 3);
+    if (y === null || (ctx.blocked && ctx.blocked(x, z, C.r + 12))) continue;
+    if ((raw.sites || []).some((s) => shape(s).d(x, z) < C.r + 12)) continue;
+    if ((raw.pools || []).some((s) => shape(s).d(x, z) < C.r + 6)) continue;
+    let grounded = true;
+    for (let k = 0; k < 32; k++) if (ctx.levelAt(x + Math.cos(k * TAU / 32) * (C.r + 4), z + Math.sin(k * TAU / 32) * (C.r + 4), 1) !== y) grounded = false;
+    if (!grounded) continue;
+    let gate = null, distance = Infinity;
+    for (const st of raw.streets) for (const p of st.pts) {
+      const d = Math.hypot(p[0] - x, p[1] - z);
+      if (d < C.r + (st.hw ?? 6) + 20 || d > C.r + 130 || d >= distance) continue;
+      if (ctx.levelAt(p[0], p[1], 4) !== y || (ctx.blocked && ctx.blocked(p[0], p[1], 3))) continue;
+      let clear = true;
+      for (let i = 1; i <= 12; i++) if (ctx.levelAt(x + (p[0] - x) * i / 12, z + (p[1] - z) * i / 12, 3) !== y) clear = false;
+      if (clear) { gate = p; distance = d; }
+    }
+    if (!gate) continue;
+    const dx = (gate[0] - x) / distance, dz = (gate[1] - z) / distance;
+    raw.landmarks.push({ type: 'wardCourt', name: C.name, theme: C.theme, x, z, y, rot: Math.atan2(dx, dz), r: C.r });
+    raw.sites.push({ x, z, r: C.r, margin: 2, blockStreets: true, streetMargin: 3, name: C.name });
+    raw.squares.push({ x, z, r: C.r + 10, kind: 'forecourt', noLamps: true });
+    raw.paths = raw.paths || [];
+    raw.paths.push({ pts: T.line(x + dx * 19, z + dz * 19, gate[0], gate[1], 3), w: 2.4 });
+    raw.extras = { ...raw.extras, civicCourt: { name: C.name, x, z, y, gate: [...gate], radius: C.r } };
+    break;
+  }
+  return raw;
+}
 export { angDiff, inArc, bearing, P as polar };

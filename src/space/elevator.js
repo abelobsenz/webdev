@@ -6,6 +6,7 @@ import { HarbourStation } from './harbour.js';
 import { stationFrame, buildPortStation, buildCounterworks } from './stations.js';
 import { craftMesh, craftPart, addLamps } from './craftMesh.js';
 import { ClimberCars } from './climbers.js';
+import { buildCounterweightRock } from './counterweightRock.js';
 
 // Meridian's space elevator: the tether (surface -> Halo -> Geostationary
 // Harbour -> counterweight), its climbers, and the stations along it.
@@ -47,6 +48,7 @@ const CLIMB_VERT = /* glsl */ `
 attribute vec3 aC;       // x: departure offset (s), y: +1 up / -1 down, z: 0 lower run, 1 upper run
 uniform float uClimbT;   // sim seconds modulo the period
 uniform vec3 uUp;        // body-frame direction of the tether
+uniform vec3 uGuide;     // westward separation of the two climber guide cables
 uniform float uPx;
 varying float vDir;
 varying float vFade;
@@ -56,7 +58,7 @@ void main() {
   float s = ph < 0.02 ? ph * ph / 0.04 : (ph > 0.98 ? 1.0 - (1.0 - ph) * (1.0 - ph) / 0.04 : ph);
   if (aC.y < 0.0) s = 1.0 - s;
   float alt = aC.z < 0.5 ? s * ${GEO_ALT.toFixed(1)} : ${GEO_ALT.toFixed(1)} + s * ${(COUNTERWEIGHT_ALT - GEO_ALT).toFixed(1)};
-  vec3 p = uUp * (${R_EARTH.toFixed(1)} + alt) + vec3(aC.y * 0.004);
+  vec3 p = uUp * (${R_EARTH.toFixed(1)} + alt) + uGuide * aC.y * 0.12;
   vec4 w = modelMatrix * vec4(p, 1.0);
   vec4 mv = viewMatrix * w;
   gl_Position = projectionMatrix * mv;
@@ -80,45 +82,12 @@ void main() {
 }
 `;
 
-function rng(seed) { let a = seed; return () => { a = (a * 1664525 + 1013904223) >>> 0; return a / 4294967296; }; }
-
-function vnoise3(x, y, z) {
-  const h = (i, j, k) => { let n = i * 374761393 + j * 668265263 + k * 1274126177; n = (n ^ (n >>> 13)) * 1274126177; return ((n ^ (n >>> 16)) >>> 0) / 4294967296; };
-  const fi = Math.floor(x), fj = Math.floor(y), fk = Math.floor(z);
-  const u = x - fi, v = y - fj, w = z - fk;
-  const su = u * u * (3 - 2 * u), sv = v * v * (3 - 2 * v), sw = w * w * (3 - 2 * w);
-  const L = (a, b, t) => a + (b - a) * t;
-  return L(L(L(h(fi, fj, fk), h(fi + 1, fj, fk), su), L(h(fi, fj + 1, fk), h(fi + 1, fj + 1, fk), su), sv),
-    L(L(h(fi, fj, fk + 1), h(fi + 1, fj, fk + 1), su), L(h(fi, fj + 1, fk + 1), h(fi + 1, fj + 1, fk + 1), su), sv), sw);
-}
-
-function buildCounterweight() {
-  const g = new THREE.IcosahedronGeometry(9, 5);
-  const p = g.attributes.position;
-  const v = new THREE.Vector3();
-  for (let i = 0; i < p.count; i++) {
-    v.fromBufferAttribute(p, i);
-    const n = v.clone().normalize();
-    let h = 0, a = 1, f = 0.25;
-    for (let o = 0; o < 5; o++) { h += a * (vnoise3(v.x * f + 3, v.y * f, v.z * f) - 0.5); a *= 0.5; f *= 2.1; }
-    const squash = 1 + 0.25 * n.x * n.x - 0.15 * n.z * n.z;
-    v.copy(n).multiplyScalar(9 * squash * (1 + h * 0.5));
-    p.setXYZ(i, v.x, v.y, v.z);
-  }
-  g.computeVertexNormals();
-  const rock = tag(g, KIND.TRUSS);
-  const parts = [rock];
-  parts.push(tag(new THREE.TorusGeometry(10.5, 0.25, 8, 120).rotateX(Math.PI / 2), KIND.HAB));
-  parts.push(tag(new THREE.TorusGeometry(10.5, 0.08, 5, 120).rotateX(Math.PI / 2).translate(0, 0.3, 0), KIND.GLOW));
-  parts.push(tag(new THREE.CylinderGeometry(1.2, 1.2, 4, 16).translate(0, -10, 0), KIND.HAB));
-  return merge(parts);
-}
-
 export class Elevator {
   constructor(space, q) {
     this.space = space;
     this.group = new THREE.Group();
     const up = bodyDir(0, MERIDIAN_LON);
+    const guide = new THREE.Vector3().crossVectors(up,new THREE.Vector3(0,1,0)).normalize();
     this.up = up;
     // tether ribbon
     const pts = [], along = [];
@@ -128,7 +97,9 @@ export class Elevator {
     alts.push(COUNTERWEIGHT_ALT);
     for (const a of alts) { pts.push(up.clone().multiplyScalar(R_EARTH + a)); along.push(a); }
     this.tetherMat = createRibbonMaterial({ widthKm: 0.03, minPx: 1.4, frag: TETHER_FRAG });
-    this.tether = new THREE.Mesh(buildRibbonGeometry([{ pts, along, id: 0 }]), this.tetherMat);
+    const cables = [{pts,along,id:0}];
+    for(const dir of [-1,1]) cables.push({pts:pts.map(p=>p.clone().addScaledVector(guide,dir*.12)),along,id:dir});
+    this.tether = new THREE.Mesh(buildRibbonGeometry(cables), this.tetherMat);
     this.tether.frustumCulled = false;
     this.tether.renderOrder = 12;
     this.group.add(this.tether);
@@ -144,7 +115,7 @@ export class Elevator {
     cg.setAttribute('aC', new THREE.Float32BufferAttribute(aC, 3));
     this.climbMat = new THREE.ShaderMaterial({
       vertexShader: CLIMB_VERT, fragmentShader: CLIMB_FRAG,
-      uniforms: { uClimbT: { value: 0 }, uUp: { value: up.clone() }, uPx: { value: 3 } },
+      uniforms: { uClimbT: { value: 0 }, uUp: { value: up.clone() }, uGuide:{value:guide}, uPx: { value: 3 } },
       transparent: true, blending: THREE.AdditiveBlending, depthWrite: false,
     });
     this.climbers = new THREE.Points(cg, this.climbMat);
@@ -176,12 +147,14 @@ export class Elevator {
     stationFrame(up, this.junction.quaternion);
     this.group.add(this.junction);
     // counterweight
-    this.counter = new THREE.Mesh(buildCounterweight(), mkMat({ pattern: 0.08, accent: [1.0, 0.6, 0.35] }));
+    const rock = buildCounterweightRock();
+    this.counter = new THREE.Mesh(rock.geo, mkMat({ pattern: 0.08, accent: [1.0, 0.6, 0.35] }));
     this.counter.position.copy(up).multiplyScalar(R_EARTH + COUNTERWEIGHT_ALT + 10);
     this.counter.quaternion.copy(qStation);
     this.group.add(this.counter);
     // the works on the rock: arrival terminal, habitat ring, mining gantries, radiators
-    const cw = buildCounterworks();
+    const cw = buildCounterworks({ surfaceRadius: rock.surfaceRadius });
+    this.counterData = cw;
     this.counterWorks = craftMesh(cw.geo, { accent: [1.0, 0.7, 0.4], lit: 0.6 });
     addLamps(this.counterWorks, cw.lamps, { minPx: 1.3 });
     this.counter.add(this.counterWorks);

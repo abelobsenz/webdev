@@ -48,7 +48,7 @@ function lookQuat(fwd, upHint, out) {
  * pointing at the station), turn at the hold point, depart along dD with the drive lit.
  * The cycle wraps while the ship is far out in both corridors (sub-pixel from the station).
  */
-function voyage(u, c, outPos, outFwd) {
+export function voyage(u, c, outPos, outFwd) {
   let thr = 0;
   if (u < 0.42) {
     const s = u / 0.42;
@@ -73,7 +73,7 @@ function voyage(u, c, outPos, outFwd) {
 const TURN_AXIS = new THREE.Vector3(0, 1, 0);
 
 /** Back-and-forth transit along a cubic Bezier with pauses at both ends. */
-function shuttleRun(t, c, outPos, outFwd) {
+export function shuttleRun(t, c, outPos, outFwd) {
   const T = c.move * 2 + c.pause * 2;
   let ph = ((t + c.offset) % T + T) % T;
   let back = false;
@@ -131,20 +131,21 @@ export class Fleet {
     const freighter = buildFreighter(1100);
     this._addVoyager('freighter', freighter, H, {
       hold: corr.dA.clone().multiplyScalar(19).add(V(0, -2.5, 0)), start: corr.dD.clone().multiplyScalar(17).add(V(0, 2, 0)),
-      dA: corr.dA, dD: corr.dD, S: 2600, bulge: V(0, 4, 0), T: 1500, offset: 0.6,
+      dA: corr.dA, dD: corr.dD, S: 2600, bulge: V(0, 9, 0), T: 1500, offset: 0.6,
       engine: { scale: 0.62, length: 17, color: 0x7fd8ff }, glow: [0.55, 0.8, 1.0], accent: [0.55, 0.85, 1.0],
     });
     this._addVoyager('approach', liner, H, {
       hold: corr.dA.clone().multiplyScalar(27).add(V(3.5, 4, 0)), start: corr.dD.clone().multiplyScalar(26).add(V(0, -3.5, 2.5)),
-      dA: corr.dA.clone().add(V(0.05, -0.1, 0.12)).normalize(), dD: corr.dD.clone().add(V(0, -0.08, -0.1)).normalize(), S: 3000, bulge: V(0, -6, 0), T: 2100, offset: 0.3,
+      dA: corr.dA.clone().add(V(0.05, -0.1, 0.12)).normalize(), dD: corr.dD.clone().add(V(0, -0.08, -0.1)).normalize(), S: 3000, bulge: V(0, 10, 0), T: 2100, offset: 0.3,
       engine: { scale: 0.55, length: 16, color: 0x7fd8ff }, glow: [0.55, 0.8, 1.0], accent: [1.0, 0.72, 0.45],
     });
     // ---- tugs and a courier working the Harbour (children of the Harbour: short hops)
     const tug = buildTug(80), courier = buildCourier(44), shuttle = buildShuttle(110);
     const A = station.data.arms;
     const armHead = (i, extra = 0) => A[i].d.clone().multiplyScalar((A[i].L + 650 + extra) * KM).setY(A[i].y * KM);
+    // The lower tug passes beneath the thermal fins before climbing to its arm head.
     const runs = [
-      { craft: tug, pts: [V(1.25, -6.1, 0.35), V(3.8, -5.2, 1.7), armHead(5).add(V(0, -1.3, 0)), armHead(5, 150)], move: 150, pause: 45, offset: 0 },
+      { craft: tug, pts: [V(1.25, -6.1, 0.35), V(3.8, -7.2, 1.7), armHead(5).add(V(0, -6.0, 0)), armHead(5, 150)], move: 150, pause: 45, offset: 0 },
       { craft: tug, pts: [armHead(1), armHead(1).add(V(0, 1.7, 0)), armHead(2).add(V(0, 1.7, 0)), armHead(2)], move: 130, pause: 60, offset: 80 },
       { craft: courier, pts: [V(-0.95, 6.1, 0.2), V(-2.5, 7.2, 1.3), corr.dD.clone().multiplyScalar(9.5).add(V(0, 2.5, 0)), corr.dD.clone().multiplyScalar(13).add(V(0, 2.1, 0))], move: 110, pause: 50, offset: 30 },
       { craft: shuttle, pts: [V(0.2, -6.1, -1.0), V(0, -8.4, -3.4), armHead(6).add(V(0, -2.5, 0)), armHead(6, 100).add(V(0, -0.5, 0))], move: 170, pause: 55, offset: 120 },
@@ -210,6 +211,7 @@ export class Fleet {
     space.addBody('tenders', [this.tenderGroup], () => this.tenderGroup.getWorldPosition(_v), 2.2, { solid: true, hint: 0.85 });
     // ---- Selene Works over the Moon's near side, with tankers
     const ref = buildRefinery(1);
+    this.refineryData = ref;
     this.refinery = new THREE.Group();
     const rm = craftMesh(ref.geo, { accent: [1.0, 0.7, 0.4], lit: 0.55 });
     const wm = craftPart(rm, ref.wheel);
@@ -221,11 +223,8 @@ export class Fleet {
     // tankers berthed radially at the docking ring (y = 2150 m)
     const tanker = buildFreighter(560);
     const berthed = [];
-    for (let k = 0; k < 3; k++) {
-      const a = (k / 3) * Math.PI * 2 + 0.5;
-      const d = V(Math.cos(a), 0, Math.sin(a));
-      const pos = d.clone().multiplyScalar(420 + 300).setY(2150);
-      const M = new THREE.Matrix4().compose(pos, lookQuat(d, V(0, 1, 0), new THREE.Quaternion()), V(1, 1, 1));
+    for (const berth of ref.berths) {
+      const M = new THREE.Matrix4().compose(berth.position, lookQuat(berth.forward, V(0, 1, 0), new THREE.Quaternion()), V(1, 1, 1));
       berthed.push({ geo: tanker.geo, m: M });
     }
     rm.add(craftPart(rm, placeMerge(berthed)));
@@ -277,7 +276,7 @@ export class Fleet {
       const east = _v3.set(0, 1, 0).cross(up).normalize();
       const north = _v4.copy(up).cross(east);
       if (outPos) outPos.copy(up).multiplyScalar(R_EARTH + 620 + 7).addScaledVector(north, 30);
-      if (outQuat) outQuat.setFromRotationMatrix(_m2.makeBasis(east, up, north));
+      if (outQuat) outQuat.setFromRotationMatrix(_m2.makeBasis(east.negate(), up, north));
     } else if (name === 'selene') {
       const toEarth = _v2.copy(sim.moonPos).negate().normalize();
       if (outPos) outPos.copy(sim.moonPos).addScaledVector(toEarth, R_MOON + this.moonAlt);
@@ -328,8 +327,10 @@ export class Fleet {
         fwd = _v2.set(0, 1, 0);
       } else if (u < 0.6) {
         const s = smooth(0, 1, (u - 0.5) / 0.1);
-        alt = 612; x = -12 + 24 * s;
-        fwd = _v2.set(1, 0.02, 0).normalize();
+        // Dip under the horizontal gate hoops before the cross-port transfer.
+        // A level transfer at 612 km flew sideways through their solid bronze rims.
+        alt = 612 - 2 * Math.sin(Math.PI*s); x = -12 + 24 * s;
+        fwd = _v2.set(24, -2*Math.PI*Math.cos(Math.PI*s), 0).normalize();
         thr = 0.3 * smooth(0, 0.15, s) * (1 - smooth(0.4, 0.6, s));
       } else {
         const s = (u - 0.6) / 0.4;
@@ -393,7 +394,7 @@ function refineryLamps() {
   }
   for (let k = 0; k < 4; k++) {
     const a = (k / 4) * Math.PI * 2 + Math.PI / 4;
-    out.push({ p: V(Math.cos(a) * 2350, -350, Math.sin(a) * 2350), r: 30, color: k % 2 ? LAMP.RED : LAMP.GREEN, i: 2.6 });
+    out.push({ p: V(Math.cos(a) * 2350, -1350, Math.sin(a) * 2350), r: 30, color: k % 2 ? LAMP.RED : LAMP.GREEN, i: 2.6 });
   }
   out.push({ p: V(0, 2810, 0), r: 30, color: LAMP.WHITE, i: 2.4, breathe: 0.35 });
   return out;
@@ -406,7 +407,7 @@ export function fleetTargets(space) {
     frame: (q) => (space.fleet ? space.fleet.pose(name, space.sim, null, q) : q.identity()),
   });
   return {
-    liner: { ...P('liner'), minDist: 1.2, maxDist: 20000, defaultDist: 5.2, view: { az: 2.35, el: 0.2 } },
+    liner: { ...P('liner'), minDist: 1.2, maxDist: 20000, defaultDist: 2.6, view: { az: 1.5, el: 0.4 } },
     tenders: { ...P('tenders'), minDist: 0.5, maxDist: 20000, defaultDist: 2.6, view: { az: 2.5, el: 0.3 } },
     selene: { ...P('selene'), minDist: 4, maxDist: 60000, defaultDist: 13, view: { az: 0.75, el: 0.22 } },
   };

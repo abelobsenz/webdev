@@ -3,6 +3,7 @@ import { patchedMaterial } from '../world/materials.js';
 import { mulberry32 } from '../world/noise.js';
 import { PLAZA_Y, PLAZA_R } from '../world/layout.js';
 import { ST } from '../world/urban.js';
+import { wardHeight } from '../world/metro.js';
 
 // The citizens of MERIDIAN.
 //
@@ -14,7 +15,7 @@ import { ST } from '../world/urban.js';
 // body bobs, idle people sway. Clothing, skin and hair vary per person, and a quarter
 // of them wear luminous textile trim that glows softly at night.
 
-const W = 256;               // samples per path
+const W = 256;               // texels per texture row; a path may span many rows
 const TAU = Math.PI * 2;
 
 // ------------------------------------------------------------------ body --
@@ -30,12 +31,18 @@ function bodyGeometry(far = false) {
     const P = g.attributes.position, N = g.attributes.normal;
     for (let i = 0; i < P.count; i++) { pos.push(P.getX(i), P.getY(i), P.getZ(i)); nrm.push(N.getX(i), N.getY(i), N.getZ(i)); part.push(p); }
     const I = g.index;
-    if (I) for (let i = 0; i < I.count; i++) idx.push(I.getX(i) + base);
-    else for (let i = 0; i < P.count; i++) idx.push(base + i);
+    const a=new THREE.Vector3(),b=new THREE.Vector3(),c=new THREE.Vector3();
+    for (let i = 0; i < (I ? I.count : P.count); i += 3) {
+      const ia=I?I.getX(i):i,ib=I?I.getX(i+1):i+1,ic=I?I.getX(i+2):i+2;
+      a.fromBufferAttribute(P,ia);b.fromBufferAttribute(P,ib).sub(a);c.fromBufferAttribute(P,ic).sub(a);
+      // A real lathe pole emits one fan, not coincident companion triangles.
+      if(b.cross(c).lengthSq()>1e-20)idx.push(base+ia,base+ib,base+ic);
+    }
+    g.dispose();
   };
-  const lathe = (prof, seg, x = 0, z = 0, sx = 1, sz = 1) => {
-    if (far) { prof = prof.filter((_, i) => i % 2 === 0 || i === prof.length - 1); seg = Math.max(4, seg - 4); }
-    const g = new THREE.LatheGeometry(prof.map(([r, y]) => new THREE.Vector2(r, y)), seg);
+  const lathe = (prof, seg, x = 0, z = 0, sx = 1, sz = 1, keep = []) => {
+    if (far) { prof = prof.filter((_, i) => i % 2 === 0 || i === prof.length - 1 || keep.includes(i)); seg = Math.max(4, seg - 4); }
+    const g = new THREE.LatheGeometry(prof.map(([r, y],i) => new THREE.Vector2(r===.001&&(i===0||i===prof.length-1)?0:r, y)), seg);
     g.scale(sx, 1, sz);
     g.translate(x, 0, z);
     return g;
@@ -45,17 +52,39 @@ function bodyGeometry(far = false) {
   // head with a nose (the head faces +z)
   const head = new THREE.SphereGeometry(0.105, far ? 6 : 10, far ? 4 : 7); head.scale(0.9, 1.1, 1.0); head.translate(0, 1.64, 0.01); add(head, 1);
   if (!far) { const nose = new THREE.ConeGeometry(0.017, 0.042, 4); nose.rotateX(Math.PI / 2); nose.translate(0, 1.63, 0.123); add(nose, 1); }
-  const hair = new THREE.SphereGeometry(0.113, far ? 6 : 10, far ? 2 : 4, 0, TAU, 0, Math.PI * 0.55); hair.scale(0.95, 1.08, 1.05); hair.translate(0, 1.655, -0.006); add(hair, 7);
+  const hair = new THREE.SphereGeometry(0.113, far ? 6 : 10, far ? 2 : 4, 0, TAU, 0, Math.PI * 0.55);
+  // The coif's underside is hidden inside the head, but remains a real closed
+  // material surface when its wearer tilts or is viewed from below.
+  {
+    const p=hair.attributes.position,n=hair.attributes.normal,ps=Array.from(p.array),ns=Array.from(n.array),ix=Array.from(hair.index.array);
+    const width=hair.parameters.widthSegments,height=hair.parameters.heightSegments,ring=height*(width+1),base=p.count;
+    ps.push(0,p.getY(ring),0);ns.push(0,-1,0);
+    for(let i=0;i<=width;i++){ps.push(p.getX(ring+i),p.getY(ring+i),p.getZ(ring+i));ns.push(0,-1,0);}
+    for(let i=0;i<width;i++)ix.push(base,base+i+2,base+i+1);
+    hair.setAttribute('position',new THREE.Float32BufferAttribute(ps,3));hair.setAttribute('normal',new THREE.Float32BufferAttribute(ns,3));hair.setIndex(ix);
+  }
+  hair.scale(0.95, 1.08, 1.05); hair.translate(0, 1.655, -0.006); add(hair, 7);
   // long hair falling to the shoulders behind the head
   const long = new THREE.SphereGeometry(0.1, far ? 5 : 8, far ? 3 : 6); long.scale(1.0, 1.55, 0.5); long.translate(0, 1.56, -0.07); add(long, 8);
   // legs (hip pivot at y 0.9): calf, knee, thigh, with shoes
   for (const [sx, p] of [[1, 2], [-1, 3]]) {
-    add(lathe([[0.001, 0.06], [0.048, 0.065], [0.05, 0.14], [0.06, 0.3], [0.052, 0.47], [0.064, 0.52], [0.078, 0.66], [0.086, 0.84], [0.001, 0.9]], 7, sx * 0.086, 0), p);
+    // Retain the ankle collar in the distant mesh so it still joins its shoe.
+    add(lathe([[0.001, 0.06], [0.048, 0.065], [0.05, 0.14], [0.06, 0.3], [0.052, 0.47], [0.064, 0.52], [0.078, 0.66], [0.086, 0.84], [0.001, 0.9]], 7, sx * 0.086, 0, 1, 1, [1]), p);
     add(lathe([[0.001, 0.0], [0.04, 0.004], [0.046, 0.03], [0.04, 0.068], [0.001, 0.075]], 6, sx * 0.086, 0.05, 1.05, 2.5), p);
   }
   // arms (shoulder pivot at y 1.41): forearm, elbow, upper arm, with hands
   for (const [sx, p] of [[1, 4], [-1, 5]]) {
-    add(lathe([[0.001, 0.75], [0.03, 0.76], [0.036, 0.84], [0.043, 0.98], [0.042, 1.04], [0.048, 1.2], [0.052, 1.36], [0.001, 1.44]], 7, sx * 0.232, 0), p);
+    const arm = lathe([[0.001, 0.75], [0.03, 0.76], [0.036, 0.84], [0.043, 0.98], [0.042, 1.04], [0.048, 1.2], [0.052, 1.36], [0.001, 1.44]], 7, sx * 0.232, 0);
+    const ap = arm.attributes.position, an = arm.attributes.normal;
+    // The upper sleeve rolls inward into the shoulder. A straight pointed cap
+    // detached from the coarser torso whenever the distant arms swung forward.
+    for (let i = 0; i < ap.count; i++) {
+      const t = THREE.MathUtils.clamp((ap.getY(i) - 1.3) / .14, 0, 1);
+      ap.setX(i, ap.getX(i) - sx * .1 * t * t * (3 - 2 * t));
+      const normal = new THREE.Vector3(an.getX(i), an.getY(i) + sx * .1 * 6 * t * (1 - t) / .14 * an.getX(i), an.getZ(i)).normalize();
+      an.setXYZ(i, normal.x, normal.y, normal.z);
+    }
+    add(arm, p);
     if (!far) {
     const hand = new THREE.SphereGeometry(0.04, 6, 5); hand.scale(0.62, 1.35, 1.0); hand.translate(sx * 0.232, 0.71, 0.008); add(hand, p);
     }
@@ -82,13 +111,17 @@ attribute float aPart;
 varying float vPart; varying float vSeed; varying float vVar;
 // path texel: xyz centre-line point, w cross slope (dy per metre to the path's right)
 vec4 ppAt(float row, float u) {
-  float x = clamp(u, 0.0, 1.0) * ${(W - 1).toFixed(1)};
+  // Long quay circuits need the same spatial resolution as a short street.
+  // Consecutive texture rows hold one path at no more than two-metre intervals.
+  float steps = max(1.0, ceil(aP1.w * 0.5));
+  float x = clamp(u, 0.0, 1.0) * steps;
   float i = floor(x); float f = x - i;
-  vec4 a = texelFetch(uPaths, ivec2(int(i), int(row)), 0);
-  vec4 b = texelFetch(uPaths, ivec2(int(min(i + 1.0, ${(W - 1).toFixed(1)})), int(row)), 0);
+  float j = min(i + 1.0, steps);
+  vec4 a = texelFetch(uPaths, ivec2(int(mod(i, ${W}.0)), int(row + floor(i / ${W}.0))), 0);
+  vec4 b = texelFetch(uPaths, ivec2(int(mod(j, ${W}.0)), int(row + floor(j / ${W}.0))), 0);
   return mix(a, b, f);
 }
-vec3 pPos; vec3 pX; vec3 pZ; float pPhase; float pScale; float pSwing; float pIdle; bool pOff; vec2 pBuild;
+vec3 pPos; vec3 pX; vec3 pZ; float pPhase; float pScale; float pSwing; float pIdle; bool pOff; vec2 pBuild; vec2 pGrade;
 void personSetup() {
   float L = max(aP1.w, 1.0);
   float closed = step(9.5, aP1.z);
@@ -100,7 +133,9 @@ void personSetup() {
   float du = 1.5 / L;
   vec4 a = ppAt(aP0.x, u - du), b = ppAt(aP0.x, u + du);
   if (closed > 0.5) { a = ppAt(aP0.x, fract(u - du)); b = ppAt(aP0.x, fract(u + du)); }
-  vec3 t = b.xyz - a.xyz; t.y = 0.0;
+  vec3 t = b.xyz - a.xyz;
+  float alongGrade = t.y / max(length(t.xz), 1e-4);
+  t.y = 0.0;
   t = length(t) > 1e-4 ? normalize(t) : vec3(0.0, 0.0, 1.0);
   t *= dirS;
   pZ = t; pX = vec3(t.z, 0.0, -t.x);
@@ -112,6 +147,7 @@ void personSetup() {
   float lat = aP0.w * smoothstep(0.0, clamp(abs(aP0.w) * 1.5, 1.5, 10.0), dEnd);
   pPos = c.xyz + pX * lat;
   pPos.y += c.w * lat * dirS;          // follow the cross slope of the street
+  pGrade = vec2(c.w, clamp(alongGrade, -0.5, 0.5)) * dirS;
   pIdle = step(abs(spd), 0.05);
   pScale = aP1.y / 1.75;
   pPhase = pIdle > 0.5 ? uTime * 0.9 + aP1.x * 40.0 : abs(s) / (0.74 * pScale) * 3.14159;
@@ -123,6 +159,20 @@ void personSetup() {
   vPart = aPart; vSeed = aP1.x; vVar = mod(aP1.z, 10.0);
 }
 vec3 rotX(vec3 v, float a) { float c = cos(a), s = sin(a); return vec3(v.x, v.y * c - v.z * s, v.y * s + v.z * c); }
+float plantedSole(float angle) {
+  // Exact lower support of the two rendered shoe profiles after opposing hip
+  // rotations. Their forward extrema lie on a vertex in both detail levels.
+  // This replaces an arbitrary upward bob that lifted both feet off the road.
+  float c = cos(angle), s = abs(sin(angle));
+  float y = 0.9 - 0.9 * c - 0.05 * s;
+  y = min(y, 0.9 - 0.87 * c - 0.165 * s);
+  y = min(y, 0.9 - 0.825 * c - 0.05 * s);
+  if (uFarSet < 0.5) {
+    y = min(y, 0.9 - 0.896 * c - 0.15 * s);
+    y = min(y, 0.9 - 0.832 * c - 0.15 * s);
+  }
+  return y;
+}
 vec3 articulate(vec3 v, bool isNormal) {
   float part = aPart;
   float robe = step(4.5, vVar);                          // variants 5..7 wear robes
@@ -146,9 +196,13 @@ vec3 articulate(vec3 v, bool isNormal) {
     if (isNormal) { v.x /= pBuild.x; v.z /= pBuild.y; } else { v.x *= pBuild.x; v.z *= pBuild.y; }
   }
   if (!isNormal) {
-    // stride bob and a slight sway
-    v.y += (pIdle > 0.5 ? 0.0 : 0.025 * abs(cos(pPhase)));
+    float stride = pSwing * sin(pPhase) * (robe > 0.5 ? 0.6 : coat > 0.5 ? 0.85 : 1.0);
+    v.y -= plantedSole(stride);
     v.x += 0.012 * sin(pPhase) * (pIdle > 0.5 ? 0.3 : 1.0) * step(0.5, v.y);
+    // Keep the torso vertical while the contact plane follows both road grades.
+    v.y += dot(pGrade, v.xz);
+  } else {
+    v.xz -= pGrade * v.y;
   }
   return v;
 }
@@ -206,6 +260,66 @@ const NORMAL = /* glsl */ `
 // share of the planned crowd actually placed on every walk (a quarter keeps streets lively and cheap)
 const POPULATION = 0.25;
 
+// A civic reservation includes the public space around a monument. Derive the
+// occupied vertical intervals from its actual closed material instead of treating
+// that entire plot as a wall. The index is used only while planning the walks.
+export function civicOccupancy(meshes) {
+  const cell = 24, cells = new Map(), a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3();
+  const box = new THREE.Box3(), triangle = new THREE.Triangle();
+  for (const mesh of meshes) {
+    if (!mesh.isMesh || mesh.isInstancedMesh || !mesh.geometry?.attributes.position) continue;
+    mesh.updateMatrixWorld(true);
+    const p = mesh.geometry.attributes.position, ix = mesh.geometry.index;
+    for (let i = 0, n = ix ? ix.count : p.count; i < n; i += 3) {
+      a.fromBufferAttribute(p, ix ? ix.getX(i) : i).applyMatrix4(mesh.matrixWorld);
+      b.fromBufferAttribute(p, ix ? ix.getX(i + 1) : i + 1).applyMatrix4(mesh.matrixWorld);
+      c.fromBufferAttribute(p, ix ? ix.getX(i + 2) : i + 2).applyMatrix4(mesh.matrixWorld);
+      const dx = b.x - a.x, dz = b.z - a.z, ex = c.x - a.x, ez = c.z - a.z, det = dx * ez - dz * ex;
+      const tri = [a.x, a.z, dx, dz, ex, ez, a.y, b.y - a.y, c.y - a.y, Math.abs(det) < 1e-8 ? 0 : 1 / det, det < 0 ? 1 : -1,
+        Math.min(a.y, b.y, c.y), Math.max(a.y, b.y, c.y), Math.min(a.x, b.x, c.x), Math.max(a.x, b.x, c.x), Math.min(a.z, b.z, c.z), Math.max(a.z, b.z, c.z)];
+      for (let x = Math.floor(Math.min(a.x, b.x, c.x) / cell); x <= Math.floor(Math.max(a.x, b.x, c.x) / cell); x++)
+        for (let z = Math.floor(Math.min(a.z, b.z, c.z) / cell); z <= Math.floor(Math.max(a.z, b.z, c.z) / cell); z++) {
+          const k = `${x},${z}`;
+          if (!cells.has(k)) cells.set(k, []);
+          cells.get(k).push(tri);
+        }
+    }
+  }
+  return (x, y, z, height = 2.1, padding = 0) => {
+    // Offset an exact shared edge infinitesimally, so a tessellated face is
+    // counted once without changing any architectural clearance.
+    x += 0.000013; z += 0.000007;
+    const candidates = new Set();
+    for (let u = Math.floor((x - padding) / cell); u <= Math.floor((x + padding) / cell); u++)
+      for (let v = Math.floor((z - padding) / cell); v <= Math.floor((z + padding) / cell); v++)
+        for (const t of cells.get(`${u},${v}`) || []) candidates.add(t);
+    if (!candidates.size) return false;
+    box.min.set(x - padding, y + .12, z - padding);
+    box.max.set(x + padding, y + height, z + padding);
+    const hits = [];
+    for (const t of candidates) {
+      if (padding > 0 && t[12] > box.min.y && t[11] < box.max.y && t[14] >= box.min.x && t[13] <= box.max.x && t[16] >= box.min.z && t[15] <= box.max.z) {
+        triangle.a.set(t[0], t[6], t[1]);
+        triangle.b.set(t[0] + t[2], t[6] + t[7], t[1] + t[3]);
+        triangle.c.set(t[0] + t[4], t[6] + t[8], t[1] + t[5]);
+        if (box.intersectsTriangle(triangle)) return true;
+      }
+      if (!t[9]) continue;
+      const px = x - t[0], pz = z - t[1], u = (px * t[5] - pz * t[4]) * t[9], v = (t[2] * pz - t[3] * px) * t[9];
+      if (u < 0 || v < 0 || u + v > 1) continue;
+      const h = t[6] + u * t[7] + v * t[8];
+      if (h > y + 0.12) hits.push([h, t[10]]);
+    }
+    hits.sort((a, b) => b[0] - a[0]);
+    let winding = 0;
+    for (const [h, sign] of hits) {
+      if (h < y + height && winding > 0) return true;
+      winding += sign;
+    }
+    return winding > 0;
+  };
+}
+
 export class People {
   constructor(scene, settings, world) {
     this.scene = scene;
@@ -216,8 +330,23 @@ export class People {
     // under the walking width) is taken from the ground itself, not interpolated
     const addPath = (pts, closed, half, follow = false) => { paths.push({ pts, closed, half, follow }); return paths.length - 1; };
     const ground = (x, z) => world.groundHeight(x, z);
-    const stations = (world.infra && world.infra.stations) || [];
-    const blocked = (x, z) => stations.some((s) => Math.hypot(s.x - x, s.z - z) < s.r + 2);
+    const stations = [...(world.infra?.stations || []), ...(world.metro?.stations || [])];
+    const wards = world.metro?.wards || [];
+    const civic = new Map(wards.map(w => {
+      const far = new Set(w.landmarks.lod.map(l => l.far));
+      return [w, civicOccupancy(w.landmarks.meshes.filter(m => !far.has(m)))];
+    }));
+    const wardAt = (x, z) => wards.find(w => Math.abs(x - w.def.x) < w.half && Math.abs(z - w.def.z) < w.half);
+    const blocked = (x, y, z) => {
+      if (stations.some(s => Math.hypot(s.x - x, s.z - z) < s.r + 2)) return true;
+      const w = wardAt(x, z);
+      if (!w) return false;
+      const occupied = civic.get(w);
+      // Articulated body reach plus half a four-metre planning step keeps the
+      // interpolated walking band safely back from a corner between samples.
+      // A complete box catches narrow posts between radial clearance probes.
+      return occupied(x, y, z, 2.1, 2.7);
+    };
     // nobody walks in the water: a point at ground level is wet where the dry land (terrain
     // or ward platform) under it is within 0.45 m of the lagoon; decks and the plaza stand clear
     const wet = (x, y, z) => {
@@ -225,10 +354,10 @@ export class People {
       return y - g < 1.0 && g < 0.45;
     };
     // resample a polyline to <= 4 m steps so the checks below see every stretch of it
-    const densify = (pts, closed) => {
+    const densify = (pts, closed, interval = 4) => {
       const src = closed ? [...pts, pts[0]] : pts, out = [];
       for (let i = 0; i < src.length - 1; i++) {
-        const a = src[i], b = src[i + 1], n = Math.max(1, Math.ceil(a.distanceTo(b) / 4));
+        const a = src[i], b = src[i + 1], n = Math.max(1, Math.ceil(a.distanceTo(b) / interval));
         for (let k = 0; k < n; k++) out.push(a.clone().lerp(b, k / n));
       }
       if (!closed && src.length) out.push(src[src.length - 1].clone());
@@ -236,16 +365,27 @@ export class People {
     };
     // split a polyline wherever it (or either edge of its walking width) enters a blocked
     // area or the water, dropping the scraps
-    const splitBlocked = (pts0, closed, half = 0) => {
-      let pts = densify(pts0, closed);
+    const splitBlocked = (pts0, closed, half = 0, levelSurface = false) => {
+      let pts = densify(pts0, closed, levelSurface ? 1 : 4);
       const n = pts.length;
+      // Ward streets and quays occupy a surveyed horizontal terrace. Reserve
+      // the whole articulated body on that same terrace so a shoe cannot
+      // cross an adjacent six-metre riser. Metre-spaced checks preserve the
+      // narrow quay lanes instead of removing an unnecessarily wide margin.
+      const unsupported = (x, y, z) => levelSurface && [-.72, 0, .72].some(dx =>
+        [-.72, 0, .72].some(dz => Math.abs(wardHeight(x + dx, z + dz) - (y - .002)) > .005));
       const bad = pts.map((p, i) => {
-        if (blocked(p.x, p.z) || wet(p.x, p.y, p.z)) return true;
+        if (blocked(p.x, p.y, p.z) || wet(p.x, p.y, p.z) || unsupported(p.x, p.y, p.z)) return true;
         if (half <= 0) return false;
         const a = pts[closed ? (i - 1 + n) % n : Math.max(i - 1, 0)], b = pts[closed ? (i + 1) % n : Math.min(i + 1, n - 1)];
         const dx = b.x - a.x, dz = b.z - a.z, l = Math.hypot(dx, dz) || 1;
-        const sx = (-dz / l) * half * 0.9, sz = (dx / l) * half * 0.9;
-        return wet(p.x + sx, p.y, p.z + sz) || wet(p.x - sx, p.y, p.z - sz);
+        const sx = (-dz / l) * half, sz = (dx / l) * half;
+        const across = Math.max(2, Math.ceil(half));
+        for (let k = 0; k <= across; k++) {
+          const u = -1 + 2 * k / across, x = p.x + sx * u, z = p.z + sz * u;
+          if (blocked(x, p.y, z) || wet(x, p.y, z) || unsupported(x, p.y, z)) return true;
+        }
+        return false;
       });
       if (!bad.some(Boolean)) return n > 1 ? [{ pts, closed }] : [];
       if (closed) {           // start the scan on a bad point so no good run wraps round
@@ -270,7 +410,9 @@ export class People {
       const lanes = [[80, 205], [262, 298], [338, 372], [424, 456], [486, 548]];
       const rootA = []; for (let i = 0; i < 8; i++) rootA.push((i / 8) * TAU + TAU / 16);
       lanes.forEach(([r0, r1], li) => {
-        const rm = (r0 + r1) / 2, half = (r1 - r0) / 2 - 1.5;
+        // Leave room for the articulated body as well as its path centre. The
+        // outer edge of the 338–372m lane otherwise clips the next garden kerb.
+        const rm = (r0 + r1) / 2, half = (r1 - r0) / 2 - 2.3;
         const outer = li >= 3;
         const arcs = [];
         if (!outer) arcs.push([0, TAU, true]);
@@ -278,24 +420,26 @@ export class People {
         for (const [a0, a1, closed] of arcs) {
           const n = Math.max(24, Math.ceil(((a1 - a0) * rm) / 6));
           const pts = [];
-          for (let k = 0; k <= (closed ? n - 1 : n); k++) { const a = a0 + ((a1 - a0) * k) / n; pts.push(new THREE.Vector3(Math.cos(a) * rm, PLAZA_Y + 0.02, Math.sin(a) * rm)); }
+          for (let k = 0; k <= (closed ? n - 1 : n); k++) { const a = a0 + ((a1 - a0) * k) / n; pts.push(new THREE.Vector3(Math.cos(a) * rm, PLAZA_Y + 0.002, Math.sin(a) * rm)); }
           for (const seg of splitBlocked(pts, closed, half)) g.rows.push({ row: addPath(seg.pts, seg.closed, half), density: 0.32 });
         }
       });
       for (let k = 0; k < 12; k++) {
         const a = (k / 12) * TAU;
         const pts = [];
-        for (let r = 95; r <= PLAZA_R - 6; r += 8) pts.push(new THREE.Vector3(Math.cos(a) * r, PLAZA_Y + 0.02, Math.sin(a) * r));
+        for (let r = 95; r <= PLAZA_R - 6; r += 8) pts.push(new THREE.Vector3(Math.cos(a) * r, PLAZA_Y + 0.002, Math.sin(a) * r));
         for (const seg of splitBlocked(pts, false, 3.6)) g.rows.push({ row: addPath(seg.pts, false, 3.6), density: 0.5 });
       }
       groups.push(g);
     }
     // ---- promenade decks
     for (const [i, path] of ((world.infra && world.infra.promenades) || []).entries()) {
-      const pts = path.map((p) => new THREE.Vector3(p.x, p.y + 0.22, p.z));
+      const pts = path.map((p) => new THREE.Vector3(p.x, p.y + 0.202, p.z));
       const c = pts[Math.floor(pts.length / 2)];
       const g = { name: `deck${i}`, rows: [], center: c.clone(), radius: pts[0].distanceTo(pts[pts.length - 1]) * 0.55 + 60, people: [] };
-      for (const seg of splitBlocked(pts, false, 10.5)) g.rows.push({ row: addPath(seg.pts, false, 10.5), density: 0.2 });
+      // Paving ends at ±10.35m; the hedge kerb starts there. Idlers use the full
+      // allowance, so retain space for shoes and sleeves inside that edge.
+      for (const seg of splitBlocked(pts, false, 9.25)) g.rows.push({ row: addPath(seg.pts, false, 9.25), density: 0.2 });
       if (g.rows.length) groups.push(g);
     }
     // ---- town streets and squares, grouped by district
@@ -311,7 +455,7 @@ export class People {
         const g = { name: key, rows: [], people: [] };
         const box = new THREE.Box3();
         for (const st of list) {
-          const pts = st.pts.map(([x, z]) => new THREE.Vector3(x, ground(x, z) + 0.03, z));
+          const pts = st.pts.map(([x, z]) => new THREE.Vector3(x, ground(x, z) + 0.002, z));
           for (const p of pts) box.expandByPoint(p);
           const closed = pts.length > 8 && pts[0].distanceTo(pts[pts.length - 1]) < 12;
           const avenue = st.cls === ST.AVENUE;
@@ -323,7 +467,7 @@ export class People {
           // a walking ring between the bench circle (0.6 r) and the rim, idlers included
           const n = 40, pts = [];
           const rr = q.r * 0.8, qh = Math.max(0.4, Math.min(q.r * 0.15 - 0.45, q.r * 0.2 - 1.85));
-          for (let k = 0; k < n; k++) { const a = (k / n) * TAU; const x = q.x + Math.cos(a) * rr, z = q.z + Math.sin(a) * rr; pts.push(new THREE.Vector3(x, ground(x, z) + 0.03, z)); box.expandByPoint(pts[pts.length - 1]); }
+          for (let k = 0; k < n; k++) { const a = (k / n) * TAU; const x = q.x + Math.cos(a) * rr, z = q.z + Math.sin(a) * rr; pts.push(new THREE.Vector3(x, ground(x, z) + 0.002, z)); box.expandByPoint(pts[pts.length - 1]); }
           for (const seg of splitBlocked(pts, true, qh)) g.rows.push({ row: addPath(seg.pts, seg.closed, qh, true), density: 0.18, idle: 0.3 });
         }
         if (!g.rows.length) continue;
@@ -347,27 +491,27 @@ export class People {
         const g = { name: `ward-${id}`, rows: [], people: [] };
         const box = new THREE.Box3();
         for (const st of W.streets) {
-          const y = (st.y ?? ground(st.pts[0][0], st.pts[0][1])) + 0.03;
+          const y = (st.y ?? ground(st.pts[0][0], st.pts[0][1])) + 0.002;
           const pts = st.pts.map(([x, z]) => new THREE.Vector3(x, y, z));
           for (const p of pts) box.expandByPoint(p);
           const closed = pts.length > 8 && pts[0].distanceTo(pts[pts.length - 1]) < 12;
           const avenue = st.cls === ST.AVENUE;
           const half = Math.max(1.2, st.hw - 1.0);
-          for (const seg of splitBlocked(pts, closed, half)) g.rows.push({ row: addPath(seg.pts, seg.closed, half), density: st.cls === ST.LANE ? 0.03 : avenue ? 0.07 : 0.05, avenue, hw: st.hw });
+          for (const seg of splitBlocked(pts, closed, half, true)) g.rows.push({ row: addPath(seg.pts, seg.closed, half), density: st.cls === ST.LANE ? 0.03 : avenue ? 0.07 : 0.05, avenue, hw: st.hw });
         }
         for (const q of W.squares) {
           if (q.kind === 'tower' || q.r < 16) continue;
           const n = 48, pts = [];
           const rr = q.kind === 'crown' ? q.r * 0.86 : q.r * 0.7;
-          const y = ground(q.x + rr, q.z) + 0.03;
+          const y = ground(q.x + rr, q.z) + 0.002;
           for (let k = 0; k < n; k++) { const a = (k / n) * TAU; pts.push(new THREE.Vector3(q.x + Math.cos(a) * rr, y, q.z + Math.sin(a) * rr)); }
           const half = Math.min(q.r * 0.12, 9);
-          for (const seg of splitBlocked(pts, true, half)) g.rows.push({ row: addPath(seg.pts, seg.closed, half), density: 0.14, idle: 0.3 });
+          for (const seg of splitBlocked(pts, true, half, true)) g.rows.push({ row: addPath(seg.pts, seg.closed, half), density: 0.14, idle: 0.3 });
         }
         for (const q of W.quays) {
-          const pts = q.pts.map(([x, z]) => new THREE.Vector3(x, q.y + 0.03, z));
+          const pts = q.pts.map(([x, z]) => new THREE.Vector3(x, q.y + 0.002, z));
           if (pts.length < 8) continue;
-          for (const seg of splitBlocked(pts, true, 2.2)) g.rows.push({ row: addPath(seg.pts, seg.closed, 2.2), density: 0.035, idle: 0.2 });
+          for (const seg of splitBlocked(pts, true, 2.2, true)) g.rows.push({ row: addPath(seg.pts, seg.closed, 2.2), density: 0.035, idle: 0.2 });
         }
         if (!g.rows.length) continue;
         const sph = box.getBoundingSphere(new THREE.Sphere());
@@ -375,7 +519,7 @@ export class People {
         groups.push(g);
       }
       for (const [i, d] of ((world.metro.bridges && world.metro.bridges.decks) || []).entries()) {
-        const pts = d.path.map((p) => new THREE.Vector3(p.x, p.y + 0.22, p.z));
+        const pts = d.path.map((p) => new THREE.Vector3(p.x, p.y + 0.202, p.z));
         const c = pts[Math.floor(pts.length / 2)];
         const g = { name: `ward-deck${i}`, rows: [], center: c.clone(), radius: pts[0].distanceTo(pts[pts.length - 1]) * 0.55 + 60, people: [] };
         for (const seg of splitBlocked(pts, false, 9.5)) g.rows.push({ row: addPath(seg.pts, false, 9.5), density: 0.1 });
@@ -384,29 +528,41 @@ export class People {
     }
 
     // ---- resample every path into the texture
-    const tex = new Float32Array(W * paths.length * 4);
+    let textureRows = 0;
     const lengths = [];
-    paths.forEach((P, row) => {
+    for (const P of paths) {
+      const pts = P.closed ? [...P.pts, P.pts[0]] : P.pts;
+      let L = 0;
+      for (let i = 1; i < pts.length; i++) L += pts[i].distanceTo(pts[i - 1]);
+      // Match the Float32 length supplied to the shader before taking ceil.
+      const length = Math.fround(L);
+      lengths.push(length);
+      P.samples = Math.max(1, Math.ceil(length * .5)) + 1;
+      P.textureRow = textureRows;
+      textureRows += Math.ceil(P.samples / W);
+    }
+    const tex = new Float32Array(W * textureRows * 4);
+    paths.forEach(P => {
       const pts = P.closed ? [...P.pts, P.pts[0]] : P.pts;
       const cum = [0];
       for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + pts[i].distanceTo(pts[i - 1]));
       const L = cum[cum.length - 1];
-      lengths.push(L);
       let j = 1;
-      for (let k = 0; k < W; k++) {
-        const s = (k / (W - 1)) * L;
+      for (let k = 0; k < P.samples; k++) {
+        const s = (k / (P.samples - 1)) * L;
         while (j < pts.length - 1 && cum[j] < s) j++;
         const t = (s - cum[j - 1]) / Math.max(cum[j] - cum[j - 1], 1e-6);
         const a = pts[j - 1], b = pts[j];
-        const o = (row * W + k) * 4;
+        const o = (P.textureRow * W + k) * 4;
         tex[o] = a.x + (b.x - a.x) * t; tex[o + 1] = a.y + (b.y - a.y) * t; tex[o + 2] = a.z + (b.z - a.z) * t; tex[o + 3] = 0;
-        if (P.follow) tex[o + 1] = ground(tex[o], tex[o + 2]) + 0.03;
+        if (P.follow) tex[o + 1] = ground(tex[o], tex[o + 2]) + 0.002;
       }
       if (!P.follow) return;
       // cross slope to the right of the forward direction (shader: right = (t.z, -t.x))
       const h = Math.min(Math.max(P.half, 0.5), 3);
-      for (let k = 0; k < W; k++) {
-        const o = (row * W + k) * 4, o0 = (row * W + Math.max(k - 1, 0)) * 4, o1 = (row * W + Math.min(k + 1, W - 1)) * 4;
+      for (let k = 0; k < P.samples; k++) {
+        const row = P.textureRow;
+        const o = (row * W + k) * 4, o0 = (row * W + Math.max(k - 1, 0)) * 4, o1 = (row * W + Math.min(k + 1, P.samples - 1)) * 4;
         const dx = tex[o1] - tex[o0], dz = tex[o1 + 2] - tex[o0 + 2], l = Math.hypot(dx, dz);
         if (l < 1e-6) continue;
         const nx = dz / l, nz = -dx / l;
@@ -414,7 +570,7 @@ export class People {
         tex[o + 3] = Math.max(-0.5, Math.min(0.5, sl));
       }
     });
-    this.pathTex = new THREE.DataTexture(tex, W, paths.length, THREE.RGBAFormat, THREE.FloatType);
+    this.pathTex = new THREE.DataTexture(tex, W, textureRows, THREE.RGBAFormat, THREE.FloatType);
     this.pathTex.minFilter = this.pathTex.magFilter = THREE.NearestFilter;
     this.pathTex.needsUpdate = true;
 
@@ -453,8 +609,9 @@ export class People {
     let total = 0;
     const _v = new THREE.Vector3();
     const rowSph = new Map();
+    const pathByTextureRow = new Map(paths.map(p => [p.textureRow, p]));
     const rowSphere = (row) => {
-      if (!rowSph.has(row)) { const b = new THREE.Box3(); for (const q of paths[row].pts) b.expandByPoint(q); rowSph.set(row, b.getBoundingSphere(new THREE.Sphere())); }
+      if (!rowSph.has(row)) { const b = new THREE.Box3(); for (const q of pathByTextureRow.get(row).pts) b.expandByPoint(q); rowSph.set(row, b.getBoundingSphere(new THREE.Sphere())); }
       return rowSph.get(row);
     };
     for (const g of groups) {
@@ -478,7 +635,7 @@ export class People {
           if (ln.c < cap) { ln.c++; left--; }
         }
         const person = (start, speed, lat) => {
-          P0.push(r.row, start, speed, lat);
+          P0.push(P.textureRow, start, speed, lat);
           P1.push(rnd(), 1.55 + rnd() * 0.36 + (rnd() < 0.08 ? -0.5 : 0), Math.floor(rnd() * 8) + (P.closed ? 10 : 0), L);
         };
         for (const ln of lanes) for (let j = 0; j < ln.c; j++) person(((j + rnd() * 0.35) / ln.c + ln.ph) * cycle, ln.v * ln.d, ln.l);
@@ -486,6 +643,30 @@ export class People {
         for (let j = 0; j < nIdle; j++) person(((j + rnd() * 0.5) / nIdle + ph) * cycle, 0, idleLat * (rnd() < 0.5 ? -1 : 1));
       }
       if (!P0.length) continue;
+      // Lower quality draws a prefix of each instance buffer. Interleave the
+      // complete district first, otherwise that prefix keeps the first streets
+      // and silently removes the later squares and waterfront promenades.
+      let shuffleSeed = 83021;
+      for (let i = 0; i < g.name.length; i++) shuffleSeed = Math.imul(shuffleSeed ^ g.name.charCodeAt(i), 16777619);
+      const shuffle = mulberry32(shuffleSeed >>> 0);
+      const byPath = new Map(), order = [];
+      for (let i = 0; i < P0.length / 4; i++) {
+        const row = P0[i * 4];
+        if (!byPath.has(row)) byPath.set(row, []);
+        byPath.get(row).push(i);
+      }
+      for (const indices of byPath.values()) {
+        for (let i = indices.length - 1; i > 0; i--) {
+          const j = Math.floor(shuffle() * (i + 1));
+          [indices[i], indices[j]] = [indices[j], indices[i]];
+        }
+        indices.forEach((index, i) => order.push({ index, rank: (i + shuffle()) / indices.length }));
+      }
+      order.sort((a, b) => a.rank - b.rank);
+      const source0 = P0.slice(), source1 = P1.slice();
+      order.forEach(({ index }, i) => {
+        for (let k = 0; k < 4; k++) { P0[i * 4 + k] = source0[index * 4 + k]; P1[i * 4 + k] = source1[index * 4 + k]; }
+      });
       const addMesh = (p0, p1, far, center, radius) => {
         const geo = geoSets[far];
         const ig = new THREE.InstancedBufferGeometry();
@@ -495,6 +676,7 @@ export class People {
         ig.setAttribute('aP1', new THREE.InstancedBufferAttribute(new Float32Array(p1), 4));
         ig.instanceCount = p0.length / 4;
         const mesh = new THREE.Mesh(ig, mats[far]);
+        mesh.name = `Citizens ${g.name} ${far ? 'far' : 'near'}`;
         mesh.frustumCulled = false;
         mesh.layers.set(1);
         mesh.userData = { center, radius, count: ig.instanceCount, far: !!far };

@@ -81,9 +81,23 @@ vec3 craftEnv(vec3 P, vec3 R, float rough) {
 }
 
 // Kinds added for stations and big hulls (applied after the base palette):
+//  13 small conservatory: planted beds under glazing, scaled to public garden rooms
 //  12 glass roof over gardens: planted parkland and lit towns seen through glazing on 9 m
 //     mullions, with an order of fields, woods and towns that still reads from tens of km
 void craftExtraKinds(float k, vec2 f, vec2 fw, float px, inout vec3 alb, inout float rough, inout float metal, inout vec3 em) {
+  if (k > 12.5 && k < 13.5) {
+    // Small enclosed public gardens use rooms and planted beds, not the kilometre
+    // district mask of a liner roof. Keep the planted identity when bays go subpixel.
+    float resolved = 1.0-smoothstep(2.5,7.0,px);
+    float paths = max(cLine(f.x,18.0,1.1,fw.x),cLine(f.y,24.0,1.2,fw.y));
+    float foliage = mix(0.5,vnoise(f*.13)*.6+vnoise(f*.65)*.4,1.0-smoothstep(.7,2.0,px));
+    vec3 planted = mix(vec3(.035,.09,.025),vec3(.13,.22,.065),foliage);
+    vec3 under = mix(planted,vec3(.29,.27,.21),mix(.18,paths,resolved));
+    float mull = mix(.10,max(cLine(f.x,6.0,.15,fw.x),cLine(f.y,6.0,.15,fw.y)),1.0-smoothstep(1.4,3.2,px));
+    alb = mix(under,vec3(.53,.55,.49),mull);
+    rough = mix(.23,.42,mull);metal=mix(.18,.12,mull);
+    em=vec3(1.0,.76,.46)*(.035+.08*mix(.18,paths,resolved))*(1.0-mull);
+  }
   if (k > 11.5 && k < 12.5) {
     float dM = 1.0 - smoothstep(2.0, 3.6, px);                       // 9 m mullions >= 3 px
     float dG = 1.0 - smoothstep(0.8, 2.4, px);                       // garden texture
@@ -217,7 +231,7 @@ void main() {
   } else if (k < 10.5) {
     alb = vec3(0.13, 0.13, 0.14); rough = 0.5; metal = 0.6;
     alb *= 1.0 - 0.3 * max(gridLine(f.x, 6.0, 0.05, fw.x), gridLine(f.y, 6.0, 0.05, fw.y)) * det;
-  } else {
+  } else if (k < 11.5) {
     // heat radiator: dark ceramic fins with glowing coolant channels, hottest near the manifold
     alb = vec3(0.1, 0.09, 0.085); rough = 0.7;
     float ch = mix(0.17, gridLine(f.y, 24.0, 2.0, fw.y), 1.0 - smoothstep(4.0, 9.0, fw.y));   // mean once under ~3 px

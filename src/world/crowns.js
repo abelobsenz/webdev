@@ -15,8 +15,10 @@ import { loftSections, latheFacade, sweepTube, mergeClean } from './geom.js';
 const TAU = Math.PI * 2;
 
 /** Loft with flat facets: each side between consecutive section points is its own strip. */
-function facetLoft(sections, { capTop = false, kindTop = 1, edgeKind = null } = {}) {
+function facetLoft(sections, { capTop = true, capBottom = true, kindTop = 1, edgeKind = null } = {}) {
   const n = sections[0].pts.length;
+  const outline = sections[0].pts;
+  const clockwise = outline.reduce((sum, p, i) => { const q = outline[(i + 1) % n]; return sum + p[0] * q[1] - q[0] * p[1]; }, 0) < 0;
   const parts = [];
   for (let i = 0; i < n; i++) {
     const pos = [], fac = [], idx = [];
@@ -31,35 +33,33 @@ function facetLoft(sections, { capTop = false, kindTop = 1, edgeKind = null } = 
     }
     for (let j = 0; j < sections.length - 1; j++) {
       const a = j * 2, b = a + 1, c = a + 2, d = a + 3;
-      idx.push(a, c, b, b, c, d);
+      const add = (u, v, w) => {
+        const A = new THREE.Vector3().fromArray(pos, u * 3), B = new THREE.Vector3().fromArray(pos, v * 3), C = new THREE.Vector3().fromArray(pos, w * 3);
+        if (B.sub(A).cross(C.sub(A)).lengthSq() > 1e-12) idx.push(u, clockwise ? w : v, clockwise ? v : w);
+      };
+      add(a, c, b); add(b, c, d);
     }
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
     g.setAttribute('aFacade', new THREE.Float32BufferAttribute(fac, 3));
     g.setIndex(idx);
     g.computeVertexNormals();
-    orientOut(g);
+    // A pointed termination has two coincident strip vertices, only one of
+    // which participates in its final triangle. Give both the same normal.
+    const normals = g.attributes.normal;
+    for (let j = 0; j < normals.count; j++) if (new THREE.Vector3().fromBufferAttribute(normals, j).lengthSq() < 0.1) {
+      const neighbour = j ^ 1;
+      normals.setXYZ(j, normals.getX(neighbour), normals.getY(neighbour), normals.getZ(neighbour));
+    }
     parts.push(g);
   }
   if (capTop) {
     const s = sections[sections.length - 1];
-    parts.push(capGeo(s.pts, s.y, kindTop));
+    if (s.pts.some(p => Math.hypot(p[0] - s.pts[0][0], p[1] - s.pts[0][1]) > 1e-6)) parts.push(capGeo(s.pts, s.y, kindTop));
   }
+  if (capBottom) parts.push(capGeo(sections[0].pts, sections[0].y, 1, true));
   void edgeKind;
   return mergeClean(parts);
-}
-
-/** Flip a strip if its normals point toward the axis. */
-function orientOut(g) {
-  const p = g.attributes.position, n = g.attributes.normal;
-  let dot = 0;
-  for (let i = 0; i < p.count; i++) dot += p.getX(i) * n.getX(i) + p.getZ(i) * n.getZ(i);
-  if (dot < 0) {
-    const idx = g.index.array;
-    for (let k = 0; k < idx.length; k += 3) { const t = idx[k + 1]; idx[k + 1] = idx[k + 2]; idx[k + 2] = t; }
-    g.index.needsUpdate = true;
-    g.computeVertexNormals();
-  }
 }
 
 function capGeo(pts, y, kind, down = false) {
@@ -206,14 +206,13 @@ function crystalTower(t, rnd) {
       secs.push({ y, pts, kind: v > glowFrom ? 0 : 0 });
       for (const [x, z] of pts) env.add(y, Math.hypot(x, z) + Math.max(1.2, r0 * 0.035));
     }
-    parts.push(facetLoft(secs));
     // the termination: six facets closing to a point
     const last = secs[secs.length - 1];
     const tipY = h, tipOff = lean * tipY;
     const tip = [cx + Math.cos(leanA) * tipOff, cz + Math.sin(leanA) * tipOff];
     const tsecs = [last, { y: last.y + (tipY - last.y) * 0.55, pts: last.pts.map(([x, z]) => [tip[0] + (x - tip[0]) * 0.5, tip[1] + (z - tip[1]) * 0.5]), kind: 2 }, { y: tipY, pts: last.pts.map(() => [tip[0], tip[1]]), kind: 2 }];
     tsecs[0] = { ...last, kind: 2 };
-    parts.push(facetLoft(tsecs));
+    parts.push(facetLoft([...secs.slice(0, -1), ...tsecs]));
     // lit edges up the upper shaft (the aurora glow), structural edges below
     for (let i = 0; i < 6; i++) {
       const pts = [];
@@ -296,7 +295,7 @@ function twinTower(t, rnd) {
   // the pool: a kerb (outer face, top, inner face) round a sunken water surface, clear of both feet
   const pr = R * 0.46, psx = (d0 * 0.46) / pr;
   parts.push(latheFacade([{ r: pr, y: 10.6, kind: 1 }, { r: pr, y: 11.6, kind: 1 }, { r: pr - 1.2, y: 11.6, kind: 1 }, { r: pr - 1.2, y: 11.1, kind: 1 }], 48, { sx: psx }));
-  parts.push(latheFacade([{ r: pr - 1.2, y: 11.1, kind: 6 }, { r: 0.1, y: 11.1, kind: 6 }], 48, { sx: psx }));
+  parts.push(latheFacade([{ r: pr - 1.2, y: 11.11, kind: 6 }, { r: pr - 1.2, y: 11.15, kind: 6 }, { r: 0, y: 11.15, kind: 6 }], 48, { sx: psx }));
   return { geo: mergeClean(parts), top: H * 1.06, collide: (y) => (y < H * 0.85 ? d0 * (1 - Math.pow(y / (H * 0.9), 1.5)) + rx : R * 0.4) };
 }
 
@@ -315,7 +314,7 @@ function receiverTower(t, rnd) {
     for (let i = 0; i < around; i++) { const a = (i / around) * TAU; const fl = 1 + 0.045 * Math.cos(24 * a); pts.push([Math.cos(a) * r * fl, Math.sin(a) * r * fl]); }
     secs.push({ y, pts, kind: j % 10 === 0 ? 1 : 0 });
   }
-  parts.push(loftSections(secs, { capTop: false }));
+  parts.push(loftSections(secs));
   // the receiver: a glowing drum banded in dark metal
   const rr = R * 0.5, y0 = shaftTop, y1 = shaftTop + H * 0.08;
   parts.push(latheFacade([{ r: 0.1, y: y0 - 2.4, kind: 10 }, { r: R * 0.34, y: y0 - 2, kind: 10 }, { r: rr, y: y0 + 4, kind: 10 }, { r: rr, y: y1 - 4, kind: 2 }, { r: R * 0.36, y: y1 + 3, kind: 10 }], 48));

@@ -6,6 +6,7 @@ import { craftMesh, craftPart, addLamps, placeMerge, placeLamps, pixelRadius } f
 import { LAMP } from './lamps.js';
 import { ctube } from './hull.js';
 import { R_EARTH, bodyDir } from './sim.js';
+import { buildCounterweightRock } from './counterweightRock.js';
 
 // Station frames and builders shared by the elevator, the rings and the fleet.
 
@@ -16,9 +17,14 @@ const _n = new THREE.Vector3(0, 1, 0);
  * +Y up (radial), +Z north (the Earth's axis), +X west. Orbital motion is toward -X.
  */
 export function stationFrame(up, out = new THREE.Quaternion()) {
-  const west = new THREE.Vector3().crossVectors(up, _n).normalize();
-  const north = new THREE.Vector3().crossVectors(west, up).normalize();
-  return out.setFromRotationMatrix(new THREE.Matrix4().makeBasis(west, up, north));
+  const radial = up.clone();
+  if (!Number.isFinite(radial.lengthSq()) || radial.lengthSq() < 1e-20) throw new RangeError('A station frame needs a finite radial direction');
+  radial.normalize();
+  const west = new THREE.Vector3().crossVectors(radial, _n);
+  if (west.lengthSq() < 1e-12) west.crossVectors(radial, new THREE.Vector3(0,0,1));
+  west.normalize();
+  const north = new THREE.Vector3().crossVectors(west, radial).normalize();
+  return out.setFromRotationMatrix(new THREE.Matrix4().makeBasis(west, radial, north));
 }
 
 /**
@@ -80,7 +86,20 @@ export function buildPortStation({ junction = false } = {}) {
     ctube(B, pts, 45, 6, CK.BRONZE);
   }
   // concourse wings along the ring (east and west)
-  for (const s of [-1, 1]) gallery(B, s * 3100, s * 9800, 480, 260, 170, (i, j) => (i < 4 || i > 13 ? CK.GLASS : (i === 4 || i === 13 ? CK.LANTERN : CK.HULL)));
+  for (const s of [-1, 1]) {
+    gallery(B, s * 3100, s * 9800, 480, 260, 170, (i, j) => (i < 4 || i > 13 ? CK.GLASS : (i === 4 || i === 13 ? CK.LANTERN : CK.HULL)));
+    B.box(s * 6450, -160, 0, 6900, 200, 1080, CK.HULL);
+  }
+  if (junction) {
+    // Pressure collar around the actual opening cut into the Halo vault.
+    B.push(new THREE.Matrix4().makeTranslation(0, 4950, 0).multiply(new THREE.Matrix4().makeRotationX(Math.PI / 2)));
+    B.torus(2240, 290, 72, 12, CK.BRONZE);
+    B.pop();
+    for (const s of [-1,1]) {
+      B.box(s * 2390,4950,0,260,160,5560,CK.HULL);
+      B.box(0,4950,s * 2670,5040,160,260,CK.HULL);
+    }
+  }
   // keel under the deck, with window bands
   gallery(B, -12600, 12600, 1300, 300, -470, (i) => (i === 3 || i === 6 || i === 12 || i === 15 ? CK.LANTERN : CK.HULL), 20);
   // tether anchor sheaves (the three tethers to the ground port hang from here)
@@ -106,20 +125,36 @@ export function buildPortStation({ junction = false } = {}) {
     B.box(x, y + 990, 0, 1200, 30, 700, CK.DECK);
     gates.push(V(x, y, 0));
   }
-  // piers north and south past the ring's walls and rotor tubes
+  // Piers descend into the service keel before crossing beneath the rotor tubes.
+  // Keeping the entire crossing below -3.2 km leaves over 500 m to their lower skin.
   const piers = [];
+  const pierRoutes = [];
+  const pierY = -3400;
   for (const s of [-1, 1]) {
-    ctube(B, [V(0, -560, s * 1250), V(0, -560, s * 21500)], 150, 12, CK.HULL);
-    ctube(B, [V(0, -380, s * 1400), V(0, -380, s * 21000)], 30, 5, CK.LANTERN);
-    for (let z = 3500; z < 21000; z += 3000) {
-      B.push(new THREE.Matrix4().makeTranslation(0, -560, s * z));
+    const route = [V(0,-560,s*1250),V(0,pierY,s*8500),V(0,pierY,s*21500)];
+    ctube(B, route, 150, 12, CK.HULL);
+    ctube(B, route.map(p => p.clone().add(V(0,180,0))), 30, 6, CK.LANTERN);
+    pierRoutes.push({ points:route, radius:180 });
+    for (const z of [9500,12500]) for (const x of [-420,420]) {
+      ctube(B,[V(x,-320,s*z),V(x,pierY,s*z)],65,6,CK.DARK);
+      ctube(B,[V(x,pierY,s*z),V(0,pierY,s*(z+1800))],45,6,CK.BRONZE);
+      B.box(x,-300,s*z,220,140,320,CK.HULL);
+    }
+    for (let z = 9500; z < 21000; z += 3000) {
+      B.push(new THREE.Matrix4().makeTranslation(0, pierY, s * z));
       lathe(B, [[160, -40, CK.BRONZE], [175, -25, CK.BRONZE], [175, 25, CK.BRONZE], [160, 40, CK.BRONZE]], 12);
       B.pop();
     }
-    B.push(new THREE.Matrix4().makeTranslation(0, -560, s * 21700));
+    B.push(new THREE.Matrix4().makeTranslation(0, pierY, s * 21700));
     sphere(B, 520, CK.GLASS, 24, 10);
     B.pop();
-    piers.push(V(0, -560, s * 21700));
+    piers.push(V(0, pierY, s * 21700));
+    // Cargo courts sit outboard of the rotor; clear central flight paths stay empty.
+    ctube(B,[V(-1050,pierY,s*20100),V(1050,pierY,s*20100)],100,8,CK.HULL);
+    for (const x of [-1050,1050]) {
+      B.box(x,pierY,s*20100,1300,180,2200,CK.HULL);
+      for (let k=0;k<4;k++) B.box(x,pierY+300,s*(19400+k*460),750,420,330,k%2?CK.BRONZE:CK.HULL);
+    }
   }
   const geo = B.geometry();
   // berthed shuttles and tugs at the piers and gate platforms
@@ -133,7 +168,7 @@ export function buildPortStation({ junction = false } = {}) {
   };
   for (const s of [-1, 1]) {
     for (let k = 0; k < 3; k++) {
-      put(k === 1 ? tu : sh, V((k - 1) * 260, -760, s * (9000 + k * 3400)), V(0, -1, 0), V(0, 0, s));
+      put(k === 1 ? tu : sh, V((k - 1) * 260, pierY - 260, s * (9000 + k * 3400)), V(0, -1, 0), V(0, 0, s));
     }
     put(sh, V(s * 12000 + 420, -7000, 0), V(0, 1, 0), V(0, 0, 1));
   }
@@ -155,7 +190,7 @@ export function buildPortStation({ junction = false } = {}) {
     lamps.push({ p: p.clone().add(V(560, 0, 0)), r: 16, color: LAMP.RED, i: 2.4 });
     lamps.push({ p: p.clone().add(V(-560, 0, 0)), r: 16, color: LAMP.GREEN, i: 2.4 });
   }
-  return { geo, ships, lamps, gates };
+  return { geo, ships, lamps, gates, pierRoutes, pierY };
 }
 
 /**
@@ -199,41 +234,81 @@ const _w = new THREE.Vector3();
 
 // ------------------------------------------------------------ counterweight works ----
 /** Works on the counterweight asteroid (metres, local +Y up the tether away from the Earth). */
-export function buildCounterworks() {
+export function buildCounterworks({ surfaceRadius = buildCounterweightRock().surfaceRadius } = {}) {
   const B = new CB();
   const toY = new THREE.Matrix4().makeRotationX(-Math.PI / 2);
+  const footings = [], mines = [], conveyors = [];
   // the tether's arrival terminal on the Earth-facing side, and a docking spindle beyond
   B.push(toY);
   lathe(B, [[0.1, -15800, CK.DARK], [380, -15800, CK.DARK], [620, -15400, CK.BRONZE], [1100, -14800, CK.HULL], [1250, -14200, CK.GLASS], [1300, -13500, CK.LANTERN],
     [1250, -13300, CK.GLASS], [1100, -12600, CK.BRONZE], [900, -11800, CK.HULL], [900, -8200, CK.HULL], [1300, -7800, CK.BRONZE], [1300, -7400, CK.DARK]], 32);
   B.pop();
-  // the habitat ring round the rock: a glazed torus on six spokes to the terminal collar
+  // A sheltered inhabited ring held by six cradles entirely outside the working rock.
   B.push(new THREE.Matrix4().makeRotationX(Math.PI / 2));
   B.torus(15000, 520, 180, 14, CK.ROOF);
   B.pop();
   for (let k = 0; k < 6; k++) {
     const a = (k / 6) * TAU + 0.26;
-    ctube(B, [V(Math.cos(a) * 1300, -7600, Math.sin(a) * 1300), V(Math.cos(a) * 14500, 0, Math.sin(a) * 14500)], 130, 8, CK.HULL);
+    const d = V(Math.cos(a), 0, Math.sin(a));
+    const lower = d.clone().multiplyScalar(1200).setY(-13500);
+    const knee = d.clone().multiplyScalar(12800).setY(-11800);
+    const upper = d.clone().multiplyScalar(15000);
+    ctube(B, [lower, knee, upper], 155, 8, CK.HULL);
+    ctube(B, [lower.clone().add(V(0,-340,0)), knee.clone().add(V(0,-340,0)), upper.clone().addScaledVector(d,340)], 62, 6, CK.BRONZE);
+    for (let j = 1; j < 8; j++) {
+      const p = knee.clone().lerp(upper, j / 8);
+      ctube(B, [p, p.clone().addScaledVector(d,250).add(V(0,-250,0))], 45, 6, CK.DARK);
+    }
+    // Six commons: a planted pressure hall, its terrace and equipment cellar.
+    B.at(upper.x, 540, upper.z, 0, -a, 0);
+    B.box(0, -50, 0, 1150, 160, 850, CK.HULL);
+    gallery(B, -520, 520, 350, 190, 170, CK.ROOF, 18);
+    B.box(0, 80, 0, 920, 25, 560, CK.GARDEN);
+    B.pop();
   }
-  // mining gantries and ore conveyors on the rock
+  // Surveyed feet meet the actual triangulated asteroid, not an assumed sphere.
   for (let k = 0; k < 5; k++) {
     const a = (k / 5) * TAU + 0.7;
     const d = V(Math.cos(a), 0.25 * Math.sin(a * 2.0), Math.sin(a)).normalize();
-    const p = d.clone().multiplyScalar(9600);
+    const p = d.clone().multiplyScalar(surfaceRadius(d));
     const q = new THREE.Quaternion().setFromUnitVectors(V(0, 1, 0), d);
     const m = new THREE.Matrix4().compose(p, q, V(1, 1, 1));
+    const deck = p.clone().addScaledVector(d, 1100);
+    mines.push({ direction: d.clone(), surface: p.clone(), deck: deck.clone(), radius: 620 });
+    for (const x of [-430,430]) for (const z of [-430,430]) {
+      const plan = V(x,0,z).applyMatrix4(m), fd = plan.clone().normalize();
+      const contact = fd.clone().multiplyScalar(surfaceRadius(fd));
+      const top = V(x,1050,z).applyMatrix4(m);
+      ctube(B, [contact.clone().addScaledVector(fd,-35), top], 90, 8, CK.BRONZE);
+      B.push(new THREE.Matrix4().compose(contact, new THREE.Quaternion().setFromUnitVectors(V(0,1,0),fd), V(1,1,1)));
+      B.box(0, 10, 0, 280, 90, 280, CK.DARK); B.pop();
+      footings.push({ contact, direction: fd, radius: surfaceRadius(fd), top });
+    }
     B.push(m);
-    B.box(0, 400, 0, 900, 800, 900, CK.HULL);
-    B.box(0, 900, 0, 1200, 120, 300, CK.BRONZE);
-    B.box(0, 700, 700, 300, 300, 1400, CK.DARK);
+    B.box(0, 1100, 0, 1160, 140, 1160, CK.HULL);
+    B.box(-240, 1330, -220, 480, 320, 520, CK.GLASS);
+    B.box(0, 1680, 220, 1250, 120, 200, CK.BRONZE);
+    for (const x of [-520,520]) B.box(x, 1450, 220, 100, 480, 140, CK.DARK);
+    ctube(B,[V(360,1170,260),V(360,2040,260),V(-170,2040,260)],55,6,CK.HULL);
+    B.box(-170,1940,260,180,210,180,CK.BRONZE);
     B.pop();
+    const collar = V(Math.cos(a) * 15000, 0, Math.sin(a) * 15000);
+    const end = deck.clone().addScaledVector(d, 250);
+    ctube(B,[end,collar],110,10,CK.HULL);
+    ctube(B,[end.clone().add(V(0,170,0)),collar.clone().add(V(0,170,0))],32,6,CK.LANTERN);
+    conveyors.push({ start:end, end:collar, radius:110 });
   }
-  // radiator fins on the far side
+  // Outward cargo and heat services share a mast seated on the surveyed pole.
+  const pole = surfaceRadius(V(0,1,0));
+  B.push(toY);
+  lathe(B,[[700,pole-100,CK.DARK],[700,pole+300,CK.BRONZE],[420,pole+650,CK.HULL],[420,15400,CK.HULL],[780,15700,CK.GLASS],[780,16400,CK.GLASS],[420,16800,CK.BRONZE]],32);
+  B.pop();
   for (let k = 0; k < 3; k++) {
     const a = (k / 3) * TAU;
     B.push(new THREE.Matrix4().makeRotationY(-a));
-    B.box(0, 12500, 0, 180, 6000, 140, CK.DARK);
-    B.box(2400, 13200, 0, 4400, 3200, 60, CK.RADIATOR);
+    B.box(2500, 13200, 0, 4600, 160, 140, CK.DARK);
+    B.box(2700, 13200, 0, 4400, 3200, 60, CK.RADIATOR);
+    B.box(4900,13200,0,100,3400,120,CK.BRONZE);
     B.pop();
   }
   const geo = B.geometry();
@@ -244,5 +319,5 @@ export function buildCounterworks() {
   }
   lamps.push({ p: V(0, -15900, 0), r: 50, color: LAMP.TEAL, i: 2.6, breathe: 0.35 });
   lamps.push({ p: V(0, 15800, 0), r: 50, color: LAMP.WHITE, i: 2.6, breathe: 0.3 });
-  return { geo, lamps };
+  return { geo, lamps, footings, mines, conveyors };
 }

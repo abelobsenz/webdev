@@ -18,6 +18,118 @@ const TAU = Math.PI * 2;
 const QY = 3, TOP = 9;
 const V = (x, y, z) => new THREE.Vector3(x, y, z);
 
+/** Two offset skins joined on every boundary: a genuinely closed architectural shell. */
+export function closedWardSurface(nu, nv, fn, thickness, front = K.STONE, back = front) {
+  const pos = [], fac = [], idx = [], cols = nu + 1, count = cols * (nv + 1);
+  for (const side of [1, -1]) for (let j = 0; j <= nv; j++) for (let i = 0; i <= nu; i++) {
+    const u = i / nu, v = j / nv, p = fn(u, v);
+    const du = fn(Math.min(1, u + 0.001), v).sub(fn(Math.max(0, u - 0.001), v));
+    const dv = fn(u, Math.min(1, v + 0.001)).sub(fn(u, Math.max(0, v - 0.001)));
+    const n = du.cross(dv);
+    if (n.lengthSq() < 1e-16) n.set(0, 1, 0); else n.normalize();
+    p.addScaledVector(n, side * thickness / 2);
+    pos.push(p.x, p.y, p.z); fac.push(u * 100, v * 100, side > 0 ? front : back);
+  }
+  for (let j = 0; j < nv; j++) for (let i = 0; i < nu; i++) {
+    const a = j * cols + i, b = a + 1, c = a + cols, d = c + 1;
+    idx.push(a, b, c, b, d, c, a + count, c + count, b + count, b + count, c + count, d + count);
+  }
+  const rim = (a, b) => idx.push(a, b, a + count, b, b + count, a + count);
+  for (let i = 0; i < nu; i++) { rim(i + 1, i); rim(nv * cols + i, nv * cols + i + 1); }
+  for (let j = 0; j < nv; j++) { rim(j * cols, (j + 1) * cols); rim((j + 1) * cols + nu, j * cols + nu); }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('aFacade', new THREE.Float32BufferAttribute(fac, 3));
+  g.setIndex(idx); g.computeVertexNormals();
+  return g;
+}
+
+function wardCourt(B, parts, L, lod) {
+  const { x, z, y, rot, theme, r } = L;
+  B.frame(x, y, z, rot);
+  const W = (u, yy, v) => V(x + u * Math.cos(rot) + v * Math.sin(rot), y + yy, z - u * Math.sin(rot) + v * Math.cos(rot));
+  B.lathe(0, 0, [[r - 4, -0.4, K.STONE], [r - 4, 0.3, K.STONE], [r - 5, 0.65, K.PAVING], [0, 0.65, K.PAVING]], lod ? 24 : 48);
+  for (let k = 0; k < 4; k++) B.box(-4.5, 4.5, r - 8 + k * 1.1, r - 6.8 + k * 1.1, -0.35, 0.65 - k * 0.16, K.STONE, K.PAVING);
+  const column = (cx, cz, h = 7, scale = 1) => B.lathe(cx, cz, [[0.85 * scale, 0.65, K.STONE], [0.85 * scale, 1, K.STONE], [0.58 * scale, 1.3, K.STONE], [0.48 * scale, h, K.STONE], [0.85 * scale, h + 0.45, K.STONE]], lod ? 6 : 10);
+  if (theme === 'astronomy') {
+    for (const s of [-1, 1]) {
+      B.box(s * 17 - 6.5, s * 17 + 6.5, -20, 7, 0.65, 7, K.PUNCHED, K.STONE);
+      B.vault(s * 17 - 7, s * 17 + 7, -20.5, 7.5, 7, 4.5, K.FRIT, lod ? 6 : 12);
+      B.box(s * 17 - 3, s * 17 + 3, 7, 10, 0.65, 4.5, K.GLASS, K.METAL);
+    }
+    const p = W(0, 0.65, 4);
+    if (!lod) armillary(parts, p.x, p.y, p.z, 9);
+    else B.lathe(0, 4, [[3, 0.65, K.STONE], [2, 3.5, K.STONE], [0.2, 20, K.METAL]], 8);
+    for (const s of [-1, 1]) B.box(s * 12 - 3.5, s * 12 + 3.5, 17, 18.5, 0.65, 1.6, K.STONE, K.METAL);
+  } else if (theme === 'tidal') {
+    for (const cx of [-18, 0, 18]) {
+      for (const sx of [-1, 1]) for (const sz of [-1, 1]) column(cx + sx * 8.3, sz * 11, 7.5, 0.7);
+      B.vaultZ(cx - 8.3, cx + 8.3, -13, 13, 7.95, 4.6, K.STONE, lod ? 6 : 12);
+      B.box(cx - 6, cx + 6, -10.5, -8.5, 0.65, 5.5, K.FRIT, K.STONE);
+    }
+    for (const sx of [-1, 1]) {
+      B.lathe(sx * 23, 20, [[2.4, 0.65, K.STONE], [2.4, 1.2, K.METAL], [1.8, 1.2, K.POOL], [1.8, 1.35, K.POOL], [0, 1.35, K.POOL]], 20);
+      B.lathe(sx * 23, 20, [[0.45, 1.35, K.METAL], [0.3, 6.5, K.METAL], [0.5, 6.8, K.LANTERN]], 8);
+    }
+  } else if (theme === 'solar') {
+    B.box(-24, 24, -17, 7, 0.65, 7.2, K.PUNCHED, K.STONE);
+    for (let i = 0; i < 6; i++) {
+      const xx = -24 + i * 8;
+      B.vprism([[xx, 7.2], [xx + 8, 7.2], [xx + 8, 7.8], [xx + 1, 11.5], [xx, 11.5]], -17.5, 7.5, K.PV, K.METAL);
+    }
+    for (const sx of [-1, 1]) for (const zz of [12, 20]) {
+      column(sx * 19, zz, 3.6);
+      B.box(sx * 19 - 4, sx * 19 + 4, zz - 2.6, zz + 2.6, 4.04, 4.45, K.METAL, K.PV);
+    }
+    B.box(-7, 7, 7, 12, 0.65, 5.4, K.GLASS, K.STONE);
+  } else if (theme === 'garden') {
+    for (let k = 0; k < 8; k++) { const a = (k + 0.5) * TAU / 8; column(Math.cos(a) * 20.5, Math.sin(a) * 20.5, 7); }
+    B.lathe(0, 0, [[22, 7.4, K.STONE], [22, 8.2, K.GARDEN], [18.8, 8.2, K.GARDEN], [18.8, 7.4, K.STONE]], lod ? 24 : 48, 0, { closedProfile: true });
+    if (!lod) for (let k = -4; k <= 4; k++) {
+      const xx = k * 3.4, reach = Math.sqrt(18.5 * 18.5 - xx * xx);
+      B.box(xx - 0.14, xx + 0.14, -reach, reach, 7.8, 8.12, K.TIMBER, K.TIMBER);
+    }
+    B.lathe(0, 0, [[6.5, 0.65, K.STONE], [6.5, 1.2, K.STONE], [5.8, 1.2, K.POOL], [5.8, 0.9, K.POOL], [0, 0.9, K.POOL]], 32);
+    for (const sx of [-1, 1]) B.box(sx * 13 - 3, sx * 13 + 3, -2, 2, 0.65, 1.65, K.STONE, K.GARDEN);
+  } else if (theme === 'harbour') {
+    B.box(-29, 29, -20, 9, 0.65, 10.5, K.PUNCHED, K.STONE);
+    for (const sx of [-1, 1]) B.vault(sx * 14.5 - 14.5, sx * 14.5 + 14.5, -20.6, 9.6, 10.5, 5, K.METAL, lod ? 6 : 12);
+    for (const cx of [-22, -13.2, -4.4, 4.4, 13.2, 22]) column(cx, 21, 6.6);
+    B.box(-27, 27, 9, 22, 7.05, 7.65, K.STONE, K.GARDEN);
+    B.box(-4, 4, -7, 1, 14, 20, K.LANTERN, K.METAL);
+    for (const sx of [-1, 1]) B.box(sx * 33 - 2, sx * 33 + 2, -5, 7, 0.65, 1.25, K.STONE, K.PAVING);
+  } else if (theme === 'reef') {
+    for (const [cx, cz, rr, h] of [[0, -8, 13, 16], [-19, 5, 8, 10], [19, 5, 8, 10]]) {
+      const prof = [[rr + 1.1, 0.65, K.STONE], [rr + 1.1, 1.2, K.STONE], [rr, 1.2, K.GLASS], [rr, 4.5, K.GLASS]];
+      for (let i = 1; i <= 10; i++) { const a = i * Math.PI / 20; prof.push([Math.max(0, Math.cos(a) * rr), 4.5 + Math.sin(a) * h, K.FRIT]); }
+      B.lathe(cx, cz, prof, lod ? 16 : 32);
+      if (!lod) for (let k = 0; k < 8; k++) {
+        const a = k * TAU / 8, rib = [];
+        for (let i = 0; i <= 12; i++) { const t = i * Math.PI / 24; rib.push(W(cx + Math.cos(a) * (Math.cos(t) * rr + 0.25), 4.5 + Math.sin(t) * h + 0.15, cz + Math.sin(a) * (Math.cos(t) * rr + 0.25))); }
+        parts.push(sweepTube(rib, () => 0.3, 6, { kind: K.STONE }));
+      }
+    }
+    B.box(-6, 6, 5, 18, 0.65, 5, K.GLASS, K.STONE);
+  } else {
+    // The sculptors' loggia: an open colonnade embracing a civic bronze, with
+    // low exhibition walls that preserve views of the larger Civic Crown.
+    for (const sx of [-1, 1]) {
+      for (const zz of [-18, -9, 0, 9]) column(sx * 22, zz, 8);
+      B.box(sx * 22 - 3, sx * 22 + 3, -21, 12, 8.45, 9.3, K.STONE, K.STONE);
+      B.box(sx * 29 - 1, sx * 29 + 1, -19, 8, 0.65, 3, K.STONE, K.STONE);
+    }
+    B.box(-25, 25, -21, -16, 8.45, 9.3, K.STONE, K.STONE);
+    B.lathe(0, 0, [[5, 0.65, K.STONE], [5, 1.7, K.STONE], [3.5, 1.7, K.STONE], [3.5, 2.7, K.STONE]], 24);
+    if (!lod) {
+      const p = W(0, 10.8, 0), ring = [];
+      for (let k = 0; k <= 48; k++) { const a = k * TAU / 48; ring.push(W(Math.cos(a) * 8, 10.8 + Math.sin(a) * 8, Math.sin(a) * 2)); }
+      parts.push(sweepTube(ring, () => 0.8, 8, { kind: K.METAL }));
+      parts.push(sweepTube([W(0, 2.7, 0), p], () => 0.7, 8, { kind: K.METAL }));
+    } else B.lathe(0, 0, [[1, 2.7, K.METAL], [1, 19, K.METAL]], 8);
+  }
+  B.frame(0, 0, 0, 0);
+}
+
 /** Longest run of loop vertices with bearing in [a0, a1] (from the ward centre). */
 function span(loop, a0, a1) {
   const n = loop.length;
@@ -38,53 +150,56 @@ const largest = (loops) => loops.reduce((b, l) => { let a = 0; for (let i = 0; i
 
 // ------------------------------------------------------------------ ships --
 /** A moored sea-ship (or research vessel): a lofted hull, decks, a superstructure, a mast. */
-function ship(B, parts, x, z, rot, len, beam, rnd, big) {
-  const c = Math.cos(rot), s = Math.sin(rot);
-  const W = (lx, y, lz) => V(x + lx * c - lz * s, y, z + lx * s + lz * c);
-  // hull: sections along the length (lx), a U from the keel to the deck line
-  const n = 18, m = 9;
-  const deckY0 = big ? 9 : 5;
-  if (!parts) { shipTop(B, x, z, rot, len, beam, deckY0, big); return; }
-  const pos = [], fac = [], idx = [];
+export function shipHullGeometry(len, beam, big = false) {
+  const n = 18, m = 10, cols = m + 1;
   const deckY = big ? 9 : 5, keel = big ? -6 : -3.5;
+  const pos = [], fac = [], idx = [];
   for (let i = 0; i <= n; i++) {
-    const u = i / n;
-    const lx = -len / 2 + len * u;
+    const u = i / n, lx = -len / 2 + len * u;
     const bow = Math.max(0, (u - 0.72) / 0.28), stern = Math.max(0, (0.1 - u) / 0.1);
     const half = (beam / 2) * Math.sqrt(Math.max(0.02, 1 - bow * bow)) * (1 - 0.25 * stern);
     const sheer = deckY + 1.6 * bow * bow + 0.6 * stern;
     for (let j = 0; j <= m; j++) {
-      const v = j / m;                      // 0 port deck edge .. 1 starboard deck edge
-      const a = Math.PI * v;
-      const lz = -Math.cos(a) * half;
+      const a = Math.PI * j / m, lz = -Math.cos(a) * half;
       const y = sheer + (keel - sheer) * Math.pow(Math.sin(a), 0.6) * (1 - 0.4 * bow);
-      const p = W(lx, y, lz);
-      pos.push(p.x, p.y, p.z);
-      fac.push(lx, y, y > 0.4 ? 1 : 10);
+      pos.push(lx, y, lz); fac.push(lx, y, y > 0.4 ? K.STONE : K.METAL);
     }
   }
-  for (let i = 0; i < n; i++) for (let j = 0; j < m; j++) {
-    const a = i * (m + 1) + j, b = a + 1, cc = a + m + 1, d = cc + 1;
-    idx.push(a, cc, b, b, cc, d);
+  for (let i = 0; i < n; i++) {
+    for (let j = 0; j < m; j++) { const a = i * cols + j, b = a + 1, c = a + cols; idx.push(a, c, b, b, c, c + 1); }
+    // The deck follows both the sheer and the actual beam, closing the entire hull.
+    const p = i * cols, q = p + cols;
+    idx.push(p, p + m, q + m, p, q + m, q);
+  }
+  for (const i of [0, n]) {
+    const start = i * cols, center = pos.length / 3, want = i === 0 ? -1 : 1;
+    let yy = 0, zz = 0;
+    for (let j = 0; j <= m; j++) { yy += pos[(start + j) * 3 + 1]; zz += pos[(start + j) * 3 + 2]; }
+    pos.push(pos[start * 3], yy / cols, zz / cols); fac.push(0, yy / cols, K.STONE);
+    for (let j = 0; j <= m; j++) {
+      const a = start + j, b = start + (j + 1) % cols;
+      const ay = pos[a * 3 + 1] - pos[center * 3 + 1], az = pos[a * 3 + 2] - pos[center * 3 + 2];
+      const by = pos[b * 3 + 1] - pos[center * 3 + 1], bz = pos[b * 3 + 2] - pos[center * 3 + 2];
+      if ((ay * bz - az * by) * want >= 0) idx.push(center, a, b); else idx.push(center, b, a);
+    }
   }
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   g.setAttribute('aFacade', new THREE.Float32BufferAttribute(fac, 3));
-  g.setIndex(idx);
-  g.computeVertexNormals();
-  // outward from the hull's centreline
-  const nr = g.attributes.normal;
-  const p0 = W(0, 0, 0);
-  if ((nr.getX(3) * (pos[9] - p0.x) + nr.getZ(3) * (pos[11] - p0.z)) < 0) { for (let k = 0; k < idx.length; k += 3) { const t = idx[k + 1]; idx[k + 1] = idx[k + 2]; idx[k + 2] = t; } g.setIndex(idx); g.computeVertexNormals(); }
-  parts.push(g);
-  shipTop(B, x, z, rot, len, beam, deckY, big);
+  g.setIndex(idx); g.computeVertexNormals();
+  return g;
+}
+
+function ship(B, parts, x, z, rot, len, beam, rnd, big) {
+  if (parts) parts.push(shipHullGeometry(len, beam, big).rotateY(-rot).translate(x, 0, z));
+  shipTop(B, x, z, rot, len, beam, big ? 9 : 5, big);
   void rnd;
 }
 function shipTop(B, x, z, rot, len, beam, deckY, big) {
   // deck, superstructure aft of midships, a funnel and a mast
   B.frame(x, 0, z, -rot + Math.PI / 2);
   const dw = beam * 0.92;
-  B.box(-dw / 2, dw / 2, -len * 0.4, len * 0.34, deckY - 0.4, deckY, K.METAL, K.PAVING);
+  B.box(-dw / 2, dw / 2, -len * 0.4, len * 0.34, deckY - 0.25, deckY + 0.08, K.METAL, K.PAVING);
   const sl = len * (big ? 0.28 : 0.34);
   const s0 = -len * 0.26;
   const tiers = big ? 4 : 2;
@@ -103,6 +218,12 @@ function observatory(B, parts, L, oy) {
   // a stepped circular terrace, the drum, the great dome with its slit and shutter rails
   B.lathe(0, 0, [[r + 16, -0.5, K.STONE], [r + 16, 0.6, K.STONE], [r + 12, 0.6, K.PAVING], [r + 12, 1.4, K.STONE], [r + 8, 1.4, K.PAVING], [r + 8, 2.2, K.STONE], [r + 4, 2.2, K.PAVING]], 64);
   B.lathe(0, 0, [[r + 1.2, 2.2, K.STONE], [r + 1.2, 3.4, K.STONE], [r, 3.4, K.PUNCHED], [r, 20, K.PUNCHED], [r + 1.5, 20.6, K.STONE], [r + 1.5, 22, K.STONE]], 64);
+  // Twin public flights flank the meridian arch's southern footing. Their
+  // 20 cm risers cross every podium ledge and meet the drum threshold.
+  for (const sx of [-1, 1]) for (let i = 0; i < 17; i++) {
+    const z0 = r + 1.2 + i * 18.8 / 17, z1 = r + 1.2 + (i + 1) * 18.8 / 17;
+    B.box(sx * 5.5 - 2.3, sx * 5.5 + 2.3, i === 0 ? r - .8 : z0, z1, -.5, 3.4 - i * .2, K.STONE, K.PAVING);
+  }
   const prof = [];
   for (let i = 0; i <= 16; i++) { const a = (i / 16) * (Math.PI / 2); prof.push([(r + 0.8) * Math.cos(a) + 0.05, 22 + (r + 0.8) * Math.sin(a), K.STONE]); }
   B.lathe(0, 0, prof, 64);
@@ -125,6 +246,7 @@ function observatory(B, parts, L, oy) {
   const arc = [];
   for (let i = 0; i <= 32; i++) { const a = (i / 32) * Math.PI; arc.push(w.clone().add(V(0, 2 + Math.sin(a) * (r + 22), Math.cos(a) * (r + 22)))); }
   parts.push(sweepTube(arc, () => 0.9, 8, { kind: 10 }));
+  for (const side of [-1, 1]) B.lathe(0, side * (r + 22), [[1.6, -.5, K.STONE], [1.6, .25, K.STONE], [1.1, .25, K.STONE], [1.1, 2.1, K.STONE]], 12);
   B.frame(0, 0, 0, 0);
 }
 
@@ -180,15 +302,20 @@ function library(B, L, y, lod) {
   for (let i = 0; i <= 8; i++) { const a = (i / 8) * (Math.PI / 2) * 0.94; prof.push([14.4 * Math.cos(a), 25.4 + 13 * Math.sin(a), K.GLASS]); }
   B.lathe(0, -3, prof, lod ? 16 : 32);
   B.lathe(0, -3, [[1.6, 38.3, K.LANTERN], [1.1, 41, K.LANTERN], [0.05, 42, K.STONE]], 10);
-  if (lod) { B.box(-w / 2, w / 2, d / 2 - 6, d / 2, 1.4, 17, K.STONE, K.STONE); return; }
+  for (let k = 0; k < 7; k++) B.box(-18, 18, d / 2 + 2 + k * .4, d / 2 + 2 + (k + 1) * .4, -.5, 1.4 - k * .2, K.STONE, K.PAVING);
+  if (lod) {
+    B.box(-w / 2, -3.5, d / 2 - 6, d / 2, 1.4, 17, K.STONE, K.STONE);
+    B.box(3.5, w / 2, d / 2 - 6, d / 2, 1.4, 17, K.STONE, K.STONE);
+    return;
+  }
   // the colonnade and its entablature
   const n = Math.floor(w / 5);
   for (let i = 0; i <= n; i++) {
     const cx = -w / 2 + 1 + (i * (w - 2)) / n;
+    if (Math.abs(cx) < 3.5) continue;
     B.lathe(cx, d / 2 - 1.5, [[0.8, 1.4, K.STONE], [0.68, 2.0, K.STONE], [0.56, 15, K.STONE], [0.85, 15.6, K.STONE]], 12);
   }
   B.box(-w / 2, w / 2, d / 2 - 2.6, d / 2 - 0.4, 15.6, 17, K.STONE, K.STONE, { bottom: true });
-  for (let k = 0; k < 4; k++) B.box(-18, 18, d / 2 + 1.5 + k * 0.5, d / 2 + 2.3 + k * 0.5, -0.5, 1.4 - k * 0.35, K.STONE, K.PAVING);
 }
 
 function campanile(B, L, y, lod) {
@@ -200,7 +327,7 @@ function campanile(B, L, y, lod) {
   B.box(-s / 2 + 0.4, s / 2 - 0.4, -s / 2 + 0.4, s / 2 - 0.4, h * 0.72 + 1, h * 0.84, K.LANTERN, K.STONE);
   if (!lod) for (const [cx, cz] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) B.box(cx * (s / 2 - 0.3) - 0.5, cx * (s / 2 - 0.3) + 0.5, cz * (s / 2 - 0.3) - 0.5, cz * (s / 2 - 0.3) + 0.5, h * 0.72 + 1, h * 0.84, K.STONE, K.STONE);
   B.box(-s / 2 - 0.4, s / 2 + 0.4, -s / 2 - 0.4, s / 2 + 0.4, h * 0.84, h * 0.86, K.STONE, K.STONE, { bottom: true });
-  B.frustum(s * 0.9, s * 0.9, 0.3, 0.3, h * 0.86, h, K.METAL, null);
+  B.frustum(s * 0.9, s * 0.9, 0.3, 0.3, h * 0.86, h, K.METAL);
   B.lathe(0, 0, [[0.4, h, K.LANTERN], [0.2, h + 3, K.LANTERN], [0.05, h + 3.4, K.LANTERN]], 6);
 }
 
@@ -214,7 +341,16 @@ function heliodrome(B, parts, L, y, lod) {
     const w = s - k * 16, t = (k + 1) * th;
     B.prism(rrect(w, w, 1.5), -0.5 + k * th, t, K.STONE, K.PAVING);
     if (lod) continue;
-    B.walls(rrect(w - 1.2, w - 1.2, 1.2), t, t + 0.9, K.STONE);
+    // The four public stairs pass through every tier's rail. Keep real gaps
+    // instead of running a continuous parapet through the climbing route.
+    for (let f = 0; f < 4; f++) {
+      B.frame(x, y, z, -rot + Math.PI / 2 + f * Math.PI / 2);
+      for (const side of [-1, 1]) {
+        const a = side < 0 ? -w / 2 + .6 : sw + 1.4, b = side < 0 ? -sw - 1.4 : w / 2 - .6;
+        if (b > a) B.box(a, b, w / 2 - .9, w / 2 - .62, t, t + .9, K.STONE, K.STONE);
+      }
+    }
+    B.frame(x, y, z, -rot + Math.PI / 2);
     B.prism(rrect(w + 1.0, w + 1.0, 2.0), t - 1.3, t - 0.35, K.STONE, K.STONE, { bottom: true });
     const y0 = k === 0 ? -0.5 : k * th;
     for (let f = 0; f < 4; f++) {
@@ -232,7 +368,7 @@ function heliodrome(B, parts, L, y, lod) {
     const c = Math.cos(a), sn = Math.sin(a);
     const P = (u, v) => [u * sn + v * c, -u * c + v * sn];
     // the stair: a ramp of steps from the plaza to the summit, between stepped cheek walls
-    const n = lod ? 1 : 40;
+    const n = 140; // 25 cm rise and 31 cm tread, retained in both LODs.
     for (let i = 0; i < n; i++) {
       const t0 = i / n, t1 = (i + 1) / n;
       const r0 = s / 2 + 12 - t0 * (s / 2 + 12 - rTop), r1 = s / 2 + 12 - t1 * (s / 2 + 12 - rTop);
@@ -245,7 +381,7 @@ function heliodrome(B, parts, L, y, lod) {
   const top = tiers * th;
   const sr = s * 0.16, rr = rTop - 2.5, er = rr + 1.6, cH = sr * 0.9, eTop = top + sr * 1.2;
   const n = 12;
-  B.lathe(0, 0, [[er, top - 0.3, K.STONE], [er, top + 0.6, K.STONE], [0.1, top + 0.6, K.PAVING]], 32);
+  B.lathe(0, 0, [[rTop - .1, top - .3, K.STONE], [rTop - .1, top + .2, K.STONE], [er + .5, top + .2, K.PAVING], [er + .5, top + .4, K.STONE], [er, top + .4, K.PAVING], [er, top + .6, K.STONE], [.1, top + .6, K.PAVING]], 32);
   for (let k = 0; k < n; k++) {
     const a = ((k + 0.5) / n) * TAU;
     B.lathe(Math.cos(a) * rr, Math.sin(a) * rr, [[1.1, top + 0.6, K.STONE], [0.9, top + 1.4, K.STONE], [0.7, top + cH, K.STONE], [1.0, top + sr, K.STONE]], 8);
@@ -263,8 +399,8 @@ function gnomon(B, L, y) {
   const { x, z, h } = L;
   B.frame(x, y, z, 0);
   B.lathe(0, 0, [[4.2, -0.5, K.STONE], [4.2, 0.6, K.STONE], [3.2, 0.6, K.PAVING], [3.2, 1.3, K.STONE], [2.2, 1.3, K.STONE]], 24);
-  B.frustum(2.4, 2.4, 0.9, 0.9, 1.3, h, K.STONE, null);
-  B.frustum(0.9, 0.9, 0.02, 0.02, h, h + 2.2, K.LANTERN, null);
+  B.frustum(2.4, 2.4, 0.9, 0.9, 1.3, h, K.STONE);
+  B.frustum(0.9, 0.9, 0.02, 0.02, h, h + 2.2, K.LANTERN);
 }
 
 function cascade(B, parts, L, rec, lod) {
@@ -307,7 +443,7 @@ function lighthouse(B, parts, L, y, lod, lights) {
   const { x, z, h } = L;
   B.frame(x, y, z, 0);
   B.lathe(0, 0, [[7, -0.5, K.STONE], [7, 1.5, K.STONE], [4.6, 1.5, K.STONE], [3.4, h * 0.82, L.style === 'crystal' ? K.FRIT : K.STONE], [4.4, h * 0.84, K.STONE], [4.4, h * 0.86, K.METAL], [3.0, h * 0.86, K.LANTERN], [3.0, h * 0.96, K.LANTERN], [3.4, h * 0.97, K.METAL], [0.05, h + 2.5, K.METAL]], lod ? 10 : 20);
-  if (!lod) B.walls(rrect(9.2, 9.2, 4.5), h * 0.86, h * 0.86 + 1.0, K.METAL);
+  if (!lod) B.parapet(rrect(9.2, 9.2, 4.5), h * 0.86, 1.0, 0.16, K.METAL);
   lights.push({ x, y: y + h * 0.91, z, c: L.light || [1.0, 0.92, 0.75], s: 3.2 });
 }
 
@@ -325,10 +461,36 @@ function crane(B, c, lod) {
   }
 }
 
+function gardenBelvedere(B, L, y, lod) {
+  B.frame(L.x, y, L.z, L.rot);
+  B.prism(rrect(12, 18, 1), -.45, .04, K.STONE, K.PAVING);
+  for (const x of [-4, 4]) for (const z of [-6, 6]) {
+    B.lathe(x, z, [[.65, -.25, K.STONE], [.65, .45, K.STONE], [.24, .45, K.TIMBER], [.24, 4.9, K.TIMBER]], 8);
+  }
+  for (const x of [-4, 4]) B.box(x - .2, x + .2, -7.2, 7.2, 4.8, 5.05, K.TIMBER, K.TIMBER);
+  for (let z = -7; z <= 7; z += lod ? 2 : 1) B.box(-4.9, 4.9, z - .075, z + .075, 5.05, 5.23, K.TIMBER, K.TIMBER);
+  // Four low bench bays frame the central through-route and its sea view.
+  for (const x of [-5.1, 5.1]) for (const z of [-3.9, 3.9]) {
+    B.box(x - .32, x + .32, z - 1.55, z + 1.55, .04, .52, K.STONE, K.TIMBER);
+    if (!lod) B.box(x - .36, x + .36, z - 1.6, z + 1.6, .52, .62, K.TIMBER, K.TIMBER);
+  }
+}
+
+function passengerShelter(B, L, y, lod) {
+  B.frame(L.x, y, L.z, L.rot);
+  B.prism(rrect(26, 12, 1.2), -.45, .04, K.STONE, K.PAVING);
+  for (const x of [-10, 10]) for (const z of [-4.5, 4.5]) B.lathe(x, z, [[.5, -.25, K.STONE], [.5, .35, K.STONE], [.18, .35, K.METAL], [.18, 5.95, K.METAL]], 8);
+  for (const x of [-10, 10]) B.box(x - .2, x + .2, -5, 5, 5.65, 5.95, K.METAL, K.METAL);
+  // A folded roof echoes the terminal's ship forms; every edge has thickness.
+  B.vprism([[-12, 6], [0, 5], [12, 6], [12, 6.3], [0, 5.3], [-12, 6.3]], -5, 5, K.METAL);
+  for (const z of [-3.2, 3.2]) for (const x of [-6, 6]) B.box(x - 2, x + 2, z - .32, z + .32, .04, .56, K.STONE, K.TIMBER);
+  void lod;
+}
+
 function terminal(B, L, y, lod) {
   const { x, z, rot, w, d } = L;
   B.frame(x, y, z, rot);
-  B.box(-w / 2, w / 2, -d / 2, d / 2, -0.4, 12, K.GLASS, K.STONE, { noTop: true });
+  B.box(-w / 2, w / 2, -d / 2, d / 2, -0.4, 12, K.GLASS, K.STONE);
   // a roof of five waves (glass vaults) over the hall
   const n = 5;
   for (let i = 0; i < n; i++) {
@@ -337,10 +499,14 @@ function terminal(B, L, y, lod) {
     B.vault(-d / 2 - 2, d / 2 + 2, -x1, -x0, 12, 7 + (i % 2) * 2.5, i % 2 ? K.GLASS : K.STONE, lod ? 4 : 10);
     B.c = Math.cos(rot); B.s = Math.sin(rot);
   }
-  if (lod) return;
   // glazed boarding bridges reaching out over the quay to the basin
-  for (const bx of [-w * 0.32, 0, w * 0.32]) B.box(bx - 2, bx + 2, d / 2, d / 2 + 22, 7.5, 10.5, K.GLASS, K.STONE, { bottom: true });
-  for (const bx of [-w * 0.32, 0, w * 0.32]) B.box(bx - 0.4, bx + 0.4, d / 2 + 19, d / 2 + 21, -6, 7.5, K.STONE, K.STONE);
+  for (const bx of [-w * 0.32, 0, w * 0.32]) {
+    B.box(bx - 2, bx + 2, d / 2, d / 2 + 85, 7.5, 10.5, K.GLASS, K.STONE, { bottom: true });
+    // A glazed quay lift closes the transfer route down to +3 m and gives the
+    // gallery a founded endpoint. The street passes safely beneath its span.
+    B.box(bx - 3.5, bx + 3.5, d / 2 + 81, d / 2 + 87, QY - y - 0.3, 11.5, K.GLASS, K.STONE);
+    B.box(bx - 4, bx + 4, d / 2 + 80, d / 2 + 88, QY - y - 0.4, QY - y + 0.3, K.STONE, K.PAVING);
+  }
 }
 
 function triumphalArch(B, L, y, lod) {
@@ -417,39 +583,16 @@ function opera(B, parts, L, y, lod) {
       const lz = oz * s + Math.sin(th) * R * Math.cos(ph * 0.8) * 0.9;
       return W(lx - R * 0.3 * (1 - v), yy, lz);
     };
-    for (const side of [1, -1]) {
-      const pos = [], fac = [], idx = [];
-      const nu = lod ? 6 : 14, nv = lod ? 5 : 12;
-      for (let j = 0; j <= nv; j++) for (let i = 0; i <= nu; i++) {
-        const p = sail(i / nu, j / nv);
-        const q = side > 0 ? p : p.clone().add(V(0, -0.8, 0));
-        pos.push(q.x, q.y, q.z); fac.push(i * 3, j * 3, side > 0 ? 1 : 1);
-      }
-      for (let j = 0; j < nv; j++) for (let i = 0; i < nu; i++) {
-        const a = j * (nu + 1) + i;
-        if (side > 0) idx.push(a, a + 1, a + nu + 1, a + 1, a + nu + 2, a + nu + 1);
-        else idx.push(a, a + nu + 1, a + 1, a + 1, a + nu + 1, a + nu + 2);
-      }
-      const g = new THREE.BufferGeometry();
-      g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-      g.setAttribute('aFacade', new THREE.Float32BufferAttribute(fac, 3));
-      g.setIndex(idx);
-      g.computeVertexNormals();
-      parts.push(g);
+    parts.push(closedWardSurface(lod ? 6 : 14, lod ? 5 : 12, sail, 0.8, K.STONE));
+    // Glazed mouths and tiled side returns enclose each auditorium. A narrow
+    // clerestory follows the sail, preserving the white shell silhouette.
+    const glass = (u, v) => { const p = sail(u, 1); return p.clone().lerp(p.clone().setY(y + 5.7), 1 - v); };
+    parts.push(closedWardSurface(12, 1, glass, 0.22, K.GLASS));
+    for (const edge of [0, 1]) {
+      const cheek = (u, v) => { const p = sail(edge, 0.015 + u * 0.985); return p.clone().lerp(p.clone().setY(y + 5.7), 1 - v); };
+      parts.push(closedWardSurface(lod ? 5 : 12, 1, (u, v) => cheek(u, v * 0.82), 0.45, K.STONE));
+      parts.push(closedWardSurface(lod ? 5 : 12, 1, (u, v) => cheek(u, 0.82 + v * 0.18), 0.22, K.GLASS));
     }
-    // the glazed mouth: a fan of glass from the podium up to the sail's crest line
-    const mouth = [];
-    for (let i = 0; i <= 12; i++) mouth.push(sail(i / 12, 1));
-    const base = mouth.map((p) => p.clone().setY(y + 6));
-    const pos = [], fac = [], idx = [];
-    for (let i = 0; i <= 12; i++) { pos.push(base[i].x, base[i].y, base[i].z, mouth[i].x, mouth[i].y, mouth[i].z); fac.push(i * 4, 0, 0, i * 4, mouth[i].y - y - 6, 0); }
-    for (let i = 0; i < 12; i++) { const a = i * 2; idx.push(a, a + 2, a + 1, a + 1, a + 2, a + 3, a, a + 1, a + 2, a + 1, a + 3, a + 2); }
-    const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-    g.setAttribute('aFacade', new THREE.Float32BufferAttribute(fac, 3));
-    g.setIndex(idx);
-    g.computeVertexNormals();
-    parts.push(g);
   }
 }
 
@@ -460,42 +603,22 @@ function amphitheatre(B, parts, L, lod) {
   const tiers = 20;
   const a0 = a + Math.PI / 2 + 0.12, a1 = a + 1.5 * Math.PI - 0.12;
   const seg = lod ? 24 : 64;
-  const pos = [], fac = [], idx = [];
-  const quad = (p0, p1, p2, p3, kind, u0, u1, v0, v1) => {
-    const b = pos.length / 3;
-    for (const [p, u, v] of [[p0, u0, v0], [p1, u1, v0], [p2, u1, v1], [p3, u0, v1]]) { pos.push(p[0], p[1], p[2]); fac.push(u, v, kind); }
-    idx.push(b, b + 1, b + 2, b, b + 2, b + 3);
-  };
+  const arc = [];
+  for (let i = 0; i <= seg; i++) { const t = a0 + (a1 - a0) * i / seg; arc.push([x + Math.cos(t) * r0, z + Math.sin(t) * r0]); }
   for (let k = 0; k < tiers; k++) {
-    const ra = r0 + ((r1 - r0) * k) / tiers, rb = r0 + ((r1 - r0) * (k + 1)) / tiers;
-    const y0 = QY + ((TOP - QY) * k) / tiers, y1 = QY + ((TOP - QY) * (k + 1)) / tiers;
-    for (let i = 0; i < seg; i++) {
-      const t0 = a0 + ((a1 - a0) * i) / seg, t1 = a0 + ((a1 - a0) * (i + 1)) / seg;
-      const P = (r, t, yy) => [x + Math.cos(t) * r, yy, z + Math.sin(t) * r];
-      // riser (facing the stage) and tread
-      quad(P(ra, t0, y0), P(ra, t1, y0), P(ra, t1, y1), P(ra, t0, y1), 1, t0 * ra, t1 * ra, y0, y1);
-      quad(P(ra, t0, y1), P(ra, t1, y1), P(rb, t1, y1), P(rb, t0, y1), 9, t0 * ra, t1 * ra, ra, rb);
-    }
+    const da = (r1 - r0) * k / tiers, db = (r1 - r0) * (k + 1) / tiers;
+    const yy = QY + (TOP - QY) * (k + 1) / tiers;
+    // Individual founded annular blocks avoid long, almost collinear triangles
+    // in the end caps of one forty-corner stepped profile.
+    parts.push(sweepLoop(arc, () => [
+      { a: [db, QY - 0.3], b: [db, yy], kind: K.STONE },
+      { a: [db, yy], b: [da, yy], kind: K.PAVING },
+      { a: [da, yy], b: [da, QY - 0.3], kind: K.STONE },
+    ], { closed: false, closeSection: true, capEnds: true }));
   }
-  const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-  g.setAttribute('aFacade', new THREE.Float32BufferAttribute(fac, 3));
-  g.setIndex(idx);
-  g.computeVertexNormals();
-  // risers face the centre, treads face up
-  const n = g.attributes.normal, P2 = g.attributes.position;
-  for (let f = 0; f < idx.length / 6; f++) {
-    const i0 = idx[f * 6];
-    const tread = Math.abs(P2.getY(idx[f * 6]) - P2.getY(idx[f * 6 + 2])) < 0.01;
-    const want = tread ? n.getY(i0) : -(n.getX(i0) * (P2.getX(i0) - x) + n.getZ(i0) * (P2.getZ(i0) - z));
-    if (want < 0) for (let k = f * 6; k < f * 6 + 6; k += 3) { const t = idx[k + 1]; idx[k + 1] = idx[k + 2]; idx[k + 2] = t; }
-  }
-  g.setIndex(idx);
-  g.computeVertexNormals();
-  parts.push(g);
   // the end walls of the cavea
   for (const t of [a0, a1]) {
-    B.frame(x + Math.cos(t) * (r0 + r1) / 2, 0, z + Math.sin(t) * (r0 + r1) / 2, -t);
+    B.frame(x + Math.cos(t) * (r0 + r1) / 2, 0, z + Math.sin(t) * (r0 + r1) / 2, Math.PI / 2 - t);
     B.box(-1, 1, -(r1 - r0) / 2 - 1, (r1 - r0) / 2 + 1, QY - 0.2, TOP + 1.2, K.STONE, K.STONE);
   }
   // the floating stage and its shell
@@ -509,18 +632,18 @@ function amphitheatre(B, parts, L, lod) {
     const r = 24;
     return V(sx - Math.cos(th) * r * Math.cos(ph) * 0.9 + Math.cos(a) * 8, 1.6 + Math.sin(ph) * r * 0.75, sz - Math.sin(th) * r * Math.cos(ph) * 0.9 + Math.sin(a) * 8);
   };
-  for (const side of [1, -1]) {
-    const pos2 = [], fac2 = [], idx2 = [];
-    const nu = 14, nv = 8;
-    for (let j = 0; j <= nv; j++) for (let i = 0; i <= nu; i++) { const p = W(i / nu, j / nv).addScaledVector(V(Math.cos(a), 0, Math.sin(a)), side > 0 ? 0 : 0.6); pos2.push(p.x, p.y, p.z); fac2.push(i * 4, j * 4, side > 0 ? 1 : 2); }
-    for (let j = 0; j < nv; j++) for (let i = 0; i < nu; i++) { const q = j * (nu + 1) + i; if (side > 0) idx2.push(q, q + 1, q + nu + 1, q + 1, q + nu + 2, q + nu + 1); else idx2.push(q, q + nu + 1, q + 1, q + 1, q + nu + 1, q + nu + 2); }
-    const sg = new THREE.BufferGeometry();
-    sg.setAttribute('position', new THREE.Float32BufferAttribute(pos2, 3));
-    sg.setAttribute('aFacade', new THREE.Float32BufferAttribute(fac2, 3));
-    sg.setIndex(idx2);
-    sg.computeVertexNormals();
-    parts.push(sg);
+  // Stop just short of the polar singularity; the narrow crest is sealed by the
+  // joined shell rim, avoiding a row of zero-area triangles at a collapsed pole.
+  parts.push(closedWardSurface(14, 8, (u, v) => W(u, v * 0.988), 0.6, K.STONE, K.LANTERN));
+  // A hinged timber gangway links the orchestra's quay to the floating stage.
+  B.frame(x, 0, z, Math.PI / 2 - a);
+  for (let k = 0; k < 12; k++) {
+    const z0 = 32 + k * 57 / 12, z1 = 32 + (k + 1) * 57 / 12, yy = QY + (1.6 - QY) * (k + 0.5) / 12;
+    B.box(-2.6, 2.6, z0, z1 + 0.03, yy - 0.45, yy, K.METAL, K.TIMBER);
+    for (const sx of [-1, 1]) B.box(sx * 2.5 - 0.1, sx * 2.5 + 0.1, z0, z1 + 0.03, yy + 0.9, yy + 1.0, K.METAL, K.METAL);
+    if (k % 2 === 0) for (const sx of [-1, 1]) B.box(sx * 2.5 - 0.1, sx * 2.5 + 0.1, z0, z0 + 0.2, yy, yy + 1.0, K.METAL, K.METAL);
   }
+  B.frame(0, 0, 0, 0);
   void shell; void lod;
 }
 
@@ -541,14 +664,21 @@ function domes(parts, list, lights) {
   }
 }
 
+export function wardBridgeLayout(br) {
+  const length = Math.hypot(br.b[0] - br.a[0], br.b[1] - br.a[1]);
+  const halfLength = length / 2 + 2;
+  return { length, halfLength, rotation: Math.atan2(br.b[1] - br.a[1], br.b[0] - br.a[0]),
+    halfWidth: br.hw + (br.style === 'tidehall' ? 4 : 0.4),
+    endExtent: halfLength + (br.style === 'tidehall' ? 6 : 0) };
+}
+
 function canalBridge(B, parts, br, rec, lod) {
   // an arched bridge over a canal (or the reef lagoon): deck, parapets, an arch over the water
   // and piers at the water's edge; the Tidehall is a glazed galleria on the same bones
   const { a, b, hw, y } = br;
   const w = rec.w;
   const ax = w.x + a[0], az = w.z + a[1], bx = w.x + b[0], bz = w.z + b[1];
-  const L = Math.hypot(bx - ax, bz - az);
-  const rot = Math.atan2(bz - az, bx - ax);
+  const layout = wardBridgeLayout(br), L = layout.length, rot = layout.rotation;
   const cx = (ax + bx) / 2, cz = (az + bz) / 2;
   // where the water is under the bridge
   let w0 = null, w1 = null;
@@ -557,17 +687,17 @@ function canalBridge(B, parts, br, rec, lod) {
     if (rec.sea.sample(x, z) > 0) { if (w0 === null) w0 = s; w1 = s; }
   }
   if (w0 === null) { w0 = L * 0.3; w1 = L * 0.7; }
-  const lx0 = -L / 2 - 2, lx1 = L / 2 + 2;
+  const lx0 = -layout.halfLength, lx1 = layout.halfLength;
   // frame: local x along the bridge (the Builder's +x maps to (cos, -sin) of rot, so turn it)
   B.frame(cx, 0, cz, -rot);
   const hump = br.style === 'causeway' ? 1.2 : Math.min(3.2, (w1 - w0) * 0.06 + 0.8);
-  const deckY = (lx) => y + 0.35 + hump * Math.cos(Math.PI * Math.min(Math.abs(lx) / (L / 2 + 2), 1) * 0.5) ** 2;
+  const deckY = (lx) => y + 0.025 + hump * Math.cos(Math.PI * Math.min(Math.abs(lx) / layout.halfLength, 1) * 0.5) ** 2;
   const n = lod ? 4 : 12;
   for (let i = 0; i < n; i++) {
     const x0 = lx0 + ((lx1 - lx0) * i) / n, x1 = lx0 + ((lx1 - lx0) * (i + 1)) / n;
-    const yt = (deckY(x0) + deckY(x1)) / 2;
-    B.box(x0, x1 + 0.02, -hw, hw, yt - 1.4, yt, K.STONE, K.PAVING, { bottom: true });
-    if (!lod || i % 2 === 0) for (const s of [-1, 1]) B.box(x0, x1 + 0.02, s * hw - (s > 0 ? 0.5 : 0), s * hw + (s > 0 ? 0 : 0.5), yt, yt + 1.1, K.STONE, K.STONE);
+    const y0 = deckY(x0), y1 = deckY(x1);
+    B.vprism([[x0, y0 - 1.4], [x1, y1 - 1.4], [x1, y1], [x0, y0]], -hw, hw, K.STONE);
+    for (const s of [-1, 1]) B.vprism([[x0, y0], [x1, y1], [x1, y1 + 1.1], [x0, y0 + 1.1]], s * hw - (s > 0 ? 0.5 : 0), s * hw + (s > 0 ? 0 : 0.5), K.STONE);
   }
   if (br.style === 'causeway') {
     for (let s = lx0 + 18; s < lx1 - 10; s += 22) {
@@ -583,9 +713,7 @@ function canalBridge(B, parts, br, rec, lod) {
     const top = deckY(0) - 1.4;
     const rise = Math.min(top - 0.8, sp * 0.3);
     if (sp > 6 && rise > 1) {
-      B.c = Math.cos(-rot + Math.PI / 2); B.s = Math.sin(-rot + Math.PI / 2);
-      B.vault(-hw, hw, -(p1 - 1.8), -(p0 + 1.8), top - rise, rise * 0.98, K.STONE, lod ? 6 : 12);
-      B.c = Math.cos(-rot); B.s = Math.sin(-rot);
+      B.vaultZ(p0 + 1.8, p1 - 1.8, -hw, hw, top - rise, rise * 0.98, K.STONE, lod ? 6 : 12, { thickness: 0.5 });
       // spandrel walls over the arch
       const m = lod ? 3 : 8;
       for (let i = 0; i < m; i++) {
@@ -599,15 +727,16 @@ function canalBridge(B, parts, br, rec, lod) {
   }
   if (br.style === 'tidehall') {
     // the Tidehall: shops both sides, a glass barrel vault, a lantern dome, end towers
-    const hl = L / 2 + 2, sw = hw + 4;
-    for (const s of [-1, 1]) B.box(-hl, hl, s > 0 ? hw - 0.2 : -sw, s > 0 ? sw : -hw + 0.2, deckY(0) - 0.2, deckY(0) + 7.2, K.PUNCHED, K.GARDEN);
-    B.c = Math.cos(-rot + Math.PI / 2); B.s = Math.sin(-rot + Math.PI / 2);
-    B.vault(-sw, sw, -hl, hl, deckY(0) + 7.2, sw * 0.55, K.GLASS, lod ? 6 : 14);
-    B.c = Math.cos(-rot); B.s = Math.sin(-rot);
+    const hl = layout.halfLength, sw = layout.halfWidth;
+    for (const s of [-1, 1]) for (let i = 0; i < n; i++) {
+      const x0 = -hl + 2 * hl * i / n, x1 = -hl + 2 * hl * (i + 1) / n;
+      B.box(x0, x1, s > 0 ? hw - 0.2 : -sw, s > 0 ? sw : -hw + 0.2, Math.min(deckY(x0), deckY(x1)) - 0.25, deckY(0) + 7.2, K.PUNCHED, K.GARDEN);
+    }
+    B.vault(-hl, hl, -sw, sw, deckY(0) + 7.2, sw * 0.55, K.GLASS, lod ? 6 : 14);
     B.lathe(0, 0, [[6, deckY(0) + 7.2 + sw * 0.5, K.STONE], [5.5, deckY(0) + 12 + sw * 0.5, K.LANTERN], [3, deckY(0) + 16 + sw * 0.5, K.GLASS], [0.1, deckY(0) + 18 + sw * 0.5, K.STONE]], 16);
     for (const ex of [-hl - 3, hl + 3]) {
-      B.box(ex - 3, ex + 3, -sw, -sw + 6, deckY(0) - 0.6, deckY(0) + 16, K.PUNCHED, K.STONE);
-      B.box(ex - 3, ex + 3, sw - 6, sw, deckY(0) - 0.6, deckY(0) + 16, K.PUNCHED, K.STONE);
+      B.box(ex - 3, ex + 3, -sw, -sw + 6, y - 0.5, deckY(0) + 16, K.PUNCHED, K.STONE);
+      B.box(ex - 3, ex + 3, sw - 6, sw, y - 0.5, deckY(0) + 16, K.PUNCHED, K.STONE);
     }
   }
   B.frame(0, 0, 0, 0);
@@ -623,12 +752,13 @@ function poolKerb(parts, pool, rec) {
   // orient anticlockwise (inside on the left), then sweep a kerb straddling the water's edge
   let A = 0; for (let i = 0; i < pts.length; i++) { const q = pts[(i + 1) % pts.length]; A += pts[i][0] * q[1] - q[0] * pts[i][1]; }
   if (A < 0) pts = pts.slice().reverse();
-  const y = TOP;
+  const center = pool.box ? [pool.box.x, pool.box.z] : pool.poly ? pool.poly[0] : [pool.x, pool.z];
+  const y = rec.levels.slice().reverse().find((l) => l.grid.sample(center[0], center[1]) < 0)?.y ?? TOP;
   parts.push(sweepLoop(pts, () => [
     { a: [0.35, y - 0.1], b: [0.35, y + 0.45], kind: 1 },
     { a: [0.35, y + 0.45], b: [-0.3, y + 0.45], kind: 1 },
     { a: [-0.3, y + 0.45], b: [-0.3, y - 0.3], kind: 1 },
-  ], { ox: w.x, oz: w.z }));
+  ], { ox: w.x, oz: w.z, closeSection: true }));
 }
 
 function arcadeAlong(B, pts, rec, lod) {
@@ -656,19 +786,36 @@ function arcadeAlong(B, pts, rec, lod) {
   B.frame(0, 0, 0, 0);
 }
 
-function mirrorTerraces(parts, pts, rec) {
-  // stepped rows of solar glass from the balustrade down to the quay, facing the sea
-  const w = rec.w;
-  const faces = [];
-  const n = 6, run = 8.5, drop = (TOP - QY) / n;
+function mirrorTerraces(parts, pts, rec, quayStairs = []) {
+  // Six supported solar-glass steps. Each row is a closed wedge, including its
+  // underside and ends; rows stop where the widening quay no longer supports them.
+  const w = rec.w, n = 6, run = 8.5, drop = (TOP - QY) / n;
+  // Keep each original sweep station's miter geometry. A conservative adjacent
+  // bay clearance prevents a long edge from bridging over the stair opening.
+  const frames = pts.map((p, i) => { const a = pts[Math.max(0, i - 1)], b = pts[Math.min(pts.length - 1, i + 1)]; const dx = b[0] - a[0], dz = b[1] - a[1], ll = Math.hypot(dx, dz) || 1; return { p, nx: dz / ll, nz: -dx / ll, reach: Math.max(Math.hypot(p[0] - a[0], p[1] - a[1]), Math.hypot(b[0] - p[0], b[1] - p[1])) }; });
   for (let k = 0; k < n; k++) {
-    const o0 = 1.2 + k * run, o1 = o0 + run;
-    const y0 = TOP - k * drop, y1 = TOP - (k + 1) * drop;
-    faces.push({ a: [o0, y0 - 0.1], b: [o0, y0 + 0.35], kind: 1 });
-    faces.push({ a: [o1 - 0.4, y1 + 0.35 + drop * 0.55], b: [o0, y0 + 0.35], kind: 7 });
-    faces.push({ a: [o1 - 0.4, y1 - 0.1], b: [o1 - 0.4, y1 + 0.35 + drop * 0.55], kind: 10 });
+    const o0 = 1.2 + k * run, o1 = o0 + run - 0.4;
+    const y0 = TOP - k * drop + 0.35, y1 = TOP - (k + 1) * drop + 0.35 + drop * 0.55;
+    const section = [
+      { a: [o1, QY - 0.2], b: [o1, y1], kind: K.METAL },
+      { a: [o1, y1], b: [o0, y0], kind: K.PV },
+      { a: [o0, y0], b: [o0, QY - 0.2], kind: K.STONE },
+    ];
+    let cur = [];
+    const flush = () => { if (cur.length > 1) parts.push(sweepLoop(cur, () => section, { ox: w.x, oz: w.z, closed: false, closeSection: true, capEnds: true, capKind: K.STONE })); cur = []; };
+    for (const f of frames) {
+      const stairGap = quayStairs.some(stair => {
+        const uv = [o0, o1].map(o => {
+          const dx = f.p[0] + f.nx * o - stair.p[0], dz = f.p[1] + f.nz * o - stair.p[1];
+          return [dx * stair.t[0] + dz * stair.t[1], dx * stair.n[0] + dz * stair.n[1]];
+        });
+        return Math.min(...uv.map(p => p[0])) < 4.3 + f.reach && Math.max(...uv.map(p => p[0])) > -12.1 - f.reach
+          && Math.min(...uv.map(p => p[1])) < (stair.offset || 0) + 4.4 && Math.max(...uv.map(p => p[1])) > -1.8;
+      });
+      if (!stairGap && rec.sea.sample(f.p[0] + f.nx * (o1 + 1), f.p[1] + f.nz * (o1 + 1)) < -1) cur.push(f.p); else flush();
+    }
+    flush();
   }
-  parts.push(sweepLoop(pts, () => faces, { ox: w.x, oz: w.z, closed: false }));
 }
 
 function marina(B, parts, bs, rec, rnd, boats) {
@@ -882,6 +1029,9 @@ export function buildWardLandmarks(scene, rec, P, G, { palette, world } = {}) {
     const y = L.y ?? (L.x !== undefined ? levelY(L.x, L.z) : TOP);
     const W = (o) => ({ ...o, x: w.x + (o.x ?? 0), z: w.z + (o.z ?? 0) });
     switch (L.type) {
+      case 'wardCourt': both((B, pp, lod) => wardCourt(B, pp, { ...W(L), y }, lod)); break;
+      case 'gardenBelvedere': both((B, pp, lod) => gardenBelvedere(B, W(L), y, lod)); break;
+      case 'passengerShelter': both((B, pp, lod) => passengerShelter(B, W(L), y, lod)); break;
       case 'observatory': both((B, pp, lod) => observatory(B, lod ? [] : partsAll, W(L), y)); break;
       case 'planetarium': both((B, pp, lod) => { if (!lod) planetarium(B, partsAll, W(L), y); else { B.frame(w.x + L.x, y, w.z + L.z, 0); B.lathe(0, 0, [[L.r * 0.9, 0, K.STONE], [L.r, L.r + 7, K.GLASS], [0.1, 2 * L.r + 7, K.GLASS]], 12); } }); break;
       case 'armillary': armillary(partsAll, w.x + L.x, y, w.z + L.z, L.r); break;
@@ -893,7 +1043,7 @@ export function buildWardLandmarks(scene, rec, P, G, { palette, world } = {}) {
           const prof = [];
           for (let i = 0; i <= 10; i++) { const a = -Math.PI / 2 + (i / 10) * Math.PI; prof.push([Math.max(0.03, p.s * Math.cos(a)), 2.2 + p.s + p.s * Math.sin(a), K.STONE]); }
           near.lathe(0, 0, prof, 16);
-          if (p.i === 4) partsAll.push(latheFacade([{ r: p.s * 1.3, y: 0, kind: 10 }, { r: p.s * 2.1, y: 0, kind: 10 }, { r: p.s * 2.1, y: 0.2, kind: 10 }, { r: p.s * 1.3, y: 0.2, kind: 10 }], 32).rotateZ(0.4).translate(px, TOP + 2.2 + p.s, pz));
+          if (p.i === 4) partsAll.push(latheFacade([{ r: p.s * 1.3, y: 0, kind: 10 }, { r: p.s * 2.1, y: 0, kind: 10 }, { r: p.s * 2.1, y: 0.2, kind: 10 }, { r: p.s * 1.3, y: 0.2, kind: 10 }], 32, { closedProfile: true }).rotateZ(0.4).translate(px, TOP + 2.2 + p.s, pz));
         }
         break;
       case 'library': both((B, pp, lod) => library(B, W(L), y, lod)); break;
@@ -940,7 +1090,7 @@ export function buildWardLandmarks(scene, rec, P, G, { palette, world } = {}) {
   if (rec.ctx.features.mirrorTerraces) {
     const outer = largest(G.topLoops);
     const pts = outer && span(outer, rec.ctx.features.mirrorTerraces.a0, rec.ctx.features.mirrorTerraces.a1);
-    if (pts) mirrorTerraces(partsAll, pts, rec);
+    if (pts) mirrorTerraces(partsAll, pts, rec, G.quayStairs);
   }
   for (const br of P.bridges) both((B, pp, lod) => canalBridge(B, pp, br, rec, lod));
   for (const pool of P.pools || []) poolKerb(partsAll, pool, rec);

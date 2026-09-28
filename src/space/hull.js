@@ -7,12 +7,16 @@ import { FACADE_GLSL } from '../world/materials.js';
 
 // Shared material for stations and ships (km units). Surface kind per vertex:
 // 0 plating, 1 habitat with windows, 2 solar / radiator panels, 3 dark truss,
-// 4 emissive accent, 5 gold foil, 6 mirror (collector dishes)
+// 4 emissive accent, 5 gold foil, 6 mirror (collector dishes), 7 rock, 8 enclosed garden
 
-export const KIND = { PLATE: 0, HAB: 1, PANEL: 2, TRUSS: 3, GLOW: 4, GOLD: 5, MIRROR: 6 };
+export const KIND = { PLATE: 0, HAB: 1, PANEL: 2, TRUSS: 3, GLOW: 4, GOLD: 5, MIRROR: 6, ROCK: 7, GARDEN: 8 };
+// The 2.5 km garden pods carry an integer number of panes and courts around their longitude.
+export const GARDEN_SURFACE = { circumference:7920, meridian:3280, pane:20, courtU:120, courtV:80 };
 
 const VERT = /* glsl */ `
 attribute float aKind;
+attribute vec2 aSurface;
+varying vec2 vSurface;
 varying vec3 vWorld;
 varying vec3 vN;
 varying vec3 vLocal;
@@ -20,6 +24,7 @@ varying vec3 vLN;
 varying float vKind;
 void main() {
   vKind = aKind;
+  vSurface = aSurface;
   vLocal = position;
   vLN = normal;
   vec4 w = modelMatrix * vec4(position, 1.0);
@@ -46,6 +51,7 @@ uniform float uBehindMask;     // 1: fade where the Hearth's image says the disc
 uniform sampler2D uHearthTex;
 uniform vec2 uHearthRes;
 uniform float uHearthDepth;
+varying vec2 vSurface;
 varying vec3 vWorld;
 varying vec3 vN;
 varying vec3 vLocal;
@@ -146,6 +152,27 @@ void main() {
     alb = vec3(0.9, 0.92, 0.95); rough = 0.06; metal = 1.0;
     float facet = hash13(floor(cellP * 0.5));
     alb *= 0.85 + 0.15 * mix(0.5, facet, detail);
+  } else if (k == 7.0) {
+    float grain = vnoise(sq * 0.004) * 0.55 + vnoise(sq * 0.023 + 71.0) * 0.25;
+    alb = mix(vec3(0.065, 0.057, 0.05), vec3(0.16, 0.145, 0.12), grain);
+    rough = 0.98; metal = 0.0;
+  } else if (k == 8.0) {
+    // Native pod longitude/latitude stays continuous across the whole dome; the
+    // station's cylindrical/planar projection has an abrupt turn on this rounded shell.
+    vec2 garden = vSurface * vec2(${GARDEN_SURFACE.circumference.toFixed(1)},${GARDEN_SURFACE.meridian.toFixed(1)});
+    vec2 footprint = max(fwidth(garden),vec2(1e-3));
+    float gardenPx = max(footprint.x,footprint.y);
+    float panes = fPulse(garden.x,${GARDEN_SURFACE.pane.toFixed(1)},.35,${(GARDEN_SURFACE.pane-.35).toFixed(2)},footprint.x) * fPulse(garden.y,${GARDEN_SURFACE.pane.toFixed(1)},.35,${(GARDEN_SURFACE.pane-.35).toFixed(2)},footprint.y);
+    float planted = fPulse(garden.x,${GARDEN_SURFACE.courtU.toFixed(1)},4.0,${(GARDEN_SURFACE.courtU-4).toFixed(1)},footprint.x) * fPulse(garden.y,${GARDEN_SURFACE.courtV.toFixed(1)},4.0,${(GARDEN_SURFACE.courtV-4).toFixed(1)},footprint.y);
+    float resolved = 1.0-smoothstep(3.0,15.0,gardenPx);
+    // Both noise samples are periodic in longitude too, including the u=0/1 seam.
+    float angle = vSurface.x*6.28318530718;
+    float foliage = mix(.5,vnoise(vec2(sin(angle)*19.0,garden.y*.015))*.65+vnoise(vec2(cos(angle)*95.0,garden.y*.075+19.0))*.35,resolved);
+    vec3 green = mix(vec3(.045,.105,.025),vec3(.16,.24,.065),foliage);
+    vec3 under = mix(vec3(.27,.25,.19),green,planted);
+    alb = mix(vec3(.57,.58,.52),under,panes);
+    rough = mix(.4,.23,panes);metal=mix(.12,.22,panes);
+    em = vec3(1.0,.78,.5) * (.022+.065*(1.0-planted)) * panes;
   } else {
     // plating: 12 x 8 m plates a shade apart, recessed seams, a few dark service hatches
     vec2 pc = floor(sq / vec2(12.0, 8.0));
@@ -208,7 +235,8 @@ export function tag(geo, kind) {
   const g = geo.index ? geo.toNonIndexed() : geo;
   const n = g.attributes.position.count;
   g.setAttribute('aKind', new THREE.Float32BufferAttribute(new Float32Array(n).fill(kind), 1));
-  for (const k of Object.keys(g.attributes)) if (!['position', 'normal', 'aKind'].includes(k)) g.deleteAttribute(k);
+  g.setAttribute('aSurface', g.getAttribute('uv') || new THREE.Float32BufferAttribute(new Float32Array(n*2),2));
+  for (const k of Object.keys(g.attributes)) if (!['position', 'normal', 'aKind', 'aSurface'].includes(k)) g.deleteAttribute(k);
   return g;
 }
 
@@ -218,31 +246,9 @@ export function merge(list) {
   return g;
 }
 
-/**
- * CB.tube with flat end caps on straight two-point tubes (CB.tube itself is open-ended, so
- * truss ends, booms and gallery rails showed hollow from end-on). The cap rim reuses the
- * tube's own frame, so it meets the wall with no sliver. Curved tubes are passed through.
- */
+/** Compatibility name: all CB tubes now have closed ends and periodic loop frames. */
 export function ctube(B, pts, r, seg = 8, k) {
   B.tube(pts, r, seg, k);
-  if (pts.length !== 2 || typeof r === 'function') return;
-  const T = new THREE.Vector3().subVectors(pts[1], pts[0]);
-  if (T.lengthSq() < 1e-12) return;
-  T.normalize();
-  const n0 = new THREE.Vector3().crossVectors(T, Math.abs(T.y) < 0.9 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0)).normalize();
-  const b0 = new THREE.Vector3().crossVectors(T, n0);
-  const d = new THREE.Vector3();
-  for (const [p, dir] of [[pts[0], -1], [pts[1], 1]]) {
-    const c = B.v(p.x, p.y, p.z, 0, 0, k);
-    const first = B.pos.length / 3;
-    for (let i = 0; i < seg; i++) {
-      const a = (i / seg) * Math.PI * 2;
-      d.copy(n0).multiplyScalar(Math.cos(a)).addScaledVector(b0, Math.sin(a));
-      B.v(p.x + d.x * r, p.y + d.y * r, p.z + d.z * r, d.x * r, d.y * r, k);
-    }
-    const hint = T.clone().multiplyScalar(dir);
-    for (let i = 0; i < seg; i++) B.tri(c, first + i, first + ((i + 1) % seg), hint);
-  }
 }
 
 /** A cylinder between two points (for trusses, spokes). */

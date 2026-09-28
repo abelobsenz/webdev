@@ -23,6 +23,7 @@ export class ClimberCars {
   constructor(space, up, schedule, count = 4) {
     this.space = space;
     this.up = up.clone();
+    this.guideAxis = new THREE.Vector3().crossVectors(up,new THREE.Vector3(0,1,0)).normalize();
     this.schedule = schedule;               // flat [offset, dir, run, ...]
     this.group = new THREE.Group();
     const car = buildClimber(1);
@@ -66,7 +67,7 @@ export class ClimberCars {
     for (let k = 0; k < this.cars.length && k < best.length; k++) {
       const c = this.cars[k];
       // up and down cars ride opposite faces of the ribbon
-      c.position.copy(this.up).multiplyScalar(best[k].r);
+      c.position.copy(this.up).multiplyScalar(best[k].r).addScaledVector(this.guideAxis,best[k].dir*.12);
       c.visible = true;
       c.userData.dir = best[k].dir;
     }

@@ -100,7 +100,9 @@ ${frag}
       uTime: { value: 0 }, uSimT: { value: 0 }, uBandAxis: { value: new THREE.Vector3(0, 0, 0) },
       ...uniforms,
     },
-    transparent: true, blending, depthWrite: false, depthTest: true,
+    // Screen expansion changes winding with the projected tangent. Optical ribbons
+    // must survive both orientations, including the far lunar and Earth ring bands.
+    side: THREE.DoubleSide, transparent: true, blending, depthWrite: false, depthTest: true,
   });
 }
 

@@ -615,7 +615,7 @@ function shellTower(t, rnd, site) {
   const H = t.height, R = t.radius;
   const parts = [], near = [];
   const rot = mulberry32(7000 + t.seed * 31)() * TAU;
-  const plan = shellPlan(), P = plan.pts, M = P.length;
+  const plan = shellPlan(), P = plan.pts;
   const sOf = (y) => { const v = Math.max(y, 0) / (H * 0.96); return (1 - 0.72 * Math.pow(v, 1.3)) * (1 + 0.3 * Math.exp(-v * 10)); };
   const turnOf = (y) => (Math.max(y, 0) / (H * 0.96)) * Math.PI * 0.85 + (t.seed || 0);
   const yTop = H * 0.9;
@@ -640,6 +640,18 @@ function shellTower(t, rnd, site) {
   const scale = [1];
   for (let k = 1; k < K; k++) scale.push(scale[k - 1] * (1 - 2.5 / (sOf(bounds[k]) * scale[k - 1] * R)));
   const place = (y, s, a) => { const c = Math.cos(a), sn = Math.sin(a); return P.map(([x, z]) => [(x * c - z * sn) * s, (x * sn + z * c) * s]); };
+  // Each tier is a closed spiral-shaped solid. Capping its own concave outline
+  // preserves the canyon, unlike a circular cap across the entire tower.
+  const cap = (S, y, upward) => {
+    const tris = THREE.ShapeUtils.triangulateShape(S.map(([x, z]) => new THREE.Vector2(x, z)), []);
+    const pos = [], nrm = [], fac = [], idx = [];
+    for (const [x, z] of S) { pos.push(x, y, z); nrm.push(0, upward ? 1 : -1, 0); fac.push(x, z, upward ? 3 : 1); }
+    for (const [a, b, c] of tris) {
+      const ny = (S[b][1] - S[a][1]) * (S[c][0] - S[a][0]) - (S[b][0] - S[a][0]) * (S[c][1] - S[a][1]);
+      if ((ny > 0) === upward) idx.push(a, b, c); else idx.push(a, c, b);
+    }
+    return makeGeo(pos, nrm, fac, idx);
+  };
   for (let k = 0; k < K; k++) {
     const ya = bounds[k], yz = bounds[k + 1], c = scale[k];
     const nRows = Math.max(3, Math.ceil((yz - ya) / 15));
@@ -663,39 +675,16 @@ function shellTower(t, rnd, site) {
       }
       parts.push(makeGeo(pos, null, fac, idx));
     }
+    parts.push(cap(place(ya, sOf(ya) * c * R, turnOf(ya)), ya, false));
+    parts.push(cap(place(yz, sOf(yz) * c * R, turnOf(yz)), yz, true));
     if (k < K - 1) {
-      // the ledge between this tier and the next: planted on top where the tier above steps in,
-      // a soffit underneath where it steps out over the canyon (the other copy is inside a tier)
+      // The tier's top and the next tier's underside form real ledges and
+      // cantilever soffits, without coincident two-sided connector sheets.
       const y = yz, a = turnOf(y);
-      const L = place(y, sOf(y) * c * R, a), U = place(y, sOf(y) * scale[k + 1] * R, a);
-      const pos = [], nrm = [], fac = [], idx = [];
-      for (const [upward, kind] of [[true, 3], [false, 1]]) {
-        const b = pos.length / 3;
-        for (const Q of [L, U]) for (const [x, z] of Q) { pos.push(x, y, z); nrm.push(0, upward ? 1 : -1, 0); fac.push(x, z, kind); }
-        for (let i = 0; i < M; i++) {
-          const i1 = (i + 1) % M;
-          const A = b + i, B = b + i1, C = b + M + i1, D = b + M + i;
-          const [ax, az] = L[i], [bx, bz] = L[i1], [cx, cz] = U[i1];
-          const ny = (bz - az) * (cx - ax) - (bx - ax) * (cz - az);
-          if ((ny > 0) === upward) idx.push(A, B, C, A, C, D); else idx.push(A, C, B, A, D, C);
-        }
-      }
-      parts.push(makeGeo(pos, nrm, fac, idx));
+      const L = place(y, sOf(y) * c * R, a);
       // a glass balustrade round the ledge's edge (hidden inside the tier above where it overhangs)
       near.push({ geo: shellRail(L, plan.nrm, a, y), y });
     }
-  }
-  // the roof: a garden over the last tier
-  {
-    const y = yTop, S = place(y, sOf(y) * scale[K - 1] * R, turnOf(y));
-    const tris = THREE.ShapeUtils.triangulateShape(S.map(([x, z]) => new THREE.Vector2(x, z)), []);
-    const pos = [], nrm = [], fac = [], idx = [];
-    for (const [x, z] of S) { pos.push(x, y, z); nrm.push(0, 1, 0); fac.push(x, z, 3); }
-    for (const [a, b, c] of tris) {
-      const ny = (S[b][1] - S[a][1]) * (S[c][0] - S[a][0]) - (S[b][0] - S[a][0]) * (S[c][1] - S[a][1]);
-      if (ny > 0) idx.push(a, b, c); else idx.push(a, c, b);
-    }
-    parts.push(makeGeo(pos, nrm, fac, idx));
   }
   // the crown: a drum on the axis over the heart of the spiral, a lantern, a cornice and the spire
   const env = sOf(yTop) * scale[K - 1] * R;
@@ -741,16 +730,17 @@ function shellRail(L, nrm0, a, y) {
     }
     for (let i = 0; i < M; i++) { const A = b + i * 2, B = A + 1, C = A + 2, D = A + 3; idx.push(A, B, C, B, D, C); }
   }
-  {
+  for (const top of [true, false]) {
     const b = pos.length / 3;
+    const yy = top ? y + h : y - 0.1;
     for (let i = 0; i <= M; i++) {
       const [x, z] = L[i % M], [nx0, nz0] = nrm0[i % M];
       const nx = nx0 * c - nz0 * sn, nz = nx0 * sn + nz0 * c;
-      pos.push(x - nx * (inset - half), y + h, z - nz * (inset - half), x - nx * (inset + half), y + h, z - nz * (inset + half));
-      nrm.push(0, 1, 0, 0, 1, 0);
+      pos.push(x - nx * (inset - half), yy, z - nz * (inset - half), x - nx * (inset + half), yy, z - nz * (inset + half));
+      nrm.push(0, top ? 1 : -1, 0, 0, top ? 1 : -1, 0);
       fac.push(us[i], 0, 10, us[i], 0.14, 10);
     }
-    for (let i = 0; i < M; i++) { const A = b + i * 2, B = A + 1, C = A + 2, D = A + 3; idx.push(A, B, C, B, D, C); }
+    for (let i = 0; i < M; i++) { const A = b + i * 2, B = A + 1, C = A + 2, D = A + 3; if (top) idx.push(A, B, C, B, D, C); else idx.push(A, C, B, B, C, D); }
   }
   return makeGeo(pos, nrm, fac, idx);
 }
@@ -797,12 +787,10 @@ export function buildTowers(list, groundHeight, scene) {
     const env = {};
     const foot = FOOT_REACH[t.type];
     if (foot) {
-      let lo = ground, hi = ground;
       const reach = foot * t.radius * 1.25;
-      for (let i = 0; i < 16; i++) {
-        const g = groundHeight(t.x + Math.cos(i * TAU / 16) * reach, t.z + Math.sin(i * TAU / 16) * reach);
-        lo = Math.min(lo, g); hi = Math.max(hi, g);
-      }
+      // Survey the full footprint: a sparse outer ring can miss an interior
+      // terrain hollow and leave part of the plinth hovering above the shore.
+      const { lo, hi } = groundRange({ at: (dx, dz) => groundHeight(t.x + dx, t.z + dz) }, reach);
       baseY = Math.max(ground, hi - 10, 0.5) - 2;
       env.drop = baseY - Math.max(lo, 0) + 3;
     }

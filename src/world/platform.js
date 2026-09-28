@@ -317,8 +317,11 @@ export function pointInLoop(x, z, pts) {
  * section(x, z, k) returns faces [{ a: [o, y], b: [o, y], kind }] (o = metres outward),
  * always the same number of faces; each face's normal is (dy, -do) in (outward, up).
  * ox, oz: the loop's frame origin in world space.
+ * closeSection closes the material profile with its return face and normalizes
+ * its orientation; capEnds seals
+ * an open path. Leave both off for wall surfaces joined to a larger ground mesh.
  */
-export function sweepLoop(loop, section, { ox = 0, oz = 0, closed = true, u0 = 0 } = {}) {
+export function sweepLoop(loop, section, { ox = 0, oz = 0, closed = true, u0 = 0, closeSection = false, capEnds = closeSection, capKind = 1 } = {}) {
   const n = loop.length;
   const nrm = [];
   for (let k = 0; k < n; k++) {
@@ -339,8 +342,28 @@ export function sweepLoop(loop, section, { ox = 0, oz = 0, closed = true, u0 = 0
   for (let k = 1; k <= n; k++) arc.push(arc[k - 1] + Math.hypot(loop[k % n][0] - loop[k - 1][0], loop[k % n][1] - loop[k - 1][1]));
   const secs = [];
   for (let k = 0; k < n; k++) secs.push(section(loop[k][0], loop[k][1], k));
+  if (closeSection && secs.some(s => Math.hypot(s.at(-1).b[0] - s[0].a[0], s.at(-1).b[1] - s[0].a[1]) > 1e-8)) {
+    for (let k = 0; k < n; k++) {
+      const s = secs[k];
+      secs[k] = [...s, { a: s.at(-1).b, b: s[0].a, kind: capKind }];
+    }
+  }
+  if (closeSection) {
+    // Closed material has an unambiguous outside. Reversed section profiles
+    // otherwise produce inward side walls against the outward path end caps.
+    // Use one orientation for the entire sweep so collapsed entrance sections
+    // retain their corresponding faces at adjacent stations.
+    const orientation = secs.map(s => s.reduce((a, f) => a + f.a[0] * f.b[1] - f.b[0] * f.a[1], 0)).find(a => Math.abs(a) > 1e-8);
+    if (orientation < 0) for (let k = 0; k < n; k++) secs[k] = secs[k].slice().reverse().map(f => ({ ...f, a: f.b, b: f.a }));
+  }
   const F = secs[0].length;
   const pos = [], nor = [], fac = [], idx = [];
+  const triangleNormal = (a, b, c) => {
+    const ux = pos[b * 3] - pos[a * 3], uy = pos[b * 3 + 1] - pos[a * 3 + 1], uz = pos[b * 3 + 2] - pos[a * 3 + 2];
+    const vx = pos[c * 3] - pos[a * 3], vy = pos[c * 3 + 1] - pos[a * 3 + 1], vz = pos[c * 3 + 2] - pos[a * 3 + 2];
+    return [uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx];
+  };
+  const agreement = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
   const segs = closed ? n : n - 1;
   for (let f = 0; f < F; f++) {
     const base = pos.length / 3;
@@ -367,14 +390,50 @@ export function sweepLoop(loop, section, { ox = 0, oz = 0, closed = true, u0 = 0
     }
     for (let k = 0; k < segs; k++) {
       const a = base + k * 2, b = a + 1, c = a + 2, e = a + 3;
-      idx.push(a, c, b, b, c, e);
+      // Variable wall batter can make a corner's return quad concave. Its
+      // diagonal must stay inside the material; flipping the wrong triangle
+      // later would hide the inversion while leaving an overlapping sliver.
+      const current = agreement(triangleNormal(a, c, b), triangleNormal(b, c, e));
+      const alternate = current < 0 ? agreement(triangleNormal(a, c, e), triangleNormal(a, e, b)) : -1;
+      if (alternate > 0) idx.push(a, c, e, a, e, b);
+      else idx.push(a, c, b, b, c, e);
+    }
+  }
+  if (capEnds && !closed) {
+    for (const k of [0, n - 1]) {
+      const s = secs[k], outline = s.map(f => f.a);
+      const last = s.at(-1).b;
+      if (Math.hypot(last[0] - outline[0][0], last[1] - outline[0][1]) > 1e-8) outline.push(last);
+      // Repeated corners arise where a parapet collapses at an entrance.
+      const contour = outline.filter((p, i) => !i || Math.hypot(p[0] - outline[i - 1][0], p[1] - outline[i - 1][1]) > 1e-8);
+      if (contour.length < 3) continue;
+      const triangles = THREE.ShapeUtils.triangulateShape(contour.map(p => new THREE.Vector2(...p)), []);
+      const base = pos.length / 3, [mx, mz, miter] = nrm[k];
+      const p = loop[k === 0 ? 0 : n - 2], q = loop[k === 0 ? 1 : n - 1];
+      const length = Math.hypot(q[0] - p[0], q[1] - p[1]), sign = k === 0 ? -1 : 1;
+      const nx = sign * (q[0] - p[0]) / length, nz = sign * (q[1] - p[1]) / length;
+      for (const [o, y] of contour) {
+        pos.push(ox + loop[k][0] + mx * o * miter, y, oz + loop[k][1] + mz * o * miter);
+        nor.push(nx, 0, nz); fac.push(o, y, capKind);
+      }
+      for (const t of triangles) idx.push(...t.map(i => base + i));
     }
   }
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
   g.setAttribute('aFacade', new THREE.Float32BufferAttribute(fac, 3));
-  g.setIndex(fixWinding(pos, nor, idx));
+  // A parapet intentionally collapses to the terrace at an entrance. Its
+  // vanishing faces have no material area; discard them after Float32
+  // conversion so distant world coordinates cannot leave collapsed slivers.
+  const rendered = g.attributes.position.array, valid = [];
+  for (let t = 0; t < idx.length; t += 3) {
+    const a = idx[t] * 3, b = idx[t + 1] * 3, c = idx[t + 2] * 3;
+    const ux = rendered[b] - rendered[a], uy = rendered[b + 1] - rendered[a + 1], uz = rendered[b + 2] - rendered[a + 2];
+    const vx = rendered[c] - rendered[a], vy = rendered[c + 1] - rendered[a + 1], vz = rendered[c + 2] - rendered[a + 2];
+    if (Math.hypot(uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx) > 0) valid.push(idx[t], idx[t + 1], idx[t + 2]);
+  }
+  g.setIndex(fixWinding(rendered, nor, valid));
   return g;
 }
 

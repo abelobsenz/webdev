@@ -4,6 +4,10 @@ import { U } from '../core/uniforms.js';
 import { SNOISE_GLSL } from './glsl.js';
 import { createRibbonMaterial, buildRibbonGeometry } from './lines.js';
 import { R_MOON } from './sim.js';
+import { buildLunarPort, buildLunarRingDistricts } from './lunarPort.js';
+import { stationFrame } from './stations.js';
+import { craftMesh, addLamps, pixelRadius } from './craftMesh.js';
+import { buildLunarServiceCourt } from './interfaces.js';
 
 // The terraformed Moon: seas in the old maria, green highlands softened craters,
 // polar ice, clouds, city lights, a thin blue atmosphere and an equatorial ring.
@@ -224,18 +228,30 @@ void main() {
   float sh = b > 0.0 ? 1.0 : smoothstep(${R_MOON.toFixed(1)} - 20.0, ${R_MOON.toFixed(1)} + 20.0, length(p - uSunDir * b));
   vec3 sunL = uSunE * sh * vec3(1.0, 0.97, 0.93);
   float u = vRing.x, v = vRing.y;
-  float fu = fwidth(u);
-  float detail = 1.0 - smoothstep(0.06, 0.35, fu);
-  float panel = hash12(floor(vec2(u / 1.2, v * 6.0)));
-  vec3 alb = vec3(0.42, 0.42, 0.44) * (0.8 + 0.3 * mix(0.5, panel, detail));
-  vec3 col = alb / 3.14159 * sunL * max(dot(N, uSunDir), 0.0);
-  vec3 V = normalize(cameraPosition - vWorld);
-  col += sunL * pow(max(dot(N, normalize(V + uSunDir)), 0.0), 150.0) * 0.5;
-  float cell = hash12(floor(vec2(u / 0.4, v * 16.0)));
-  float lit = mix(0.35, step(0.55, cell) * (0.5 + cell), detail);
-  col += vec3(0.85, 0.9, 1.0) * lit * (0.06 + 0.2 * (1.0 - sh)) * smoothstep(0.45, 0.3, abs(v));
-  float pulse = pow(fract(u / 60.0 - uTime * 0.4), 16.0) * smoothstep(0.42, 0.5, abs(v));
-  col += vec3(0.7, 0.8, 1.0) * pulse * 1.2;
+  float across = v * 11.0;
+  float px = max(fwidth(u), fwidth(across));
+  float top = step(0.5, vRing.z);
+  // A planned cross-section: a central service boulevard, paired transit lines,
+  // garden terraces and neighbourhood halls beside two physical shield galleries.
+  float garden = smoothstep(2.65,2.8,abs(across)) * (1.0-smoothstep(4.8,4.95,abs(across)));
+  float district = fract(u / 17.32 + .5);
+  float plaza = 1.0-smoothstep(.04,.075,abs(district-.5));
+  float localWalk = 1.0-smoothstep(.11,.19,abs(abs(across)-3.0));
+  float carriage = 1.0-smoothstep(.27,.36,abs(abs(across)-1.7));
+  float verge = 1.0-smoothstep(.035+px,.07+px,abs(abs(across)-2.09));
+  vec3 alb = mix(vec3(.35,.37,.38),vec3(.045,.065,.07),carriage);
+  alb = mix(alb,vec3(.085,.14,.065),garden*(1.0-plaza*.8));
+  alb = mix(alb,vec3(.49,.46,.4),max(localWalk,plaza*garden));
+  alb = mix(vec3(.28,.29,.3),alb,top);
+  vec3 col = alb / 3.14159 * sunL * max(dot(N,uSunDir),0.0);
+  vec3 V = normalize(cameraPosition-vWorld);
+  col += sunL * pow(max(dot(N,normalize(V+uSunDir)),0.0),55.0)*.045;
+  // Bounded public lighting reveals longitudinal order in lunar night without giant
+  // random square emitters. Narrow lights settle to their coverage when unresolved.
+  float railLamp = exp(-pow((abs(across)-1.7)/max(.028,px*.7),2.0))*min(1.0,.028/max(px,.028));
+  float walkLamp = exp(-pow((abs(across)-3.0)/max(.018,px*.7),2.0))*min(1.0,.018/max(px,.018));
+  float buildingGlow = garden*plaza*.022;
+  col += top*(alb*.034+vec3(.45,.8,1.0)*railLamp*.34+vec3(1.0,.72,.4)*(walkLamp*.24+buildingGlow)+vec3(.45,.64,.6)*verge*.025);
   gl_FragColor = vec4(col, 1.0);
 }
 `;
@@ -251,18 +267,21 @@ void main() {
 }
 `;
 
-function buildBand(R, w, segs) {
+export function buildBand(R, w, segs) {
   const pos = [], nor = [], ring = [], idx = [];
   const prof = [];
   for (let i = 0; i <= 8; i++) { const t = i / 8 - 0.5; prof.push([t * w, 0, 0, 1, t]); }
+  prof.push([w*.5,-.28,1,0,.5]);
+  for(let i=7;i>=0;i--) {const t=i/8-.5;prof.push([t*w,-.28,0,-1,t]);}
+  prof.push([-w*.5,0,-1,0,-.5]);
   const M = prof.length;
   for (let j = 0; j <= segs; j++) {
     const th = (j / segs) * Math.PI * 2;
     const c = Math.cos(th), s = Math.sin(th);
-    for (const [ax, dr, , , v] of prof) {
+    for (const [ax, dr, na, nr, v] of prof) {
       pos.push(c * (R + dr), ax, s * (R + dr));
-      nor.push(c, 0, s);
-      ring.push(th * R, v, 0);
+      nor.push(c*nr, na, s*nr);
+      ring.push(th * R, v, nr === 1 ? 1 : 0);
     }
   }
   for (let j = 0; j < segs; j++) for (let i = 0; i < M - 1; i++) {
@@ -311,6 +330,26 @@ export class Moon {
     this.far = new THREE.Mesh(buildRibbonGeometry([{ pts, along, id: 0 }]), this.farMat);
     this.far.renderOrder = 11;
     this.group.add(this.far);
+    this.districtData=buildLunarRingDistricts();
+    this.districts=craftMesh(this.districtData.geo,{accent:[.7,.85,1],lit:.5});
+    this.group.add(this.districts);
+    this.port = new THREE.Group();
+    this.port.name='Tranquillity Exchange';
+    this.port.position.set(R_MOON+380,0,0);
+    stationFrame(new THREE.Vector3(1,0,0),this.port.quaternion);
+    this.portData=buildLunarPort();
+    const portMesh=craftMesh(this.portData.geo,{accent:[.7,.85,1],lit:.6});
+    portMesh.name='Tranquillity terminal and receiving courts';
+    addLamps(portMesh,this.portData.lamps,{minPx:1.2});
+    this.port.add(portMesh);
+    this.group.add(this.port);
+    this.courtData=buildLunarServiceCourt();
+    this.court=craftMesh(this.courtData.geo,{accent:[.7,.85,1],lit:.6});
+    const courtAngle=8.35/(R_MOON+380),courtUp=new THREE.Vector3(Math.cos(courtAngle),0,Math.sin(courtAngle));
+    this.court.position.copy(courtUp).multiplyScalar(R_MOON+380).setY(2.75);
+    stationFrame(courtUp,this.court.quaternion);
+    addLamps(this.court,this.courtData.lamps,{minPx:.65});
+    this.group.add(this.court);
     this.group.traverse((o) => { o.frustumCulled = false; });
   }
 
@@ -345,5 +384,6 @@ export class Moon {
     const fu = this.farMat.uniforms;
     fu.uSunDir.value.copy(sim.sunDir);
     fu.uBandAxis.value.set(0, 1, 0).applyQuaternion(sim.moonQuat);
+    if(this.space.camera)this.court.visible=pixelRadius(this.space.camera,this.court.getWorldPosition(new THREE.Vector3()),this.courtData.radius,this.space.size.y)>3;
   }
 }

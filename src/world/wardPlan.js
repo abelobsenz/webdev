@@ -16,6 +16,13 @@ export const FIELD_N = 1024;
 const E2 = 16;                      // land field distance range (m)
 const enc = (d, R = E2) => Math.max(0, Math.min(255, Math.round((d + R) * (255 / (2 * R)))));
 
+// Planning shapes share the SDF convention (+rotation turns east toward south).
+// Building lot frames use Three's opposite yaw; convert it explicitly here.
+export function siteShape(s) {
+  return s.prim || (s.poly ? SD.polygon(s.poly) : s.box ? SD.rbox(s.box.x, s.box.z, s.box.hw, s.box.hd, s.box.rot || 0, s.box.round ?? 4) : SD.circle(s.x, s.z, s.r));
+}
+const lotShape = (L, pad = 0) => SD.rbox(L.x ?? L.lx, L.z ?? L.lz, L.w / 2 + pad, L.d / 2 + pad, -(L.rot || 0), 0);
+
 // ----------------------------------------------------------- polylines --
 export const T = {
   line(x0, z0, x1, z1, step = 8) {
@@ -129,7 +136,16 @@ export function buildWardPlan(ctx, design) {
   const lap = (k) => { const t = performance.now(); prof[k] = (prof[k] || 0) + (t - _t); _t = t; };
   const raw = design.plan(ctx, T);
   lap('design');
-  const out = { field, land, reserve, half, streets: [], squares: [], lots: [], lamps: [], bridges: [], stairs: [], parks: raw.parks || [], landmarks: raw.landmarks || [], quayWalks: [], extras: raw.extras || {} };
+  const sites = (raw.sites || []).map((s) => ({ ...s, prim: siteShape(s) }));
+  // Allocate civic plots before streets, so a lane cannot erase a requested college or
+  // run through a civic hall. A site's larger garden reservation can have a smaller
+  // solid street obstacle (the observatory's entrance must still reach its terrace).
+  const obstacles = [
+    ...sites.filter((s) => s.blockStreets).map((s) => ({ prim: s.streetShape || s.prim, margin: s.streetMargin ?? 3, name: s.name || 'landmark' })),
+    ...(raw.lots || []).filter((L) => L.civic).map((L) => ({ prim: lotShape(L, 1.2), margin: 4.5, name: L.program || L.type })),
+    ...(raw.pools || []).map((p) => ({ prim: siteShape(p), margin: 2.4, name: 'ornamental pool' })),
+  ];
+  const out = { field, land, reserve, half, sites, obstacles, streets: [], squares: [], lots: [], lamps: [], bridges: [], stairs: [], parks: raw.parks || [], paths: raw.paths || [], accessRoutes: raw.accessRoutes || [], landmarks: raw.landmarks || [], quayWalks: [], extras: raw.extras || {} };
 
   // ---- streets, clipped to the level they run on
   for (const st of raw.streets) {
@@ -138,14 +154,32 @@ export function buildWardPlan(ctx, design) {
     const P = densify(st.pts, 4);
     const runs = [];
     let cur = null, blockedGap = false;
-    for (const p of P) {
-      const blk = ctx.blocked ? ctx.blocked(p[0], p[1], hw) : false;
-      const y = blk ? null : ctx.levelAt(p[0], p[1], st.margin ?? 2.0);
+    for (let pi = 0; pi < P.length; pi++) {
+      const p = P[pi], prev = P[Math.max(0, pi - 1)], next = P[Math.min(P.length - 1, pi + 1)];
+      const dx = next[0] - prev[0], dz = next[1] - prev[1], len = Math.hypot(dx, dz) || 1;
+      const blk = (ctx.blocked ? ctx.blocked(p[0], p[1], hw) : false) || obstacles.some((s) => s.prim.d(p[0], p[1]) < hw + s.margin);
+      let y = blk ? null : ctx.levelAt(p[0], p[1], st.margin ?? 2.0);
+      if (y !== null) {
+        // Test the actual road cross-section, rather than assuming a two-metre
+        // centreline setback can support a thirty-metre boulevard.
+        for (const side of [-1, 1]) if (ctx.levelAt(p[0] - dz / len * hw * side, p[1] + dx / len * hw * side, 0.4) !== y) y = null;
+      }
       if (y === null) { cur = null; if (blk) blockedGap = true; continue; }
       if (!cur || Math.abs(cur.y - y) > 0.1) { cur = { pts: [], y, blockedBefore: blockedGap }; runs.push(cur); blockedGap = false; }
       cur.pts.push(p);
     }
-    const keep = runs.filter((r) => r.pts.length > 1 && T.length(r.pts) >= 10);
+    // A tiny run may be discarded between a solid plot and open water. Preserve
+    // the solid obstruction across it; otherwise the next retained run could
+    // incorrectly create a bridge through the plot that clipped the road.
+    const keep = [];
+    let blockedSinceKept = false;
+    for (const r of runs) {
+      blockedSinceKept ||= r.blockedBefore;
+      if (r.pts.length < 2 || T.length(r.pts) < 10) continue;
+      r.blockedBefore = blockedSinceKept;
+      keep.push(r);
+      blockedSinceKept = false;
+    }
     for (let k = 1; k < keep.length; k++) {
       const A = keep[k - 1], B = keep[k];
       const a = A.pts[A.pts.length - 1], b = B.pts[0];
@@ -169,6 +203,16 @@ export function buildWardPlan(ctx, design) {
   out.bridges = dedupe(out.bridges, (b) => [(b.a[0] + b.b[0]) / 2, (b.a[1] + b.b[1]) / 2], 12);
   for (const b of raw.bridges || []) out.bridges.push(b);
   for (const st of out.streets) field.polyline(st.pts, st.hw);
+  // A bridge's shops/entrance towers and a terrace stair's cheeks are physical
+  // construction beyond the clipped street. Reserve the complete construction
+  // before allocating any neighboring parcel or vegetation.
+  out.transportSites = [];
+  if (ctx.connectorSite) for (const [kind, list] of [['bridge', out.bridges], ['stair', out.stairs]]) for (const connector of list) {
+    const prim = ctx.connectorSite(connector, kind);
+    if (!prim) continue;
+    out.transportSites.push({ kind, prim, connector });
+    raster(prim, 2, (k, d) => { if (d < 0) reserve[k] = Math.max(reserve[k], 2); });
+  }
 
   lap('streets');
   // ---- squares (circles) and plazas (rounded boxes), parks, beds, zones, inlays
@@ -255,10 +299,11 @@ export function buildWardPlan(ctx, design) {
   }
   out.detail = detail;
   out.detailN = DN;
-  for (const s of raw.sites || []) {
-    const prim = s.prim || (s.poly ? SD.polygon(s.poly) : s.box ? SD.rbox(s.box.x, s.box.z, s.box.hw, s.box.hd, s.box.rot || 0, s.box.round ?? 4) : SD.circle(s.x, s.z, s.r));
-    raster(prim, 2, (k, d) => { if (d < (s.margin ?? 4)) reserve[k] = Math.max(reserve[k], 2); });
+  for (const s of sites) {
+    // Landmark protection outranks public paving even though its enum value is lower.
+    raster(s.prim, (s.margin ?? 4) + 2, (k, d) => { if (d < (s.margin ?? 4)) reserve[k] = 2; });
   }
+  for (const s of out.transportSites) raster(s.prim, 2, (k, d) => { if (d < 0) reserve[k] = 2; });
 
   lap('fields');
   // ---- lots along every frontage
@@ -271,11 +316,12 @@ export function buildWardPlan(ctx, design) {
     return reserve[j * N + i];
   };
   const excl = raw.exclusions || [];
+  let largestLotRadius = 0;
   const lotOk = (L) => {
     const c = Math.cos(L.rot), s = Math.sin(L.rot);
     let y0 = null;
     for (let iu = -1; iu <= 1; iu += 0.5) for (let iv = -1; iv <= 1; iv += 0.5) {
-      const lx = iu * L.w * 0.5, lz = iv * L.d * 0.5;
+      const lx = iu * (L.w * 0.5 + 0.6), lz = iv * (L.d * 0.5 + 0.6);
       const x = L.lx + lx * c + lz * s, z = L.lz - lx * s + lz * c;
       const y = ctx.levelAt(x, z, 5);
       if (y === null || (y0 !== null && Math.abs(y - y0) > 0.1)) return false;
@@ -283,7 +329,11 @@ export function buildWardPlan(ctx, design) {
       if (field.edge(x, z) < SETBACK - 0.6) return false;
       if (field.squareAt(x, z) > 0.02) return false;
       if (resAt(x, z)) return false;
-      if (land[(Math.min(N - 1, Math.max(0, Math.floor((z + half) / cell))) * N + Math.min(N - 1, Math.max(0, Math.floor((x + half) / cell)))) * 4] < enc(1.5)) return false;
+      // Authored civic entrances deliberately meet their forecourt paving.
+      // The rounded paint cap can extend under the podium; it must not delete
+      // the very college or museum the path serves. Roads, sites, water, other
+      // buildings and support still undergo the same exact checks above/below.
+      if (!L.civic && land[(Math.min(N - 1, Math.max(0, Math.floor((z + half) / cell))) * N + Math.min(N - 1, Math.max(0, Math.floor((x + half) / cell)))) * 4] < enc(1.5)) return false;
     }
     L.y = y0;
     const rad = Math.hypot(L.w, L.d) * 0.5;
@@ -292,7 +342,8 @@ export function buildWardPlan(ctx, design) {
       else if (Math.hypot(e.x - L.lx, e.z - L.lz) < Math.hypot(e.w, e.d) * 0.5 + rad && obbOverlap({ x: e.x, z: e.z, w: e.w, d: e.d, rot: e.rot || 0 }, { x: L.lx, z: L.lz, w: L.w, d: L.d, rot: L.rot }, 3)) return false;
     }
     const gx = Math.floor(L.lx / G), gz = Math.floor(L.lz / G);
-    for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) {
+    const reach = Math.max(1, Math.ceil((rad + largestLotRadius + 4) / G));
+    for (let dx = -reach; dx <= reach; dx++) for (let dz = -reach; dz <= reach; dz++) {
       const list = grid.get(`${gx + dx},${gz + dz}`);
       if (list) for (const o of list) if (Math.hypot(o.lx - L.lx, o.lz - L.lz) < rad + Math.hypot(o.w, o.d) * 0.5 + 3 && obbOverlap({ x: o.lx, z: o.lz, w: o.w, d: o.d, rot: o.rot }, { x: L.lx, z: L.lz, w: L.w, d: L.d, rot: L.rot }, L.gap ?? 3.2)) return false;
     }
@@ -300,6 +351,7 @@ export function buildWardPlan(ctx, design) {
   };
   const addLot = (L) => {
     out.lots.push(L);
+    largestLotRadius = Math.max(largestLotRadius, Math.hypot(L.w, L.d) * 0.5);
     const k = gkey(L.lx, L.lz);
     if (!grid.has(k)) grid.set(k, []);
     grid.get(k).push(L);
@@ -325,7 +377,9 @@ export function buildWardPlan(ctx, design) {
           for (let tryW = 0; tryW < 3 && !placed; tryW++) {
             const p = T.at(P, sv + wd / 2);
             const nx = -p.tz * side, nz = p.tx * side;
-            const off = st.hw + (rule.setback ? rule.setback(cls) : SB[cls]) + dep / 2;
+            // Setbacks are measured to the built podium (0.6 m beyond its lot),
+            // with a small raster allowance, rather than to the paper footprint.
+            const off = st.hw + (rule.setback ? rule.setback(cls) : SB[cls]) + 0.9 + dep / 2;
             const L = { lx: p.x + nx * off, lz: p.z + nz * off, w: wd, d: dep, rot: Math.atan2(-nx, -nz), cls, street: st };
             if (lotOk(L)) {
               L.seed = rnd() * 1000;
@@ -346,7 +400,8 @@ export function buildWardPlan(ctx, design) {
 
   lap('lots');
   // ---- lamps along the verges and round the squares
-  const lampOk = (x, z) => ctx.levelAt(x, z, 1.2) !== null && field.edge(x, z) > 0.3 && field.squareAt(x, z) < 0.05;
+  const lampSafe = (x, z) => ctx.levelAt(x, z, 1.2) !== null && resAt(x, z) !== 2 && !obstacles.some((o) => o.prim.d(x, z) < 0.6) && !(ctx.blocked && ctx.blocked(x, z, 0));
+  const lampOk = (x, z) => lampSafe(x, z) && field.edge(x, z) > 0.3 && field.squareAt(x, z) < 0.05;
   for (const st of out.streets) {
     const P = st.pts;
     const spacing = st.cls === ST.AVENUE ? 26 : st.cls === ST.ESPLANADE ? 22 : st.cls === ST.STREET ? 30 : 34;
@@ -375,7 +430,7 @@ export function buildWardPlan(ctx, design) {
     for (let k = 0; k < n; k++) {
       const a = (k / n) * TAU;
       const x = q.x + Math.cos(a) * (q.r - 2), z = q.z + Math.sin(a) * (q.r - 2);
-      if (ctx.levelAt(x, z, 1) !== null) out.lamps.push({ lx: x, lz: z, yaw: a + Math.PI, cls: 0 });
+      if (lampSafe(x, z)) out.lamps.push({ lx: x, lz: z, yaw: a + Math.PI, cls: 0 });
     }
   }
   for (const l of raw.lamps || []) out.lamps.push(l);

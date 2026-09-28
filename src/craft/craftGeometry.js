@@ -22,7 +22,7 @@ import * as THREE from 'three';
 //   refinery (from the cryo refinery)    Selene Works: spindle, habitat wheel, cracking
 //                                        columns, tank clusters, heat radiators, vent.
 
-export const CK = { GLASS: 0, HULL: 1, LANTERN: 2, GARDEN: 3, CONDUIT: 4, PANEL: 7, BRONZE: 8, DECK: 9, DARK: 10, RADIATOR: 11, ROOF: 12 };
+export const CK = { GLASS: 0, HULL: 1, LANTERN: 2, GARDEN: 3, CONDUIT: 4, PANEL: 7, BRONZE: 8, DECK: 9, DARK: 10, RADIATOR: 11, ROOF: 12, CONSERVATORY: 13 };
 const TAU = Math.PI * 2;
 
 export class CB {
@@ -57,7 +57,7 @@ export class CB {
    * Loft closed rings along z. rings: [{ z, pts: [[x, y], ...], cx, cy }] (equal counts).
    * kindFn(i, j) picks the facade kind per vertex (i around, j along).
    */
-  loft(rings, kindFn, { capStart = false, capEnd = false } = {}) {
+  loft(rings, kindFn, { capStart = true, capEnd = true } = {}) {
     const n = rings[0].pts.length;
     const base = this.pos.length / 3;
     const cols = n + 1;
@@ -75,30 +75,54 @@ export class CB {
     const hint = new THREE.Vector3();
     for (let j = 0; j < rings.length - 1; j++) {
       const R = rings[j];
-      const cx = R.cx || 0, cy = R.cy || 0;
+      let sectionArea = 0;
+      for (let i = 0; i < n; i++) { const a = R.pts[i], b = R.pts[(i + 1) % n]; sectionArea += a[0] * b[1] - b[0] * a[1]; }
+      const orientation = Math.sign(sectionArea) || 1;
       for (let i = 0; i < n; i++) {
         const a = base + j * cols + i, b = a + 1, c = a + cols, d = c + 1;
-        const p = R.pts[i];
-        hint.set(p[0] - cx, p[1] - cy, 0);
+        const p = R.pts[i], next = R.pts[(i + 1) % n];
+        hint.set((next[1] - p[1]) * orientation, (p[0] - next[0]) * orientation, 0);
         if (hint.lengthSq() < 1e-8) hint.set(0, 1, 0);
         this.tri(a, b, d, hint); this.tri(a, d, c, hint);
       }
     }
     const cap = (R, dir, k) => {
-      const c = this.v(R.cx || 0, R.cy || 0, R.z, 0, 0, k);
+      const cx = R.pts.reduce((s, p) => s + p[0], 0) / n, cy = R.pts.reduce((s, p) => s + p[1], 0) / n;
+      const c = this.v(cx, cy, R.z, cx, cy, k);
       const first = this.pos.length / 3;
       for (let i = 0; i < n; i++) this.v(R.pts[i][0], R.pts[i][1], R.z, R.pts[i][0], R.pts[i][1], k);
       for (let i = 0; i < n; i++) this.tri(c, first + i, first + ((i + 1) % n), new THREE.Vector3(0, 0, dir));
     };
-    if (capStart) cap(rings[0], -1, typeof capStart === 'number' ? capStart : CK.HULL);
-    if (capEnd) cap(rings[rings.length - 1], 1, typeof capEnd === 'number' ? capEnd : CK.HULL);
+    const direction = Math.sign(rings[rings.length - 1].z - rings[0].z) || 1;
+    if (capStart !== false) cap(rings[0], -direction, typeof capStart === 'number' ? capStart : CK.HULL);
+    if (capEnd !== false) cap(rings[rings.length - 1], direction, typeof capEnd === 'number' ? capEnd : CK.HULL);
   }
 
-  /** Surface of revolution about local z. prof: [[r, z, kind], ...]. */
-  lathe(prof, seg = 16, phase = 0) {
-    const rings = prof.map(([r, z]) => ({ z, pts: sectionEllipse(Math.max(r, 1e-3), Math.max(r, 1e-3), seg, 2, phase) }));
-    // per-ring kind; lathe hint is radial, which fails where r shrinks to a point: fine
-    this.loft(rings, (i, j) => prof[Math.min(j + 1, prof.length - 1)][2] ?? prof[j][2] ?? CK.HULL);
+  /** Closed material volume about local z. closedProfile keeps an axial bore or nozzle open. */
+  lathe(prof, seg = 16, phase = 0, { closedProfile = false } = {}) {
+    let P = prof.map(([r, z, k]) => [Math.max(0, r), z, k ?? CK.HULL]);
+    closedProfile ||= Math.hypot(P[0][0] - P[P.length - 1][0], P[0][1] - P[P.length - 1][1]) < 1e-9;
+    if (!closedProfile) P = [[0, P[0][1], P[0][2]], ...P, [0, P[P.length - 1][1], P[P.length - 1][2]]];
+    P = P.filter((p, i) => !i || Math.hypot(p[0] - P[i - 1][0], p[1] - P[i - 1][1]) > 1e-9);
+    if (Math.hypot(P[0][0] - P[P.length - 1][0], P[0][1] - P[P.length - 1][1]) > 1e-9) P.push([...P[0]]);
+    let area = 0;
+    for (let j = 0; j < P.length - 1; j++) area += P[j][0] * P[j + 1][1] - P[j + 1][0] * P[j][1];
+    const orientation = Math.sign(area) || 1;
+    for (let j = 0; j < P.length - 1; j++) {
+      const [r0, z0] = P[j], [r1, z1, k] = P[j + 1];
+      if (r0 === 0 && r1 === 0) continue;
+      for (let i = 0; i < seg; i++) {
+        const a = phase + i / seg * TAU, b = phase + ((i + 1) % seg) / seg * TAU;
+        const h = new THREE.Vector3((z1 - z0) * Math.cos((a + (phase + (i + 1) / seg * TAU)) / 2), (z1 - z0) * Math.sin((a + (phase + (i + 1) / seg * TAU)) / 2), r0 - r1).multiplyScalar(orientation);
+        const v = (r, z, angle) => this.v(Math.cos(angle) * r, Math.sin(angle) * r, z, angle * Math.max(r0, r1), z, k);
+        if (r0 === 0) this.tri(v(0, z0, a), v(r1, z1, a), v(r1, z1, b), h);
+        else if (r1 === 0) this.tri(v(r0, z0, a), v(0, z1, a), v(r0, z0, b), h);
+        else {
+          const p0 = v(r0, z0, a), p1 = v(r0, z0, b), p2 = v(r1, z1, a), p3 = v(r1, z1, b);
+          this.tri(p0, p1, p3, h); this.tri(p0, p3, p2, h);
+        }
+      }
+    }
   }
 
   box(cx, cy, cz, sx, sy, sz, k = CK.HULL) {
@@ -123,8 +147,13 @@ export class CB {
   /** Tube along points (local frame), radius r (number or fn(t)). */
   tube(pts, r, seg = 8, k = CK.HULL) {
     const N = pts.length;
+    const closed = N > 2 && pts[0].distanceToSquared(pts[N - 1]) < 1e-16;
     const T = [], Nn = [], Bn = [];
-    for (let i = 0; i < N; i++) T.push(new THREE.Vector3().subVectors(pts[Math.min(i + 1, N - 1)], pts[Math.max(i - 1, 0)]).normalize());
+    for (let i = 0; i < N; i++) {
+      const before = closed && (i === 0 || i === N - 1) ? N - 2 : Math.max(i - 1, 0);
+      const after = closed && (i === 0 || i === N - 1) ? 1 : Math.min(i + 1, N - 1);
+      T.push(new THREE.Vector3().subVectors(pts[after], pts[before]).normalize());
+    }
     let n0 = Math.abs(T[0].y) < 0.9 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0);
     n0 = new THREE.Vector3().crossVectors(T[0], n0).normalize();
     Nn.push(n0); Bn.push(new THREE.Vector3().crossVectors(T[0], n0));
@@ -134,6 +163,7 @@ export class CB {
       if (ax.length() > 1e-6) n.applyAxisAngle(ax.normalize(), Math.acos(THREE.MathUtils.clamp(T[i - 1].dot(T[i]), -1, 1)));
       Nn.push(n); Bn.push(new THREE.Vector3().crossVectors(T[i], n));
     }
+    if (closed) { Nn[N - 1].copy(Nn[0]); Bn[N - 1].copy(Bn[0]); }
     const base = this.pos.length / 3;
     let L = 0;
     for (let j = 0; j < N; j++) {
@@ -150,6 +180,17 @@ export class CB {
       const a = base + j * cols + i, b = a + 1, c = a + cols, d = c + 1;
       const h = Nn[j].clone().multiplyScalar(Math.cos(((i + 0.5) / seg) * TAU)).addScaledVector(Bn[j], Math.sin(((i + 0.5) / seg) * TAU));
       this.tri(a, b, d, h); this.tri(a, d, c, h);
+    }
+    if (!closed) for (const [j, sign] of [[0, -1], [N - 1, 1]]) {
+      const rr = typeof r === 'function' ? r(j / (N - 1)) : r;
+      const c = this.v(pts[j].x, pts[j].y, pts[j].z, 0, 0, k);
+      const rim = [];
+      for (let i = 0; i < seg; i++) {
+        const a = i / seg * TAU;
+        const d = Nn[j].clone().multiplyScalar(Math.cos(a) * rr).addScaledVector(Bn[j], Math.sin(a) * rr).add(pts[j]);
+        rim.push(this.v(d.x, d.y, d.z, Math.cos(a) * rr, Math.sin(a) * rr, k));
+      }
+      for (let i = 0; i < seg; i++) this.tri(c, rim[i], rim[(i + 1) % seg], T[j].clone().multiplyScalar(sign));
     }
   }
 
@@ -190,15 +231,7 @@ export function sectionEllipse(a, b, count, n = 2, phase = 0, belly = 1) {
 }
 
 /** Lathe about local z with one facade kind per band (prof = [[r, z, kind], ...]; band i..i+1 takes prof[i+1]'s kind). */
-function lathe(B, prof, seg = 16, phase = 0) {
-  for (let i = 0; i < prof.length - 1; i++) {
-    const [r0, z0] = prof[i];
-    const [r1, z1, k] = prof[i + 1];
-    if (Math.abs(r0 - r1) < 1e-6 && Math.abs(z0 - z1) < 1e-6) continue;
-    const e0 = Math.max(r0, 1e-3), e1 = Math.max(r1, 1e-3);
-    B.loft([{ z: z0, pts: sectionEllipse(e0, e0, seg, 2, phase) }, { z: z1, pts: sectionEllipse(e1, e1, seg, 2, phase) }], k ?? CK.HULL);
-  }
-}
+function lathe(B, prof, seg = 16, phase = 0, opts) { B.lathe(prof, seg, phase, opts); }
 
 const lerp = (a, b, t) => a + (b - a) * t;
 const ss = (a, b, x) => { const t = Math.min(Math.max((x - a) / (b - a), 0), 1); return t * t * (3 - 2 * t); };
@@ -313,7 +346,8 @@ export function buildTender(len = 300) {
     const a = (k / 5) * TAU + Math.PI / 2;
     const x = Math.cos(a) * 9, y = Math.sin(a) * 8;
     B.at(x, y, -140);
-    B.lathe([[3.4, -16, CK.CONDUIT], [4.4, -15, CK.DARK], [3.2, -10, CK.DARK], [2.2, -4, CK.BRONZE], [3.0, 0, CK.HULL]], 14);
+    B.lathe([[3.4, -16, CK.CONDUIT], [4.4, -15, CK.DARK], [3.2, -10, CK.DARK], [2.2, -4, CK.BRONZE], [3.0, 0, CK.HULL],
+      [2.4, 0, CK.HULL], [1.6, -4, CK.DARK], [2.6, -10, CK.DARK], [3.1, -15, CK.DARK]], 14, 0, { closedProfile: true });
     B.pop();
     glows.push({ p: new THREE.Vector3(x, y, -156).multiplyScalar(s), r: 5 * s, dir: new THREE.Vector3(0, 0, -1) });
   }
@@ -439,7 +473,8 @@ export function buildLiner(len = 2400) {
   const glows = [];
   const bell = (x, y, r, glowR) => {
     B.at(x, y, -1150);
-    B.lathe([[r * 0.82, -r * 1.6, CK.CONDUIT], [r, -r * 1.55, CK.DARK], [r * 0.7, -r * 0.9, CK.DARK], [r * 0.45, -r * 0.2, CK.BRONZE], [r * 0.6, 0, CK.HULL]], 24);
+    B.lathe([[r * 0.82, -r * 1.6, CK.CONDUIT], [r, -r * 1.55, CK.DARK], [r * 0.7, -r * 0.9, CK.DARK], [r * 0.45, -r * 0.2, CK.BRONZE], [r * 0.6, 0, CK.HULL],
+      [r * 0.5, 0, CK.HULL], [r * 0.35, -r * 0.2, CK.DARK], [r * 0.59, -r * 0.9, CK.DARK], [r * 0.77, -r * 1.55, CK.DARK]], 24, 0, { closedProfile: true });
     B.pop();
     glows.push({ p: new THREE.Vector3(x, y, -1150 - r * 1.6).multiplyScalar(s), r: glowR * s, dir: new THREE.Vector3(0, 0, -1) });
   };
@@ -488,12 +523,18 @@ export function buildLiner(len = 2400) {
 
 // -------------------------------------------------------------- refinery ----
 /** Selene Works. Local +Y is the spindle axis. Returns { geo, wheel, glows, vent, size }. */
-export function buildRefinery(scale = 1) {
+export function buildRefinery(scale = 1, { supports = true } = {}) {
   const B = new CB();
   const W = new CB();
   B.push(new THREE.Matrix4().makeScale(scale, scale, scale));
   W.push(new THREE.Matrix4().makeScale(scale, scale, scale));
   const toY = new THREE.Matrix4().makeRotationX(-Math.PI / 2);        // local z -> +y
+  const tanks = [], radiators = [], berths = [], supportRanges = [];
+  const support = (name, draw) => {
+    if (!supports) return;
+    const start = B.idx.length; draw();
+    supportRanges.push({ name, start, count: B.idx.length - start });
+  };
   // spindle
   B.push(toY);
   B.lathe([[20, -3000, CK.CONDUIT], [160, -2960, CK.BRONZE], [120, -2700, CK.HULL], [110, -800, CK.HULL], [260, -700, CK.GLASS], [260, -500, CK.GLASS],
@@ -515,6 +556,12 @@ export function buildRefinery(scale = 1) {
     B.torus(560, 26, 72, 8, CK.BRONZE);
     B.pop();
   }
+  // Cast manifold collars bridge the small radial gap between the tapered
+  // spindle and the existing column lines. The three process tiers remain legible.
+  for (const y of [-2200, -1500, -1000]) support(`manifold-root-${y}`, () => {
+    B.push(new THREE.Matrix4().makeTranslation(0, y, 0).multiply(new THREE.Matrix4().makeRotationX(Math.PI / 2)));
+    B.torus(125, 24, 48, 10, CK.BRONZE); B.pop();
+  });
   // tank clusters high on the spindle: pearl and gold spheres
   const sph = (x, y, z, r, k) => {
     const prof = [];
@@ -523,16 +570,23 @@ export function buildRefinery(scale = 1) {
   };
   for (let k = 0; k < 8; k++) {
     const a = (k / 8) * TAU + 0.2;
-    sph(Math.cos(a) * 420, 1200 + (k % 2) * 260, Math.sin(a) * 420, 170 + (k % 3) * 40, k % 3 === 0 ? CK.BRONZE : CK.HULL);
-    B.tube([new THREE.Vector3(Math.cos(a) * 110, 1200 + (k % 2) * 260, Math.sin(a) * 110), new THREE.Vector3(Math.cos(a) * 300, 1200 + (k % 2) * 260, Math.sin(a) * 300)], 18, 6, CK.DARK);
+    const r = 170 + (k % 3) * 40, y = 1200 + (k % 2) * 260;
+    const p = new THREE.Vector3(Math.cos(a) * 680, y, Math.sin(a) * 680);
+    sph(p.x,p.y,p.z,r,k % 3 === 0 ? CK.BRONZE : CK.HULL);
+    B.tube([new THREE.Vector3(Math.cos(a) * 110, y, Math.sin(a) * 110), new THREE.Vector3(Math.cos(a) * (680-r+25), y, Math.sin(a) * (680-r+25))], 24, 8, CK.DARK);
+    tanks.push({ center:p.clone().multiplyScalar(scale), radius:r*scale });
   }
-  // heat radiators: four great fins below the wheel
+  // Heat exchangers occupy their own lower tier, clear of the complete rotating wheel.
   for (let k = 0; k < 4; k++) {
     const a = (k / 4) * TAU + Math.PI / 4;
     B.push(new THREE.Matrix4().makeRotationY(-a));
-    B.box(700, -350, 0, 1100, 30, 30, CK.DARK);
-    B.box(1500, -350, 0, 1700, 620, 16, CK.RADIATOR);
+    B.box(700, -1350, 0, 1100, 48, 48, CK.DARK);
+    support(`radiator-root-${k}`, () => B.box(160, -1350, 0, 160, 88, 86, CK.BRONZE));
+    B.box(1500, -1350, 0, 1700, 620, 16, CK.RADIATOR);
+    B.box(2355,-1350,0,30,650,40,CK.BRONZE);
+    B.box(1500,-1670,0,1710,25,35,CK.BRONZE);
     B.pop();
+    radiators.push({ yMin:-1682.5*scale, yMax:-1025*scale, rMin:650*scale, rMax:2370*scale, angle:a });
   }
   // docking ring at the upper end
   B.push(new THREE.Matrix4().makeRotationX(Math.PI / 2));
@@ -541,7 +595,30 @@ export function buildRefinery(scale = 1) {
   B.torus(400, 10, 64, 6, CK.CONDUIT);
   B.pop(); B.pop();
   for (let k = 0; k < 4; k++) { const a = (k / 4) * TAU; B.tube([new THREE.Vector3(Math.cos(a) * 110, 2150, Math.sin(a) * 110), new THREE.Vector3(Math.cos(a) * 400, 2150, Math.sin(a) * 400)], 16, 6, CK.DARK); }
+  // Tankers berth bow-first at three dedicated fluid/crew transfer collars.
+  for (let k=0;k<3;k++) {
+    const a=k/3*TAU+.5,d=new THREE.Vector3(Math.cos(a),0,Math.sin(a));
+    const shipRadius=850, nose=530*560/1100, tip=shipRadius-nose;
+    B.tube([d.clone().multiplyScalar(420).setY(2150),d.clone().multiplyScalar(tip).setY(2150)],26,10,CK.HULL);
+    B.at(d.x*(tip-20),2150,d.z*(tip-20),0,-a+Math.PI/2,0);
+    B.lathe([[20,-25,CK.BRONZE],[38,-16,CK.BRONZE],[38,16,CK.LANTERN],[20,25,CK.BRONZE]],20,0,{closedProfile:true}); B.pop();
+    berths.push({ position:d.clone().multiplyScalar(shipRadius*scale).setY(2150*scale), forward:d.clone().negate(), tip:d.clone().multiplyScalar(tip*scale).setY(2150*scale) });
+    // Crew commons above the loading tier, each on an enclosed lift gallery.
+    const ca=a+Math.PI/3, cd=new THREE.Vector3(Math.cos(ca),0,Math.sin(ca));
+    B.tube([cd.clone().multiplyScalar(80).setY(2480),cd.clone().multiplyScalar(760).setY(2730)],45,10,CK.HULL);
+    B.push(new THREE.Matrix4().makeTranslation(cd.x*890,2730,cd.z*890).multiply(toY));
+    B.lathe([[220,-90,CK.HULL],[290,-45,CK.BRONZE],[300,0,CK.GARDEN],[275,90,CK.ROOF],[180,200,CK.ROOF],[0,240,CK.BRONZE]],28);B.pop();
+  }
   // habitat wheel (separate so it can turn): torus, spokes and hub
+  W.push(toY);
+  W.lathe([[270,-710,CK.BRONZE],[350,-675,CK.HULL],[350,-525,CK.GLASS],[270,-490,CK.BRONZE]],36,0,{closedProfile:true});
+  W.pop();
+  // Small bearing rollers physically join the spindle to the rotating hub races.
+  for(let k=0;k<24;k++) {
+    const a=k/24*TAU;
+    W.at(Math.cos(a)*265,-600,Math.sin(a)*265);
+    W.lathe([[0,-5.5,CK.BRONZE],[5.5,0,CK.BRONZE],[0,5.5,CK.BRONZE]],10);W.pop();
+  }
   W.push(new THREE.Matrix4().makeTranslation(0, -600, 0).multiply(new THREE.Matrix4().makeRotationX(Math.PI / 2)));
   W.torus(2200, 170, 128, 16, CK.GLASS);
   W.torus(2380, 30, 128, 6, CK.LANTERN);
@@ -549,10 +626,10 @@ export function buildRefinery(scale = 1) {
   W.pop();
   for (let k = 0; k < 6; k++) {
     const a = (k / 6) * TAU;
-    W.tube([new THREE.Vector3(Math.cos(a) * 280, -600, Math.sin(a) * 280), new THREE.Vector3(Math.cos(a) * 2050, -600, Math.sin(a) * 2050)], (t) => 60 - 20 * Math.sin(Math.PI * t), 10, k % 2 ? CK.HULL : CK.GLASS);
+    W.tube([new THREE.Vector3(Math.cos(a) * 330, -600, Math.sin(a) * 330), new THREE.Vector3(Math.cos(a) * 2050, -600, Math.sin(a) * 2050)], (t) => 60 - 20 * Math.sin(Math.PI * t), 10, k % 2 ? CK.HULL : CK.GLASS);
   }
   W.pop();
   B.pop();
   const glows = [{ p: new THREE.Vector3(0, -3010, 0).multiplyScalar(scale), r: 160 * scale, dir: new THREE.Vector3(0, -1, 0) }];
-  return { geo: B.geometry(), wheel: W.geometry(), glows, wheelY: -600 * scale, size: 6000 * scale };
+  return { geo: B.geometry(), wheel: W.geometry(), glows, wheelY: -600 * scale, size: 6000 * scale, tanks, radiators, berths, supportRanges, wheelEnvelope:{rMin:2020*scale,rMax:2410*scale,yMin:-770*scale,yMax:-430*scale} };
 }

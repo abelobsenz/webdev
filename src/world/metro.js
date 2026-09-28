@@ -9,11 +9,11 @@ import { mergeClean } from './geom.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { SDFGrid, SD, sweepLoop, capPolys, nestLoops, loopSpan, loopArea } from './platform.js';
 import { buildWardPlan, landTexture, T } from './wardPlan.js';
-import { DESIGNS, wardShape, angDiff, inArc } from './wards.js';
+import { DESIGNS, wardShape, angDiff, inArc, refineWardCourts } from './wards.js';
 import { buildBuildings } from './buildings.js';
 import { buildStreetscape } from './streetscape.js';
 import { buildWardBridges } from './bridges.js';
-import { buildWardLandmarks } from './wardLandmarks.js';
+import { buildWardLandmarks, wardBridgeLayout } from './wardLandmarks.js';
 
 // Greater Meridian: the Outer Wards. Seven sea districts stand on built platforms in a
 // ring 11-17 km out from the Axis, each designed as a city of its own (wards.js): its own
@@ -160,8 +160,17 @@ function buildFields(rec) {
   // the landing points: where each bridge meets the terrace wall
   for (const L of rec.landings) {
     const d = [Math.cos(L.b), Math.sin(L.b)];
-    let r = R(L.b) * 0.5;
-    while (r < R(L.b) * 1.2 && top.sample(d[0] * r, d[1] * r) < 0) r += 0.5;
+    // Enter from the sea. A ray beginning in the town would stop at its first
+    // canal, carrying the entire sea bridge through the neighborhoods beyond
+    // it. The landing pad was deliberately founded at the outer shore above.
+    const start = R(L.b) * 0.5;
+    let r = start;
+    // Keep the existing half-metre survey lattice, so already valid coastlines
+    // retain their exact street/parcel seed stream when another ward is fixed.
+    for (let i = Math.ceil(R(L.b) * 0.8 / 0.5); i >= 0; i--) {
+      const q = start + i * 0.5;
+      if (top.sample(d[0] * q, d[1] * q) < 0) { r = q + 0.5; break; }
+    }
     L.E = [d[0] * r, d[1] * r];                        // on the wall line (local)
     L.t = [-d[0], -d[1]];                              // pointing into the ward
     L.side = [-L.t[1], L.t[0]];                        // frameAt side: (-t.z, t.x)
@@ -300,29 +309,107 @@ function seaSection(rec, gapAt) {
   const band = (rec.design.wall && rec.design.wall.band) ?? 10;
   return (x, z) => {
     const g = gapAt(x, z);
-    const kh = 0.45 * (1 - g), kw = 0.7 * (1 - g);
+    const kh = 0.45 * (1 - g);
     return [
       { a: [2.4, -16], b: [0, QUAY_Y - 0.7], kind: low },
       { a: [0, QUAY_Y - 0.7], b: [0, QUAY_Y + kh], kind: band },
-      { a: [0, QUAY_Y + kh], b: [-kw, QUAY_Y + kh], kind: 1 },
-      { a: [-kw, QUAY_Y + kh], b: [-kw, QUAY_Y - 0.05], kind: 1 },
+      { a: [0, QUAY_Y + kh], b: [-0.7, QUAY_Y + kh], kind: 1 },
+      { a: [-0.7, QUAY_Y + kh], b: [-0.7, -16], kind: low },
     ];
   };
 }
 
-function wallSection(y0, y1, kind, gapAt, { glass = true } = {}) {
+function wallSection(y0, y1, kind, gapAt) {
   return (x, z) => {
     const g = gapAt(x, z);
-    const ph = 0.45 * (1 - g), cw = 0.8 * (1 - g), gh = glass ? 0.95 * (1 - g) : 0.001;
+    const ph = 0.45 * (1 - g);
     return [
       { a: [0, y0 - 0.1], b: [0, y1 + ph], kind },
-      { a: [0, y1 + ph], b: [-cw, y1 + ph], kind: 1 },
-      { a: [-cw, y1 + ph], b: [-cw, y1 - 0.05], kind: 1 },
-      { a: [-0.34 * (1 - g), y1 + ph], b: [-0.34 * (1 - g), y1 + ph + gh], kind: 12 },
-      { a: [-0.34 * (1 - g), y1 + ph + gh], b: [-0.46 * (1 - g), y1 + ph + gh], kind: 10 },
-      { a: [-0.46 * (1 - g), y1 + ph + gh], b: [-0.46 * (1 - g), y1 + ph], kind: 12 },
+      { a: [0, y1 + ph], b: [-0.8, y1 + ph], kind: 1 },
+      { a: [-0.8, y1 + ph], b: [-0.8, y0 - 0.1], kind },
     ];
   };
+}
+
+// A simplified contour can have a long straight edge through a stair entrance.
+// Insert the actual gap and transition intersections so every opening is built,
+// regardless of whether the original contour happened to have a vertex there.
+function refineWallGaps(loop, gaps) {
+  if (!gaps.length) return loop;
+  const out = [];
+  for (let i = 0; i < loop.length; i++) {
+    const a = loop[i], b = loop[(i + 1) % loop.length], dx = b[0] - a[0], dz = b[1] - a[1], ll = dx * dx + dz * dz;
+    if (ll < 1e-12) continue;
+    const ts = [0];
+    for (const g of gaps) {
+      const ax = a[0] - g.x, az = a[1] - g.z, dot = ax * dx + az * dz;
+      for (const extra of [0, 0.5, 1, 1.5, 2]) {
+        const disc = dot * dot - ll * (ax * ax + az * az - (g.hw + extra) ** 2);
+        if (disc < 0) continue;
+        for (const t of [(-dot - Math.sqrt(disc)) / ll, (-dot + Math.sqrt(disc)) / ll]) if (t > 1e-8 && t < 1 - 1e-8) ts.push(t);
+      }
+    }
+    ts.sort((a, b) => a - b);
+    for (let j = 0; j < ts.length; j++) if (!j || ts[j] - ts[j - 1] > 1e-7) out.push([a[0] + dx * ts[j], a[1] + dz * ts[j]]);
+  }
+  return out;
+}
+
+// A raster contour can contain a short edge between two sharp turns. A constant
+// width miter can fold across that edge (especially the battered seawall base).
+// Keep the visible contour fixed and taper the return/batter locally so each end
+// occupies at most 40% of the adjacent segment's length. This leaves a real,
+// positive-width material section and prevents crossed wall faces.
+function wallSweep(loop, section, options = {}) {
+  const closed = options.closed !== false, count = loop.length;
+  const sections = loop.map((p, k) => section(...p, k));
+  const safe = loop.map((p, k) => {
+    const a = loop[closed ? (k - 1 + count) % count : Math.max(0, k - 1)];
+    const b = loop[closed ? (k + 1) % count : Math.min(count - 1, k + 1)];
+    let ax = p[0] - a[0], az = p[1] - a[1], bx = b[0] - p[0], bz = b[1] - p[1];
+    if (!closed && k === 0) { ax = bx; az = bz; }
+    if (!closed && k === count - 1) { bx = ax; bz = az; }
+    const la = Math.hypot(ax, az) || 1, lb = Math.hypot(bx, bz) || 1;
+    const rx = az / la, rz = -ax / la, sx = bz / lb, sz = -bx / lb;
+    const ml = Math.hypot(rx + sx, rz + sz) || 1;
+    const nx = (rx + sx) / ml, nz = (rz + sz) / ml;
+    const miter = 1 / Math.max(nx * rx + nz * rz, 0.55);
+    const alongA = Math.abs((nx * ax + nz * az) / la * miter);
+    const alongB = Math.abs((nx * bx + nz * bz) / lb * miter);
+    return Math.min(alongA > 1e-8 ? la * 0.4 / alongA : Infinity, alongB > 1e-8 ? lb * 0.4 / alongB : Infinity);
+  });
+  const scales = sections.map((s, k) => Math.min(1, safe[k] / (Math.max(...s.flatMap(f => [Math.abs(f.a[0]), Math.abs(f.b[0])])) || 1)));
+  return sweepLoop(loop, (_x, _z, k) => {
+    // Carry the narrower section onto its neighbours so a battered face does
+    // not make a sudden sideways step immediately before a tight corner.
+    const before = closed ? (k - 1 + count) % count : Math.max(0, k - 1);
+    const after = closed ? (k + 1) % count : Math.min(count - 1, k + 1);
+    const scale = Math.min(scales[before], scales[k], scales[after]);
+    return sections[k].map(f => ({ ...f, a: [f.a[0] * scale, f.a[1]], b: [f.b[0] * scale, f.b[1]] }));
+  }, options);
+}
+
+function terraceSolids(loop, y0, y1, kind, gaps, ox, oz) {
+  const gapAt = gapFn(gaps), pts = refineWallGaps(loop, gaps);
+  const out = [wallSweep(pts, wallSection(y0, y1, kind, gapAt), { ox, oz, closeSection: true })];
+  const glass = (x, z) => {
+    const f = 1 - gapAt(x, z), bottom = y1 + 0.45 * f, top = bottom + 0.95 * f;
+    return [
+      { a: [-0.34, bottom], b: [-0.34, top], kind: 12 },
+      { a: [-0.34, top], b: [-0.46, top], kind: 10 },
+      { a: [-0.46, top], b: [-0.46, bottom], kind: 12 },
+    ];
+  };
+  const keep = pts.map(p => gapAt(...p) < 0.99);
+  if (keep.every(Boolean)) out.push(wallSweep(pts, glass, { ox, oz, closeSection: true }));
+  else {
+    const start = keep.findIndex(k => !k), n = pts.length;
+    let run = [];
+    const flush = () => { if (run.length > 1) out.push(wallSweep(run, glass, { ox, oz, closed: false, closeSection: true, capEnds: true })); run = []; };
+    for (let i = 1; i <= n; i++) { const k = (start + i) % n; if (keep[k]) run.push(pts[k]); else flush(); }
+    flush();
+  }
+  return out;
 }
 
 /** The longest run of loop vertices whose bearing (from the ward centre) lies in [a0, a1]. */
@@ -357,6 +444,7 @@ function boxAlong(parts, p, t, n, u0, u1, o0, o1, y0, y1, kind, ox, oz, topKind 
   const tb = pos.length / 3;
   for (let i = 0; i < 4; i++) { pos.push(q[i][0], y1, q[i][1]); nor.push(0, 1, 0); fac.push(q[i][0], q[i][1], topKind); }
   idx.push(tb, tb + 1, tb + 2, tb, tb + 2, tb + 3);
+  quad(V(3, y0), V(2, y0), V(1, y0), V(0, y0), 0, -1, 0, kind);
   const sides = [[0, 1, [-n[0], -n[1]]], [1, 2, t], [2, 3, n], [3, 0, [-t[0], -t[1]]]];
   for (const [a, b, nn] of sides) quad(V(a, y0), V(b, y0), V(b, y1), V(a, y1), nn[0], 0, nn[1], kind);
   const g = new THREE.BufferGeometry();
@@ -395,7 +483,7 @@ function mooringGeometry() {
   const col = (g, c) => { const n = g.attributes.position.count, a = new Float32Array(n * 3); for (let i = 0; i < n; i++) { a[i * 3] = c[0]; a[i * 3 + 1] = c[1]; a[i * 3 + 2] = c[2]; } g.setAttribute('color', new THREE.BufferAttribute(a, 3)); return g; };
   const prep = (g) => { g = g.index ? g.toNonIndexed() : g; g.deleteAttribute('uv'); return g; };
   const bronze = [0.23, 0.2, 0.17], stone = [0.62, 0.6, 0.56];
-  const prof = [[0.001, QUAY_Y - 0.03], [0.17, QUAY_Y - 0.03], [0.17, QUAY_Y + 0.05], [0.14, QUAY_Y + 0.12], [0.13, QUAY_Y + 0.46], [0.2, QUAY_Y + 0.52], [0.2, QUAY_Y + 0.6], [0.12, QUAY_Y + 0.68], [0.001, QUAY_Y + 0.7]].map(([r, y]) => new THREE.Vector2(r, y));
+  const prof = [[0, QUAY_Y - 0.03], [0.17, QUAY_Y - 0.03], [0.17, QUAY_Y + 0.05], [0.14, QUAY_Y + 0.12], [0.13, QUAY_Y + 0.46], [0.2, QUAY_Y + 0.52], [0.2, QUAY_Y + 0.6], [0.12, QUAY_Y + 0.68], [0, QUAY_Y + 0.7]].map(([r, y]) => new THREE.Vector2(r, y));
   const bol = prep(new THREE.LatheGeometry(prof, 10)); bol.translate(0, 0, -1.3);
   // the wall face at y: z = 2.4 (QUAY_Y - 0.7 - y) / (QUAY_Y + 15.3)
   const face = (y) => (2.4 * (QUAY_Y - 0.7 - y)) / (QUAY_Y + 15.3);
@@ -409,22 +497,67 @@ function mooringMaterial() {
   return (_mooringMat ??= new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.45, metalness: 0.35 }));
 }
 
+function terraceStairLayout(rec, s) {
+  const grid = rec.levels.find(l => Math.abs(l.y - s.y1) < .1)?.grid;
+  if (!grid) return null;
+  let lo = 0, hi = 1;
+  for (let k = 0; k < 24; k++) {
+    const q = (lo + hi) / 2, x = s.lo[0] + (s.hi[0] - s.lo[0]) * q, z = s.lo[1] + (s.hi[1] - s.lo[1]) * q;
+    if (grid.sample(x, z) < 0) hi = q; else lo = q;
+  }
+  s.wall = [s.lo[0] + (s.hi[0] - s.lo[0]) * hi, s.lo[1] + (s.hi[1] - s.lo[1]) * hi];
+  const d = [s.wall[0] - s.lo[0], s.wall[1] - s.lo[1]];
+  const dl = Math.hypot(d[0], d[1]) || 1;
+  const t = [d[0] / dl, d[1] / dl];
+  const side = [-t[1], t[0]];
+  const rise = s.y1 - s.y0;
+  const n = Math.max(4, Math.round(rise / 0.3));
+  const run = n * 0.42;
+  // The terrace contour curves across a broad flight. Finish every riser
+  // before the earliest bank contact, then carry a level landing over the
+  // complete contour, so its outer corners cannot fall into a narrow trench.
+  const upperGrid = rec.levels.find(l => Math.abs(l.y - s.y1) < .1).grid;
+  let firstBank = Infinity, lastBank = -Infinity;
+  for (let v = -s.hw; v <= s.hw + .01; v += Math.min(1, s.hw / 8)) {
+    for (let u = -20; u <= 20; u += .1) {
+    if (upperGrid.sample(s.wall[0] + side[0] * v + t[0] * u, s.wall[1] + side[1] * v + t[1] * u) < -.15) {
+      firstBank = Math.min(firstBank, u); lastBank = Math.max(lastBank, u); break;
+    }
+    }
+  }
+  const finish = Number.isFinite(firstBank) ? firstBank - .8 : -1.2;
+  const landingEnd = Number.isFinite(lastBank) ? lastBank + .8 : .8;
+  const landingLength = landingEnd - finish;
+  return { t, side, rise, n, run, finish, landingLength, landingEnd, start: finish - run };
+}
+
 function buildPlatform(rec, P) {
   const { w, sea, levels, design } = rec;
   const ox = w.x, oz = w.z;
-  const walls = [], quay = [], grounds = [], sand = [], near = [], far = [];
+  const walls = [], quay = [], grounds = [], sand = [], near = [], far = [], connectors = [];
   // gaps in the parapets: bridge landings, the heads of stairs, quay stairs
   const topGaps = [], levelGaps = levels.map(() => []), seaGaps = [];
   for (const L of rec.landings) topGaps.push({ x: L.E[0], z: L.E[1], hw: L.kind === 'ring' ? 7.5 : 14.5 });
+  // Local canal crossings need openings too. Locate every actual coast crossing
+  // along the emitted bridge alignment; a long causeway can cross both an inner
+  // bank and a separate crown islet.
+  for (const br of P.bridges) {
+    const length = Math.hypot(br.b[0] - br.a[0], br.b[1] - br.a[1]), n = Math.ceil(length / 1.5), grid = levels[0].grid;
+    let previous = grid.sample(...br.a);
+    for (let i = 1; i <= n; i++) {
+      const x = br.a[0] + (br.b[0] - br.a[0]) * i / n, z = br.a[1] + (br.b[1] - br.a[1]) * i / n, value = grid.sample(x, z);
+      if (previous * value <= 0) {
+        const f = Math.abs(previous) / (Math.abs(previous) + Math.abs(value) || 1), t = (i - 1 + f) / n;
+        topGaps.push({ x: br.a[0] + (br.b[0] - br.a[0]) * t, z: br.a[1] + (br.b[1] - br.a[1]) * t, hw: br.hw + 1.2 });
+      }
+      previous = value;
+    }
+  }
   for (const s of P.stairs) {
     const k = levels.findIndex((l) => Math.abs(l.y - s.y1) < 0.1);
     if (k > 0) {
-      // the wall crossing between the two street ends
-      const g = levels[k].grid;
-      let wp = s.hi;
-      for (let t = 0; t <= 1; t += 0.02) { const x = s.lo[0] + (s.hi[0] - s.lo[0]) * t, z = s.lo[1] + (s.hi[1] - s.lo[1]) * t; if (g.sample(x, z) < 0) { wp = [x, z]; break; } }
-      s.wall = wp;
-      levelGaps[k].push({ x: wp[0], z: wp[1], hw: s.hw + 0.5 });
+      terraceStairLayout(rec, s);
+      levelGaps[k].push({ x: s.wall[0], z: s.wall[1], hw: s.hw + 0.5 });
     }
   }
   // quay stairs every ~230 m along the outer terrace wall, away from landings and features
@@ -438,7 +571,18 @@ function buildPlatform(rec, P) {
       acc += Math.hypot(fr[i].p[0] - fr[i - 1].p[0], fr[i].p[1] - fr[i - 1].p[1]);
       if (acc < 230) continue;
       const f = fr[i];
-      const test = [f.p[0] + f.n[0] * 9, f.p[1] + f.n[1] * 9];
+      // Fit a straight stair beside the curved wall instead of allowing the
+      // bank and its cornice to cross the low treads. The upper landing reaches
+      // inward to the original edge; the descending flight stays on the quay.
+      let offset = .1;
+      for (let u = -11.5; u <= 3.2; u += .25) {
+        let v = .1;
+        while (v < 7 && levels[0].grid.sample(f.p[0] + f.t[0] * u + f.n[0] * v, f.p[1] + f.t[1] * u + f.n[1] * v) < 1.0) v += .1;
+        offset = Math.max(offset, v);
+      }
+      f.offset = offset;
+      if (offset > 5) continue;
+      const test = [f.p[0] + f.n[0] * (offset + 6), f.p[1] + f.n[1] * (offset + 6)];
       if (sea.sample(test[0], test[1]) > -2) continue;                         // quay too narrow here
       if (rec.landings.some((L) => Math.hypot(L.E[0] - f.p[0], L.E[1] - f.p[1]) < 110)) continue;
       acc = 0;
@@ -456,7 +600,6 @@ function buildPlatform(rec, P) {
       }
     }
   }
-  const topGapAt = gapFn(topGaps);
   const lowWall = (design.wall && design.wall.arcade) ?? 5;
   const terrKind = (design.wall && design.wall.terrace) ?? 1;
   // ---- sea walls round every edge
@@ -474,7 +617,7 @@ function buildPlatform(rec, P) {
     if (f.kind === 'ghat') for (let i = 0; i < pts.length; i += 2) seaGaps.push({ x: pts[i][0], z: pts[i][1], hw: 3 });
   }
   const seaGapAt = gapFn(seaGaps);
-  for (const loop of seaLoops) walls.push(sweepLoop(loop, seaSection(rec, seaGapAt), { ox, oz }));
+  for (const loop of seaLoops) walls.push(wallSweep(refineWallGaps(loop, seaGaps), seaSection(rec, seaGapAt), { ox, oz, closeSection: true }));
   // holes in the ground under landmarks that stand on it (the Cascade, the cavea)
   const holes = [];
   for (const L of P.landmarks) {
@@ -495,10 +638,9 @@ function buildPlatform(rec, P) {
     quay.push(capPolys(nestLoops(q.contours(0, 0.2)), QUAY_Y, 9, { ox, oz }));
   }
   // ---- terrace walls: quay to street, and each terrace to the next
-  for (const loop of topLoops) walls.push(sweepLoop(loop, wallSection(QUAY_Y, WARD_TOP, lowWall, topGapAt), { ox, oz }));
+  for (const loop of topLoops) walls.push(...terraceSolids(loop, QUAY_Y, WARD_TOP, lowWall, topGaps, ox, oz));
   for (let k = 1; k < levels.length; k++) {
-    const gAt = gapFn(levelGaps[k]);
-    for (const loop of levels[k].grid.contours(0, 0.2)) walls.push(sweepLoop(loop, wallSection(levels[k - 1].y, levels[k].y, terrKind, gAt, { glass: true }), { ox, oz }));
+    for (const loop of levels[k].grid.contours(0, 0.2)) walls.push(...terraceSolids(loop, levels[k - 1].y, levels[k].y, terrKind, levelGaps[k], ox, oz));
   }
   // ---- the street level (and terraces): one surface per level, with holes where a station
   // plinth stands (its walls go down into the platform, so no surface lies on another)
@@ -532,15 +674,15 @@ function buildPlatform(rec, P) {
       }
     } else {
       const steps = 9, tread = 1.3, rise = 0.5;
-      const faces = [];
       for (let j = 0; j < steps; j++) {
         const o0 = j * tread, o1 = (j + 1) * tread;
-        const y0 = QUAY_Y - j * rise, y1 = QUAY_Y - (j + 1) * rise;
-        faces.push({ a: [o0, y0], b: [o0, y1], kind: 1 });            // riser (faces outward)
-        faces.push({ a: [o1, y1], b: [o0, y1], kind: 9 });            // tread (faces up)
+        const y1 = QUAY_Y - (j + 1) * rise, base = SEABED_Y - 0.5;
+        walls.push(sweepLoop(s.pts, () => [
+          { a: [o1, base], b: [o1, y1], kind: 1 },
+          { a: [o1, y1], b: [o0, y1], kind: 9 },
+          { a: [o0, y1], b: [o0, base], kind: 1 },
+        ], { ox, oz, closed: false, closeSection: true, capEnds: true }));
       }
-      faces.push({ a: [steps * tread, QUAY_Y - steps * rise], b: [steps * tread, SEABED_Y - 0.5], kind: 1 });
-      walls.push(sweepLoop(s.pts, () => faces, { ox, oz, closed: false }));
       for (const f of [fr[0], fr[fr.length - 1]]) {
         const sgn = f === fr[0] ? -1 : 1;
         boxAlong(walls, f.p, f.t, f.n, sgn * 1.2 - 1.2, sgn * 1.2 + 1.2, -0.7, steps * tread + 0.6, SEABED_Y - 0.5, QUAY_Y + 0.5, 1, ox, oz);
@@ -551,7 +693,8 @@ function buildPlatform(rec, P) {
   // let 0.1 m into the wall (the wall curves away from the straight flight), every tread has
   // a stone nosing that oversails its riser, and a stepped balustrade closes the open side.
   for (const f of quayStairs) {
-    const n = 20, oi = -0.1, oo = 3.3, ob = 3.02;
+    const firstNear = near.length, firstFar = far.length;
+    const n = 20, oi = f.offset, oo = f.offset + 3.4, ob = f.offset + 3.12;
     for (let j = 0; j < n; j++) {
       const u0 = -11 + j * 0.5, yt = Math.min(QUAY_Y + (j + 1) * 0.3, WARD_TOP - 0.02);
       boxAlong(near, f.p, f.t, f.n, u0 + 0.05, u0 + 0.5, oi, ob, QUAY_Y - 0.1, yt, 1, ox, oz, 9);
@@ -560,35 +703,33 @@ function buildPlatform(rec, P) {
       boxAlong(near, f.p, f.t, f.n, u0, u0 + 0.5, ob, oo, QUAY_Y - 0.1, yt + 0.95, 1, ox, oz);
     }
     // the landing runs the width of the parapet gap (u -1.1..2.7), closed by an end balustrade
-    boxAlong(near, f.p, f.t, f.n, -1, 2.9, oi, ob, QUAY_Y - 0.1, WARD_TOP - 0.02, 1, ox, oz, 9);
+    boxAlong(near, f.p, f.t, f.n, -1, 2.9, -.8, ob, QUAY_Y - 0.1, WARD_TOP - 0.02, 1, ox, oz, 9);
     boxAlong(near, f.p, f.t, f.n, -1, 2.9, ob, oo, QUAY_Y - 0.1, WARD_TOP + 0.93, 1, ox, oz);
-    boxAlong(near, f.p, f.t, f.n, 2.9, 3.15, oi, oo, QUAY_Y - 0.1, WARD_TOP + 0.93, 1, ox, oz);
-    // far: the same flight in five blocks and the landing
-    for (let i = 0; i < 5; i++) boxAlong(far, f.p, f.t, f.n, -11 + i * 2, -9 + i * 2, oi, oo, QUAY_Y - 0.1, Math.min(QUAY_Y + (4 * i + 4) * 0.3, WARD_TOP - 0.02), 1, ox, oz);
-    boxAlong(far, f.p, f.t, f.n, -1, 3.15, oi, oo, QUAY_Y - 0.1, WARD_TOP - 0.02, 1, ox, oz);
+    boxAlong(near, f.p, f.t, f.n, 2.9, 3.15, -.8, oo, QUAY_Y - 0.1, WARD_TOP + 0.93, 1, ox, oz);
+    // Retain real treads in the massing pass too: no metre-high LOD steps.
+    for (let i = 0; i < n; i++) boxAlong(far, f.p, f.t, f.n, -11 + i * .5, -10.5 + i * .5, oi, oo, QUAY_Y - 0.1, Math.min(QUAY_Y + (i + 1) * .3, WARD_TOP - 0.02), 1, ox, oz);
+    boxAlong(far, f.p, f.t, f.n, -1, 3.15, -.8, oo, QUAY_Y - 0.1, WARD_TOP - 0.02, 1, ox, oz);
+    connectors.push({ kind: 'quay-stair', frame: f, near: near.slice(firstNear), far: far.slice(firstFar) });
   }
   // ---- stairs between the terraces
   for (const s of P.stairs) {
     if (!s.wall) continue;
-    const d = [s.wall[0] - s.lo[0], s.wall[1] - s.lo[1]];
-    const dl = Math.hypot(d[0], d[1]) || 1;
-    const t = [d[0] / dl, d[1] / dl];
-    const side = [-t[1], t[0]];
-    const rise = s.y1 - s.y0;
-    const n = Math.max(4, Math.round(rise / 0.3));
-    const run = n * 0.42;
+    const firstNear = near.length, firstFar = far.length;
+    const { t, side, rise, n, run, finish, landingLength } = terraceStairLayout(rec, s);
     for (let j = 0; j < n; j++) {
-      const u0 = -run - 1.2 + j * 0.42, yt = s.y0 + (j + 1) * (rise / n) - 0.02;
-      boxAlong(near, s.wall, side, t, -s.hw, s.hw, u0 + 0.05, u0 + 0.42 + (j === n - 1 ? 1.25 : 0), s.y0 - 0.1, yt, 1, ox, oz, 9);
+      const u0 = finish - run + j * 0.42, yt = s.y0 + (j + 1) * (rise / n) - 0.02;
+      boxAlong(near, s.wall, side, t, -s.hw, s.hw, u0 + 0.05, u0 + 0.42 + (j === n - 1 ? landingLength : 0), s.y0 - 0.1, yt, 1, ox, oz, 9);
       boxAlong(near, s.wall, side, t, -s.hw, s.hw, u0, u0 + 0.05, s.y0 - 0.1, yt - 0.05, 1, ox, oz, 9);
       boxAlong(near, s.wall, side, t, -s.hw, s.hw, u0 - 0.04, u0 + 0.05, yt - 0.05, yt, 1, ox, oz, 1);
     }
-    // cheek walls and their far massing (three blocks following the flight)
-    for (const sg of [-1, 1]) boxAlong(near, s.wall, side, t, sg * s.hw - 0.5, sg * s.hw + 0.5, -run - 1.2, 0.1, s.y0 - 0.1, s.y1 + 0.45, 1, ox, oz);
-    for (let i = 0; i < 3; i++) {
-      const u0 = -run - 1.2 + (run * i) / 3, u1 = i === 2 ? 0.1 : -run - 1.2 + (run * (i + 1)) / 3;
-      boxAlong(far, s.wall, side, t, -s.hw - 0.5, s.hw + 0.5, u0, u1, s.y0 - 0.1, s.y0 + (rise * (i + 1)) / 3 - 0.02, 1, ox, oz);
+    // Guard heights follow the stair, leaving a human-scale route rather than
+    // a seven-metre retaining canyon at its lower entrance.
+    for (let i = 0; i < n; i++) {
+      const u0 = finish - run + i * .42, u1 = u0 + .42 + (i === n - 1 ? landingLength : 0), yt = s.y0 + rise * (i + 1) / n - .02;
+      for (const sg of [-1, 1]) boxAlong(near, s.wall, side, t, sg * s.hw - .5, sg * s.hw + .5, u0, u1, s.y0 - .1, yt + .85, 1, ox, oz);
+      boxAlong(far, s.wall, side, t, -s.hw, s.hw, u0, u1, s.y0 - .1, yt, 1, ox, oz);
     }
+    connectors.push({ kind: 'terrace-stair', definition: s, near: near.slice(firstNear), far: far.slice(firstFar) });
   }
   // ---- the reef apron under the water round the ward and its basins
   const seabed = [];
@@ -615,6 +756,9 @@ function buildPlatform(rec, P) {
     // make sure every face points up
     const nr = g.attributes.normal;
     if (nr.getY(n + 5) < 0) { for (let k = 0; k < idx.length; k += 3) { const tt = idx[k + 1]; idx[k + 1] = idx[k + 2]; idx[k + 2] = tt; } g.setIndex(idx); g.computeVertexNormals(); }
+    // The duplicated centre seam has an unused pole vertex; give it the same
+    // upward terrain normal rather than leaving a zero-length attribute.
+    for (let k = 0; k < nr.count; k++) if (Math.hypot(nr.getX(k), nr.getY(k), nr.getZ(k)) < 0.5) nr.setXYZ(k, 0, 1, 0);
     seabed.push(g);
   }
   // ---- quay lamps and walks
@@ -662,7 +806,10 @@ function buildPlatform(rec, P) {
       }
     }
   }
-  return { walls, quay, grounds, sand, seabed, near, far, quayLamps, quayWalks, spans, quayStairs, seaLoops, topLoops, moorings };
+  return { walls, quay, grounds, sand, seabed, near, far, connectors, quayLamps, quayWalks, spans, quayStairs, seaLoops, topLoops, moorings,
+    // These are intentionally one-sided terrain/shore shading surfaces, not
+    // architectural solids. All wall, rail, stair and groyne components are closed.
+    terrainSurfaces: { quay, grounds, sand, seabed } };
 }
 
 // ------------------------------------------------------------ ground material --
@@ -931,6 +1078,65 @@ function seabedMaterial() {
 }
 
 // ------------------------------------------------------------------- build --
+/** CPU surface query shared by vegetation, walkers and deterministic ward checks. */
+export function wardSurfaceAt(rec, P, lx, lz) {
+  if (levelAtRec(rec, lx, lz, 0) === null) return null;
+  const N = P.field.N;
+  const i = Math.floor((lx + P.half) / P.field.cell), j = Math.floor((lz + P.half) / P.field.cell);
+  if (i < 0 || j < 0 || i >= N || j >= N) return null;
+  if (P.pools.some((p) => p.prim.d(lx, lz) < 0)) return 'water';
+  const e = P.field.edge(lx, lz);
+  if (e < 0) return 'road';
+  if (e < 4.6 || P.field.squareAt(lx, lz) > 0.5) return 'paved';
+  const k = (j * N + i) * 4;
+  if (P.land[k] < 128) return 'path';
+  if (P.land[k + 1] > 128) return 'zone';
+  if (P.land[k + 2] > 128) return 'bed';
+  return 'lawn';
+}
+
+/** Build a ward plan from its measured arcology footprints (also usable without WebGL). */
+export function planWard(rec, towers, prof = {}) {
+  const { w, design } = rec;
+  const wt = towers.filter((t) => t.def.ward === w.id);
+  const ctx = rec.ctx;
+  ctx.prof = prof;
+  ctx.rnd = mulberry32(9000 + w.seed * 131);
+  ctx.half = rec.half;
+  ctx.R = rec.R;
+  ctx.levelAt = (x, z, m) => levelAtRec(rec, x, z, m);
+  ctx.connectorSite = (connector, kind) => {
+    if (kind === 'bridge') {
+      const b = wardBridgeLayout(connector);
+      return SD.rbox((connector.a[0] + connector.b[0]) / 2, (connector.a[1] + connector.b[1]) / 2, b.endExtent + 1, b.halfWidth + 1, b.rotation, 0);
+    }
+    const s = connector, layout = terraceStairLayout(rec, s);
+    if (!layout) return null;
+    const centre = (layout.start + layout.landingEnd) / 2;
+    return SD.rbox(s.wall[0] + layout.t[0] * centre, s.wall[1] + layout.t[1] * centre,
+      (layout.landingEnd - layout.start) / 2 + 1, s.hw + 1.5, Math.atan2(layout.t[1], layout.t[0]), 0);
+  };
+  ctx.towersBuilt = wt.map((t) => ({ x: t.def.x - w.x, z: t.def.z - w.z, r: t.footprint, def: t.def, level: t.def.level }));
+  ctx.blocked = (x, z, hw) => ctx.towersBuilt.some((t) => Math.hypot(x - t.x, z - t.z) < t.r + hw + 5) || rec.landings.some((L) => { const s = L.station; if (!s) return false; const dx = x - s.x, dz = z - s.z; const c = Math.cos(s.rot), sn = Math.sin(s.rot); return Math.abs(dx * c + dz * sn) < 41 + hw && Math.abs(-dx * sn + dz * c) < 18 + hw * 0.4; });
+  const planDesign = {
+    plan: (c, Tk) => {
+      const raw = refineWardCourts(c, design.plan(c, Tk));
+      raw.squares = raw.squares || []; raw.plazas = raw.plazas || []; raw.sites = raw.sites || []; raw.exclusions = raw.exclusions || [];
+      for (const t of ctx.towersBuilt) {
+        raw.squares.push({ x: t.x, z: t.z, r: t.r + 16, kind: 'tower', noLamps: true });
+        raw.exclusions.push({ x: t.x, z: t.z, r: t.r + 10 });
+      }
+      for (const L of rec.landings) {
+        const s = L.station;
+        if (s) raw.sites.push({ box: { x: s.x, z: s.z, hw: 41, hd: 18, rot: s.rot }, margin: 3 });
+        if (!L.own) raw.plazas.push({ x: L.x + L.t[0] * (L.kind === 'ring' ? 26 : 40), z: L.z + L.t[1] * (L.kind === 'ring' ? 26 : 40), hw: L.kind === 'ring' ? 30 : 50, hd: L.kind === 'ring' ? 34 : 44, rot: L.b, kind: 'landing' });
+      }
+      return raw;
+    },
+  };
+  return buildWardPlan(ctx, planDesign);
+}
+
 /**
  * Build the Outer Wards. towers = the built ward arcologies (with a measured .footprint).
  * Returns the platforms, towns, landmarks and bridges, an updater for their LOD, and a
@@ -949,31 +1155,7 @@ export function buildMetro(scene, towers, bridgePaths, ground, world = null) {
   for (const rec of recs) {
     _t = performance.now();
     const { w, design } = rec;
-    const wt = towers.filter((t) => t.def.ward === w.id);
-    const ctx = rec.ctx;
-    ctx.prof = prof;
-    ctx.half = rec.half;
-    ctx.R = rec.R;
-    ctx.levelAt = (x, z, m) => levelAtRec(rec, x, z, m);
-    ctx.towersBuilt = wt.map((t) => ({ x: t.def.x - w.x, z: t.def.z - w.z, r: t.footprint, def: t.def, level: t.def.level }));
-    ctx.blocked = (x, z, hw) => ctx.towersBuilt.some((t) => Math.hypot(x - t.x, z - t.z) < t.r + hw + 5) || rec.landings.some((L) => { const s = L.station; if (!s) return false; const dx = x - s.x, dz = z - s.z; const c = Math.cos(s.rot), sn = Math.sin(s.rot); return Math.abs(dx * c + dz * sn) < 41 + hw && Math.abs(-dx * sn + dz * c) < 18 + hw * 0.4; });
-    const planDesign = {
-      plan: (c, Tk) => {
-        const raw = design.plan(c, Tk);
-        raw.squares = raw.squares || []; raw.plazas = raw.plazas || []; raw.sites = raw.sites || []; raw.exclusions = raw.exclusions || [];
-        for (const t of ctx.towersBuilt) {
-          raw.squares.push({ x: t.x, z: t.z, r: t.r + 16, kind: 'tower', noLamps: true });
-          raw.exclusions.push({ x: t.x, z: t.z, r: t.r + 10 });
-        }
-        for (const L of rec.landings) {
-          const s = L.station;
-          if (s) raw.sites.push({ box: { x: s.x, z: s.z, hw: 41, hd: 18, rot: s.rot }, margin: 3 });
-          if (!L.own) raw.plazas.push({ x: L.x + L.t[0] * (L.kind === 'ring' ? 26 : 40), z: L.z + L.t[1] * (L.kind === 'ring' ? 26 : 40), hw: L.kind === 'ring' ? 30 : 50, hd: L.kind === 'ring' ? 34 : 44, rot: L.b, kind: 'landing' });
-        }
-        return raw;
-      },
-    };
-    const P = buildWardPlan(ctx, planDesign);
+    const P = planWard(rec, towers, prof);
     rec.plan = P;
     lap('plan');
     // ---- the platform
@@ -1022,7 +1204,7 @@ export function buildMetro(scene, towers, bridgePaths, ground, world = null) {
     lap('towns');
     // lamps (in the ward's own light), benches and centrepieces, drawn only near the ward
     const fv = { edge: (x, z) => P.field.edge(x - w.x, z - w.z), centre: (x, z) => P.field.centre(x - w.x, z - w.z), squareAt: (x, z) => P.field.squareAt(x - w.x, z - w.z) };
-    const SS = buildStreetscape(scene, { streets: wp.streets, squares: wp.squares, lamps: wp.lamps, field: fv }, ground);
+    const SS = buildStreetscape(scene, { streets: wp.streets, squares: wp.squares, lots: wp.lots, lamps: wp.lamps, field: fv }, ground);
     for (const m of SS.meshes) out.lod.push({ near: m, far: null, center: new THREE.Vector3(w.x, 10, w.z), radius: rec.R(0) * 1.15, nearDist: 1500 });
     out.streetscapes.push(SS);
     lap('streetscape');
@@ -1050,18 +1232,7 @@ export function buildMetro(scene, towers, bridgePaths, ground, world = null) {
     const w = fieldRec(x, z);
     if (!w) return null;
     const lx = x - w.def.x, lz = z - w.def.z;
-    if (levelAtRec(w.rec, lx, lz, 0) === null) return null;
-    const P = w.plan, N = P.field.N;
-    const i = Math.floor((lx + P.half) / P.field.cell), j = Math.floor((lz + P.half) / P.field.cell);
-    if (i < 0 || j < 0 || i >= N || j >= N) return null;
-    const e = P.field.edge(lx, lz);
-    if (e < 0) return 'road';
-    if (e < 4.6 || P.field.squareAt(lx, lz) > 0.5) return 'paved';
-    const k = (j * N + i) * 4;
-    if (P.land[k] < 128) return 'path';
-    if (P.land[k + 1] > 128) return 'zone';
-    if (P.land[k + 2] > 128) return 'bed';
-    return 'lawn';
+    return wardSurfaceAt(w.rec, w.plan, lx, lz);
   };
   /** 0 free, 1 park, 2 landmark site or station, 3 plaza. */
   plan.reservedAt = (x, z) => {
@@ -1131,4 +1302,4 @@ function mergeGround(list) {
 }
 function mergeGeometriesSafe(list) { return mergeGeometries(list, false); }
 
-export { levelAtRec, QUAY_Y as WARD_QUAY };
+export { levelAtRec, QUAY_Y as WARD_QUAY, buildPlatform as buildWardPlatform, mooringGeometry as wardMooringGeometry, boxAlong as wardPlatformBox, terraceSolids as wardTerraceSolids };

@@ -155,7 +155,7 @@ export class World {
     this.updaters.push({ applyQuality: (s) => this.lowrise.applyQuality(s), update: (dt, t) => this.lowrise.update(dt, t, this.app.camera) });
     // the rim arcologies' forecourts: ring colonnades, fountains, obelisks, their lamps
     const bridgeAvoid = (x, z, r) => this.wardBridgePaths.some((b) => (b.head && Math.hypot(b.head.x - x, b.head.z - z) < r + 75) || b.path.slice(0, 30).some((p) => Math.hypot(p.x - x, p.z - z) < r + 22));
-    this.rimCourts = buildRimForecourts(this.scene, this.towers, raw, bridgeAvoid);
+    this.rimCourts = buildRimForecourts(this.scene, this.towers, raw, bridgeAvoid, { streets: this.plan.streets, lots: this.plan.lots });
     this.updaters.push({ update: () => this.app.camera && this.rimCourts.update(this.app.camera) });
     this.streetscape = buildStreetscape(this.scene, this.plan, raw, [...this.infra.promLamps, ...this.rimCourts.lamps]);
     this.colliders.push(...(this.streetscape.colliders || []));   // square fountains, obelisks, kiosks

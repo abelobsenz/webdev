@@ -746,6 +746,10 @@ function wardLookup() {
       const r = find(x, z);
       return (r && r.plan && r.plan.raw && r.plan.raw.trees ? r.plan.raw.trees : []).map((t) => [r.w.x + t.x, r.w.z + t.z]);
     },
+    water(x, z) {
+      const r = find(x, z);
+      return !!(r && r.plan && r.plan.pools.some((p) => p.prim.d(x - r.w.x, z - r.w.z) < 0.5));
+    },
   };
 }
 
@@ -758,16 +762,17 @@ export function buildStreetscape(scene, plan, ground, extraLamps = []) {
   scene.add(group);
   out.meshes.push(group);
   const occ = new Occupancy();
-  // the lagoon's town plan carries its exclusions and lots; a ward's plan does not (its
-  // towers stand in 'tower' squares, its landmark sites and stations in the reserve map)
+  // Both town and ward plans carry their real lots. Ward tower and station sites
+  // additionally use tower squares and the reservation map.
   const inner = Array.isArray(plan.exclusions);
   const excl = inner ? plan.exclusions : plan.squares.filter((q) => q.kind === 'tower').map((q) => ({ x: q.x, z: q.z, r: q.r - 6 }));
-  const lots = inner && plan.lots ? plan.lots : [];
+  const lots = plan.lots || [];
+  const lotReach = Math.ceil((Math.max(0, ...lots.map((L) => Math.hypot(L.w, L.d) / 2)) + 6) / 64);
   const lotGrid = new Map();
   for (const L of lots) { const k = `${Math.floor(L.x / 64)},${Math.floor(L.z / 64)}`; if (!lotGrid.has(k)) lotGrid.set(k, []); lotGrid.get(k).push(L); }
   const inLot = (x, z, pad) => {
     const i = Math.floor(x / 64), j = Math.floor(z / 64);
-    for (let a = i - 1; a <= i + 1; a++) for (let b = j - 1; b <= j + 1; b++) {
+    for (let a = i - lotReach; a <= i + lotReach; a++) for (let b = j - lotReach; b <= j + lotReach; b++) {
       const l = lotGrid.get(`${a},${b}`);
       if (l) for (const L of l) {
         const c = Math.cos(L.rot), s = Math.sin(L.rot), dx = x - L.x, dz = z - L.z;
@@ -814,7 +819,9 @@ export function buildStreetscape(scene, plan, ground, extraLamps = []) {
       const e2 = field.edge(x2, z2);
       if (e2 > 1.1 && e2 < 1.9 && field.squareAt(x2, z2) < 0.05 && !inLot(x2, z2, 0.5)) { x = x2; z = z2; }
     }
-    if (inner && (hedge(x, z) < 0.55 || inLot(x, z, 0.3))) continue;
+    if (inLot(x, z, 0.6) || excluded(x, z, 0.4)) continue;
+    if (inner && hedge(x, z) < 0.55) continue;
+    if (ward && (ward.reserved(x, z) === 2 || ward.water(x, z))) continue;
     if (!occ.free(x, z, 0.5)) continue;
     const pts = [[x, z], [x + 0.2, z], [x - 0.2, z], [x, z + 0.2], [x, z - 0.2]];
     let y;
@@ -880,14 +887,14 @@ export function buildStreetscape(scene, plan, ground, extraLamps = []) {
     const level = inner ? null : wardHeight(q.x, q.z);
     const okAt = (x, z) => {
       if (field.squareAt(x, z) < 0.5 || field.edge(x, z) < 0.5) return false;
-      if (excluded(x, z, 2)) return false;
+      if (excluded(x, z, 2) || inLot(x, z, 0.6)) return false;
       if (deck) {
         const u = (x - q.x) * deck.dx + (z - q.z) * deck.dz, v = -(x - q.x) * deck.dz + (z - q.z) * deck.dx;
         if (u < 4 && Math.abs(v) < 17) return false;
       }
       if (inner) return ground(x, z) > 1.2;
       if (Math.abs(wardHeight(x, z) - level) > 0.05) return false;
-      return ward ? ward.reserved(x, z) !== 2 : false;
+      return ward ? ward.reserved(x, z) !== 2 && !ward.water(x, z) : false;
     };
     const place = (set, x, z, yaw, r, pts, tol = 0.2) => {
       if (!pts.every(([px, pz]) => okAt(px, pz))) return false;
@@ -1011,11 +1018,11 @@ export function buildStreetscape(scene, plan, ground, extraLamps = []) {
           const e = field.edge(px, pz);
           if (e < eLo || e > eHi || field.squareAt(px, pz) > 0.03) return false;
           if (Math.abs(Math.abs(field.centre(px, pz)) - (st.hw + e)) > 0.6) return false;   // a junction
-          if (excluded(px, pz, 2)) return false;
+          if (excluded(px, pz, 2) || inLot(px, pz, 0.6)) return false;
           if (inner) return hedge(px, pz) > 0.45 && !inLot(px, pz, 0.3);
           if (Math.abs(wardHeight(px, pz) - level) > 0.05) return false;
           for (const [mx, mz] of [[1.2, 0], [-1.2, 0], [0, 1.2], [0, -1.2]]) if (Math.abs(wardHeight(px + mx, pz + mz) - level) > 0.05) return false;
-          return ward ? ward.reserved(px, pz) !== 2 : false;
+          return ward ? ward.reserved(px, pz) !== 2 && !ward.water(px, pz) : false;
         };
         if (!pts.every(([px, pz]) => ok(px, pz))) continue;
         if (!occ.free(x, z, 1.1) || nearWardTree(x, z, 2.4)) continue;

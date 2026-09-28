@@ -360,6 +360,7 @@ export function buildAxis(scene, updaters) {
       { kind: 1, v: 'y', u: Cl, pts: [P(R - 0.5, yT + 0.35), P(R - 0.5, yT)] },
       { kind: 9, v: 'r', pts: [P(R - 0.5, yT), P(R - 9, yT)] },                                          // promenade
       { kind: d.floor, v: 'r', pts: [P(R - 9, yT), P(rIn, yT)] },                                        // the deck
+      { kind: 1, v: 'y', pts: [P(rIn, yT), P(rIn, yC)] },                                              // inner collar in the core
     ], R > 300 ? 192 : 144));
     // mullion fins over the gallery's solid ribs (every fifth 3.2 m bay), veins down their faces
     for (let k = 0; k < Cf / 16; k++) {
@@ -683,6 +684,9 @@ export function buildAxis(scene, updaters) {
     { kind: 1, v: 's', pts: [P(50, 46), P(32, 60), P(20, 72)] },
     { kind: 10, v: 'y', pts: [P(20, 72), P(16, 78), P(12.5, 90), P(11, 118), P(9, 121)] },
     { kind: 10, v: 'r', pts: [P(9, 121), P(5.5, 121.6)] },
+    // Return down the cable bore: the collar is a closed material shell,
+    // with room through its centre for the neck and tether.
+    { kind: 1, v: 's', pts: [P(5.5, 121.6), P(13.5, 10)] },
   ], 96));
   // the climber dock: four guide rails on the tether's tracks, braced by lit rings; a climber
   // waits inside it between runs, beacons on the rail heads
@@ -698,13 +702,14 @@ export function buildAxis(scene, updaters) {
     frame.push(tube(pts, () => 0.9, 8, { kind: 2, closed: true, up: V3(0, -1, 0) }));
   }
   const crownFrame = new THREE.Mesh(mergeClean(frame), gyroMat);
+  crownFrame.name = 'Axis anchor and cradle';
   crownFrame.castShadow = true;
   crownFrame.receiveShadow = true;
   crown.add(crownFrame);
 
   // --------------------------------------------------- tether & climbers ---
   const tetherTop = 45000;
-  const tetherGeo = new THREE.CylinderGeometry(3.5, 6, tetherTop - AXIS.anchorY, 12, 1, true);
+  const tetherGeo = new THREE.CylinderGeometry(3.5, 6, tetherTop - AXIS.anchorY, 12, 1, false);
   tetherGeo.translate(0, (tetherTop + AXIS.anchorY) / 2, 0);
   // The tether seen from the city: a dark braided nanotube ribbon with four polished climber
   // tracks, white collars every 400 m, guide lights racing up the tracks at night, red and
@@ -753,6 +758,7 @@ void main() {
     transparent: true,
   });
   const tether = new THREE.Mesh(tetherGeo, tetherMat);
+  tether.name = 'Axis tether';
   tether.frustumCulled = false;
   group.add(tether);
   // the halo glows round the tether above the climber dock

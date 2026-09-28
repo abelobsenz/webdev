@@ -1,8 +1,9 @@
 import * as THREE from 'three';
-import { CB, CK, buildTender } from '../craft/craftGeometry.js';
+import { CB, CK, buildTender, buildLiner } from '../craft/craftGeometry.js';
 import { lathe, buildShuttle, buildTug, buildFreighter, buildCourier } from '../craft/craftClasses.js';
 import { LAMP } from './lamps.js';
 import { ctube } from './hull.js';
+import { buildEmbarkationTerrace } from './interfaces.js';
 import { craftMesh, craftPart, addLamps, placeMerge, placeLamps, pixelRadius, KM } from './craftMesh.js';
 
 // THE GEOSTATIONARY HARBOUR, drawn in metres with the ships' own builder and material.
@@ -232,6 +233,18 @@ export function buildHarbour() {
   // ---- berthed ships: freighters and tenders alongside the fingers, small craft in the bays
   const shipsBig = [], shipsSmall = [], lamps = [];
   const D = new CB();       // docking clamps between finger tips and berthed hulls (drawn metres)
+  const servicePods = [];
+  // Customs and garden waiting rooms rise from the arm spines, above the cargo plane.
+  // They remain outside every rotating ring's radial envelope and above berthed hulls.
+  for (const arm of arms) {
+    const side = arm.up ? 1 : -1;
+    const p=arm.d.clone().multiplyScalar(arm.L-980).setY(arm.y);
+    ctube(D,[p,p.clone().add(V(0,side*450,0))],70,10,CK.HULL);
+    const root=p.clone().add(V(0,side*410,0));
+    D.push(new THREE.Matrix4().compose(root,new THREE.Quaternion().setFromUnitVectors(V(0,0,1),V(0,side,0)),V(1,1,1)));
+    lathe(D,[[190,-50,CK.HULL],[265,0,CK.BRONZE],[275,90,CK.GLASS],[230,190,CK.ROOF],[90,320,CK.ROOF],[0,350,CK.BRONZE]],28);D.pop();
+    servicePods.push({root, radius:275, arm:arms.indexOf(arm)});
+  }
   const fr = buildFreighter(1100), te = buildTender(620), sh = buildShuttle(110), tu = buildTug(80), co = buildCourier(44);
   const I = new THREE.Matrix4();
   const teFull = { geo: placeMerge([{ geo: te.geo, m: I }, ...te.arms.map((A) => ({ geo: A.geo, m: I }))]), lamps: [], length: te.length };
@@ -311,17 +324,28 @@ export function buildHarbour() {
   };
   // gangways from the gallery to the liner's flank (true metres, like the ships)
   const G = new CB();
+  const linerGeo=buildLiner(2400).geo;
+  const linerProbe=new THREE.Mesh(linerGeo,new THREE.MeshBasicMaterial({side:THREE.DoubleSide}));
+  linerProbe.matrix.makeBasis(new THREE.Vector3().crossVectors(V(0,1,0),pier.fwd).normalize(),V(0,1,0),pier.fwd).setPosition(pier.pos);
+  linerProbe.matrixAutoUpdate=false;linerProbe.updateMatrixWorld(true);
+  const gangways=[];
   for (const r of [pierArm.L - 2150, pierArm.L - 1350, pierArm.L - 550]) {
     const p0 = pierArm.d.clone().multiplyScalar(r).setY(pierArm.y);
-    const p1 = p0.clone().addScaledVector(pierArm.side, -150).setY(pierArm.y - 140);
+    const aim=p0.clone().addScaledVector(pierArm.side,-330).setY(pierArm.y-140);
+    const dir=aim.clone().sub(p0).normalize();
+    const hit=new THREE.Raycaster(p0,dir,0,800).intersectObject(linerProbe,false)[0];
+    if(!hit) throw new Error('Harbour gangway missed the liner hull');
+    const p1=hit.point.clone().addScaledVector(dir,8);
+    gangways.push({root:p0.clone(),contact:hit.point.clone(),end:p1.clone()});
     ctube(G, [p0, p1], 14, 8, CK.HULL);
     G.at(p1.x, p1.y, p1.z);
     G.box(0, 0, 0, 34, 34, 34, CK.BRONZE);
     G.pop();
     lamps.push({ p: p1.clone().add(V(0, 26, 0)), r: 4, color: LAMP.AMBER, i: 2.2, breathe: 0.3, phase: r * 0.001 });
   }
+  linerProbe.material.dispose();linerGeo.dispose();
   const body = placeMerge([{ geo: bodyDesign, m: new THREE.Matrix4() }, { geo: G.geometry(), m: new THREE.Matrix4() }, { geo: D.geometry(), m: new THREE.Matrix4() }]);
-  return { body, rings, wingGeo, wingRoots, shipsBigGeo, shipsSmallGeo, lamps, berths, arms, pier };
+  return { body, rings, wingGeo, wingRoots, shipsBigGeo, shipsSmallGeo, lamps, berths, arms, pier, servicePods, gangways };
 }
 
 /** The Harbour as a scene object: a group in km, rings turning, wings tracking the Sun. */
@@ -355,6 +379,13 @@ export class HarbourStation {
     this.shipsSmall.scale.setScalar(KM);
     this.group.add(this.shipsBig, this.shipsSmall);
     this.lampMesh = addLamps(this.body, h.lamps, { minPx: 1.4 });
+    this.terraceData=buildEmbarkationTerrace();
+    this.terrace=craftMesh(this.terraceData.geo,{accent:[.55,.85,1],lit:.62});
+    const pier=h.arms[4];
+    this.terrace.position.copy(pier.d).multiplyScalar((pier.L-1200)*KM).addScaledVector(pier.side,.32).setY(pier.y*KM+.19);
+    this.terrace.rotation.y=-pier.a;
+    addLamps(this.terrace,this.terraceData.lamps,{minPx:.65});
+    this.group.add(this.terrace);
     this.group.traverse((o) => { o.frustumCulled = false; });
     this._sunL = new THREE.Vector3();
     this._q = new THREE.Quaternion();
@@ -386,6 +417,7 @@ export class HarbourStation {
     const px = pixelRadius(cam, this.group.getWorldPosition(this._w), 13, space.size.y);
     this.shipsSmall.visible = px > 350;
     this.shipsBig.visible = px > 40;
+    this.terrace.visible=pixelRadius(cam,this.terrace.getWorldPosition(this._w),this.terraceData.radius,space.size.y)>3;
     if (this.lampMesh) this.lampMesh.visible = px > 10;
   }
 }

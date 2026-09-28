@@ -3,7 +3,7 @@ import { RINGS } from '../sky/celestial.js';
 import { U } from '../core/uniforms.js';
 import { NOISE_GLSL } from '../shaders/noise.glsl.js';
 import { SUNLIGHT_GLSL, createRibbonMaterial, buildRibbonGeometry } from './lines.js';
-import { R_EARTH, bodyDir, cityToBody } from './sim.js';
+import { R_EARTH, MERIDIAN_LON, bodyDir, cityToBody } from './sim.js';
 import { FACADE_GLSL } from '../world/materials.js';
 import { HALO_PORTS } from './earthData.js';
 
@@ -229,30 +229,32 @@ void main() {
 }
 `;
 
-function buildRing(def, basis, segs, roof = false) {
+export function buildRing(def, basis, segs, roof = false) {
   const { a, b, n, R } = basis;
   const w = def.width;
   const hw = w / 2;
   const wall = Math.max(1.2, w * 0.07);
   const tubeR = w * 0.035;
+  const wt = Math.max(0.15, w * 0.012);
   // profile: [s (axial km), dr (radial km), ns, nr (normal in s/r plane), v, part]
   const floor = [];
   const NF = 16;
   for (let i = 0; i <= NF; i++) {
     const t = i / NF - 0.5;
-    floor.push([t * w, -0.004 * w * (1 - 4 * t * t), 0, 1, t, 0]);
+    floor.push([t * (w + 2 * wt), -0.004 * w * (1 - 4 * t * t), 0, 1, t, 0]);
   }
+  const floorBack = floor.map(([s,dr,,,v,part]) => [s,dr-0.4,0,-1,v,part]);
+  const floorEdges = [-1,1].map(sd => [[sd*(hw+wt),0,sd,0,sd*.5,0],[sd*(hw+wt),-0.4,sd,0,sd*.5,0]]);
   // retaining walls as solid slabs: inner face, top, outer face and foot (each its own strip
   // so the corners stay sharp); a single sheet showed the walls paper-thin edge-on
-  const wt = Math.max(0.15, w * 0.012);
-  const wallL = [[-hw, 0, 1, 0, 0.0, 1], [-hw, wall, 1, 0, 1.0, 1]];
-  const wallR = [[hw, wall, -1, 0, 1.0, 1], [hw, 0, -1, 0, 0.0, 1]];
+  const wallL = [[-hw, -0.06, 1, 0, 0.0, 1], [-hw, wall, 1, 0, 1.0, 1]];
+  const wallR = [[hw, wall, -1, 0, 1.0, 1], [hw, -0.06, -1, 0, 0.0, 1]];
   const slabs = [];
   for (const sd of [-1, 1]) {
     const si = sd * hw, so = sd * (hw + wt);
     slabs.push([[si, wall, 0, 1, 1.0, 1], [so, wall, 0, 1, 1.0, 1]]);
-    slabs.push([[so, wall, sd, 0, 1.0, 1], [so, 0, sd, 0, 0.0, 1]]);
-    slabs.push([[so, 0, 0, -1, 0.0, 1], [si, 0, 0, -1, 0.0, 1]]);
+    slabs.push([[so, wall, sd, 0, 1.0, 1], [so, -0.06, sd, 0, 0.0, 1]]);
+    slabs.push([[so, -0.06, 0, -1, 0.0, 1], [si, -0.06, 0, -1, 0.0, 1]]);
   }
   // glass roof: a flat-topped vault from wall top to wall top (clear of the port stations'
   // masts), normals from the section's own tangent
@@ -277,14 +279,21 @@ function buildRing(def, basis, segs, roof = false) {
     }
     tubes.push(tube);
   }
-  const profiles = roof ? [roofP] : [floor, wallL, wallR, ...slabs, ...tubes];
+  const profiles = roof ? [roofP] : [floor, floorBack, ...floorEdges, wallL, wallR, ...slabs, ...tubes];
+  const angles = Array.from({length:segs+1},(_,i)=>i/segs*Math.PI*2);
+  const jDir = bodyDir(0,MERIDIAN_LON);
+  const junctionAngle = ((Math.atan2(jDir.dot(b),jDir.dot(a)) % (Math.PI*2)) + Math.PI*2) % (Math.PI*2);
+  if (roof && def.name === 'Halo') {
+    for (const x of [-2.52,2.52]) angles.push(junctionAngle+x/R);
+    angles.sort((x,y)=>x-y); segs=angles.length-1;
+  }
   const pos = [], nor = [], ring = [], idx = [];
   const P = new THREE.Vector3(), rad = new THREE.Vector3(), tan = new THREE.Vector3();
   for (const prof of profiles) {
     const base = pos.length / 3;
     const M = prof.length;
     for (let j = 0; j <= segs; j++) {
-      const th = (j / segs) * Math.PI * 2;
+      const th = angles[j];
       rad.copy(a).multiplyScalar(Math.cos(th)).addScaledVector(b, Math.sin(th));
       for (const [s, dr, ns, nr, v, part] of prof) {
         P.copy(rad).multiplyScalar(R + dr).addScaledVector(n, s);
@@ -296,6 +305,7 @@ function buildRing(def, basis, segs, roof = false) {
     }
     for (let j = 0; j < segs; j++) {
       for (let i = 0; i < M - 1; i++) {
+        if (roof && def.name === 'Halo' && Math.abs(((angles[j]+angles[j+1])/2-junctionAngle)*R)<2.52 && Math.abs((prof[i][0]+prof[i+1][0])/2)<2.67) continue;
         const i0 = base + j * M + i, i1 = i0 + M, i2 = i0 + 1, i3 = i1 + 1;
         idx.push(i0, i1, i2, i2, i1, i3);
       }

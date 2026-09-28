@@ -21,6 +21,7 @@ import { SunSwarm } from './sun.js';
 import { Hearth, RS } from './hearth.js';
 import { Traffic } from './traffic.js';
 import { Lanes } from './lanes.js';
+import { WorkingStations } from './workingStations.js';
 
 const smooth = (a, b, x) => { const t = Math.min(Math.max((x - a) / (b - a), 0), 1); return t * t * (3 - 2 * t); };
 const easeInOut = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
@@ -119,6 +120,51 @@ export class SpaceMode {
       frame: (q) => q.copy(self.hearth ? self.hearth.quat : q.identity()),
       minDist: 190, maxDist: 1.4e6, defaultDist: 640, view: { az: 0.45, el: 0.09 },
     });
+    T('lunarport', {
+      position:o=>o.set(R_MOON+380,0,0).applyQuaternion(sim.moonQuat).add(sim.moonPos),
+      frame:q=>q.copy(sim.moonQuat).multiply(stationFrame(new THREE.Vector3(1,0,0))),
+      minDist:8,maxDist:20000,defaultDist:27,view:{az:2.25,el:.4},
+    });
+    const lunarFrame=stationFrame(new THREE.Vector3(1,0,0));
+    T('lunarReceiving', {
+      position:o=>o.set(0,-.6,7.6).applyQuaternion(lunarFrame).add(_v2.set(R_MOON+380,0,0)).applyQuaternion(sim.moonQuat).add(sim.moonPos),
+      frame:q=>q.copy(sim.moonQuat).multiply(lunarFrame),
+      minDist:.12,maxDist:20000,defaultDist:11,view:{az:.55,el:.45},
+    });
+    const terraceLocal=new THREE.Vector3(Math.cos(.2),0,Math.sin(.2)).multiplyScalar(9.174).addScaledVector(new THREE.Vector3(-Math.sin(.2),0,Math.cos(.2)),.32).setY(-1.07);
+    T('harbourTerrace',{
+      position:o=>o.copy(terraceLocal).applyQuaternion(meridQ).addScaledVector(merid,R_EARTH+GEO_ALT).applyQuaternion(sim.earthQuat),
+      frame:q=>q.copy(sim.earthQuat).multiply(meridQ).multiply(_q.setFromAxisAngle(_v2.set(0,1,0),-.2)),
+      minDist:.12,maxDist:200000,defaultDist:1.25,view:{az:.55,el:.6},
+    });
+    const courtAngle=8.35/(R_MOON+380),courtUp=new THREE.Vector3(Math.cos(courtAngle),0,Math.sin(courtAngle)),courtFrame=stationFrame(courtUp);
+    T('lunarCourt',{
+      position:o=>o.copy(courtUp).multiplyScalar(R_MOON+380).add(_v2.set(0,2.75,0)).applyQuaternion(sim.moonQuat).add(sim.moonPos),
+      frame:q=>q.copy(sim.moonQuat).multiply(courtFrame),
+      minDist:.12,maxDist:20000,defaultDist:1.35,view:{az:1.15,el:.55},
+    });
+    const foundryUp=bodyDir(0,NAURU_LON+.009);
+    T('foundry', {
+      position:o=>o.copy(foundryUp).multiplyScalar(R_EARTH+627).add(_v2.set(0,42,0)).applyQuaternion(sim.earthQuat),
+      frame:q=>q.copy(sim.earthQuat).multiply(stationFrame(foundryUp)),
+      minDist:8,maxDist:30000,defaultDist:31,view:{az:2.55,el:.35},
+    });
+    const solarOffset=new THREE.Vector3(0,.025*1.496e8,.004*1.496e8);
+    T('solarCollector', {
+      position:o=>o.copy(sim.sunPos).add(solarOffset),
+      frame:q=>q.setFromUnitVectors(_v2.set(0,1,0),_v3.copy(solarOffset).normalize()),
+      minDist:12,maxDist:1e8,defaultDist:42,view:{az:.55,el:.48},
+    });
+    T('solarService', {
+      position:o=>o.set(0,3.7,0).applyQuaternion(_q.setFromUnitVectors(_v2.set(0,1,0),_v3.copy(solarOffset).normalize())).add(solarOffset).add(sim.sunPos),
+      frame:q=>q.setFromUnitVectors(_v2.set(0,1,0),_v3.copy(solarOffset).normalize()),
+      minDist:.12,maxDist:1e8,defaultDist:6,view:{az:1,el:.4},
+    });
+    T('hearthworks', {
+      position:o=>self.hearth?o.copy(self.hearth.refugePosition).applyAxisAngle(_v2.set(0,0,1),.12).applyQuaternion(self.hearth.quat).add(sim.hearthPos):o.copy(sim.hearthPos),
+      frame:q=>self.hearth?q.copy(self.hearth.quat):q.identity(),
+      minDist:16,maxDist:1.4e6,defaultDist:64,view:{az:2.2,el:.35},
+    });
   }
 
   // --------------------------------------------------------------- build --
@@ -149,7 +195,7 @@ export class SpaceMode {
         segB.copy(el.up).multiplyScalar(R_EARTH + COUNTERWEIGHT_ALT + 20).applyQuaternion(this.sim.earthQuat);
         const line = new THREE.Line3(segA, segB);
         line.closestPointToPoint(cam, true, segP);
-        return [segP.distanceTo(cam), Math.max(segA.distanceTo(cam), segB.distanceTo(cam))];
+        return [Math.max(.001,segP.distanceTo(cam)-.25), Math.max(segA.distanceTo(cam), segB.distanceTo(cam))+.25];
       },
     });
     this.addBody('harbour', [el.harbour], () => el.harbour.getWorldPosition(_v), 17, { solid: true, hint: 0.95 });
@@ -185,6 +231,8 @@ export class SpaceMode {
     // ships: liners at the Harbour, tenders over the Halo, Selene Works above the Moon
     this.fleet = new Fleet(this);
     this.modules.push(this.fleet);
+    this.works = new WorkingStations(this);
+    this.modules.push(this.works);
     for (const b of this.bodies) if (!b.local) b.remote = true;
     // post: crossfade helper
     this.fadeRT = new THREE.WebGLRenderTarget(1, 1, { type: THREE.UnsignedByteType, depthBuffer: false });
@@ -458,6 +506,15 @@ export class SpaceMode {
     this.exposure += (want - this.exposure) * (1 - Math.exp(-(dt || 0.016) * 2.5));
     if (!isFinite(this.exposure)) this.exposure = want;
     const f = p.finalMat.uniforms;
+    // These buffers belong to the ground camera. Sampling its last shafts/AO frame in
+    // orbit stamped the Axis and city horizon into every star field, even at the Sun.
+    f.uAO.value = 0;
+    f.uShaftDark.value = 0;
+    f.uShaftLit.value = 0;
+    f.uStreak.value = 0;
+    f.uDirt.value = 0;
+    p.shaftValid = false;
+    p.aoValid = false;
     f.uExposure.value = this.exposure;
     // small bright specks (glints, window lights) should not each bloom into a flash
     p.downMat.uniforms.uThreshold.value = 1.8 / this.exposure;

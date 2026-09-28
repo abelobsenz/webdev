@@ -8,8 +8,10 @@ export { mergeGeometries };
  * at given heights. Adds aFacade = (perimeter metres, height metres, kind).
  * sections: [{ y, pts: [[x,z], ...], kind }]
  */
-export function loftSections(sections, { capTop = true, capBottom = false, kindTop = 1 } = {}) {
+export function loftSections(sections, { capTop = true, capBottom = true, kindTop = 1 } = {}) {
   const n = sections[0].pts.length;
+  const outline = sections[0].pts;
+  const clockwise = outline.reduce((sum, p, i) => { const q = outline[(i + 1) % n]; return sum + p[0] * q[1] - q[0] * p[1]; }, 0) < 0;
   const pos = [], fac = [], idx = [];
   const rows = sections.length;
   for (let j = 0; j < rows; j++) {
@@ -26,7 +28,8 @@ export function loftSections(sections, { capTop = true, capBottom = false, kindT
   for (let j = 0; j < rows - 1; j++) {
     for (let i = 0; i < n; i++) {
       const a = j * cols + i, b = a + 1, c = a + cols, d = c + 1;
-      idx.push(a, c, b, b, c, d);
+      if (clockwise) idx.push(a, b, c, b, d, c);
+      else idx.push(a, c, b, b, c, d);
     }
   }
   const addCap = (s, top, kind) => {
@@ -54,8 +57,14 @@ export function loftSections(sections, { capTop = true, capBottom = false, kindT
   return g;
 }
 
-/** Lathe around Y with facade coordinates. profile: [{ r, y, kind }] bottom → top. */
-export function latheFacade(profile, segments = 64, { phase = 0, sx = 1, sz = 1 } = {}) {
+/**
+ * Lathe around Y with facade coordinates. Structural profiles close to the axis
+ * at both ends. Use closedProfile for a ring's cross-section: its inner wall
+ * joins the last profile point back to the first, preserving the central hole.
+ * Planar profiles remain surface inlays; they have no enclosed volume to cap.
+ */
+export function latheFacade(profile, segments = 64, { phase = 0, sx = 1, sz = 1, capTop = true, capBottom = true, closedProfile = false } = {}) {
+  if (closedProfile && (profile[0].r !== profile.at(-1).r || profile[0].y !== profile.at(-1).y)) profile = [...profile, profile[0]];
   const pos = [], fac = [], idx = [];
   const cols = segments + 1;
   for (let j = 0; j < profile.length; j++) {
@@ -67,16 +76,70 @@ export function latheFacade(profile, segments = 64, { phase = 0, sx = 1, sz = 1 
     }
   }
   for (let j = 0; j < profile.length - 1; j++) {
+    // Coincident rings mark a hard normal/material boundary. Keep both sets
+    // of vertices but do not manufacture zero-area faces between them.
+    if (profile[j].r === profile[j + 1].r && profile[j].y === profile[j + 1].y) continue;
     for (let i = 0; i < segments; i++) {
       const a = j * cols + i, b = a + 1, c = a + cols, d = c + 1;
-      idx.push(a, c, b, b, c, d);
+      // A profile may terminate on the axis. Emit its fan once, without the
+      // collapsed companion triangles that otherwise create zero normals.
+      if (profile[j].r !== 0) idx.push(a, c, b);
+      if (profile[j + 1].r !== 0) idx.push(b, c, d);
     }
+  }
+  const first = profile[0], last = profile.at(-1);
+  const isClosed = first.r === last.r && first.y === last.y;
+  const planar = profile.every(p => p.y === first.y);
+  const cap = (p, top) => {
+    if (p.r === 0) return;
+    const base = pos.length / 3;
+    pos.push(0, p.y, 0); fac.push(0, 0, 1);
+    for (let i = 0; i <= segments; i++) {
+      const a = i / segments * Math.PI * 2 + phase;
+      const x = Math.cos(a) * p.r * sx, z = Math.sin(a) * p.r * sz;
+      pos.push(x, p.y, z); fac.push(x, z, 1);
+    }
+    for (let i = 0; i < segments; i++) {
+      if (top) idx.push(base, base + i + 2, base + i + 1);
+      else idx.push(base, base + i + 1, base + i + 2);
+    }
+  };
+  if (!isClosed && !planar) {
+    if (capBottom) cap(first, false);
+    if (capTop) cap(last, true);
   }
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   g.setAttribute('aFacade', new THREE.Float32BufferAttribute(fac, 3));
   g.setIndex(idx);
   g.computeVertexNormals();
+  const nr = g.attributes.normal;
+  for (let j = 0; j < profile.length; j++) {
+    const a = j * cols, b = a + segments;
+    if (profile[j].r === 0) {
+      const sign = j === 0 ? -1 : 1;
+      for (let i = a; i <= b; i++) nr.setXYZ(i, 0, sign, 0);
+    } else {
+      const seam = new THREE.Vector3().fromBufferAttribute(nr, a).add(new THREE.Vector3().fromBufferAttribute(nr, b)).normalize();
+      nr.setXYZ(a, seam.x, seam.y, seam.z); nr.setXYZ(b, seam.x, seam.y, seam.z);
+    }
+  }
+  // Callers can supply an explicit material boundary beside another duplicated
+  // ring. The middle copy then has no faces and no definable normal. Remove
+  // only unreferenced vertices, retaining both visible sides of every crease.
+  const used = new Uint8Array(g.attributes.position.count);
+  for (const i of idx) used[i] = 1;
+  const live = used.reduce((sum, n) => sum + n, 0);
+  if (live < used.length) {
+    const remap = new Uint32Array(used.length);
+    for (let i = 0, next = 0; i < used.length; i++) if (used[i]) remap[i] = next++;
+    for (const [name, attribute] of Object.entries(g.attributes)) {
+      const data = new Float32Array(live * attribute.itemSize);
+      for (let i = 0; i < used.length; i++) if (used[i]) for (let k = 0; k < attribute.itemSize; k++) data[remap[i] * attribute.itemSize + k] = attribute.array[i * attribute.itemSize + k];
+      g.setAttribute(name, new THREE.BufferAttribute(data, attribute.itemSize));
+    }
+    g.setIndex(idx.map(i => remap[i]));
+  }
   return g;
 }
 
@@ -86,9 +149,11 @@ export function latheFacade(profile, segments = 64, { phase = 0, sx = 1, sz = 1 
  */
 export function sweepTube(points, radius, radial = 16, { kind = 1, ellipse = 1, closeEnds = true } = {}) {
   const N = points.length;
+  const closed = N > 3 && points[0].distanceToSquared(points[N - 1]) < 1e-12 && Math.abs(radius(0) - radius(1)) < 1e-8;
   const tangents = [], normals = [], binormals = [];
   for (let i = 0; i < N; i++) {
-    const a = points[Math.max(i - 1, 0)], b = points[Math.min(i + 1, N - 1)];
+    const a = points[closed && (i === 0 || i === N - 1) ? N - 2 : Math.max(i - 1, 0)];
+    const b = points[closed && (i === 0 || i === N - 1) ? 1 : Math.min(i + 1, N - 1)];
     tangents.push(new THREE.Vector3().subVectors(b, a).normalize());
   }
   // initial normal
@@ -108,6 +173,17 @@ export function sweepTube(points, radius, radial = 16, { kind = 1, ellipse = 1, 
     normals.push(n);
     binormals.push(new THREE.Vector3().crossVectors(tangents[i], n).normalize());
   }
+  if (closed) {
+    // Remove accumulated transport twist smoothly, so nonplanar closed loops
+    // meet with identical frames instead of leaving a slit at their seam.
+    const turn = Math.atan2(tangents[0].dot(new THREE.Vector3().crossVectors(normals[N - 1], normals[0])), normals[N - 1].dot(normals[0]));
+    for (let i = 1; i < N; i++) {
+      normals[i].applyAxisAngle(tangents[i], turn * i / (N - 1));
+      binormals[i].crossVectors(tangents[i], normals[i]).normalize();
+    }
+    normals[N - 1].copy(normals[0]);
+    binormals[N - 1].copy(binormals[0]);
+  }
   const pos = [], fac = [], idx = [];
   let len = 0;
   const cols = radial + 1;
@@ -126,6 +202,22 @@ export function sweepTube(points, radius, radial = 16, { kind = 1, ellipse = 1, 
     for (let i = 0; i < radial; i++) {
       const a = j * cols + i, b = a + 1, c = a + cols, d = c + 1;
       idx.push(a, b, c, b, d, c);
+    }
+  }
+  if (closeEnds && !closed) {
+    for (const j of [0, N - 1]) {
+      if (radius(j / (N - 1)) === 0) continue;
+      const base = pos.length / 3, p = points[j];
+      pos.push(p.x, p.y, p.z); fac.push(0, 0, kind);
+      for (let i = 0; i <= radial; i++) {
+        const source = (j * cols + i) * 3;
+        pos.push(pos[source], pos[source + 1], pos[source + 2]);
+        fac.push(Math.cos(i / radial * Math.PI * 2) * radius(j / (N - 1)), Math.sin(i / radial * Math.PI * 2) * radius(j / (N - 1)) * ellipse, kind);
+      }
+      for (let i = 0; i < radial; i++) {
+        if (j === 0) idx.push(base, base + i + 2, base + i + 1);
+        else idx.push(base, base + i + 1, base + i + 2);
+      }
     }
   }
   const g = new THREE.BufferGeometry();

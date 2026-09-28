@@ -22,15 +22,7 @@ const lerp = (a, b, t) => a + (b - a) * t;
 const ss = (a, b, x) => { const t = Math.min(Math.max((x - a) / (b - a), 0), 1); return t * t * (3 - 2 * t); };
 
 /** Lathe about local z with one facade kind per band: prof = [[r, z, kind], ...]; band i..i+1 takes prof[i+1]'s kind. */
-export function lathe(B, prof, seg = 16, phase = 0) {
-  for (let i = 0; i < prof.length - 1; i++) {
-    const [r0, z0] = prof[i];
-    const [r1, z1, k] = prof[i + 1];
-    if (Math.abs(r0 - r1) < 1e-6 && Math.abs(z0 - z1) < 1e-6) continue;
-    const e0 = Math.max(r0, 1e-3), e1 = Math.max(r1, 1e-3);
-    B.loft([{ z: z0, pts: sectionEllipse(e0, e0, seg, 2, phase) }, { z: z1, pts: sectionEllipse(e1, e1, seg, 2, phase) }], k ?? CK.HULL);
-  }
-}
+export function lathe(B, prof, seg = 16, phase = 0, opts) { B.lathe(prof, seg, phase, opts); }
 
 /** Sphere (as a lathe) centred at the builder's current origin. */
 export function sphere(B, r, k, seg = 16, rings = 8) {
@@ -42,7 +34,8 @@ export function sphere(B, r, k, seg = 16, rings = 8) {
 /** Engine bell opening toward -z at the current origin: returns the glow record (local coords). */
 function bell(B, x, y, z, r, len, glows, s = 1, k = CK.BRONZE) {
   B.at(x, y, z);
-  lathe(B, [[r * 0.55, 0, CK.HULL], [r * 0.5, -len * 0.2, CK.DARK], [r * 0.72, -len * 0.55, k], [r, -len, CK.DARK], [r * 0.93, -len * 1.02, CK.CONDUIT]], 18);
+  lathe(B, [[r * 0.55, 0, CK.HULL], [r * 0.5, -len * 0.2, CK.DARK], [r * 0.72, -len * 0.55, k], [r, -len, CK.DARK], [r * 0.93, -len * 1.02, CK.CONDUIT],
+    [r * 0.87, -len, CK.DARK], [r * 0.62, -len * 0.55, CK.DARK], [r * 0.4, -len * 0.2, CK.DARK], [r * 0.43, 0, CK.HULL]], 18, 0, { closedProfile: true });
   B.pop();
   glows.push({ p: V(x, y, z - len).multiplyScalar(s), r: r * 0.9 * s, dir: V(0, 0, -1) });
 }
@@ -122,7 +115,7 @@ export function buildShuttle(len = 110) {
 // -------------------------------------------------------------------- tug ----
 export function buildTug(len = 80) {
   const s = len / 80;
-  const B = new CB();
+  const B = new CB(), clampBrackets=[];
   B.push(new THREE.Matrix4().makeScale(s, s, s));
   // engine block: an octagonal prism with bronze bands
   const oct = (r) => sectionEllipse(r, r, 8, 2, Math.PI / 8);
@@ -143,6 +136,14 @@ export function buildTug(len = 80) {
   for (const z of [-13, 12, 37]) {
     B.box(0, 10.5, z, 22, 1.2, 1.4, CK.BRONZE); B.box(0, -10.5, z, 22, 1.2, 1.4, CK.BRONZE);
     B.box(10.5, 0, z, 1.2, 22, 1.4, CK.BRONZE); B.box(-10.5, 0, z, 1.2, 22, 1.4, CK.BRONZE);
+    // The end clamps stand clear of the cargo ends. Four real radial shoes
+    // carry each frame back to the longitudinal spine, including an empty bay.
+    const start=B.idx.length;
+    for(const side of [-1,1]) {
+      B.tube([V(side*10.5,0,z),V(side*3,3,z)],.48,6,CK.HULL);
+      B.tube([V(0,side*10.5,z),V(3,side*3,z+.18)],.48,6,CK.HULL);
+    }
+    clampBrackets.push({start,count:B.idx.length-start});
   }
   const ck = [CK.HULL, CK.BRONZE, CK.DECK, CK.HULL, CK.DECK, CK.HULL, CK.BRONZE, CK.HULL];
   let n = 0;
@@ -158,7 +159,7 @@ export function buildTug(len = 80) {
     { p: V(0, 5.6, -36.2).multiplyScalar(s), r: 0.6 * s, color: LAMP.WHITE, i: 2, dir: V(0, 0, -1) },
   ];
   for (const x of [-11, 11]) for (const y of [-11, 11]) lamps.push({ p: V(x, y, 37.8).multiplyScalar(s), r: 0.55 * s, color: LAMP.AMBER, i: 2.4, breathe: 0.3, phase: (x > 0 ? 0.25 : 0) + (y > 0 ? 0.5 : 0) });
-  return { geo: B.geometry(), glows, lamps, length: len };
+  return { geo: B.geometry(), glows, lamps, length: len, clampBrackets };
 }
 
 // ---------------------------------------------------------------- courier ----
@@ -185,7 +186,8 @@ export function buildFreighter(len = 1100) {
   lathe(B, [[0.1, -392, CK.DARK], [64, -392, CK.DARK], [66, -386, CK.BRONZE], [62, -380, CK.HULL], [34, -372, CK.HULL], [34, -300, CK.HULL], [40, -296, CK.BRONZE], [40, -290, CK.BRONZE], [26, -284, CK.HULL], [0.1, -284, CK.HULL]], 32);
   const glows = [];
   B.at(0, 0, -392);
-  lathe(B, [[20, 0, CK.DARK], [22, -20, CK.BRONZE], [34, -60, CK.DARK], [52, -118, CK.DARK], [49, -121, CK.CONDUIT]], 32);
+  lathe(B, [[20, 0, CK.DARK], [22, -20, CK.BRONZE], [34, -60, CK.DARK], [52, -118, CK.DARK], [49, -121, CK.CONDUIT],
+    [46, -118, CK.DARK], [29, -60, CK.DARK], [17, -20, CK.DARK], [15, 0, CK.DARK]], 32, 0, { closedProfile: true });
   B.pop();
   glows.push({ p: V(0, 0, -512).multiplyScalar(s), r: 44 * s, dir: V(0, 0, -1) });
   // cross radiators on booms: heat goes out edge-on to the drive, never back into the hull
@@ -240,7 +242,7 @@ export function buildClimber(scale = 1) {
   B.push(new THREE.Matrix4().makeScale(scale, scale, scale));
   B.push(new THREE.Matrix4().makeRotationX(-Math.PI / 2));       // local z -> +y
   // sleeve round the tether (the ribbon is ~30 m across)
-  lathe(B, [[19, -74, CK.DARK], [19, 74, CK.DARK]], 24);
+  lathe(B, [[18, -74, CK.DARK], [19, -74, CK.DARK], [19, 74, CK.DARK], [18, 74, CK.DARK]], 24, 0, { closedProfile: true });
   // passenger stack: five glazed decks between bronze rims, domed ends
   const prof = [[19, -52, CK.HULL], [30, -50, CK.HULL], [40, -44, CK.HULL], [44, -38, CK.BRONZE], [44, -35, CK.BRONZE]];
   let z = -35;
@@ -249,7 +251,7 @@ export function buildClimber(scale = 1) {
     z += 14;
   }
   prof.push([44, z + 1, CK.BRONZE], [40, z + 7, CK.HULL], [30, z + 13, CK.HULL], [19, z + 15, CK.HULL]);
-  lathe(B, prof, 36);
+  lathe(B, prof, 36, 0, { closedProfile: true });
   // drive units: rollers gripping the tether above and below
   for (const zz of [-66, 66]) {
     for (let k = 0; k < 4; k++) {
@@ -260,12 +262,12 @@ export function buildClimber(scale = 1) {
       B.pop();
     }
     B.at(0, 0, zz);
-    lathe(B, [[19, -9, CK.HULL], [32, -6, CK.HULL], [32, 6, CK.HULL], [19, 9, CK.HULL]], 24);
+    lathe(B, [[19, -9, CK.HULL], [32, -6, CK.HULL], [32, 6, CK.HULL], [19, 9, CK.HULL]], 24, 0, { closedProfile: true });
     B.pop();
   }
   // beamed-power receiver skirt below the cabin, facing the ground station
   B.at(0, 0, -58);
-  lathe(B, [[46, 0, CK.PANEL], [70, 5, CK.PANEL], [72, 5.5, CK.BRONZE], [72, 7, CK.BRONZE], [46, 2, CK.DARK]], 36);
+  lathe(B, [[46, 0, CK.PANEL], [70, 5, CK.PANEL], [72, 5.5, CK.BRONZE], [72, 7, CK.BRONZE], [46, 2, CK.DARK]], 36, 0, { closedProfile: true });
   B.pop();
   B.pop(); B.pop();
   const lamps = [];

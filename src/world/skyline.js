@@ -6,6 +6,8 @@ import { mulberry32 } from './noise.js';
 import { outerCities, renderedHeight } from './outerCities.js';
 import { terrainHeight } from './terrain.js';
 import { buildMassifTowns } from './massifTowns.js';
+import { islandPrism, islandFoundation, islandRoad, footprintGround, rectangle, circleFootprint, buildIslandPlan, pointSegmentDistance, islandRoadHeight } from './islandPlan.js';
+import { buildIslandLandscape } from './islandLandmarks.js';
 
 /** Everything built on the island land (districts, landmarks, villas, lighthouses) as keep-out
  *  circles {x, z, r}, filled by buildSkyline(): ground cover grows only outside them. */
@@ -40,20 +42,20 @@ function tower(rnd, x, y, z, H, R, style = rnd()) {
     if (style < 0.3) r = R * (1 - 0.5 * Math.pow(v, 1.4));
     else if (style < 0.55) r = R * (0.86 + 0.24 * Math.sin(Math.PI * v)) * (1 - 0.3 * v);
     else r = R * (1 - 0.2 * Math.floor(v * 4) / 4);
-    prof.push({ r, y: y + H * v, kind: j === rows ? 1 : 0 });
+    prof.push({ r, y: y + 8 + H * v, kind: j === rows ? 1 : 0 });
   }
-  const top = y + H;
+  const top = y + 8 + H;
   const rt = prof[prof.length - 1].r;
-  prof.push({ r: rt * 0.84, y: top + 4, kind: 2 }, { r: rt * 0.32, y: top + 11, kind: 1 }, { r: 0.6, y: top + H * (0.05 + 0.07 * rnd()), kind: 2 }, { r: 0.01, y: top + H * 0.13, kind: 1 });
-  const g = latheFacade([{ r: R * 1.25, y: y - 6, kind: 1 }, { r: R * 1.25, y: y + 8, kind: 5 }, ...prof], seg, { phase: rnd() * TAU });
-  return g.translate(x, 0, z);
+  prof.push({ r: rt * 0.84, y: top + 4, kind: 2 }, { r: rt * 0.32, y: top + 11, kind: 1 }, { r: 0.6, y: top + Math.max(12,H * (0.05 + 0.07 * rnd())), kind: 2 }, { r: 0.01, y: top + H * 0.13, kind: 1 });
+  const profile=[{ r: R * 1.25, y: y - 6, kind: 1 }, { r: R * 1.25, y: y + 8, kind: 5 }, ...prof],g = latheFacade(profile, seg, { phase: rnd() * TAU });
+  g.userData.islandLatheProfile={rows:profile.length,segments:seg};return g.translate(x,0,z);
 }
 
 function needle(rnd, x, y, z, H, R) {
   const prof = [{ r: R * 1.6, y: y - 6, kind: 1 }, { r: R * 1.6, y: y + 10, kind: 5 }];
-  for (let j = 0; j <= 6; j++) { const v = j / 6; prof.push({ r: R * (1 - 0.72 * Math.pow(v, 1.2)), y: y + H * 0.86 * v, kind: 0 }); }
-  prof.push({ r: R * 0.34, y: y + H * 0.88, kind: 2 }, { r: R * 0.2, y: y + H * 0.96, kind: 2 }, { r: 0.4, y: y + H, kind: 2 });
-  return latheFacade(prof, 6, { phase: rnd() * TAU }).translate(x, 0, z);
+  for (let j = 0; j <= 6; j++) { const v = j / 6; prof.push({ r: R * (1 - 0.72 * Math.pow(v, 1.2)), y: y + 10 + H * 0.86 * v, kind: 0 }); }
+  prof.push({ r: R * 0.34, y: y + 10 + H * 0.88, kind: 2 }, { r: R * 0.2, y: y + 10 + H * 0.96, kind: 2 }, { r: 0.4, y: y + 10 + H, kind: 2 });
+  const g=latheFacade(prof,6,{phase:rnd()*TAU}).translate(x,0,z);g.userData.islandLatheProfile={rows:prof.length,segments:6};return g;
 }
 
 function block(x, y, z, H, w, d, rot, wall = 5, top = 1) {
@@ -63,34 +65,7 @@ function block(x, y, z, H, w, d, rot, wall = 5, top = 1) {
   return g.translate(x, 0, z);
 }
 
-function prism4(q, y0, y1, wall = 5, topK = 3) {
-  // a prism over four corner points (x, z), walls outward, a planted top
-  const pos = [], fac = [], idx = [];
-  const cx = (q[0][0] + q[1][0] + q[2][0] + q[3][0]) / 4, cz = (q[0][1] + q[1][1] + q[2][1] + q[3][1]) / 4;
-  let u = 0;
-  for (let i = 0; i < 4; i++) {
-    const a = q[i], b = q[(i + 1) % 4];
-    const L = Math.hypot(b[0] - a[0], b[1] - a[1]);
-    const base = pos.length / 3;
-    pos.push(a[0], y0, a[1], b[0], y0, b[1], b[0], y1, b[1], a[0], y1, a[1]);
-    fac.push(u, y0, wall, u + L, y0, wall, u + L, y1, wall, u, y1, wall);
-    const nx = b[1] - a[1], nz = -(b[0] - a[0]);
-    const out = nx * ((a[0] + b[0]) / 2 - cx) + nz * ((a[1] + b[1]) / 2 - cz) > 0;
-    if (out) idx.push(base, base + 2, base + 1, base, base + 3, base + 2); else idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
-    u += L;
-  }
-  const t = pos.length / 3;
-  for (const p of q) { pos.push(p[0], y1, p[1]); fac.push(p[0], p[1], topK); }
-  // top faces up
-  const cr = (q[1][0] - q[0][0]) * (q[2][1] - q[0][1]) - (q[1][1] - q[0][1]) * (q[2][0] - q[0][0]);
-  if (cr < 0) idx.push(t, t + 1, t + 2, t, t + 2, t + 3); else idx.push(t, t + 2, t + 1, t, t + 3, t + 2);
-  const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-  g.setAttribute('aFacade', new THREE.Float32BufferAttribute(fac, 3));
-  g.setIndex(idx);
-  g.computeVertexNormals();
-  return g;
-}
+const prism4 = islandPrism;
 
 /** The lowest rendered ground under a footprint. */
 function groundMin(x, z, r) {
@@ -99,18 +74,21 @@ function groundMin(x, z, r) {
   return m;
 }
 
+/** Closed quay/mole section, with its seabed sole and exposed ends. */
+const harbourSweep=(loop,section)=>sweepLoop(loop,section,{closed:false,closeSection:true,capEnds:true,capKind:1});
+
 // --------------------------------------------------------------- harbour --
 function harbour(parts, c, rnd, lights, { moleReach = 340, cranes = 0, lighthouseH = 34 } = {}) {
   const Q = c.quayLine;
   // quay: sea wall and fender facing the sea, a 70 m quay top, its back wall into the land
-  parts.push(sweepLoop(Q, () => [
+  const quay=harbourSweep(Q, () => [
     { a: [2.6, -16], b: [0, 2.5], kind: 1 },
     { a: [0, 2.5], b: [0, 3.45], kind: 10 },
     { a: [0, 3.45], b: [-0.8, 3.45], kind: 1 },
     { a: [-0.8, 3.45], b: [-0.8, 3.0], kind: 1 },
     { a: [-0.8, 3.0], b: [-70, 3.0], kind: 9 },
     { a: [-70, 3.0], b: [-70, -9], kind: 1 },
-  ], { closed: false }));
+  ]);quay.userData.islandPublicFloor=true;parts.push(quay);
   const d = c.d, sd = c.side;
   // moles from both quay ends, curving in to leave a mouth on the axis
   const ends = [Q[0], Q[Q.length - 1]];
@@ -121,7 +99,7 @@ function harbour(parts, c, rnd, lights, { moleReach = 340, cranes = 0, lighthous
     const ctrl = [[e[0], e[1]], [e[0] + d[0] * moleReach * 0.55, e[1] + d[1] * moleReach * 0.55], tip];
     const curve = new THREE.CatmullRomCurve3(ctrl.map(([x, z]) => V(x, 0, z)), false, 'centripetal');
     const pts = curve.getSpacedPoints(24).map((v) => [v.x, v.z]);
-    parts.push(sweepLoop(pts, () => [
+    parts.push(harbourSweep(pts, () => [
       { a: [9, -16], b: [8, 4.2], kind: 1 },
       { a: [8, 4.2], b: [-8, 4.2], kind: 9 },
       { a: [-8, 4.2], b: [-9, -16], kind: 1 },
@@ -133,14 +111,33 @@ function harbour(parts, c, rnd, lights, { moleReach = 340, cranes = 0, lighthous
     if (cranes) for (let k = 0; k < cranes; k++) {
       const p = pts[6 + k * 4];
       if (!p) continue;
-      parts.push(block(p[0], 4.2, p[1], 32, 16, 9, Math.atan2(d[0], d[1])));
-      parts.push(block(p[0] + d[0] * 18, 36, p[1] + d[1] * 18, 3, 52, 3, Math.atan2(d[0], d[1]), 1, 1));
+      const angle=Math.atan2(d[1],d[0]);
+      parts.push(prism4(rectangle(p[0],p[1],16,10,angle),3.7,36.2,8,1));
+      parts.push(prism4(rectangle(p[0]+d[0]*18,p[1]+d[1]*18,52,4,angle),35.5,39,1,1));
+      parts.push(sweepTube([V(p[0]-d[0]*5,25,p[1]-d[1]*5),V(p[0]+d[0]*35,35.5,p[1]+d[1]*35)],()=>.7,6,{kind:10}));
+      parts.push(sweepTube([V(p[0]+d[0]*39,35.5,p[1]+d[1]*39),V(p[0]+d[0]*39,14,p[1]+d[1]*39)],()=>.28,5,{kind:10}));
     }
   });
+  // A level arrival square receives the existing offshore station bridge. Its central
+  // axis stays open, while two supported arcades frame the first inland boulevard.
+  const ax=c.deep.x-d[0]*34,az=c.deep.z-d[1]*34,angle=Math.atan2(d[1],d[0]);
+  const arrival=prism4(rectangle(ax,az,58,78,angle),-16,3.75,1,9);arrival.userData.islandPublicFloor=true;parts.push(arrival);
+  for(const side of [-1,1]){
+    let previous;
+    for(let k=0;k<5;k++){
+      const x=ax+d[0]*(k*10-20)+sd[0]*side*28,z=az+d[1]*(k*10-20)+sd[1]*side*28;
+      if(!c.plan.isRoadFree(x,z,1.2)){previous=undefined;continue;}
+      parts.push(latheFacade([{r:.9,y:3.75,kind:1},{r:.7,y:13,kind:1},{r:1.1,y:13.5,kind:1}],8).translate(x,0,z));
+      if(previous)parts.push(prism4(rectangle((x+previous[0])/2,(z+previous[1])/2,12.2,4,angle),13.3,15,1,3));
+      previous=[x,z];
+    }
+  }
   // the ferry pier and its terminal
-  const m0 = Q[Math.floor(Q.length / 2)];
+  // The ferry berth occupies a side bay; the centre is reserved for the Great Ring
+  // station footbridge, whose landing is at deep - d*22.
+  const m0 = Q[Math.min(Q.length-3,Math.floor(Q.length / 2)+3)];
   const pier = [[m0[0] - d[0] * 29, m0[1] - d[1] * 29], [m0[0] + d[0] * 95, m0[1] + d[1] * 95]];
-  parts.push(sweepLoop(pier, () => [{ a: [6, -12], b: [6, 3.7], kind: 1 }, { a: [6, 3.7], b: [-6, 3.7], kind: 9 }, { a: [-6, 3.7], b: [-6, -12], kind: 1 }], { closed: false }));
+  parts.push(harbourSweep(pier, () => [{ a: [6, -12], b: [6, 3.7], kind: 1 }, { a: [6, 3.7], b: [-6, 3.7], kind: 9 }, { a: [-6, 3.7], b: [-6, -12], kind: 1 }], { closed: false }));
   const tb = [m0[0] - d[0] * 40, m0[1] - d[1] * 40];
   parts.push(block(tb[0], 3.0, tb[1], 13, 60, 24, Math.atan2(d[0], d[1]), 0, 3));
   // the waterfront row along the back of the quay
@@ -154,6 +151,8 @@ function harbour(parts, c, rnd, lights, { moleReach = 340, cranes = 0, lighthous
       const p0 = [a[0] + tx * t0, a[1] + tz * t0], p1 = [a[0] + tx * t1, a[1] + tz * t1];
       const dep = 18 + rnd() * 10;
       const q = [[p0[0] + n[0] * 74, p0[1] + n[1] * 74], [p1[0] + n[0] * 74, p1[1] + n[1] * 74], [p1[0] + n[0] * (74 + dep), p1[1] + n[1] * (74 + dep)], [p0[0] + n[0] * (74 + dep), p0[1] + n[1] * (74 + dep)]];
+      const centre=q.reduce((a,p)=>[a[0]+p[0]/4,a[1]+p[1]/4],[0,0]);
+      if(c.plan&&!c.plan.isRoadFree(centre[0],centre[1],Math.hypot(L/segs,dep)/2+3))continue;
       const g0 = Math.min(3, ...q.map(([x, z]) => renderedHeight(x, z)));
       parts.push(prism4(q, g0 - 5, Math.max(g0, 3) + 14 + rnd() * 20, 5, 3));
     }
@@ -180,42 +179,61 @@ function segDist(px, pz, a, b) {
 function urbanGrid(parts, c, rnd, o, placed) {
   const { ox, oz, ra, rs, size, street = 14, maxSlope = 18, minG = 2.2, lot, cell } = o;
   const d = c.d, sd = c.side;
-  const P = (u, v) => [ox + d[0] * u + sd[0] * v, oz + d[1] * u + sd[1] * v];
-  const Q = c.quayLine;
+  const P = (u, v) => {
+    const bend = c.id === 'thalassa' ? 65 * Math.sin(u / 480) : c.id === 'vesper' ? 34 * Math.sin(u / 420) : 0;
+    return [ox + d[0] * u + sd[0] * (v + bend), oz + d[1] * u + sd[1] * (v + bend)];
+  };
+  const Q = c.quayLine, roads = new Map(),entrances=[];
   const nU = Math.ceil(ra / size), nV = Math.ceil(rs / size);
+  const obstacle = placed.slice();
+  const edge = (i0,j0,i1,j1) => {
+    const key = [[i0,j0].join(','),[i1,j1].join(',')].sort().join('|');
+    if (!roads.has(key)) roads.set(key, [P(i0*size,j0*size),P(i1*size,j1*size)]);
+  };
   for (let i = -nU; i < nU; i++) for (let j = -nV; j < nV; j++) {
-    const u0 = i * size, u1 = u0 + size, v0 = j * size, v1 = v0 + size;
-    const uc = u0 + size / 2, vc = v0 + size / 2;
-    const t = Math.hypot(uc / ra, vc / rs);
-    if (t > 1 - 0.22 * rnd()) continue;
-    const [cx, cz] = P(uc, vc);
-    let near = false;
-    for (let k = 0; k < Q.length - 1 && !near; k++) near = segDist(cx, cz, Q[k], Q[k + 1]) < 110 + size * 0.71;
-    if (near || placed.some((p) => Math.hypot(p.x - cx, p.z - cz) < p.r + size * 0.75)) continue;
-    let gMin = 1e9, gMax = -1e9;
-    for (let a = 0; a <= 2; a++) for (let b = 0; b <= 2; b++) {
-      const [x, z] = P(u0 + (size * a) / 2, v0 + (size * b) / 2);
-      const h = renderedHeight(x, z);
-      gMin = Math.min(gMin, h); gMax = Math.max(gMax, h);
+    const u0=i*size,v0=j*size,u1=u0+size,v1=v0+size,uc=(u0+u1)/2,vc=(v0+v1)/2;
+    const t=Math.hypot(uc/ra,vc/rs);if(t>1-.13*rnd())continue;
+    const [cx,cz]=P(uc,vc);
+    if(Q.slice(1).some((q,k)=>segDist(cx,cz,Q[k],q)<115+size*.71))continue;
+    if(obstacle.some(p=>Math.hypot(p.x-cx,p.z-cz)<p.r+size*.73))continue;
+    if(c.plan?.reserved.some(p=>Math.hypot(p.x-cx,p.z-cz)<p.r+size*.73+street/2))continue;
+    const ground=footprintGround([P(u0,v0),P(u1,v0),P(u1,v1),P(u0,v1)],20);
+    if(ground.min<minG||ground.max-ground.min>maxSlope)continue;
+    for(const e of [[i,j,i+1,j],[i+1,j,i+1,j+1],[i+1,j+1,i,j+1],[i,j+1,i,j]])edge(...e);
+    const s=street/2+2,pad=[P(u0+s,v0+s),P(u1-s,v0+s),P(u1-s,v1-s),P(u0+s,v1-s)];
+    // The regional boulevard occupies its reserved corridor; local street strips still
+    // connect around it, but no building or raised plot can obstruct its passage.
+    if(c.plan&&!c.plan.isRoadFree(cx,cz,size*.72))continue;
+    if(rnd()<.07){const top=islandFoundation(parts,pad,{kind:3,name:`${c.id} neighbourhood garden`}),gate=[(pad[0][0]+pad[1][0])/2,(pad[0][1]+pad[1][1])/2];entrances.push({from:P(uc,v0),to:gate,top,width:4,q:pad,kind:'neighbourhood garden'});placed.push({x:cx,z:cz,r:size*.6});continue;}
+    if(cell){
+      const pg=footprintGround(pad,8),top=pg.max+.85,before=parts.length;
+      if(cell(P,u0+s,v0+s,u1-s,v1-s,top,t)){
+        const structures=parts.splice(before);islandFoundation(parts,pad,{top,kind:9,name:`${c.id} tower court`});parts.push(...structures);
+        const gate=[(pad[0][0]+pad[1][0])/2,(pad[0][1]+pad[1][1])/2],streetP=P(uc,v0);entrances.push({from:streetP,to:gate,top,width:4,q:pad});
+        placed.push({x:cx,z:cz,r:size*.6});continue;
+      }
     }
-    if (gMin < minG || gMax - gMin > maxSlope) continue;
-    const top = gMax + 0.8;
-    parts.push(prism4([P(u0, v0), P(u1, v0), P(u1, v1), P(u0, v1)], gMin - 6, top, 1, 9));
-    const s = street / 2;
-    if (rnd() < 0.08) {                     // a garden square
-      parts.push(prism4([P(u0 + s, v0 + s), P(u1 - s, v0 + s), P(u1 - s, v1 - s), P(u0 + s, v1 - s)], top - 1, top + 0.6, 1, 3));
-      continue;
-    }
-    if (cell && cell(P, u0 + s, v0 + s, u1 - s, v1 - s, top, t)) continue;
-    const nu = rnd() < 0.55 ? 2 : 1, nv = rnd() < 0.55 ? 2 : 1, gap = 4;
-    const lu = (size - street - gap * (nu - 1)) / nu, lv = (size - street - gap * (nv - 1)) / nv;
-    for (let a = 0; a < nu; a++) for (let b = 0; b < nv; b++) {
-      const a0 = u0 + s + a * (lu + gap), b0 = v0 + s + b * (lv + gap);
-      lot((iu0, iv0, iu1, iv1) => [P(a0 + iu0, b0 + iv0), P(a0 + iu1, b0 + iv0), P(a0 + iu1, b0 + iv1), P(a0 + iu0, b0 + iv1)], lu, lv, top, t);
+    const nu=rnd()<.6?2:1,nv=rnd()<.6?2:1,gap=6;
+    const lu=(size-2*s-gap*(nu-1))/nu,lv=(size-2*s-gap*(nv-1))/nv;
+    for(let a=0;a<nu;a++)for(let b=0;b<nv;b++){
+      const au=u0+s+a*(lu+gap),bv=v0+s+b*(lv+gap);
+      const Lq=(iu0,iv0,iu1,iv1)=>[P(au+iu0,bv+iv0),P(au+iu1,bv+iv0),P(au+iu1,bv+iv1),P(au+iu0,bv+iv1)];
+      const q=Lq(0,0,lu,lv),top=islandFoundation(parts,q,{name:`${c.id} street-front plot`,kind:9});
+      lot(Lq,lu,lv,top,t);
+      const vEdge=b===0?v0:v1,e=b===0?[q[0],q[1]]:[q[2],q[3]],gate=[(e[0][0]+e[1][0])/2,(e[0][1]+e[1][1])/2],streetP=P(au+lu/2,vEdge);
+      entrances.push({from:streetP,to:gate,top,width:3.2,q});
+      const centre=P(au+lu/2,bv+lv/2);placed.push({x:centre[0],z:centre[1],r:Math.hypot(lu,lv)/2+1});
     }
   }
-  // the grid is one district: keep the countryside out of it
-  placed.push({ x: ox, z: oz, r: Math.max(ra, rs) });
+  const surfaces=[],junctions=new Map();
+  const junction=p=>{const key=p.join(',');if(junctions.has(key))return junctions.get(key);let y=renderedHeight(...p);for(let k=0;k<16;k++)y=Math.max(y,renderedHeight(p[0]+Math.cos(k*TAU/16)*street*.44,p[1]+Math.sin(k*TAU/16)*street*.44));y+=.28;junctions.set(key,y);return y;};
+  for(const points of roads.values()){
+    const sections=islandRoad(parts,points,street*.88,{startY:junction(points[0]),endY:junction(points.at(-1)),keepouts:SKYLINE_KEEPOUT});surfaces.push({sections,points});parts.at(-1).userData.islandStreet={from:points[0],to:points.at(-1)};
+    const mid=[(points[0][0]+points[1][0])/2,(points[0][1]+points[1][1])/2];
+    placed.push({x:mid[0],z:mid[1],r:street/2+2});
+  }
+  // Finalize all public road crossings before building these entrance flights.
+  c.plan.coreEntrances.push(...entrances);
 }
 
 /** A building on a lot: a body, and for tall ones a set-back upper stage and a lantern crown. */
@@ -234,6 +252,7 @@ function building(parts, rnd, Lq, lu, lv, top, H, wall = 5, roof = 9) {
 function countryside(parts, c, rnd, lights, placed, n) {
   FOOTPRINTS.push({ c, placed });
   let made = 0, tries = 0;
+  c.plan.holdings=[];c.plan.holdingPaths=[];
   while (made < n && tries++ < n * 30) {
     const a = rnd() * TAU, r = Math.sqrt(rnd()) * c.coast.s * 1.1;
     const x = c.ix + Math.cos(a) * r, z = c.iz + Math.sin(a) * r;
@@ -243,11 +262,24 @@ function countryside(parts, c, rnd, lights, placed, n) {
     const Lq = (u0, v0, u1, v1) => [[u0, v0], [u1, v0], [u1, v1], [u0, v1]].map(([u, v]) => [x + (u - w / 2) * cs - (v - dd / 2) * sn, z + (u - w / 2) * sn + (v - dd / 2) * cs]);
     const q = Lq(0, 0, w, dd);
     const hs = q.map(([px, pz]) => renderedHeight(px, pz)).concat(renderedHeight(x, z));
-    const gMin = Math.min(...hs), gMax = Math.max(...hs);
+    const fg=footprintGround(q);
+    const gMin = fg.min, gMax = fg.max;
     if (gMin < 4 || gMax - gMin > (big ? 10 : 6)) continue;
-    if (placed.some((p) => Math.hypot(p.x - x, p.z - z) < p.r + (big ? 60 : 24))) continue;
-    const top = gMax + 0.5;
-    parts.push(prism4(q, gMin - 3, top, 1, 3));             // a planted terrace: fields or garden
+    if (placed.some((p) => Math.hypot(p.x - x, p.z - z) < p.r + (big ? 60 : 24)) || (c.plan && (!c.plan.free(x, z, big ? 62 : 26) || c.plan.sites.some(s=>Math.hypot(s.x-x,s.z-z)<700)))) continue;
+    if(c.plan.holdingPaths.some(([a,b])=>pointSegmentDistance(x,z,a,b)<(big?60:24)+3))continue;
+    let access=null;
+    for(let side=0;side<q.length;side++){
+      const qa=q[side],qb=q[(side+1)%q.length],gate=[(qa[0]+qb[0])/2,(qa[1]+qb[1])/2];
+      for(const route of c.plan.routes)for(let j=1;j<route.points.length;j++){
+        const a=route.points[j-1],b=route.points[j],dx=b[0]-a[0],dz=b[1]-a[1],t=Math.max(0,Math.min(1,((gate[0]-a[0])*dx+(gate[1]-a[1])*dz)/(dx*dx+dz*dz||1))),p=[a[0]+dx*t,a[1]+dz*t],distance=Math.hypot(p[0]-gate[0],p[1]-gate[1]);
+        if(distance>420||(access&&distance>=access.distance))continue;
+        if(placed.some(o=>pointSegmentDistance(o.x,o.z,p,gate)<o.r+2))continue;
+        access={p,gate,distance};
+      }
+    }
+    if(!access)continue;
+    const top = gMax + 0.85;
+    islandFoundation(parts,q,{top,kind:3,name:`${c.id} countryside holding`});             // a planted terrace: fields or garden
     if (big) {
       parts.push(prism4(Lq(3, 3, 19, 15), top - 1, top + 8, 5, 1));
       parts.push(prism4(Lq(24, 4, 43, 30), top - 1, top + 10, 8, 10));
@@ -255,7 +287,8 @@ function countryside(parts, c, rnd, lights, placed, n) {
       parts.push(prism4(Lq(4, 5, 20, 17), top - 1, top + 7, 5, 9));
       parts.push(prism4(Lq(12, 11, 26, 20), top - 1, top + 4, 0, 3));
     }
-    placed.push({ x, z, r: big ? 58 : 22 });
+    const holding={x,z,r:Math.hypot(w,dd)/2+2,q,top,type:'countryside holding'};
+    placed.push(holding);c.plan.holdings.push(holding);c.plan.holdingPaths.push([access.p,access.gate]);
     made++;
   }
   for (const p of placed) SKYLINE_KEEPOUT.push(p);
@@ -284,20 +317,68 @@ function summit(c) {
   return best;
 }
 
+/** Join monumental approaches to real streets through a reserved clear corridor. */
+function clearStreetArrival(parts,desired,door,width,{exclude=()=>false,accept=()=>true}={}){
+  const candidates=[],obstacles=parts.filter(g=>g.userData.islandFoundation&&!exclude(g.userData.islandFoundation.name)).map(g=>{const q=g.userData.islandFoundation.q,centre=q.reduce((s,p)=>[s[0]+p[0]/q.length,s[1]+p[1]/q.length],[0,0]);return{centre,r:Math.max(...q.map(p=>Math.hypot(p[0]-centre[0],p[1]-centre[1])))};});
+  for(const g of parts.filter(g=>g.userData.islandStreet)){
+    const p=g.userData.islandRoad.points;for(let i=1;i<p.length;i++){
+      const a=p[i-1],b=p[i],dx=b[0]-a[0],dz=b[1]-a[1],f=Math.max(0,Math.min(1,((desired[0]-a[0])*dx+(desired[1]-a[1])*dz)/(dx*dx+dz*dz))),point=[a[0]+dx*f,a[1]+dz*f];
+      if(!accept(point))continue;const len=Math.hypot(point[0]-door[0],point[1]-door[1]);if(len>600||len<10)continue;
+      if(obstacles.some(o=>pointSegmentDistance(...o.centre,point,door)<o.r+width/2+1))continue;
+      candidates.push({point,score:Math.hypot(point[0]-desired[0],point[1]-desired[1])+len*.2});
+    }
+  }
+  candidates.sort((a,b)=>a.score-b.score);if(!candidates.length)throw new Error(`Monument needs a clear street arrival at ${door}`);return candidates[0].point;
+}
+
 function buildThalassa(parts, c, rnd, lights) {
   harbour(parts, c, rnd, lights, { moleReach: 320 });
   const s = summit(c);
-  // the temple of the sea: four tiers, a colonnade, a dome and a lantern
-  for (let k = 0; k < 4; k++) parts.push(block(s.x, s.h - 6 + k * 9, s.z, 9 + (k === 0 ? 6 : 0), 150 - k * 28, 150 - k * 28, 0.3, 1, 9));
-  for (let k = 0; k < 18; k++) { const a = (k / 18) * TAU; parts.push(latheFacade([{ r: 2.2, y: 0, kind: 1 }, { r: 1.8, y: 24, kind: 1 }, { r: 2.6, y: 25, kind: 1 }], 8).translate(s.x + Math.cos(a) * 36, s.h + 30, s.z + Math.sin(a) * 36)); }
-  parts.push(latheFacade([{ r: 40, y: s.h + 54.5, kind: 1 }, { r: 40, y: s.h + 58, kind: 1 }, { r: 34, y: s.h + 58, kind: 0 }, { r: 26, y: s.h + 76, kind: 0 }, { r: 12, y: s.h + 86, kind: 0 }, { r: 5, y: s.h + 88, kind: 2 }, { r: 3, y: s.h + 100, kind: 2 }, { r: 0.1, y: s.h + 106, kind: 1 }], 32));
-  lights.push({ x: s.x, y: s.h + 100, z: s.z, c: [1.0, 0.85, 0.6], s: 4 });
-  const placed = [{ x: s.x, z: s.z, r: 120 }];
+  // A measured summit foundation carries every tier, and the entire colonnade sits
+  // within its upper stylobate. The dome is translated to this same island coordinate.
+  const floor = islandFoundation(parts, rectangle(s.x,s.z,182,182,.3), {name:'Thalassa sea temple foundation'});
+  const axis=[[Math.cos(.3),Math.sin(.3)],[-Math.sin(.3),Math.cos(.3)]],front=[...axis,...axis.map(a=>a.map(v=>-v))].sort((a,b)=>(b[0]*c.d[0]+b[1]*c.d[1])-(a[0]*c.d[0]+a[1]*c.d[1]))[0];
+  const right=[front[1],-front[0]],T=(u,v)=>[s.x+right[0]*u+front[0]*v,s.z+right[1]*u+front[1]*v];
+  const templeRect=(u0,v0,u1,v1)=>[T(u0,v0),T(u1,v0),T(u1,v1),T(u0,v1)];
+  // Each stylobate is a closed U-shaped assembly around an actual stair opening.
+  // Its central sanctuary stays solid under the complete ring of columns.
+  for(let k=0;k<4;k++){
+    const h=75-k*10,y0=floor+k*5-.2,y1=floor+(k+1)*5;
+    for(const q of [templeRect(-h,-h,h,40),templeRect(-h,40,-9,h),templeRect(9,40,h,h)])parts.push(prism4(q,y0,y1,1,9));
+    // A projecting coping course and paired urn plinths articulate every accessible step.
+    for(const u of [-h+3,h-3])parts.push(prism4(templeRect(u-1,-h,u+1,h),y1-.7,y1+.3,1,1));
+  }
+  const stylobate=floor+20;
+  for(let k=0;k<18;k++){const a=k/18*TAU;parts.push(latheFacade([{r:2.2,y:stylobate,kind:1},{r:1.8,y:stylobate+24,kind:1},{r:2.6,y:stylobate+25,kind:1}],8).translate(s.x+Math.cos(a)*36,0,s.z+Math.sin(a)*36));}
+  parts.push(latheFacade([{r:40,y:stylobate+24.5,kind:1},{r:40,y:stylobate+28,kind:1},{r:34,y:stylobate+28,kind:0},{r:26,y:stylobate+46,kind:0},{r:12,y:stylobate+56,kind:0},{r:5,y:stylobate+58,kind:2},{r:3,y:stylobate+70,kind:2},{r:.1,y:stylobate+76,kind:1}],32).translate(s.x,0,s.z));
+  lights.push({x:s.x,y:stylobate+70,z:s.z,c:[1,.85,.6],s:4});
+  const approach=T(0,240),door=T(0,91);
+  islandRoad(parts,[T(0,91),T(0,40)],16,{startY:floor,endY:stylobate,steps:true,keepouts:SKYLINE_KEEPOUT});
+  // Thin continuous courses break down the white retaining faces; their intervals are
+  // structural stonework, leaving the new entrance and its upper flight fully clear.
+  const baseGround=footprintGround(rectangle(s.x,s.z,182,182,.3));
+  for(let y=Math.ceil((baseGround.min+2)/6)*6;y<floor-1;y+=6){
+    parts.push(prism4(templeRect(-92,-92,92,-90.5),y,y+.42,1,1));
+    for(const u of [-91.25,91.25])parts.push(prism4(templeRect(u-.75,-91,u+.75,91),y,y+.42,1,1));
+    for(const u of [-51,51])parts.push(prism4(templeRect(u-39.5,90.5,u+39.5,92),y,y+.42,1,1));
+  }
+  for(const side of [-1,1])for(const v of [-65,-38,-11,16,43,70]){
+    const p=T(side*92,v);islandFoundation(parts,rectangle(p[0],p[1],4.2,5,.3),{top:floor+.4,name:'Thalassa temple wall pier'});
+  }
+  for(const u of [-65,-36,36,65]){
+    const p=T(u,88),q=rectangle(p[0],p[1],13,7,Math.atan2(right[1],right[0]));parts.push(prism4(q,floor-.2,floor+.8,1,3));
+    parts.push(latheFacade([{r:1.8,y:floor+.8,kind:1},{r:1.2,y:floor+2.6,kind:1},{r:2.1,y:floor+3.5,kind:2},{r:1.3,y:floor+4.5,kind:2},{r:.1,y:floor+5.8,kind:2}],12).translate(p[0],0,p[1]));
+  }
+  // Four grounded buttress piers articulate the retaining wall below the sanctuary.
+  for(const [u,v]of [[-91,-91],[91,-91],[91,91],[-91,91]]){const cs=Math.cos(.3),sn=Math.sin(.3),x=s.x+u*cs-v*sn,z=s.z+u*sn+v*cs;islandFoundation(parts,rectangle(x,z,13,13,.3),{top:floor+1.2,name:'Thalassa temple buttress'});}
+  const placed = [{ x: s.x, z: s.z, r: 150 }];
   // the white town climbs from the harbour to the temple in terraces
   const bx = c.coast.x - c.d[0] * 150, bz = c.coast.z - c.d[1] * 150;
   const L = Math.hypot(s.x - bx, s.z - bz);
-  urbanGrid(parts, c, rnd, { ox: (bx + s.x) / 2, oz: (bz + s.z) / 2, ra: L / 2 + 120, rs: 1600, size: 70, street: 12, maxSlope: 28,
+  urbanGrid(parts, c, rnd, { ox: (bx + s.x) / 2, oz: (bz + s.z) / 2, ra: L / 2 + 120, rs: 850, size: 76, street: 12, maxSlope: 28,
     lot: (Lq, lu, lv, top, t) => building(parts, rnd, Lq, lu, lv, top, 7 + rnd() * 14 * (1.2 - t), 5, rnd() < 0.3 ? 3 : 9) }, placed);
+  const arrival=clearStreetArrival(parts,approach,door,18,{exclude:n=>n.startsWith('Thalassa temple')||n==='Thalassa sea temple foundation',accept:p=>(p[0]-s.x)*front[0]+(p[1]-s.z)*front[1]>=140});
+  c.plan.coreEntrances.push({from:arrival,to:door,top:floor,width:18,q:rectangle(s.x,s.z,182,182,.3),kind:'temple approach'});
   countryside(parts, c, rnd, lights, placed, 70 * 3);
 }
 
@@ -377,7 +458,7 @@ function buildAustral(parts, c, rnd, lights) {
   const placed = [];
   // the great spire: a five-lobed section turning as it rises
   const sx = c.coast.x - c.d[0] * 950, sz = c.coast.z - c.d[1] * 950;
-  const g = groundMin(sx, sz, 120);
+  const g = islandFoundation(parts,circleFootprint(sx,sz,264,48),{name:'Austral spire foundation',kind:3});
   const H = 1400, R = 110;
   const secs = [];
   for (let j = 0; j <= 60; j++) {
@@ -390,21 +471,39 @@ function buildAustral(parts, c, rnd, lights) {
   }
   parts.push(loftSections(secs, { capTop: true, kindTop: 2 }));
   parts.push(latheFacade([{ r: R * 0.1, y: g + H * 0.9, kind: 1 }, { r: 0.6, y: g + H * 1.06, kind: 2 }], 10).translate(sx, 0, sz));
-  parts.push(latheFacade([{ r: R * 2.4, y: g - 6, kind: 1 }, { r: R * 2.4, y: g + 6, kind: 5 }, { r: R * 2.1, y: g + 8, kind: 3 }, { r: 0.1, y: g + 8.5, kind: 3 }], 48).translate(sx, 0, sz));
+  parts.push(latheFacade([{r:R*2.4,y:g-.1,kind:1},{r:R*2.4,y:g+.7,kind:1},{r:R*2.1,y:g+1.2,kind:3},{r:.1,y:g+1.2,kind:3}],48).translate(sx,0,sz));
   lights.push({ x: sx, y: g + H * 1.06, z: sz, c: [0.8, 1.0, 0.9], s: 4 });
   placed.push({ x: sx, z: sz, r: R * 2.6 });
+  parts.push(latheFacade([{r:220,y:g+1.15,kind:9},{r:238,y:g+1.15,kind:9},{r:238,y:g+1.5,kind:9},{r:220,y:g+1.5,kind:9}],64,{closedProfile:true}).translate(sx,0,sz));
+  const spireApproaches=[];
+  for(let k=0;k<5;k++){
+    const a=k*TAU/5+c.toward,dx=Math.cos(a),dz=Math.sin(a),A=[sx+dx*355,sz+dz*355],B=[sx+dx*254,sz+dz*254];
+    const threshold=rectangle(B[0],B[1],18,6,a+Math.PI/2);
+    islandFoundation(parts,threshold,{top:g+1.5,kind:9,name:'Austral spire entrance threshold'});
+    spireApproaches.push({A,B,threshold,dx,dz});
+    islandRoad(parts,[B,[sx+dx*169,sz+dz*169]],12,{startY:g+1.5,endY:g+1.5,flat:true});
+    for(let r=280;r<=355;r+=20)placed.push({x:sx+dx*r,z:sz+dz*r,r:12});
+    const pa=a+Math.PI/5,x=sx+Math.cos(pa)*194,z=sz+Math.sin(pa)*194;
+    parts.push(latheFacade([{r:1.2,y:g+1.2,kind:1},{r:1,y:g+12,kind:1},{r:12,y:g+13,kind:3},{r:12,y:g+14,kind:1},{r:.1,y:g+17,kind:3}],20).translate(x,0,z));
+  }
+
   for (let k = 0; k < 14; k++) {
     const a = (k / 14) * TAU + rnd() * 0.2, r = 520 + rnd() * 300;
     const x = sx + Math.cos(a) * r, z = sz + Math.sin(a) * r;
     const h = renderedHeight(x, z);
     if (h < 3 || h > 300) continue;
     const Rt = 20 + rnd() * 16;
+    if(!c.plan.isRoadFree(x,z,Rt*1.3))continue;
     parts.push(tower(rnd, x, groundMin(x, z, Rt * 1.25) - 4, z, 150 + rnd() * 170, Rt, rnd()));
     placed.push({ x, z, r: Rt * 1.3 });
   }
   // the arcology's garden-roofed quarters round the spire
   urbanGrid(parts, c, rnd, { ox: sx, oz: sz, ra: 1050, rs: 1400, size: 96, street: 16,
     lot: (Lq, lu, lv, top, t) => building(parts, rnd, Lq, lu, lv, top, (14 + rnd() * 40) * (1.3 - t), rnd() < 0.4 ? 0 : 5, 3) }, placed);
+  for(const e of spireApproaches){
+    const from=clearStreetArrival(parts,e.A,e.B,14,{exclude:n=>n.startsWith('Austral spire'),accept:p=>(p[0]-sx)*e.dx+(p[1]-sz)*e.dz>300});
+    c.plan.coreEntrances.push({from,to:e.B,top:g+1.5,width:14,q:e.threshold,kind:'spire approach'});
+  }
   countryside(parts, c, rnd, lights, placed, 70 * 3);
 }
 
@@ -412,11 +511,19 @@ function buildAustral(parts, c, rnd, lights) {
 // every island city's footprint (districts, landmarks, villas, farms, lighthouse) for
 // whatever grows or is built round them later (the island woods)
 const FOOTPRINTS = [];
+const ROAD_CLEARANCE = new Map(), ROAD_CELL=128;
+function reserveRoad(points,width){
+  for(let i=1;i<points.length;i++){const a=points[i-1],b=points[i],seg={a,b,r:width/2};
+    for(let x=Math.floor((Math.min(a[0],b[0])-seg.r)/ROAD_CELL);x<=Math.floor((Math.max(a[0],b[0])+seg.r)/ROAD_CELL);x++)for(let z=Math.floor((Math.min(a[1],b[1])-seg.r)/ROAD_CELL);z<=Math.floor((Math.max(a[1],b[1])+seg.r)/ROAD_CELL);z++){const key=x+','+z;if(!ROAD_CLEARANCE.has(key))ROAD_CLEARANCE.set(key,[]);ROAD_CLEARANCE.get(key).push(seg);}
+  }
+}
 /** Is a circle (x, z, r) clear of the island cities, their harbours and countryside? */
 export function islandCityFree(x, z, r = 0) {
-  for (const { c, placed } of FOOTPRINTS) {
+  for(let ix=Math.floor((x-r)/ROAD_CELL);ix<=Math.floor((x+r)/ROAD_CELL);ix++)for(let iz=Math.floor((z-r)/ROAD_CELL);iz<=Math.floor((z+r)/ROAD_CELL);iz++)for(const s of ROAD_CLEARANCE.get(ix+','+iz)||[])if(pointSegmentDistance(x,z,s.a,s.b)<r+s.r+1)return false;
+  for (const { c, placed, plan } of FOOTPRINTS) {
     if (Math.hypot(x - c.ix, z - c.iz) > c.coast.s * 1.3 + 2000) continue;
     for (const p of placed) if (Math.hypot(p.x - x, p.z - z) < p.r + r) return false;
+    if(plan && (!plan.isRoadFree(x,z,r) || plan.circles.some(p=>Math.hypot(p.x-x,p.z-z)<p.r+r)))return false;
     const Q = c.quayLine;
     for (let k = 0; k < Q.length - 1; k++) if (segDist(x, z, Q[k], Q[k + 1]) < 200 + r) return false;
     if (Math.hypot(x - c.station.x, z - c.station.z) < 220 + r) return false;
@@ -424,14 +531,18 @@ export function islandCityFree(x, z, r = 0) {
   return true;
 }
 
-export function buildSkyline(scene) {
+export function buildSkyline(scene, { audit = false } = {}) {
   FOOTPRINTS.length = 0;
+  ROAD_CLEARANCE.clear();
+  SKYLINE_KEEPOUT.length = 0;
+  const auditParts = [], plans = [];
   const oc = outerCities();
   const meshes = [];
   const lights = [];
   let tris = 0;
   const builders = { terraced: buildThalassa, port: buildAnchorage, needles: buildOrison, domes: buildVesper, spire: buildAustral };
   const add = (parts, pal, seed, name, light) => {
+    if(audit)for(const geometry of parts)auditParts.push({name,geometry});
     const geo = mergeClean(parts.filter((g) => g && g.attributes.position.count));
     const mat = createFacadeMaterial(pal, seed, { litFrac: 0.62, band: 128, lampTint: light ? light.map((v) => v / Math.max(...light)) : undefined });
     const m = new THREE.Mesh(geo, mat);
@@ -446,12 +557,24 @@ export function buildSkyline(scene) {
   };
   oc.islands.forEach((c, i) => {
     const parts = [];
-    builders[c.style](parts, c, mulberry32(2026 + i * 17), lights);
+    const obstacles=[];
+    if(c.id==='thalassa'){const s=summit(c);obstacles.push({x:s.x,z:s.z,r:180});}
+    if(c.id==='austral')obstacles.push({x:c.coast.x-c.d[0]*950,z:c.coast.z-c.d[1]*950,r:300});
+    if(c.id==='vesper')obstacles.push({x:c.coast.x-c.d[0]*520,z:c.coast.z-c.d[1]*520,r:125});
+    if(c.id==='anchorage')for(const sign of [-1,1])obstacles.push({x:c.coast.x-c.d[0]*420+c.side[0]*sign*95,z:c.coast.z-c.d[1]*420+c.side[1]*sign*95,r:60});
+    const plan=buildIslandPlan(c,obstacles), city={...c,plan};
+    builders[c.style](parts, city, mulberry32(2026 + i * 17), lights);
+    const footprint=FOOTPRINTS.find(f=>f.c.id===c.id);
+    plan.circles.push(...footprint.placed);
+    buildIslandLandscape(parts,city,plan,lights,SKYLINE_KEEPOUT);
+    for(const g of parts){const road=g.userData.islandClearance;if(road)reserveRoad(road.points,road.width);}
+    footprint.plan=plan;plans.push(plan);
     add(parts, c.palette, 900 + i, `${c.name} (island city)`, c.light);
   });
   // the massif terrace towns live in massifTowns.js
-  const mt = buildMassifTowns(scene, oc.massif, lights);
+  const mt = buildMassifTowns(scene, oc.massif, lights,{audit});
+  for(const part of mt.auditParts)auditParts.push(part);
   meshes.push(...mt.meshes);
   tris += mt.tris;
-  return { meshes, tris, lights, cities: oc, isFree: islandCityFree };
+  return { meshes, tris, lights, cities: oc, isFree: islandCityFree, plans, auditParts };
 }

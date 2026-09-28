@@ -84,7 +84,9 @@ export class SpaceSim {
     const N = new THREE.Vector3(0, 1, 0);
     const d = new THREE.Vector3().addScaledVector(E, moonLocal.x).addScaledVector(U, moonLocal.y).addScaledVector(N, -moonLocal.z).normalize();
     // orbit plane: through d, prograde (eastward), tilted ~18 deg to the equator
-    const east = new THREE.Vector3().crossVectors(N, d).normalize();
+    const east = new THREE.Vector3().crossVectors(N, d);
+    if (east.lengthSq() < 1e-12) east.crossVectors(new THREE.Vector3(0,0,1), d);
+    east.normalize();
     const north = new THREE.Vector3().crossVectors(d, east).normalize();
     const tilt = THREE.MathUtils.degToRad(-14);
     this.moonT.copy(east).multiplyScalar(Math.cos(tilt)).addScaledVector(north, Math.sin(tilt)).normalize();

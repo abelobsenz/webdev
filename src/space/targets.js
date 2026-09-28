@@ -50,7 +50,50 @@ TARGET_INFO.tenders = {
 TARGET_INFO.selene = {
   key: '0', name: 'Selene Works', district: 'Above the near side · 2,600 km',
   lore: 'Water, oxygen and metals from the lunar highlands are refined here and sent down the gravity well to the harbours. The great fins are radiators, glowing with waste heat. The wheel holds six thousand people, most of them in the one job that never runs out: looking after the machines.',
-  facts: [['Span', '6 km'], ['Wheel', '4.4 km, 1 rpm'], ['Crew', '6,000']],
+  facts: [['Span', '6 km'], ['Wheel', '4.4 km, 0.38 rpm'], ['Crew', '6,000']],
 };
 
-export const TARGET_ORDER = ['earth', 'meridian', 'halo', 'geo', 'moon', 'sun', 'hearth', 'liner', 'tenders', 'selene'];
+TARGET_INFO.lunarport = {
+  key:'',name:'Tranquillity Exchange',district:'Lunar ring · 380 km',
+  lore:'The customs hall where the near-side towns meet the orbital road. The six garden commons look back toward Earth. Below them, sealed piers receive water and refined stock from Selene Works; the two cargo courts keep their traffic outside the inhabited ring.',
+  facts:[['Commons','6'],['Concourse','13.6 km'],['Role','Lunar interchange']],
+};
+TARGET_INFO.foundry = {
+  key:'',name:'Nauru Reclamation Works',district:'Halo north wall · 627 km',
+  lore:'Three open receiving halls take the tenders\' recovered satellites and old tether stock. The sorting rails lead to remelting columns and quiet stock courts. An enclosed gallery carries the works off the Halo wall; its crews live in the garden wheel behind the furnaces.',
+  facts:[['Receiving halls','3'],['Stock courts','2'],['Role','Orbital reclamation']],
+};
+TARGET_INFO.solarCollector = {
+  key:'',name:'Helianth Collector',district:'Solar swarm · polar service station',
+  lore:'One working flower in the swarm. Twelve collector petals spread beneath a habitat wheel screened from the full face of the nearby Sun. The raised fins turn waste heat back into space. Above the hub, the service crown receives worn receiver leaves and sends repaired craft out among the unattended mirrors.',
+  facts:[['Span','29 km'],['Collector petals','12'],['Role','Swarm maintenance']],
+};
+TARGET_INFO.solarService = {
+  key:'',name:'Helianth Service Crown',district:'Solar swarm · receiver maintenance',
+  lore:'A tug waits in its fitted cradle beside the receiving gantry. Worn receiver leaves cross to the calibration racks on the opposite wing; sealed galleries carry the crew back to the central lift and the shaded habitat below. The departure column stays open above the berth, while the radiator leaves stand well outside the working crown.',
+  facts:[['Service craft','360 m tug'],['Receiver racks','3'],['Role','Swarm repair and transfer']],
+};
+TARGET_INFO.hearthworks = {
+  key:'',name:'Hearth Refuge',district:'Beyond the collector line',
+  lore:'Two counter-rotating garden wheels outside the hot collector ring. Gold transfer collars ride on magnetic bearings around the fixed spindle. The incoming gallery arrives below the wheels; repair racks and radiator leaves stay still between them. Here the collector crews sleep and tend small gardens before their next shift.',
+  facts:[['Habitat wheels','2, counter-rotating'],['Wheel diameter','24 km'],['Gravity at rim','1 g']],
+};
+
+TARGET_INFO.harbourTerrace = {
+  key:'',name:'Concord Embarkation Garden',district:'Harbour · liner pier',
+  lore:'The last gardens before departure. Passengers come up through the pier lifts, pass customs, and wait in six connected conservatories beside the liner. Sealed galleries lead back to the boarding bridges. Baggage rails, a handling gantry and the courier court occupy the service end of the terrace.',
+  facts:[['Terrace','1 km'],['Conservatories','6'],['Role','Passenger embarkation']],
+};
+TARGET_INFO.lunarCourt = {
+  key:'',name:'Tranquillity Service Court',district:'Lunar orbital road · north traction spine',
+  lore:'A local stopping place beyond the Exchange. The three-car train waits on a siding above the workshop floor. Two lifts take passengers to the town hall and its enclosed winter gardens. Beyond a separate EVA airlock, crews handle spare guide collars and calibrate radiator fins in the exterior service courts. The through line stays open.',
+  facts:[['Platform','740 m'],['Service train','3 cars'],['Role','Local transit and maintenance']],
+};
+
+TARGET_INFO.lunarReceiving = {
+  key:'',name:'Selene Receiving Court',district:'Tranquillity Exchange · outboard piers',
+  lore:'Water and oxygen arrive from Selene in paired pressure drums. The ferry settles onto belly couplings outside the ring, above a braced unloading dock. Across the pressure spine, a gantry sorts refined metal into inspected stock. Crew airlocks face a separate EVA walkway; the ferry lifts straight outward when its transfer is complete.',
+  facts:[['Fluid vessels','4'],['Ferry length','770 m'],['Role','Water, oxygen and metal receiving']],
+};
+
+export const TARGET_ORDER = ['earth', 'meridian', 'halo', 'geo', 'moon', 'sun', 'hearth', 'liner', 'tenders', 'selene', 'foundry', 'lunarport', 'lunarReceiving', 'solarCollector', 'solarService', 'hearthworks', 'harbourTerrace', 'lunarCourt'];

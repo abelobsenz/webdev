@@ -8,16 +8,23 @@ import { U } from '../core/uniforms.js';
 const TAU = Math.PI * 2;
 
 /** Extrude a 2D cross-section (in side/up coordinates) along a path with a world-up frame. */
-export function extrudeAlong(path, section, kindFn, { caps = false } = {}) {
+export function extrudeAlong(path, section, kindFn, { caps = true } = {}) {
   const pos = [], fac = [], idx = [];
   const n = section.length;
+  const periodic = path.length > 3 && path[0].distanceToSquared(path.at(-1)) < 1e-10;
+  const clockwise = section.reduce((sum, p, i) => { const q = section[(i + 1) % n]; return sum + p[0] * q[1] - q[0] * p[1]; }, 0) < 0;
   let len = 0;
   const up = new THREE.Vector3(0, 1, 0);
+  const frames = [];
   for (let j = 0; j < path.length; j++) {
-    const a = path[Math.max(j - 1, 0)], b = path[Math.min(j + 1, path.length - 1)];
+    const atSeam = periodic && (j === 0 || j === path.length - 1);
+    const a = path[atSeam ? path.length - 2 : Math.max(j - 1, 0)], b = path[atSeam ? 1 : Math.min(j + 1, path.length - 1)];
     const t = new THREE.Vector3().subVectors(b, a).normalize();
-    const side = new THREE.Vector3().crossVectors(t, up).normalize();
+    const side = new THREE.Vector3().crossVectors(t, up);
+    if (side.lengthSq() < 1e-10) side.copy(frames.at(-1)?.side ?? new THREE.Vector3(1, 0, 0));
+    side.normalize();
     const u2 = new THREE.Vector3().crossVectors(side, t).normalize();
+    frames.push({ t, side, u2 });
     if (j > 0) len += path[j].distanceTo(path[j - 1]);
     let per = 0;
     for (let i = 0; i <= n; i++) {
@@ -32,11 +39,14 @@ export function extrudeAlong(path, section, kindFn, { caps = false } = {}) {
   const cols = n + 1;
   for (let j = 0; j < path.length - 1; j++) {
     for (let i = 0; i < n; i++) {
+      const p = section[i], q = section[(i + 1) % n];
+      if (Math.hypot(p[0] - q[0], p[1] - q[1]) < 1e-8) continue;
       const a = j * cols + i, b = a + 1, c = a + cols, d = c + 1;
-      idx.push(a, b, c, b, d, c);
+      if (clockwise) idx.push(a, b, c, b, d, c);
+      else idx.push(a, c, b, b, c, d);
     }
   }
-  if (caps) {
+  if (caps && !periodic) {
     // flat end caps (own vertices, so their normals stay flat): the section is triangulated
     // once and each triangle is wound to face out of the end it closes
     const ring = [];
@@ -48,10 +58,7 @@ export function extrudeAlong(path, section, kindFn, { caps = false } = {}) {
     const tris = THREE.ShapeUtils.triangulateShape(ring.map((s) => new THREE.Vector2(s[0], s[1])), []);
     const e1 = new THREE.Vector3(), e2 = new THREE.Vector3(), nrm = new THREE.Vector3();
     for (const [j, sign] of [[0, -1], [path.length - 1, 1]]) {
-      const a = path[Math.max(j - 1, 0)], b = path[Math.min(j + 1, path.length - 1)];
-      const t = new THREE.Vector3().subVectors(b, a).normalize();
-      const side = new THREE.Vector3().crossVectors(t, up).normalize();
-      const u2 = new THREE.Vector3().crossVectors(side, t).normalize();
+      const { t, side, u2 } = frames[j];
       const o = pos.length / 3;
       for (const s of ring) {
         const p = path[j];
@@ -72,41 +79,21 @@ export function extrudeAlong(path, section, kindFn, { caps = false } = {}) {
   g.setAttribute('aFacade', new THREE.Float32BufferAttribute(fac, 3));
   g.setIndex(idx);
   g.computeVertexNormals();
+  if (periodic) {
+    const normals = g.attributes.normal;
+    for (let i = 0; i <= n; i++) {
+      const a = i, b = (path.length - 1) * cols + i;
+      const normal = new THREE.Vector3().fromBufferAttribute(normals, a).add(new THREE.Vector3().fromBufferAttribute(normals, b)).normalize();
+      normals.setXYZ(a, normal.x, normal.y, normal.z); normals.setXYZ(b, normal.x, normal.y, normal.z);
+    }
+  }
   return g;
-}
-
-/** A copy of a surface with its faces reversed (own vertices, clean normals): the back of a one-sided shell. */
-function backFace(g) {
-  const b = g.clone();
-  const ix = b.index.array;
-  for (let i = 0; i < ix.length; i += 3) { const k = ix[i + 1]; ix[i + 1] = ix[i + 2]; ix[i + 2] = k; }
-  b.computeVertexNormals();
-  return b;
 }
 
 /** Lathe-profile filter: drops points below the last kept one, so a short span never folds. */
 function rising() {
   let last = -Infinity;
   return (q) => (q.y >= last ? ((last = q.y), true) : false);
-}
-
-/** A flat disc of radius r at c facing n (unit): closes a tube end. */
-function disc(c, n, r, seg = 16, kind = 1) {
-  const u = Math.abs(n.y) < 0.9 ? new THREE.Vector3(0, 1, 0).cross(n).normalize() : new THREE.Vector3(1, 0, 0).cross(n).normalize();
-  const v = new THREE.Vector3().crossVectors(n, u);
-  const pos = [c.x, c.y, c.z], fac = [0, 0, kind], idx = [];
-  for (let i = 0; i < seg; i++) {
-    const a = (i / seg) * TAU;
-    pos.push(c.x + (u.x * Math.cos(a) + v.x * Math.sin(a)) * r, c.y + (u.y * Math.cos(a) + v.y * Math.sin(a)) * r, c.z + (u.z * Math.cos(a) + v.z * Math.sin(a)) * r);
-    fac.push(Math.cos(a) * r, Math.sin(a) * r, kind);
-    idx.push(0, 1 + i, 1 + ((i + 1) % seg));
-  }
-  const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-  g.setAttribute('aFacade', new THREE.Float32BufferAttribute(fac, 3));
-  g.setIndex(idx);
-  g.computeVertexNormals();
-  return g;
 }
 
 // ------------------------------------------------------------ promenades --
@@ -126,7 +113,11 @@ function portal(parts, p, side, base, ground = null) {
   const h = 13.5, half = ground ? 17.2 : 15.8;
   for (const s of [-1, 1]) {
     const c = p.clone().addScaledVector(side, s * half);
-    const foot = ground ? Math.min(ground(c.x, c.z), base - 1.4) : base - 1;
+    let foot = base - 1;
+    if (ground) {
+      foot = Math.min(ground(c.x, c.z), base - 1.4);
+      for (let i = 0; i < 12; i++) foot = Math.min(foot, ground(c.x + Math.cos(i / 12 * TAU) * 2.3, c.z + Math.sin(i / 12 * TAU) * 2.3));
+    }
     const pyl = latheFacade([
       ...(ground ? [{ r: 0.1, y: foot - 1.2, kind: 1 }, { r: 2.3, y: foot - 1.2, kind: 1 }, { r: 2.3, y: foot + 0.6, kind: 1 }, { r: 1.95, y: foot + 0.9, kind: 1 }] : [{ r: 1.9, y: foot, kind: 1 }]),
       { r: 1.7, y: base + 1.2, kind: 1 }, { r: 1.2, y: base + h * 0.72, kind: 1 },
@@ -139,30 +130,53 @@ function portal(parts, p, side, base, ground = null) {
   for (let i = 0; i <= 24; i++) {
     const u = i / 24;
     const x = -half + 2 * half * u;
-    arc.push(p.clone().addScaledVector(side, x).add(new THREE.Vector3(0, base + h * 0.78 + 3.2 * Math.sin(Math.PI * u), 0)));
+    arc.push(p.clone().addScaledVector(side, x).setY(base + h * 0.78 + 3.2 * Math.sin(Math.PI * u)));
   }
   parts.push(sweepTube(arc, () => 0.55, 8, { kind: 1 }));
   parts.push(sweepTube(arc.map((q) => q.clone().add(new THREE.Vector3(0, -0.75, 0))), () => 0.2, 6, { kind: 2 }));
 }
 
 /** Build a grid surface from a function (u, v) -> [x, y, z] with a constant facade kind. */
-function gridSurface(nu, nv, fn, kind, facScale = [1, 1]) {
+function gridVolume(nu, nv, upper, lower, kindTop, kindBottom, facScale = [1, 1]) {
   const pos = [], fac = [], idx = [];
-  for (let j = 0; j <= nv; j++) for (let i = 0; i <= nu; i++) {
-    const p = fn(i / nu, j / nv);
-    pos.push(p[0], p[1], p[2]);
-    fac.push((i / nu) * facScale[0], (j / nv) * facScale[1], kind);
+  const cols = nu + 1, layerSize = cols * (nv + 1);
+  for (const [fn, kind] of [[upper, kindTop], [lower, kindBottom]])
+    for (let j = 0; j <= nv; j++) for (let i = 0; i <= nu; i++) {
+      const p = fn(i / nu, j / nv);
+      pos.push(p[0], p[1], p[2]);
+      fac.push(i / nu * facScale[0], j / nv * facScale[1], kind);
+    }
+  const normal = (a, b, c) => new THREE.Vector3().fromArray(pos, b * 3).sub(new THREE.Vector3().fromArray(pos, a * 3))
+    .cross(new THREE.Vector3().fromArray(pos, c * 3).sub(new THREE.Vector3().fromArray(pos, a * 3)));
+  let flip = false;
+  for (let i = 0; i < nu; i++) { const n = normal(i, i + 1, i + cols); if (n.lengthSq() > 1e-12) { flip = n.y < 0; break; } }
+  const tri = (a, b, c, reverse = flip) => {
+    if (normal(a, b, c).lengthSq() > 1e-14) idx.push(a, reverse ? c : b, reverse ? b : c);
+  };
+  for (let layer = 0; layer < 2; layer++) for (let j = 0; j < nv; j++) for (let i = 0; i < nu; i++) {
+    const a = layer * layerSize + j * cols + i;
+    tri(a, a + 1, a + cols, layer ? !flip : flip);
+    tri(a + 1, a + cols + 1, a + cols, layer ? !flip : flip);
   }
-  const cols = nu + 1;
-  for (let j = 0; j < nv; j++) for (let i = 0; i < nu; i++) {
-    const a = j * cols + i;
-    idx.push(a, a + 1, a + cols, a + 1, a + cols + 1, a + cols);
+  const boundary = [];
+  for (let i = 0; i <= nu; i++) boundary.push(i);
+  for (let j = 1; j <= nv; j++) boundary.push(j * cols + nu);
+  for (let i = nu - 1; i >= 0; i--) boundary.push(nv * cols + i);
+  for (let j = nv - 1; j > 0; j--) boundary.push(j * cols);
+  for (let i = 0; i < boundary.length; i++) {
+    const a = boundary[i], b = boundary[(i + 1) % boundary.length], start = pos.length / 3;
+    for (const v of [a, a + layerSize, b + layerSize, b]) {
+      pos.push(...pos.slice(v * 3, v * 3 + 3)); fac.push(fac[v * 3], fac[v * 3 + 1], kindBottom);
+    }
+    tri(start, start + 1, start + 2); tri(start, start + 2, start + 3);
   }
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   g.setAttribute('aFacade', new THREE.Float32BufferAttribute(fac, 3));
   g.setIndex(idx);
   g.computeVertexNormals();
+  const normals = g.attributes.normal;
+  for (let i = 0; i < normals.count; i++) if (new THREE.Vector3().fromBufferAttribute(normals, i).lengthSq() < 0.1) normals.setXYZ(i, 0, 1, 0);
   return g;
 }
 
@@ -195,23 +209,26 @@ function station(parts, c, t, side, base, entry, groundLo) {
     plinth.computeVertexNormals();
     parts.push(plinth);
   }
-  // the glass pod (kind 2 glows softly at night)
-  // (its foot is buried in the plinth, and a back face closes the shell from inside)
-  const glass = gridSurface(40, 16, (iu, iv) => {
-    const s = iu * 2 - 1, a = iv * Math.PI;
-    const f = pod(s);
-    const sn = Math.pow(Math.sin(a), 0.85);
-    return P(s * L / 2, Math.cos(a) * W * f, -0.2 + 0.6 * sn * f + sn * H * f).toArray();
-  }, 14, [L, 30]);
-  parts.push(glass, backFace(glass));
+  // A closed glass material shell with two genuine train portals. The seed
+  // form swells between the mouths; the inner arch and its end rims preserve
+  // the occupied volume instead of duplicating a zero-thickness surface.
+  const handed = new THREE.Vector3().crossVectors(side, up).dot(t) >= 0 ? 1 : -1;
+  parts.push(sweepSolid(41, (j) => ({ p: P(handed * (j / 40 * 2 - 1) * L / 2, 0, 0),
+    t: t.clone().multiplyScalar(handed), s: side, n: up }), (j) => {
+    const s = j / 40 * 2 - 1, width = W * Math.max(.43, pod(s)), height = (H + .6) * Math.max(.58, pod(s));
+    const outline = [];
+    for (let i = 0; i <= 16; i++) { const a = i / 16 * Math.PI; outline.push([Math.cos(a) * width, -.2 + Math.pow(Math.sin(a), .85) * height, 14]); }
+    for (let i = 16; i >= 0; i--) { const a = i / 16 * Math.PI; outline.push([Math.cos(a) * (width - .18), -.2 + Math.pow(Math.sin(a), .85) * (height - .18), 14]); }
+    return outline;
+  }, { capKind: 14 }));
   // ribs: bone-white arches, fanning slightly toward the nose
   for (let k = -7; k <= 7; k++) {
     const s = k / 7.6;
-    const f = pod(s) * 1.07 + 0.02;
+    const width = W * Math.max(.43, pod(s)), height = (H + .6) * Math.max(.58, pod(s));
     const arc = [];
     for (let i = 0; i <= 18; i++) {
       const a = (i / 18) * Math.PI;
-      arc.push(P(s * L / 2 + Math.cos(a) * 1.2 * s, Math.cos(a) * (W * f + 0.5), 0.2 + Math.pow(Math.sin(a), 0.85) * (H * f + 0.5)));
+      arc.push(P(s * L / 2 + Math.cos(a) * 1.2 * s, Math.cos(a) * (width + .6), .05 + Math.pow(Math.sin(a), .85) * (height + .6)));
     }
     parts.push(sweepTube(arc, (u) => 0.42 + 0.25 * Math.abs(u - 0.5), 8, { kind: 1 }));
   }
@@ -219,10 +236,10 @@ function station(parts, c, t, side, base, entry, groundLo) {
   const spine = [], beamL = [], beamR = [];
   for (let i = 0; i <= 30; i++) {
     const s = (i / 30) * 2 - 1;
-    const f = pod(s) * 1.07 + 0.02;
-    spine.push(P(s * L / 2 * 1.02, 0, 0.2 + H * f + 0.6));
-    beamL.push(P(s * L / 2 * 0.96, -(W * f + 0.5), 0.5));
-    beamR.push(P(s * L / 2 * 0.96, W * f + 0.5, 0.5));
+    const width = W * Math.max(.43, pod(s)), height = (H + .6) * Math.max(.58, pod(s));
+    spine.push(P(s * L / 2 * 1.02, 0, height + .55));
+    beamL.push(P(s * L / 2, -(width + .3), .3));
+    beamR.push(P(s * L / 2, width + .3, .3));
   }
   parts.push(sweepTube(spine, (u) => 0.55 * Math.sin(Math.PI * u) + 0.1, 8, { kind: 1 }));
   parts.push(sweepTube(beamL, () => 0.5, 6, { kind: 1 }), sweepTube(beamR, () => 0.5, 6, { kind: 1 }));
@@ -236,13 +253,7 @@ function station(parts, c, t, side, base, entry, groundLo) {
       const x = sd * (W * pod(s * 0.62) * 0.95 + v);
       return P(s * len / 2 + sd * 2, x, y0 + 1.6 * Math.pow(v / reach, 2) + 0.6 * Math.sin(Math.PI * iv) * (1 - s * s)).toArray();
     };
-    parts.push(gridSurface(24, 6, (iu, iv) => leaf(iu, iv, 7.2), 3, [len, reach]));
-    parts.push(gridSurface(24, 6, (iu, iv) => leaf(1 - iu, iv, 6.7), 1, [len, reach]));
-    // the petal's edges: a 50 cm fascia band round the outer and inner rims closes the slab
-    for (const e of [0, 1]) {
-      const band = gridSurface(24, 1, (iu, iv) => leaf(iu, e, 6.7 + 0.5 * iv), 1, [len, 0.5]);
-      parts.push(band, backFace(band));
-    }
+    parts.push(gridVolume(24, 6, (iu, iv) => leaf(iu, iv, 7.2), (iu, iv) => leaf(iu, iv, 6.7), 3, 1, [len, reach]));
     // slender struts under each petal
     for (const s of [-0.55, 0, 0.55]) {
       const wv = Math.pow(1 - s * s, 0.7) * reach * 0.7;
@@ -337,10 +348,6 @@ function buildPromenades(groundHeight, rawHeight = groundHeight) {
       return p.clone().addScaledVector(frameAt(path, i).side, lat).add(new THREE.Vector3(0, 2.5 + 0.55 * e, 0));
     });
     parts.push(sweepTube(tube, () => 3.0, 12, { kind: 13 }));
-    // end caps (sweepTube leaves the ends open)
-    const tt0 = new THREE.Vector3().subVectors(tube[0], tube[1]).normalize();
-    const tt1 = new THREE.Vector3().subVectors(tube[N], tube[N - 1]).normalize();
-    parts.push(disc(tube[0], tt0, 3.02, 12), disc(tube[N], tt1, 3.02, 12));
     // glazing: mullion hoops every 4 samples and three ridge mullions along the crown
     const tubeFrame = (i) => {
       const tg = new THREE.Vector3().subVectors(tube[Math.min(i + 1, N)], tube[Math.max(i - 1, 0)]).normalize();
@@ -405,8 +412,8 @@ function buildPromenades(groundHeight, rawHeight = groundHeight) {
     const f0 = frameAt(path, 3), f1 = frameAt(path, N - 2);
     // the pylons stand clear of the parapets on their own footings (at 15.8 m they overhung
     // the deck's edge fascia, their feet in mid-air beside it)
-    portal(parts, path[3], f0.side, path[3].y + 0.2, groundHeight);
-    portal(parts, path[N - 1], f1.side, path[N - 1].y + 0.2, groundHeight);
+    portal(parts, path[3], f0.side, path[3].y + 0.2, rawHeight);
+    portal(parts, path[N - 1], f1.side, path[N - 1].y + 0.2, rawHeight);
     // terminals: the line runs into the pod through its portal ring. On the plaza the
     // pod sits on the paving beside the deck; on the island it sits on the landing
     // square's platform, with the pod reaching on into town.
@@ -792,14 +799,24 @@ function buildLotusPads(groundHeight, promenadePaths) {
     const pr = 36 + rnd() * 70;
     if (groundHeight(x, z) > -3) continue;
     let ok = true;
+    // Reserve the entire scalloped water footprint, including its outer tips.
+    // A clear centre alone can leave half a platform embedded in an island.
+    for (const fraction of [.5, 1]) for (let i = 0; i < 32; i++) {
+      const angle = i / 32 * TAU, reach = pr * 1.09 * fraction;
+      if (groundHeight(x + Math.cos(angle) * reach, z + Math.sin(angle) * reach) > -3) ok = false;
+    }
     for (const p of pads) if (Math.hypot(p.x - x, p.z - z) < p.r + pr + 60) ok = false;
-    for (const path of promenadePaths) for (let k = 0; k < path.length; k += 3) if (Math.hypot(path[k].x - x, path[k].z - z) < pr + 40) { ok = false; break; }
+    for (const path of promenadePaths) for (let k = 1; k < path.length; k++) {
+      const a = path[k - 1], b = path[k], dx = b.x - a.x, dz = b.z - a.z;
+      const u = Math.max(0, Math.min(1, ((x - a.x) * dx + (z - a.z) * dz) / (dx * dx + dz * dz || 1)));
+      if (Math.hypot(x - a.x - u * dx, z - a.z - u * dz) < pr * 1.09 + 40) { ok = false; break; }
+    }
     if (!ok) continue;
     pads.push({ x, z, r: pr });
     const petals = 8 + Math.floor(rnd() * 6);
     const prof = [
-      { r: 0.001, y: -2, kind: 1 }, { r: pr * 0.95, y: -2, kind: 1 }, { r: pr * 1.02, y: 1.8, kind: 1 }, { r: pr, y: 2.6, kind: 2 }, { r: pr * 0.94, y: 3.0, kind: 1 },
-      { r: pr * 0.9, y: 3.2, kind: 3 }, { r: 0.001, y: 3.4, kind: 3 },
+      { r: 0, y: -2, kind: 1 }, { r: pr * 0.95, y: -2, kind: 1 }, { r: pr * 1.02, y: 1.8, kind: 1 }, { r: pr, y: 2.6, kind: 2 }, { r: pr * 0.94, y: 3.0, kind: 1 },
+      { r: pr * 0.9, y: 3.2, kind: 3 }, { r: 0, y: 3.4, kind: 3 },
     ];
     const pad = latheFacade(prof, 64);
     // scalloped rim: petals
@@ -815,7 +832,8 @@ function buildLotusPads(groundHeight, promenadePaths) {
     parts.push(pad);
     // the stem: a flared column from the seabed that opens into the pad's underside
     {
-      const sb = groundHeight(x, z);
+      let sb = groundHeight(x, z);
+      for (let i = 0; i < 16; i++) sb = Math.min(sb, groundHeight(x + Math.cos(i / 16 * TAU) * pr * .16, z + Math.sin(i / 16 * TAU) * pr * .16));
       const stem = latheFacade([{ r: 0.1, y: sb - 1.5, kind: 1 }, { r: pr * 0.16, y: sb - 1.5, kind: 1 }, { r: pr * 0.1, y: sb + 3, kind: 1 },
         { r: pr * 0.07, y: (sb - 2) * 0.5, kind: 1 }, { r: pr * 0.22, y: -2.4, kind: 1 }, { r: pr * 0.5, y: -1.8, kind: 1 }, { r: 0.1, y: -1.7, kind: 1 }]
         .filter(rising()), 16);
@@ -826,8 +844,8 @@ function buildLotusPads(groundHeight, promenadePaths) {
     if (rnd() < 0.6) {
       const h = 12 + rnd() * 16;
       const dome = latheFacade([
-        { r: 0.001, y: 3, kind: 0 }, { r: pr * 0.32, y: 3, kind: 0 }, { r: pr * 0.32, y: h * 0.5, kind: 0 }, { r: pr * 0.36, y: h * 0.55, kind: 2 },
-        { r: pr * 0.3, y: h * 0.75, kind: 0 }, { r: pr * 0.18, y: h * 0.95, kind: 0 }, { r: 0.3, y: h * 1.05, kind: 1 }, { r: 0.001, y: h * 1.07, kind: 1 },
+        { r: 0, y: 3, kind: 0 }, { r: pr * 0.32, y: 3, kind: 0 }, { r: pr * 0.32, y: h * 0.5, kind: 0 }, { r: pr * 0.36, y: h * 0.55, kind: 2 },
+        { r: pr * 0.3, y: h * 0.75, kind: 0 }, { r: pr * 0.18, y: h * 0.95, kind: 0 }, { r: 0.3, y: h * 1.05, kind: 1 }, { r: 0, y: h * 1.07, kind: 1 },
       ], 32);
       dome.translate(x + (rnd() - 0.5) * pr * 0.3, 0, z + (rnd() - 0.5) * pr * 0.3);
       parts.push(dome);

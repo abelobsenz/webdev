@@ -205,18 +205,28 @@ export const FAR_ISLANDS = [
 // ---------------------------------------------------------------------------
 export const INNER = { half: 7200, n: 1024 };
 
-/** Samples the inner grid heights quickly (bilinear), falls back to analytic outside. */
+/** Samples the actual inner terrain triangles; falls back to analytic outside. */
 export class HeightSampler {
   constructor(heights) { this.h = heights; }
   get(x, z) {
     const { half, n } = INNER;
     const u = ((x + half) / (2 * half)) * n, v = ((z + half) / (2 * half)) * n;
-    if (u < 0 || v < 0 || u >= n || v >= n) return terrainHeight(x, z);
-    const i = Math.floor(u), j = Math.floor(v);
+    if (u < 0 || v < 0 || u > n || v > n) return terrainHeight(x, z);
+    const i = Math.min(n - 1, Math.floor(u)), j = Math.min(n - 1, Math.floor(v));
     const fu = u - i, fv = v - j;
     const s = n + 1;
     const h00 = this.h[j * s + i], h10 = this.h[j * s + i + 1], h01 = this.h[(j + 1) * s + i], h11 = this.h[(j + 1) * s + i + 1];
-    return (h00 * (1 - fu) + h10 * fu) * (1 - fv) + (h01 * (1 - fu) + h11 * fu) * fv;
+    // buildInnerGeometry alternates the two cell diagonals. Bilinear heights
+    // describe a different curved surface and can leave roots or paving above
+    // or below the rendered triangles, even though all four corners agree.
+    if ((i + j) & 1) {
+      return fu + fv <= 1
+        ? h00 + (h10 - h00) * fu + (h01 - h00) * fv
+        : h11 + (h01 - h11) * (1 - fu) + (h10 - h11) * (1 - fv);
+    }
+    return fu <= fv
+      ? h00 + (h11 - h01) * fu + (h01 - h00) * fv
+      : h00 + (h10 - h00) * fu + (h11 - h10) * fv;
   }
 }
 

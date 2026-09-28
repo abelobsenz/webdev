@@ -127,7 +127,7 @@ class Builder {
     for (const [a, b, c] of tris) this.tri(base + a, base + b, base + c);
   }
 
-  prism(poly, y0, y1, side, top = K.STONE, { bottom = false, vBase = 0, noTop = false } = {}) {
+  prism(poly, y0, y1, side, top = K.STONE, { bottom = true, vBase = 0, noTop = false } = {}) {
     this.walls(poly, y0, y1, side, { vBase });
     if (!noTop) this.cap(poly, y1, top, true);
     if (bottom) this.cap(poly, y0, K.STONE, false);
@@ -156,6 +156,7 @@ class Builder {
     this.walls(poly, y, y + h, kind, { flip: hole });
     this.walls(other, y, y + h, kind, { flip: !hole });
     this.ring(poly, other, y + h, topKind, true);
+    this.ring(poly, other, y, kind, false);
   }
 
   /** Flat polygon in the (z, y) plane at x facing nx (+-1) along x; pts = [[z, y], ...]. */
@@ -171,22 +172,33 @@ class Builder {
   cornice(poly, y0, y1, out, kind = K.STONE) {
     const o = offsetPoly(poly, out);
     this.walls(o, y0, y1, kind);
+    this.walls(poly, y0, y1, kind, { flip: true });
     this.ring(o, poly, y1, kind, true);
     this.ring(o, poly, y0, kind, false);
   }
 
   /**
    * A flight of steps across x0..x1 climbing toward -z from the front face at zf, from the
-   * ground at yF to the landing at yF + n * rs: n - 1 treads of td and their risers (the first
-   * riser reaches down to yBot). The cheeks and the last riser are the caller's notch walls.
+   * ground at yF to the landing at yF + n * rs: n - 1 treads of td and their risers.
+   * The flight has its own closed cheeks, back and foundation; the final rise
+   * meets the caller's landing without leaving an open material shell.
    */
   stair(x0, x1, zf, td, n, yF, rs, yBot) {
-    this.reserve(n * 8, n * 12);
-    // the last riser is the back of the caller's notch, so it is not drawn twice
     for (let k = 1; k < n; k++) {
-      const z = zf - (k - 1) * td, y = yF + k * rs, yp = k === 1 ? yBot : yF + (k - 1) * rs;
-      this.face([[x0, yp, z], [x1, yp, z], [x1, y, z], [x0, y, z]], [0, 0, 1], K.STONE);
-      this.face([[x0, y, z], [x1, y, z], [x1, y, z - td], [x0, y, z - td]], [0, 1, 0], K.PAVING);
+      const za = zf - (k - 1) * td, zb = zf - k * td;
+      const y = yF + k * rs, yp = k === 1 ? yBot : yF + (k - 1) * rs;
+      this.face([[x0, yp, za], [x1, yp, za], [x1, y, za], [x0, y, za]], [0, 0, 1], K.STONE);
+      this.face([[x0, y, za], [x1, y, za], [x1, y, zb], [x0, y, zb]], [0, 1, 0], K.PAVING);
+      this.face([[x0, yBot, za], [x1, yBot, za], [x1, yBot, zb], [x0, yBot, zb]], [0, -1, 0], K.STONE);
+      // Keep every shared strip vertex instead of ear-clipping the entire
+      // sawtooth outline: collinear tread corners otherwise form T junctions.
+      const cheek = [[za, yBot], ...(k > 1 ? [[za, yp]] : []), [za, y], [zb, y], [zb, yBot]];
+      for (const [x, nx] of [[x0, -1], [x1, 1]]) {
+        const centre = this.v(x, (yBot + y) / 2, (za + zb) / 2, nx, 0, 0, (za + zb) / 2, (yBot + y) / 2, K.STONE);
+        const edge = cheek.map(([z, yy]) => this.v(x, yy, z, nx, 0, 0, z, yy, K.STONE));
+        for (let i = 0; i < edge.length; i++) this.tri(centre, edge[i], edge[(i + 1) % edge.length]);
+      }
+      if (k === n - 1) this.face([[x0, yBot, zb], [x1, yBot, zb], [x1, y, zb], [x0, y, zb]], [0, 0, -1], K.STONE);
     }
   }
 
@@ -195,7 +207,8 @@ class Builder {
   }
 
   /** Lathe around a local centre. prof: [[r, y, kind], ...] bottom -> top. */
-  lathe(cx, cz, prof, seg = 16, vBase = 0) {
+  lathe(cx, cz, prof, seg = 16, vBase = 0, { closedProfile = false, capBottom = true, capTop = true } = {}) {
+    if (closedProfile && (prof[0][0] !== prof.at(-1)[0] || prof[0][1] !== prof.at(-1)[1])) prof = [...prof, prof[0]];
     this.reserve((seg + 1) * prof.length * 2, seg * prof.length * 6);
     for (let j = 0; j < prof.length - 1; j++) {
       const [r0, y0, k0] = prof[j], [r1, y1, k1] = prof[j + 1];
@@ -210,6 +223,22 @@ class Builder {
         ring1.push(this.v(cx + ca * r1, y1, cz + sa * r1, ca * nr, ny, sa * nr, a * Math.max(r0, 1), y1 - vBase, k1 ?? k0));
       }
       for (let i = 0; i < seg; i++) this.quad(ring0[i], ring0[i + 1], ring1[i + 1], ring1[i]);
+    }
+    const first = prof[0], last = prof.at(-1);
+    if ((first[0] !== last[0] || first[1] !== last[1]) && !prof.every(p => p[1] === first[1])) {
+      for (const [p, up, enabled] of [[first, false, capBottom], [last, true, capTop]]) {
+        if (!enabled || p[0] <= 0) continue;
+        // Radial caps use a centre fan. Ear-clipped regular polygons create
+        // vanishingly small rim ears on narrow lantern tips, especially after
+        // their coordinates are quantized far from the world origin.
+        this.reserve(seg + 1, seg * 3);
+        const centre = this.v(cx, p[1], cz, 0, up ? 1 : -1, 0, 0, 0, K.STONE);
+        const ring = Array.from({ length: seg }, (_, i) => {
+          const x = Math.cos(i / seg * TAU) * p[0], z = Math.sin(i / seg * TAU) * p[0];
+          return this.v(cx + x, p[1], cz + z, 0, up ? 1 : -1, 0, x, z, K.STONE);
+        });
+        for (let i = 0; i < seg; i++) this.tri(centre, ring[i], ring[(i + 1) % seg]);
+      }
     }
   }
 
@@ -231,6 +260,7 @@ class Builder {
       const p = this.v(x, y, z0, nx, 0, 0, z0, y, kindEnd), q = this.v(x, y, z1, nx, 0, 0, z1, y, kindEnd), r = this.v(x, y + rise, zm, nx, 0, 0, zm, y + rise, kindEnd);
       this.tri(p, q, r);
     }
+    this.face([[x0, y, z0], [x1, y, z0], [x1, y, z1], [x0, y, z1]], [0, -1, 0], kindEnd);
   }
 
   /** Barrel vault over a rect, axis along local x. inside: seen from beneath (a ceiling), no end caps. */
@@ -249,30 +279,38 @@ class Builder {
     }
     for (let i = 0; i < seg; i++) this.quad(bot[i], bot[i + 1], top[i + 1], top[i]);
     if (inside) return;
-    for (const [x, nx, row] of [[x0, -1, bot], [x1, 1, top]]) {
-      const c = this.v(x, y, zm, nx, 0, 0, zm, y, K.STONE);
-      for (let i = 0; i < seg; i++) {
-        const t0 = (i / seg) * Math.PI, t1 = ((i + 1) / seg) * Math.PI;
-        const p = this.v(x, y + Math.sin(t0) * rise, zm + Math.cos(t0) * hd, nx, 0, 0, zm + Math.cos(t0) * hd, y + Math.sin(t0) * rise, K.STONE);
-        const q = this.v(x, y + Math.sin(t1) * rise, zm + Math.cos(t1) * hd, nx, 0, 0, zm + Math.cos(t1) * hd, y + Math.sin(t1) * rise, K.STONE);
-        this.tri(c, p, q);
-      }
-      void row;
-    }
+    const profile = Array.from({ length: seg + 1 }, (_, i) => [zm + Math.cos(i / seg * Math.PI) * hd, y + Math.sin(i / seg * Math.PI) * rise]);
+    this.xpoly(profile, x0, -1, K.STONE);
+    this.xpoly(profile, x1, 1, K.STONE);
+    this.face([[x0, y, z0], [x1, y, z0], [x1, y, z1], [x0, y, z1]], [0, -1, 0], K.STONE);
   }
 
-  /** Barrel vault with its axis along local z: the section of an arch, run back from it. */
-  vaultZ(x0, x1, z0, z1, y, rise, kind, seg = 12, { inside = false } = {}) {
-    const xm = (x0 + x1) / 2, hw = (x1 - x0) / 2, sg = inside ? -1 : 1;
-    this.reserve((seg + 1) * 2, seg * 6);
-    const a = [], b = [];
-    for (let i = 0; i <= seg; i++) {
-      const t = (i / seg) * Math.PI, x = xm + Math.cos(t) * hw, yy = y + Math.sin(t) * rise;
-      const nx = Math.cos(t) / hw, ny = Math.sin(t) / rise, l = Math.hypot(nx, ny);
-      a.push(this.v(x, yy, z0, (sg * nx) / l, (sg * ny) / l, 0, t * hw, z0, kind));
-      b.push(this.v(x, yy, z1, (sg * nx) / l, (sg * ny) / l, 0, t * hw, z1, kind));
+  /** Closed barrel shell along local z. Its inner soffit leaves the arcade passage open. */
+  vaultZ(x0, x1, z0, z1, y, rise, kind, seg = 12, { inside = false, thickness = 0.16 } = {}) {
+    const xm = (x0 + x1) / 2, hw = (x1 - x0) / 2;
+    const sections = [];
+    for (let side = 0; side < 2; side++) {
+      const rx = hw + side * thickness, ry = rise + side * thickness, sg = side ? 1 : -1;
+      const front = [], back = [], profile = [];
+      for (let i = 0; i <= seg; i++) {
+        const t = i / seg * Math.PI, x = xm + Math.cos(t) * rx, yy = y + Math.sin(t) * ry;
+        const nx = Math.cos(t) / rx, ny = Math.sin(t) / ry, l = Math.hypot(nx, ny);
+        front.push(this.v(x, yy, z0, sg * nx / l, sg * ny / l, 0, t * hw, z0, kind));
+        back.push(this.v(x, yy, z1, sg * nx / l, sg * ny / l, 0, t * hw, z1, kind));
+        profile.push([x, yy]);
+      }
+      for (let i = 0; i < seg; i++) this.quad(front[i], front[i + 1], back[i + 1], back[i]);
+      sections.push(profile);
     }
-    for (let i = 0; i < seg; i++) this.quad(a[i], a[i + 1], b[i + 1], b[i]);
+    for (const [z, nz] of [[z0, -1], [z1, 1]]) for (let i = 0; i < seg; i++) {
+      const p = [sections[0][i], sections[0][i + 1], sections[1][i + 1], sections[1][i]];
+      this.face(p.map(([x, yy]) => [x, yy, z]), [0, 0, nz], kind);
+    }
+    for (const i of [0, seg]) {
+      const inner = sections[0][i], outer = sections[1][i];
+      this.face([[inner[0], y, z0], [inner[0], y, z1], [outer[0], y, z1], [outer[0], y, z0]], [0, -1, 0], kind);
+    }
+    void inside; // callers name the visible soffit; both material faces are always present
   }
 
   /** Polygon in the (x, y) plane extruded along z from z0 to z1 (gables, pediments, arches). */
@@ -317,6 +355,7 @@ class Builder {
       this.quad(i0, i1, i2, i3);
     }
     if (topKind !== null) this.cap(t.map(([x, z]) => [cx + x, cz + z]), y1, topKind);
+    this.cap(b.map(([x, z]) => [cx + x, cz + z]), y0, kind, false);
   }
 
   /** Loft between two closed rings of equal count (flat-shaded facets). */
@@ -446,7 +485,7 @@ function roofKit(B, R, poly, y, w, d, lod, { garden = 0.5 } = {}) {
     }
   }
   if (lod) {
-    B.walls(poly, y, y + 0.9, K.STONE);
+    B.parapet(poly, y, 0.9, 0.25);
     if (pav) B.box(pav.px - pav.pw / 2, pav.px + pav.pw / 2, pav.pz - pav.pd / 2, pav.pz + pav.pd / 2, y, y + 3.2, K.GLASS, K.PV);
     return;
   }
@@ -486,6 +525,7 @@ function roofKit(B, R, poly, y, w, d, lod, { garden = 0.5 } = {}) {
     if (x1 - x0 < 2) continue;
     const ya = y + 0.3, yb = y + 1.2;
     B.face([[x0, ya, z0], [x1, ya, z0], [x1, yb, z1], [x0, yb, z1]], tn, K.PV);
+    B.face([[x0, y, z0], [x1, y, z0], [x1, y, z1], [x0, y, z1]], [0, -1, 0], K.METAL);
     B.face([[x0, y, z0], [x1, y, z0], [x1, ya, z0], [x0, ya, z0]], [0, 0, -1], K.METAL);
     B.face([[x0, y, z1], [x1, y, z1], [x1, yb, z1], [x0, yb, z1]], [0, 0, 1], K.METAL);
     for (const [x, nx] of [[x0, -1], [x1, 1]]) B.face([[x, y, z0], [x, y, z1], [x, yb, z1], [x, ya, z0]], [nx, 0, 0], K.METAL);
@@ -507,8 +547,10 @@ function ribbon(B, L, R, H, lod) {
     roofKit(B, R, slab, top, w - 2, d - 2, true, { garden: 0.45 });
     return top + 3.4;
   }
-  B.walls(rrect(w - 2 * shop, d - 2 * shop, 1.6), 0, SHOP_H, K.GLASS);
-  B.walls(rrect(w - 2 * inset, d - 2 * inset, 2.4), FH, top, K.GLASS);
+  B.prism(rrect(w - 2 * shop, d - 2 * shop, 1.6), 0, SHOP_H, K.GLASS);
+  // The closed core meets the underside of the planted roof slab. Its own
+  // cap must never compete with the garden surface at the same depth.
+  B.prism(rrect(w - 2 * inset, d - 2 * inset, 2.4), FH, top - 0.35, K.GLASS);
   for (let k = 1; k <= n; k++) {
     const y = k * FH;
     // slab edge planted on alternate floors; glass balustrade with a handrail along its top
@@ -547,8 +589,7 @@ function terrace(B, L, R, H, lod) {
     const z1 = d / 2 - fc - t * stepZ, z0 = -d / 2;
     const h = per * FH;
     const poly = rrect(x1 - x0, z1 - z0, 1.6, (x0 + x1) / 2, (z0 + z1) / 2);
-    B.walls(poly, y, y + h, t === 0 || t % 2 ? K.GLASS : K.PUNCHED);
-    B.cap(poly, y + h, K.GARDEN);
+    B.prism(poly, y, y + h, t === 0 || t % 2 ? K.GLASS : K.PUNCHED, K.GARDEN);
     if (!lod) {
       for (let f = 1; f < per; f++) B.cornice(poly, y + f * FH - 0.3, y + f * FH, 0.25);
       // set in from the edge: where the next tier stands on it the trough runs inside that tier
@@ -594,9 +635,26 @@ function cloister(B, L, R, H, lod) {
     [-w / 2, -w / 2 + b, -d / 2 + b, d / 2 - b], [w / 2 - b, w / 2, -d / 2 + b, d / 2 - b],
   ];
   wings.forEach(([x0, x1, z0, z1], i) => {
-    if (i === 0 && !lod) {
+    if (i === 0 && L.gateHalfWidth) {
+      // The college gate continues through this wing into its quadrangle.
+      // Closed side wings and a lintel preserve the masonry around the void.
+      const g = L.gateHalfWidth;
+      for (const [xa, xb] of [[x0, -g], [g, x1]]) {
+        if (lod) B.box(xa, xb, z0, z1, 0, top, K.PUNCHED, K.GARDEN);
+        else {
+          B.box(xa, xb, z0, z1 - loggia, 0, FH, K.GLASS, K.STONE);
+          B.box(xa, xb, z0, z1, FH, top, K.PUNCHED, K.GARDEN);
+        }
+      }
+      B.box(-g, g, z0, z1, 6.1, top, K.PUNCHED, K.GARDEN);
+      if (!lod) for (let k = 0; k <= m; k++) {
+        const x = x0 + 1 + k * bay;
+        if (Math.abs(x) < g + 0.6) continue;
+        B.lathe(x, z1 - 0.6, [[0.42, 0, K.STONE], [0.34, FH - 0.5, K.STONE], [0.55, FH, K.STONE]], 8);
+      }
+    } else if (i === 0 && !lod) {
       // street wing: a glazed ground floor behind an open loggia
-      B.box(x0 + 0.4, x1 - 0.4, z0, z1 - loggia, 0, FH, K.GLASS, K.STONE, { noTop: true });
+      B.box(x0 + 0.4, x1 - 0.4, z0, z1 - loggia, 0, FH, K.GLASS, K.STONE, {});
       B.box(x0, x1, z0, z1, FH, top, K.PUNCHED, K.GARDEN, { bottom: true });
       for (let k = 0; k <= m; k++) {
         const x = x0 + 1 + k * bay;
@@ -608,11 +666,11 @@ function cloister(B, L, R, H, lod) {
     // campanile on a back corner: shaft, open lantern, a spire with its eaves closed underneath
     const cx = bellSide * (w / 2 - b / 2), cz = -d / 2 + b / 2, s = b * 0.4;
     B.box(cx - s, cx + s, cz - s, cz + s, top, top + 9, K.PUNCHED, K.STONE);
-    B.box(cx - s + 0.4, cx + s - 0.4, cz - s + 0.4, cz + s - 0.4, top + 9, top + 12, K.LANTERN, K.STONE, { noTop: true });
+    B.box(cx - s + 0.4, cx + s - 0.4, cz - s + 0.4, cz + s - 0.4, top + 9, top + 12, K.LANTERN, K.STONE, {});
     B.lathe(cx, cz, [[0, top + 12, K.STONE], [s * 1.1, top + 12, K.STONE], [s * 0.2, top + 16, K.STONE], [0, top + 16.5, K.STONE]], 8);
   }
   if (lod) {
-    B.walls(rect(-w / 2, w / 2, -d / 2, d / 2), top, top + 0.9, K.STONE);
+    B.parapet(rect(-w / 2, w / 2, -d / 2, d / 2), top, 0.9, 0.3);
     return top + (bell ? 16.5 : 0.9);
   }
   // cornice, parapets on both edges of the roof
@@ -625,6 +683,7 @@ function cloister(B, L, R, H, lod) {
   if (pr > 1.2) {
     const rim = ellipse(pr, pr, 20), water = ellipse(pr - 0.35, pr - 0.35, 20);
     B.walls(rim, 0, 0.55, K.STONE);
+    B.cap(rim, 0, K.STONE, false);
     B.ring(rim, water, 0.55, K.STONE, true);
     B.walls(water, 0.35, 0.55, K.STONE, { flip: true });
     B.cap(water, 0.35, K.POOL);
@@ -646,11 +705,12 @@ function tower(B, L, R, H, lod) {
   B.entries.push({ x: 0, w: Math.min(3.6, w * 0.2), back: d / 2 - recess + 0.3 });
   if (lod) B.prism(rrect(w, d, 2.5), 0, podium, K.PUNCHED, K.GARDEN);
   else {
-    B.prism(rrect(w - 1, d - recess - 0.5, 2.0, 0, -(recess - 0.5) / 2), 0, FH, K.GLASS, K.STONE, { noTop: true });
+    B.prism(rrect(w - 1, d - recess - 0.5, 2.0, 0, -(recess - 0.5) / 2), 0, FH, K.GLASS, K.STONE, {});
     B.prism(rrect(w, d, 2.5), FH, podium, K.PUNCHED, K.GARDEN, { bottom: true });
     B.parapet(rrect(w, d, 2.5), podium, 0.9, 0.3);
   }
-  B.walls(shape(0), podium, top, K.GLASS);
+  // Seat the closed core beneath the crown slab in both detail levels.
+  B.prism(shape(0), podium, top - 0.6, K.GLASS);
   if (!lod) {
     for (let k = 1; k < n; k++) {
       const y = podium + k * FH;
@@ -693,7 +753,7 @@ function pavilion(B, L, R, H, lod) {
   B.prism(step(r + s1, span / 2 + 1.6 * k, zc + 1.6 * k), 0, 0.5, K.STONE, K.PAVING);
   B.prism(step(r + s2, span / 2 + k, zc + k), 0.5, 1.0, K.STONE, K.PAVING);
   B.entries.push({ x: 0, w: Math.min(3.2, span), back: zc + 1.6 * k + 0.3 });
-  B.walls(ellipse(r, r, sg), 1.0, 1.0 + h, K.PUNCHED);
+  B.prism(ellipse(r, r, sg), 1.0, 1.0 + h, K.PUNCHED);
   // dome on an eaves ring closed underneath, a lantern capped at the top
   const prof = [];
   for (let i = 0; i <= 8; i++) { const a = (i / 8) * (Math.PI / 2) * 0.93; prof.push([r * 1.02 * Math.cos(a), 1 + h + r * 0.85 * Math.sin(a), K.GLASS]); }
@@ -703,10 +763,10 @@ function pavilion(B, L, R, H, lod) {
   // portico: columns (piers in the massing) under an entablature and a pediment
   for (let c = 0; c < 6; c++) {
     const x = -span / 2 + (c * span) / 5;
-    if (lod) B.box(x - cr, x + cr, zc - cr, zc + cr, 1.0, yE, K.STONE, K.STONE, { noTop: true });
+    if (lod) B.box(x - cr, x + cr, zc - cr, zc + cr, 1.0, yE, K.STONE, K.STONE, {});
     else B.lathe(x, zc, [[cr, 1.0, K.STONE], [cr * 0.8, yE - 0.2 * k, K.STONE], [cr * 1.33, yE, K.STONE]], 10);
   }
-  B.box(-span / 2 - k, span / 2 + k, r - k, zc + k, yE, 1 + h + 0.4 * k, K.STONE, K.STONE, { bottom: true, noTop: true });
+  B.box(-span / 2 - k, span / 2 + k, r - k, zc + k, yE, 1 + h + 0.4 * k, K.STONE, K.STONE, { bottom: true });
   B.vprism([[-span / 2 - k, 1 + h + 0.4 * k], [span / 2 + k, 1 + h + 0.4 * k], [0, 1 + h + 0.4 * k + 0.2 * span]], r - k, zc + k, K.STONE);
   return yl + 3.05 * k;
 }
@@ -811,7 +871,7 @@ function stack(B, L, R, H, lod) {
       B.walls(poly, y + h - 0.35, y + h, K.STONE);
     } else B.walls(poly, y, y + h, kind);
     B.cap(poly, y + h, K.GARDEN);
-    if (i > 0) B.cap(poly, y, K.STONE, false);
+    B.cap(poly, y, K.STONE, false);
     if (!lod) B.parapet(poly, y + h, 1.0, 0.06, K.FRIT, K.METAL);
     y += h;
   }
@@ -835,6 +895,7 @@ function crystal(B, L, R, H, lod) {
   const top = Math.max(2, Math.round(H / FH)) * FH;
   const r0 = ring(1, 0), r1 = ring(1.08, 0.08), r2 = ring(0.7, 0.3);
   B.prism(rrect(w - 1, d - 1, 1.2), 0, 1.2, K.STONE, K.PAVING);
+  B.cap(r0.map(([x, z]) => [x * 0.94, z * 0.94]), 1.2, K.STONE, false);
   B.loft(r0.map(([x, z]) => [x * 0.94, z * 0.94]), 1.2, r1, top * 0.58, K.GLASS);
   B.loft(r1, top * 0.58, r2, top, K.GLASS);
   // the prism crown: glass closing to a lit ridge
@@ -853,22 +914,28 @@ function crystal(B, L, R, H, lod) {
 
 // Aurora: a college round its quad - a cloister with a gate tower on the street and turrets
 function college(B, L, R, H, lod) {
-  const top = cloister(B, L, R, H, lod);
+  const gateHalfWidth = Math.min(3.0, L.w * 0.065);
+  const top = cloister(B, { ...L, gateHalfWidth }, R, H, lod);
   const w = L.w, d = L.d;
   const gw = Math.min(14, w * 0.18);
   const zf = d / 2 - 5;
   // the gate tower stands out to the podium's edge, over the loggia's steps: the gate is the way in
   B.entries.length = 0;
-  B.box(-gw / 2, gw / 2, zf - 5, zf + 5.6, 0, top + 12, K.PUNCHED, K.STONE);
-  B.box(-gw / 2 + 0.8, gw / 2 - 0.8, zf - 4.2, zf + 4.8, top + 12, top + 17, K.LANTERN, K.STONE, { noTop: true });
+  B.entries.push({ x: 0, w: gateHalfWidth * 1.6, back: d / 2 - 1.2, minRise: 0.15 });
+  for (const [xa, xb] of [[-gw / 2, -gateHalfWidth], [gateHalfWidth, gw / 2]]) B.box(xa, xb, zf - 5, zf + 5.6, 0, top + 12, K.PUNCHED, K.STONE);
+  // A real arched passage, with an outward closed spandrel above it.
+  const arch = [[-gateHalfWidth, top + 12], [-gateHalfWidth, 4.2]];
+  for (let i = 1; i <= 12; i++) {
+    const a = Math.PI * (1 - i / 12);
+    arch.push([Math.cos(a) * gateHalfWidth, 4.2 + Math.sin(a) * 1.8]);
+  }
+  arch.push([gateHalfWidth, top + 12]);
+  B.vprism(arch, zf - 5, zf + 5.6, K.PUNCHED, K.STONE);
+  B.box(-gw / 2 + 0.8, gw / 2 - 0.8, zf - 4.2, zf + 4.8, top + 12, top + 17, K.LANTERN, K.STONE, {});
   B.lathe(0, zf + 0.3, [[0, top + 17, K.STONE], [gw * 0.42, top + 17, K.STONE], [gw * 0.1, top + 25, K.STONE], [0, top + 26, K.STONE]], 8);
   for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
     const cx = sx * (w / 2 - 3), cz = sz * (d / 2 - 3);
     B.lathe(cx, cz, [[3.4, 0, K.STONE], [3.2, top + 4, K.PUNCHED], [3.8, top + 4.2, K.STONE], [0, top + 10, K.STONE]], lod ? 6 : 12);
-  }
-  if (!lod) {
-    // the gate: an arched door set into the tower's face
-    B.vprism([[-3, 0], [3, 0], [3, 4.2], [2.1, 5.4], [0, 6], [-2.1, 5.4], [-3, 4.2]], zf + 5.56, zf + 5.68, K.METAL);
   }
   return top + 26;
 }
@@ -893,6 +960,7 @@ function ringWall(B, outer, inner, y0, y1, kind, topKind = kind) {
   B.walls(outer, y0, y1, kind);
   B.walls(inner, y0, y1, kind, { flip: true });
   ringBand(B, outer, inner, y1, topKind);
+  ringBand(B, outer, inner, y0, kind, false);
 }
 
 // Tidewater: a narrow canal house - brick front, tall windows, a shopfront at the quay, and
@@ -903,7 +971,7 @@ function canal(B, L, R, H, lod) {
   const top = fl * FH;
   const zf = d / 2;
   // shopfront, then brick above
-  B.box(-w / 2 + 0.25, w / 2 - 0.25, -d / 2, zf - 0.3, 0, FH, K.GLASS, K.STONE, { noTop: true });
+  B.box(-w / 2 + 0.25, w / 2 - 0.25, -d / 2, zf - 0.3, 0, FH, K.GLASS, K.STONE, {});
   B.box(-w / 2, w / 2, -d / 2, zf, FH, top, K.PUNCHED, K.STONE, { bottom: true });
   const g = Math.floor(R() * 4);
   // the cornice house hides a low roof behind its attic; the others show a steep gable
@@ -961,14 +1029,14 @@ function arcade(B, L, R, H, lod) {
   if (n % 2 === 0) n += n > 2 ? -1 : 1;
   const bay = (w - 2 * pier) / n;
   B.entries.push({ x: 0, w: Math.max(1.2, Math.min(2.6, bay - 1.3)), back: zf - depth + 0.4 });
-  if (lod) B.box(-w / 2, w / 2, -d / 2, zf - 0.05, 0, yA, K.STONE, K.STONE, { noTop: true });
-  else B.box(-w / 2 + 0.3, w / 2 - 0.3, -d / 2, zf - depth, 0, yA, K.GLASS, K.STONE, { noTop: true });
-  B.box(-w / 2, w / 2, -d / 2, zf, yA, top - 0.45, K.PUNCHED, K.GARDEN, { bottom: true, noTop: true });
+  if (lod) B.box(-w / 2, w / 2, -d / 2, zf - 0.05, 0, yA, K.STONE, K.STONE, {});
+  else B.box(-w / 2 + 0.3, w / 2 - 0.3, -d / 2, zf - depth, 0, yA, K.GLASS, K.STONE, {});
+  B.box(-w / 2, w / 2, -d / 2, zf, yA, top - 0.45, K.PUNCHED, K.GARDEN, { bottom: true });
   B.box(-w / 2 - 0.35, w / 2 + 0.35, -d / 2 - 0.35, zf + 0.45, top - 0.45, top, K.STONE, K.GARDEN, { bottom: true });
   if (!lod) {
     // piers closing both ends of the walk
-    B.box(-w / 2, -w / 2 + pier, zf - depth, zf, 0, yA, K.STONE, K.STONE, { noTop: true });
-    B.box(w / 2 - pier, w / 2, zf - depth, zf, 0, yA, K.STONE, K.STONE, { noTop: true });
+    B.box(-w / 2, -w / 2 + pier, zf - depth, zf, 0, yA, K.STONE, K.STONE, {});
+    B.box(w / 2 - pier, w / 2, zf - depth, zf, 0, yA, K.STONE, K.STONE, {});
     const xs = [];
     for (let k = 0; k <= n; k++) xs.push(-w / 2 + pier + k * bay);
     // columns: moulded base, shaft, capital, square abacus
@@ -989,7 +1057,7 @@ function arcade(B, L, R, H, lod) {
       pts.push([xb, yS], [xb, yA]);
       B.vprism(pts, zf - 1.05, zf - 0.05, K.STONE);
       B.vaultZ(xl, xr, zf - depth, zf - 1.05, yS, rise, K.STONE, 12, { inside: true });
-      if (k > 0) B.box(xa - 0.55, xa + 0.55, zf - depth, zf - 1.05, yS, yA, K.STONE, K.STONE, { bottom: true, noTop: true });
+      if (k > 0) B.box(xa - 0.55, xa + 0.55, zf - depth, zf - 1.05, yS, yA, K.STONE, K.STONE, { bottom: true });
     }
   }
   roofKit(B, R, rect(-w / 2, w / 2, -d / 2, d / 2), top, w - 2, d - 2, lod, { garden: 0.7 });
@@ -1003,10 +1071,10 @@ function solar(B, L, R, H, lod) {
   const fl = Math.max(2, Math.round(H / FH));
   const top = fl * FH;
   B.box(-w / 2, w / 2, -d / 2, d / 2 - 1.2, 0, top, K.PUNCHED, K.PAVING);
-  B.box(-w / 2 + 0.4, w / 2 - 0.4, d / 2 - 1.2, d / 2 - 0.9, 0, FH, K.GLASS, K.STONE, { noTop: true });
+  B.box(-w / 2 + 0.4, w / 2 - 0.4, d / 2 - 1.2, d / 2 - 0.9, 0, FH, K.GLASS, K.STONE, {});
   // set-back top floor with a sawtooth roof of steep PV
   const sw = w - 6, sd = d - 8;
-  B.box(-sw / 2, sw / 2, -sd / 2 - 1, sd / 2 - 1, top, top + FH, K.GLASS, K.STONE, { noTop: true });
+  B.box(-sw / 2, sw / 2, -sd / 2 - 1, sd / 2 - 1, top, top + FH, K.GLASS, K.STONE, {});
   const rows = Math.max(2, Math.floor(sd / 4.5));
   for (let i = 0; i < rows; i++) {
     const z0 = -sd / 2 - 1 + (i * sd) / rows, z1 = z0 + sd / rows;
@@ -1017,6 +1085,8 @@ function solar(B, L, R, H, lod) {
     const a = B.v(-sw / 2, top + FH, z1, 0, pny, pnz, -sw / 2, 0, K.PV), b = B.v(sw / 2, top + FH, z1, 0, pny, pnz, sw / 2, 0, K.PV);
     const c = B.v(sw / 2, top + FH + 2.6, z0 + 0.3, 0, pny, pnz, sw / 2, sl, K.PV), e = B.v(-sw / 2, top + FH + 2.6, z0 + 0.3, 0, pny, pnz, -sw / 2, sl, K.PV);
     B.quad(a, b, c, e);
+    B.face([[-sw / 2, top + FH, z0 + 0.3], [sw / 2, top + FH, z0 + 0.3], [sw / 2, top + FH + 2.6, z0 + 0.3], [-sw / 2, top + FH + 2.6, z0 + 0.3]], [0, 0, -1], K.METAL);
+    B.face([[-sw / 2, top + FH, z0 + 0.3], [sw / 2, top + FH, z0 + 0.3], [sw / 2, top + FH, z1], [-sw / 2, top + FH, z1]], [0, -1, 0], K.METAL);
     // triangular cheeks close each tooth at both ends
     for (const sx of [-1, 1]) {
       const x = (sx * sw) / 2;
@@ -1030,7 +1100,7 @@ function solar(B, L, R, H, lod) {
     B.box(-w / 2 - 0.2, w / 2 + 0.2, d / 2 - 1.2, d / 2 + 0.9, y - 0.12, y, K.TIMBER, K.TIMBER, { bottom: true });
   }
   const nb = Math.floor(w / 3.3);
-  for (let i = 0; i <= nb; i++) { const x = -w / 2 + (i * w) / nb; B.box(x - 0.08, x + 0.08, d / 2 - 0.2, d / 2 + 0.8, FH, top - 0.3, K.METAL, K.METAL); }
+  for (let i = 0; i <= nb; i++) { const x = -w / 2 + (i * w) / nb; B.box(x - 0.08, x + 0.08, d / 2 - 0.2, d / 2 + 0.8, FH, top - 0.42, K.METAL, K.METAL); }
   ringWall(B, rrect(w, d - 1.2, 0, 0, -0.6), rrect(w - 0.5, d - 1.7, 0, 0, -0.6), top, top + 0.9, K.STONE);
   return top + FH + 2.6;
 }
@@ -1048,14 +1118,13 @@ function ziggurat(B, L, R, H, lod) {
     const tw = w - 2 * step * t, td = d - 2 * step * t;
     const h = per * FH;
     const poly = rrect(tw, td, 1.2);
-    B.walls(poly, y, y + h, t % 2 ? K.PUNCHED : K.GLASS);
-    B.cap(poly, y + h, K.GARDEN);
+    B.prism(poly, y, y + h, t % 2 ? K.PUNCHED : K.GLASS, K.GARDEN);
     // a closed planter box round the lip, its planting hanging over the wall below: outer
     // face, soffit, inner face and a planted top, so no view finds a gap into it
     const po = rrect(tw + 0.5, td + 0.5, 1.45), pi = rrect(tw - 0.7, td - 0.7, 0.85);
     B.walls(po, y + h - 1.7, y + h + 0.6, K.GARDEN);
-    ringBand(B, po, poly, y + h - 1.7, K.GARDEN, false);
-    B.walls(pi, y + h, y + h + 0.6, K.STONE, { flip: true });
+    ringBand(B, po, pi, y + h - 1.7, K.GARDEN, false);
+    B.walls(pi, y + h - 1.7, y + h + 0.6, K.STONE, { flip: true });
     ringBand(B, po, pi, y + h + 0.6, K.GARDEN);
     y += h;
   }
@@ -1161,7 +1230,7 @@ function mansion(B, L, R, H, lod) {
   const top = fl * FH, hb = FH * 1.2;
   // rusticated base, proud of the upper walls; its top is the ledge the upper walls stand on
   B.box(-w / 2 - 0.2, w / 2 + 0.2, -d / 2 - 0.2, d / 2 + 0.2, 0, hb, K.STONE, K.STONE);
-  B.box(-w / 2, w / 2, -d / 2, d / 2, hb, top, K.PUNCHED, K.STONE, { noTop: true });
+  B.box(-w / 2, w / 2, -d / 2, d / 2, hb, top, K.PUNCHED, K.STONE, {});
   // cornice and mansard
   B.box(-w / 2 - 0.5, w / 2 + 0.5, -d / 2 - 0.5, d / 2 + 0.5, top, top + 0.7, K.STONE, K.STONE, { bottom: true });
   B.frustum(w, d, w - 3.2, d - 3.2, top + 0.7, top + 4.4, K.METAL, K.METAL);
@@ -1205,10 +1274,10 @@ function gallery(B, L, R, H, lod) {
   const w = L.w, d = L.d;
   const fl = Math.max(3, Math.round(H / FH));
   const top = fl * FH, hb = FH * 1.4;
-  B.box(-w / 2, w / 2, -d / 2, d / 2, 0, hb, K.PUNCHED, K.STONE, { noTop: true });
+  B.box(-w / 2, w / 2, -d / 2, d / 2, 0, hb, K.PUNCHED, K.STONE, {});
   // the string course between the base and the piano nobile
   B.box(-w / 2 - 0.25, w / 2 + 0.25, -d / 2 - 0.25, d / 2 + 0.25, hb - 0.35, hb, K.STONE, K.STONE, { bottom: true });
-  B.box(-w / 2, w / 2, -d / 2, d / 2, hb, top, K.PUNCHED, K.STONE, { noTop: true });
+  B.box(-w / 2, w / 2, -d / 2, d / 2, hb, top, K.PUNCHED, K.STONE, {});
   B.box(-w / 2 - 0.7, w / 2 + 0.7, -d / 2 - 0.7, d / 2 + 0.8, top, top + 1.1, K.STONE, K.STONE, { bottom: true });
   B.box(-w / 2 + 0.6, w / 2 - 0.6, -d / 2 + 0.6, d / 2 - 0.6, top + 1.1, top + 3.2, K.PUNCHED, K.STONE);
   if (lod) return top + 3.2;
@@ -1256,9 +1325,13 @@ function museum(B, L, R, H, lod) {
       const x = -pw / 2 + (i * pw) / (n - 1);
       B.lathe(x, d / 2 - 1.6, [[0.85, 1.4, K.STONE], [0.75, 2.0, K.STONE], [0.62, h - 2.2, K.STONE], [0.9, h - 1.6, K.STONE]], 12);
     }
-    // the steps down from the plinth, each tread its own block in front of the last
-    for (let k = 0; k < 3; k++) B.box(-pw / 2 - 2, pw / 2 + 2, d / 2 + 1 + k * 0.5, d / 2 + 1.5 + k * 0.5, 0, 1.4 - (k + 1) * 0.35, K.STONE, K.PAVING);
   }
+  // The public flight reaches the actual ward datum, including the building's
+  // raised foundation. Keep it in the distant geometry as well as the detail.
+  const footY = Number.isFinite(L.baseY) ? L.lo - L.baseY : -0.25;
+  const risers = Math.max(2, Math.ceil((1.4 - footY) / 0.18));
+  const rise = (1.4 - footY) / risers, tread = 0.3;
+  for (let k = 0; k < risers - 1; k++) B.box(-pw / 2 - 2, pw / 2 + 2, d / 2 + 1 + k * tread, d / 2 + 1 + (k + 1) * tread, footY - 1, 1.4 - (k + 1) * rise, K.STONE, K.PAVING);
   return yTop + 3.6;
 }
 
@@ -1319,7 +1392,7 @@ function planStairs(L, entries, ground, yBot) {
     // foot of the flight: the lowest ground across its width, just out from the face
     const yF = Math.min(at(x0, zf + 0.3), at((x0 + x1) / 2, zf + 0.3), at(x1, zf + 0.3));
     const rise = -yF, run = zf - e.back;
-    if (!(rise > 0.3) || run < 0.26) continue;
+    if (!(rise > (e.minRise ?? 0.3)) || run < 0.26) continue;
     let n = Math.ceil(rise / 0.18), td = 0.3;
     if ((n - 1) * td > run) { n = Math.ceil(rise / 0.2); td = Math.min(0.32, run / (n - 1)); }
     if ((n - 1) * td > run + 1e-6 || td < 0.26) continue;
@@ -1401,7 +1474,7 @@ export function buildBuildings(scene, plan, ground, settings, opts = {}) {
       B.seed = L.seed;
       // the entrance flights (the same in both passes; the massing keeps the plain podium)
       if (!stairs) stairs = planStairs(L, B.entries, ground, yBot);
-      podium(B, L, yBot, lod ? [] : stairs, lod);
+      podium(B, L, yBot, lod && type !== 'college' ? [] : stairs, lod);
       top = Math.max(top, h);
     }
     placements.push({ x: L.x, z: L.z, sx: L.w, sz: L.d, y: L.baseY, sy: top, rot: L.rot, type });
