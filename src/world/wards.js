@@ -1,5 +1,7 @@
 import { SD } from './platform.js';
 import { ST, T, TAU } from './wardPlan.js';
+import { tidewaterRii, carveRii, rioDistance, fondamente, canalMouth, RIO } from './wardsA/tidewaterCanals.js';
+import { auroraCircus, ORRERY, seraphSummit, sunwardDial } from './wardsA/civicGardens.js';
 
 // The seven Outer Wards of Greater Meridian, each designed as a city in its own right.
 //
@@ -94,7 +96,7 @@ const aurora = {
   plan(ctx) {
     const { R, rnd } = ctx;
     const streets = [], squares = [], plazas = [], parks = [], sites = [], landmarks = [], lots = [], inlays = [], beds = [], zones = [], pools = [], trees = [];
-    const paths = [], accessRoutes = [];
+    const paths = [], accessRoutes = [], lamps = [], parterres = [];
     const circusR = 282;
     const O = ctx.observatory;
     const inCircus = (p) => Math.hypot(p[0], p[1]) < circusR + 10;
@@ -121,32 +123,23 @@ const aurora = {
     // the Circus ring and the esplanade
     streets.push({ pts: T.ring(0, 0, circusR + 4, 7), cls: ST.ESPLANADE, hw: 7, name: 'Circus of the Planets', noLots: false });
     streets.push(esplanade(ctx, 9));
-    // squares and plazas
-    squares.push({ x: 0, z: 0, r: circusR - 4, kind: 'crown', noLamps: true });
+    // squares and plazas (the Circus floor itself is laid out with the orrery, below)
     squares.push({ x: O.x, z: O.z, r: 128, kind: 'plaza', noLamps: true });
     plazas.push({ x: L.x - Math.cos(eb) * 48, z: L.z - Math.sin(eb) * 48, hw: 44, hd: 56, rot: eb, kind: 'landing' });
-    // the orbits of the planets inlaid in the Circus, the meridian line down the whole ward
-    for (const r of [96, 128, 168, 212, 250]) inlays.push({ pts: T.ring(0, 0, r, 5), w: 0.12 });
+    // the meridian line down the whole ward and the Ecliptic, inlaid in bronze
     inlays.push({ pts: T.line(0, R(Math.PI / 2) - 30, 0, O.z + 120, 6), w: 0.22 });
     inlays.push({ pts: T.line(Math.cos(eb) * 270, Math.sin(eb) * 270, Math.cos(eb2) * 270, Math.sin(eb2) * 270), w: 0.14 });
-    // planets on their orbits, the planetarium north of the crown, the orrery south
-    const planets = [];
-    [[96, 0.4, 3], [128, 1.9, 4], [168, 3.1, 4.4], [212, 4.3, 3.6], [250, 5.4, 9], [250, 2.3, 7.5]].forEach(([r, a, s], i) => planets.push({ x: Math.cos(a) * r, z: Math.sin(a) * r, s, i }));
-    landmarks.push({ type: 'planets', list: planets });
+    // the planetarium north-west of the crown and the armillary south-east, in the Circus
     landmarks.push({ type: 'planetarium', x: -196, z: -118, r: 30 });
     landmarks.push({ type: 'armillary', x: 186, z: 150, r: 18 });
     sites.push({ x: -196, z: -118, r: 46 }, { x: 186, z: 150, r: 26 });
-    // parterres round the Circus: beds of blue and silver planting between the orbits
-    for (let k = 0; k < 12; k++) {
-      const a = (k / 12) * TAU + 0.26;
-      if (Math.abs(angDiff(a, -Math.PI / 2)) < 0.25 || Math.abs(angDiff(a, Math.PI / 2)) < 0.25 || Math.abs(angDiff(a, eb)) < 0.25 || Math.abs(angDiff(a, eb2)) < 0.25) continue;
-      beds.push({ pts: T.arc(0, 0, 148, a - 0.16, a + 0.16, 4), w: 4.5 });
-      beds.push({ pts: T.arc(0, 0, 232, a - 0.1, a + 0.1, 4), w: 3.5 });
-    }
-    for (let k = 0; k < 36; k++) {
-      const a = (k / 36) * TAU;
-      if ([-Math.PI / 2, Math.PI / 2, eb, eb2].some((q) => Math.abs(angDiff(a, q)) < 0.12)) continue;
-      trees.push({ x: Math.cos(a) * 266, z: Math.sin(a) * 266, sp: 'flowering', s: 9.5 });
+    // the Circus of the Planets: an orrery round the crown (the Sun), every planet on its
+    // own orbit clear of the arcology's footprint, the giants' orbits drawn in box hedges
+    {
+      const monuments = [[-196, -118, 46], [186, 150, 26]];
+      const C = auroraCircus(T, { axes: [-Math.PI / 2, Math.PI / 2, eb, eb2], keepClear: (x, z, m) => monuments.some(([mx, mz, mr]) => Math.hypot(x - mx, z - mz) < mr + m) || ORRERY.some((p) => Math.hypot(x - Math.cos(p.a) * p.orbit, z - Math.sin(p.a) * p.orbit) < p.s + 4 + m) });
+      squares.push(...C.squares); inlays.push(...C.inlays); sites.push(...C.sites); landmarks.push(...C.landmarks);
+      parks.push(...C.parks); paths.push(...C.paths); lamps.push(...C.lamps);
     }
     // the observatory on its hill, the stair up from Meridian Way
     landmarks.push({ type: 'observatory', x: O.x, z: O.z + 6, r: 44, y: 19 });
@@ -184,7 +177,7 @@ const aurora = {
       },
       floors: (Lt, R) => (Lt.floors ? Lt.floors : Lt.type === 'tower' ? 14 + Math.floor(R() * 10) : Lt.type === 'crystal' ? 3 + Math.floor(R() * 4) : 4 + Math.round(Lt.centre * (4 + R() * 7)) + Math.floor(R() * 3)),
     };
-    return { streets, squares, plazas, parks, sites, landmarks, lots, inlays, beds, zones, pools, trees, lotRule, paths, accessRoutes };
+    return { streets, squares, plazas, parks, sites, landmarks, lots, inlays, beds, zones, pools, trees, lotRule, paths, accessRoutes, lamps, parterres };
   },
 };
 
@@ -192,6 +185,7 @@ const aurora = {
 const TIDE_GRAND = [[-1420, 580], [-1000, 470], [-650, 360], [-300, 300], [60, 300], [380, 225], [640, 30], [860, -280], [1080, -600], [1360, -880]];
 const tidewater = {
   palette: 'jade',
+  canalBoats: true,
   lowrise: { palette: 'jade', warmth: 0.95, litFrac: 0.6, lampTint: [1.05, 0.95, 0.82] },
   ground: { pave: [0.62, 0.52, 0.44], pave2: [0.50, 0.38, 0.30], style: 1, zone: [0.6, 0.55, 0.48], lamp: [1.0, 0.68, 0.38], inlay: [0.5, 0.42, 0.3], inlayGlow: [1.0, 0.7, 0.4] },
   wall: { arcade: 5, lower: 1, band: 10 },
@@ -212,24 +206,20 @@ const tidewater = {
       sea.sub(SD.polyline(pts, 9));
       top.sub(SD.polyline(pts, 15));
     }
-    // marinas at the Grand Canal's mouths
+    // the rii: the Crescent off the Grand Canal and the radial rii of the outer belt
+    ctx.rii = tidewaterRii(ctx);
+    carveRii(ctx.rii, sea, top);
+    // marinas at the Grand Canal's mouths: basins cut into the platform where the canal
+    // runs 150 m inside the outline, so the pontoons lie in sheltered water between quays
+    // (walking the curve itself; the old chord test put both basins out in the open sea)
     const mouths = [];
-    for (const [i0, i1, sgn] of [[1, 0, -1], [TIDE_GRAND.length - 2, TIDE_GRAND.length - 1, 1]]) {
-      const a = TIDE_GRAND[i0], b = TIDE_GRAND[i1];
-      const dir = Math.atan2(b[1] - a[1], b[0] - a[0]);
-      // the point where the canal meets the edge
-      let best = null;
-      for (let t = 0; t <= 1; t += 0.02) {
-        const x = a[0] + (b[0] - a[0]) * t, z = a[1] + (b[1] - a[1]) * t;
-        const d = Math.hypot(x, z) - R(Math.atan2(z, x));
-        if (d > -170 && (!best || Math.abs(d + 110) < Math.abs(best.d + 110))) best = { x, z, d };
-      }
-      if (!best) continue;
-      mouths.push({ x: best.x, z: best.z, rot: dir });
-      sea.sub(SD.rbox(best.x, best.z, 125, 72, dir, 24));
-      top.sub(SD.rbox(best.x, best.z, 141, 88, dir, 30));
-      ctx.features.basins.push({ x: best.x, z: best.z, hw: 125, hd: 72, rot: dir, kind: 'marina' });
-      void sgn;
+    for (const fromEnd of [false, true]) {
+      const m = canalMouth(grand, R, fromEnd, 150);
+      if (!m) continue;
+      mouths.push(m);
+      sea.sub(SD.rbox(m.x, m.z, 118, 66, m.rot, 24));
+      top.sub(SD.rbox(m.x, m.z, 134, 82, m.rot, 30));
+      ctx.features.basins.push({ x: m.x, z: m.z, hw: 118, hd: 66, rot: m.rot, kind: 'marina', channel: 21 });
     }
     ctx.mouths = mouths;
     ctx.features.ghats.push({ a0: 0.55, a1: 0.95 });
@@ -247,25 +237,34 @@ const tidewater = {
       const pts = T.offset(T.radial(0, 0, a, rc + 20, R(a) - 30), s * 21);
       streets.push({ pts, cls: ST.LANE, hw: 4, name: 'fondamenta', noBridges: true });
     }
-    streets.push(esplanade(ctx, 8));
+    // the esplanade bridges the mouths of the rii and radial canals (never the Grand Canal
+    // or a marina: those gaps are far longer than a footbridge)
+    streets.push({ ...esplanade(ctx, 8), noBridges: false, bridgeMax: 46 });
+    // fondamenta along both banks of every rio
+    streets.push(...fondamente(ctx.rii));
     // the Calle Grande from the bridge landing to the Twin Tides, and the cross street over the
-    // Grand Canal (its bridge is the Tidehall)
+    // Grand Canal (its bridge is the Tidehall); south of the Crescent it continues as a street
     const L = ctx.landing;
     streets.push({ pts: T.curve([[L.x, L.z], [L.x * 0.7, L.z * 0.7 - 20], [-420, -120], [-220, -60]], 6), cls: ST.AVENUE, hw: 9, name: 'Calle Grande' });
-    streets.push({ pts: T.line(-40, -250, -40, 700, 6), cls: ST.STREET, hw: 6, name: 'Ruga dei Mercanti', bridge: 'tidehall', bridgeMax: 110 });
+    streets.push({ pts: T.line(-40, -250, -40, 470, 6), cls: ST.STREET, hw: 6, name: 'Ruga dei Mercanti', bridge: 'tidehall', bridgeMax: 110 });
+    streets.push({ pts: T.line(-40, 470, -40, 700, 6), cls: ST.STREET, hw: 6, name: 'Ruga dei Mercanti', bridgeMax: 60 });
     streets.push({ pts: T.line(40, -R(-Math.PI / 2) + 40, 40, -260, 6), cls: ST.STREET, hw: 5, name: 'Ruga Nord' });
     // main streets crossing the ring canal on bridges
     for (const a of [-2.5, -0.7, 0.35, 2.2, 2.75]) streets.push({ pts: T.radial(0, 0, a, 330, R(a) - 30, 6), cls: ST.STREET, hw: 5.5, name: 'calle' });
-    // calli: a lane grid turned to the canal's general run, no bridges of their own
-    const keep = (p) => ctx.levelAt(p[0], p[1], 3) !== null && Math.hypot(p[0], p[1] + 30) > 262;
-    for (const g of gridLines({ rot: -0.62, sx: 78, sz: 64, ext: 1300, clsX: ST.LANE, clsZ: ST.LANE, keep })) streets.push({ pts: g.pts, cls: ST.LANE, noBridges: true, name: 'calle' });
+    // calli: a lane grid turned to the canal's general run. They stop at the Grand Canal and
+    // the Singel, but cross the rii on hump-backed footbridges where they meet them nearly
+    // square-on (an oblique crossing leaves a longer gap and simply ends at the fondamenta)
+    const onRio = (p) => rioDistance(ctx.rii, p[0], p[1]) < RIO.top + 4;
+    const keep = (p) => (ctx.levelAt(p[0], p[1], 3) !== null || onRio(p)) && Math.hypot(p[0], p[1] + 30) > 262;
+    for (const g of gridLines({ rot: -0.62, sx: 78, sz: 64, ext: 1300, clsX: ST.LANE, clsZ: ST.LANE, keep })) streets.push({ pts: g.pts, cls: ST.LANE, bridgeMax: 31, name: 'calle' });
     // squares: the Piazza della Marea at the landing, campi along the canals
     const eb = ctx.b;
     plazas.push({ x: L.x - Math.cos(eb) * 56, z: L.z - Math.sin(eb) * 56, hw: 60, hd: 52, rot: eb, kind: 'landing' });
     const camp = [L.x - Math.cos(eb) * 56 + Math.cos(eb + Math.PI / 2) * 44, L.z - Math.sin(eb) * 56 + Math.sin(eb + Math.PI / 2) * 44];
     landmarks.push({ type: 'campanile', x: camp[0], z: camp[1], h: 96, s: 11 });
     sites.push({ x: camp[0], z: camp[1], r: 12, blockStreets: true, name: 'Campanile' });
-    for (const [x, z, r] of [[-560, -40, 34], [520, -120, 34], [180, 560, 30], [-860, 180, 30], [760, -560, 30], [-300, 520, 28]]) squares.push({ x, z, r, kind: 'village' });
+    // campi: two of them sit inside the Crescent's arms, on the calli that bridge it
+    for (const [x, z, r] of [[-560, -40, 34], [520, -120, 34], [175, 470, 28], [-860, 180, 30], [760, -560, 30], [-300, 450, 26]]) squares.push({ x, z, r, kind: 'village' });
     squares.push({ x: 0, z: -30, r: 262, kind: 'crown', noLamps: true });
     // gardens
     parks.push({ x: 720, z: 60, r: 95, paths: [T.curve([[650, 20], [720, 80], [790, 40]])], trees: 1 });
@@ -349,8 +348,14 @@ const sunward = {
       inlays.push({ pts: [[gx + Math.cos(a) * 8, gz + Math.sin(a) * 8], [gx + Math.cos(a) * 40, gz + Math.sin(a) * 40]], w: h % 3 === 0 ? 0.2 : 0.1 });
     }
     inlays.push({ pts: T.arc(gx, gz, 40, -Math.PI, 0, 3), w: 0.12 });
-    for (const r of [100, 150, 200]) inlays.push({ pts: T.ring(0, 0, r, 5), w: 0.15 });
+    for (const r of [156, 200]) inlays.push({ pts: T.ring(0, 0, r, 5), w: 0.15 });
     squares.push({ x: 0, z: 0, r: 240, kind: 'crown', noLamps: true });
+    // the Sun Dial: the receiver crown is its gnomon
+    {
+      const rays = []; for (let k = 0; k <= 12; k++) rays.push(west0 + ((west1 - west0) * k) / 12);
+      const D = sunwardDial(T, { rays });
+      inlays.push(...D.inlays); sites.push(...D.sites); landmarks.push(...D.landmarks); trees.push(...D.trees);
+    }
     // gardens of the sun-plan: citrus groves between the crescents
     parks.push({ x: -560, z: -260, r: 70, trees: 1.2, paths: [T.arc(-560, -260, 38, 0, TAU, 5)] });
     parks.push({ x: -620, z: 250, r: 64, trees: 1.2, paths: [T.arc(-620, 250, 34, 0, TAU, 5)] });
@@ -385,7 +390,7 @@ const seraph = {
     const { R, rnd } = ctx;
     const streets = [], squares = [], plazas = [], parks = [], sites = [], landmarks = [], lots = [], inlays = [], beds = [], zones = [], pools = [], trees = [];
     const b = ctx.b, ca = ctx.cascade.a;
-    const paths = [], accessRoutes = [];
+    const paths = [], accessRoutes = [], lamps = [];
     const onCascade = (p) => Math.abs(angDiff(Math.atan2(p[1], p[0]), ca)) * Math.hypot(p[0], p[1]) < ctx.cascade.w * 0.5 + 16 && Math.hypot(p[0], p[1]) > 190;
     const keep = (p) => !onCascade(p);
     // grand stair axes every sixty degrees (the sixth is the Cascade)
@@ -410,8 +415,14 @@ const seraph = {
       const a = b + (k + 0.5) * (TAU / 36);
       for (const run of T.split(T.radial(0, 0, a, R(a) * 0.77, R(a) * 0.9), keep)) streets.push({ pts: run, cls: ST.LANE, noBridges: true });
     }
-    // the crown terrace: a garden plaza; the landing's Gate of Seraph
-    squares.push({ x: 0, z: 0, r: 196, kind: 'crown', noLamps: true });
+    // the crown terrace: the Summit Garden round a paved tower plaza; the landing's Gate
+    {
+      const axes = [];
+      for (let k = 0; k < 6; k++) { const a = b + (k * TAU) / 6; axes.push(Math.abs(angDiff(a, ca)) < 0.1 ? { a: ca, clear: ctx.cascade.w / 2 + 10 } : { a, clear: 8 }); }
+      const S = seraphSummit(T, { axes });
+      squares.push(...S.squares); parks.push(...S.parks); pools.push(...S.pools); paths.push(...S.paths);
+      trees.push(...S.trees); lamps.push(...S.lamps); landmarks.push(...S.landmarks); sites.push(...S.sites);
+    }
     const L = ctx.landing;
     plazas.push({ x: L.x - Math.cos(b) * 48, z: L.z - Math.sin(b) * 48, hw: 50, hd: 50, rot: b, kind: 'landing' });
     // the Cascade: a water staircase from the crown terrace to the beach
@@ -445,7 +456,7 @@ const seraph = {
       },
       floors: (Lt, R) => (Lt.type === 'ziggurat' ? 4 + Math.floor(R() * 5) : 3 + Math.floor(R() * 4)),
     };
-    return { streets, squares, plazas, parks, sites, landmarks, lots, inlays, beds, zones, pools, trees, lotRule, paths, accessRoutes };
+    return { streets, squares, plazas, parks, sites, landmarks, lots, inlays, beds, zones, pools, trees, lotRule, paths, accessRoutes, lamps };
   },
 };
 

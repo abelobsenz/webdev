@@ -6,6 +6,8 @@ import { patchedMaterial } from './materials.js';
 import { sweepLoop } from './platform.js';
 import { inArc } from './wards.js';
 import { U } from '../core/uniforms.js';
+import { channelMarina, channelLanterns, canalBerths, boatInstances } from './wardsA/canalLife.js';
+import { orreryPlanet, orbitHedges, summitBeds, fountainJet, hourStone } from './wardsA/civicGardens.js';
 
 // The signature places of the Outer Wards and the furniture of their waterfronts: the Great
 // Observatory, the Tidehall, the heliostat field and the Heliodrome, the Cascade, the harbour
@@ -775,6 +777,9 @@ function arcadeAlong(B, pts, rec, lod) {
     if (acc < 4.2) continue;
     acc = 0;
     const f = fr[i];
+    // Only on the broad sea quay: the outline also runs up the canals, whose narrow quays
+    // carry the moorings at their kerb and leave no room for a colonnade.
+    if (rec.sea.sample(f.p[0] + f.n[0] * 13, f.p[1] + f.n[1] * 13) > -1.5) continue;
     const cx = w.x + f.p[0] + f.n[0] * 4.8, cz = w.z + f.p[1] + f.n[1] * 4.8;
     B.frame(cx, QY, cz, 0);
     if (!lod) B.lathe(0, 0, [[0.5, -0.1, K.STONE], [0.4, 0.5, K.STONE], [0.33, 4.6, K.STONE], [0.55, 5.0, K.STONE]], 10);
@@ -1035,17 +1040,15 @@ export function buildWardLandmarks(scene, rec, P, G, { palette, world } = {}) {
       case 'observatory': both((B, pp, lod) => observatory(B, lod ? [] : partsAll, W(L), y)); break;
       case 'planetarium': both((B, pp, lod) => { if (!lod) planetarium(B, partsAll, W(L), y); else { B.frame(w.x + L.x, y, w.z + L.z, 0); B.lathe(0, 0, [[L.r * 0.9, 0, K.STONE], [L.r, L.r + 7, K.GLASS], [0.1, 2 * L.r + 7, K.GLASS]], 12); } }); break;
       case 'armillary': armillary(partsAll, w.x + L.x, y, w.z + L.z, L.r); break;
-      case 'planets':
-        for (const p of L.list) {
-          const px = w.x + p.x, pz = w.z + p.z;
-          near.frame(px, TOP, pz, 0);
-          near.lathe(0, 0, [[2.2, -0.3, K.STONE], [2.2, 1.0, K.STONE], [0.6, 1.0, K.STONE], [0.4, 2.2, K.STONE]], 12);
-          const prof = [];
-          for (let i = 0; i <= 10; i++) { const a = -Math.PI / 2 + (i / 10) * Math.PI; prof.push([Math.max(0.03, p.s * Math.cos(a)), 2.2 + p.s + p.s * Math.sin(a), K.STONE]); }
-          near.lathe(0, 0, prof, 16);
-          if (p.i === 4) partsAll.push(latheFacade([{ r: p.s * 1.3, y: 0, kind: 10 }, { r: p.s * 2.1, y: 0, kind: 10 }, { r: p.s * 2.1, y: 0.2, kind: 10 }, { r: p.s * 1.3, y: 0.2, kind: 10 }], 32, { closedProfile: true }).rotateZ(0.4).translate(px, TOP + 2.2 + p.s, pz));
-        }
+      case 'orrery':
+        for (const p of L.list) both((B, pp, lod) => orreryPlanet(B, lod ? null : partsAll, p, w.x + p.x, y, w.z + p.z, lod));
+        both((B, pp, lod) => orbitHedges(B, L.hedges || [], w.x, y, w.z, lod));
         break;
+      case 'summitGarden':
+        both((B, pp, lod) => summitBeds(B, L, w.x, w.z, lod));
+        for (const [fx, fz] of L.fountains || []) both((B, pp, lod) => fountainJet(B, w.x + fx, L.y, w.z + fz, lod));
+        break;
+      case 'sunDial': for (const st of L.stones) both((B, pp, lod) => hourStone(B, st, w.x + st.x, y, w.z + st.z, lod)); break;
       case 'library': both((B, pp, lod) => library(B, W(L), y, lod)); break;
       case 'campanile': both((B, pp, lod) => campanile(B, W(L), y, lod)); break;
       case 'heliodrome': both((B, pp, lod) => heliodrome(B, pp, W(L), y, lod)); break;
@@ -1086,7 +1089,12 @@ export function buildWardLandmarks(scene, rec, P, G, { palette, world } = {}) {
   // the ward's waterfront furniture
   for (const lh of rec.ctx.features.lighthouses) both((B, pp, lod) => lighthouse(B, pp, { ...lh, x: w.x + lh.x, z: w.z + lh.z }, QY, lod, lod ? [] : lights));
   for (const d of rec.ctx.features.docks) { ship(near, partsAll, w.x + d.x, w.z + d.z, d.rot, d.len, d.beam, rnd, !!d.ship); ship(far, null, w.x + d.x, w.z + d.z, d.rot, d.len, d.beam, rnd, !!d.ship); }
-  for (const bs of rec.ctx.features.basins) if (bs.kind === 'marina') marina(near, partsAll, bs, rec, rnd, boats);
+  const canalBoats = [];
+  for (const bs of rec.ctx.features.basins) if (bs.kind === 'marina') {
+    if (bs.channel) { channelMarina(near, bs, rec, rnd, canalBoats); lights.push(...channelLanterns(near, bs, rec)); }
+    else marina(near, partsAll, bs, rec, rnd, boats);
+  }
+  if (rec.design.canalBoats) canalBoats.push(...canalBerths(rec, P, G, rnd));
   if (rec.ctx.features.mirrorTerraces) {
     const outer = largest(G.topLoops);
     const pts = outer && span(outer, rec.ctx.features.mirrorTerraces.a0, rec.ctx.features.mirrorTerraces.a1);
@@ -1095,7 +1103,7 @@ export function buildWardLandmarks(scene, rec, P, G, { palette, world } = {}) {
   for (const br of P.bridges) both((B, pp, lod) => canalBridge(B, pp, br, rec, lod));
   for (const pool of P.pools || []) poolKerb(partsAll, pool, rec);
   // harbour mouth lights: steady red and green on the channel ends
-  for (const bs of rec.ctx.features.basins) if (bs.kind === 'harbour' || bs.kind === 'marina') {
+  for (const bs of rec.ctx.features.basins) if ((bs.kind === 'harbour' || bs.kind === 'marina') && !bs.channel) {
     const c = Math.cos(bs.rot || 0), s = Math.sin(bs.rot || 0);
     lights.push({ x: w.x + bs.x + bs.hw * c, y: QY + 4, z: w.z + bs.z + bs.hw * s, c: [0.25, 1.0, 0.45], s: 1.6 });
     lights.push({ x: w.x + bs.x - bs.hw * c, y: QY + 4, z: w.z + bs.z - bs.hw * s, c: [1.0, 0.22, 0.12], s: 1.6 });
@@ -1126,8 +1134,16 @@ export function buildWardLandmarks(scene, rec, P, G, { palette, world } = {}) {
     scene.add(bm);
     out.meshes.push(bm);
   }
+  // lantern boats on Tidewater's canals and in its channel marinas
+  if (canalBoats.length) {
+    const cm = boatInstances(canalBoats, createFacadeMaterial('pearl', 893, { litFrac: 0.7, band: 1e5, colW: 2.6, floorH: 3.2, uplight: 0, warmth: 0.9 }), `${w.name} canal boats`);
+    scene.add(cm);
+    out.meshes.push(cm);
+    out.lod.push({ near: cm, far: null, center: V(w.x, 5, w.z), radius: rec.R(0) * 1.1, nearDist: 1600 });
+  }
   const sl = signalLights(lights);
   if (sl) { scene.add(sl); out.meshes.push(sl); }
   out.boats = boats;
+  out.canalBoats = canalBoats;
   return out;
 }

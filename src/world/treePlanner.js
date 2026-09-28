@@ -292,7 +292,8 @@ export function planTrees(world) {
     // designed rows and rings (the Circus of the Planets, the Mall's araucarias, ...)
     for (const t of mp.trees || []) {
       const sp = SP[t.sp] ?? SP.flowering;
-      const y = wardHeight(t.x, t.z);
+      // t.root: a tree planted in a raised bed is rooted in the bed's soil, not the paving
+      const y = t.root !== undefined ? t.root + 0.15 : wardHeight(t.x, t.z);
       if (!(y > 2)) continue;                              // rooted on the platform, never over water
       if (reserved(t.x, t.z) === 2 || surf(t.x, t.z) === 'water' || surf(t.x, t.z) === 'road') continue;
       if (!clear(t.x, t.z, 2.0, 6) || towerHit(t.x, t.z, 2) || !bldgFree(t.x, t.z, 1.5)) continue;
