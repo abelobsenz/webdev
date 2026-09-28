@@ -6,7 +6,7 @@ import { patchedMaterial } from './materials.js';
 import { sweepLoop } from './platform.js';
 import { inArc } from './wards.js';
 import { U } from '../core/uniforms.js';
-import { marinersLantern, voyageHall } from './wardLandmarksB.js';
+import { marinersLantern, voyageHall, seaTheatre, shellPavilion } from './wardLandmarksB.js';
 
 // The signature places of the Outer Wards and the furniture of their waterfronts: the Great
 // Observatory, the Tidehall, the heliostat field and the Heliodrome, the Cascade, the harbour
@@ -1055,10 +1055,11 @@ export function buildWardLandmarks(scene, rec, P, G, { palette, world } = {}) {
       case 'terminal': both((B, pp, lod) => terminal(B, W(L), y, lod)); break;
       case 'marinersLantern': both((B, pp, lod) => marinersLantern(B, pp, W(L), y, lod, lod ? null : lights)); break;
       case 'voyageHall': both((B, pp, lod) => voyageHall(B, pp, W(L), y, lod)); break;
+      case 'shellPavilion': both((B, pp, lod) => shellPavilion(B, pp, W(L), y, lod, lod ? null : lights)); break;
       case 'cranes': for (const c of L.list) both((B, pp, lod) => crane(B, { ...c, x: w.x + c.x, z: w.z + c.z }, lod)); break;
       case 'arch': both((B, pp, lod) => triumphalArch(B, W(L), y, lod)); break;
       case 'opera': both((B, pp, lod) => opera(B, lod ? [] : partsAll, W(L), y, lod)); break;
-      case 'amphitheatre': amphitheatre(near, partsAll, W(L), false); break;
+      case 'amphitheatre': if (L.rOuter) both((B, pp, lod) => seaTheatre(B, pp, W(L), lod, lod ? null : lights, sweepLoop)); else amphitheatre(near, partsAll, W(L), false); break;
       case 'domes': domes(partsAll, L.list.map((d) => ({ ...d, x: w.x + d.x, z: w.z + d.z })), lights); break;
       case 'monuments':
         for (const m of L.list) {

@@ -123,3 +123,109 @@ export function voyageHall(B, parts, L, y, lod) {
   }
   B.frame(0, 0, 0, 0);
 }
+
+// ----------------------------------------------------------- Westmere --
+/**
+ * The Theatre of the Western Sea. A keyhole is cut from the street level to the quay: a
+ * round orchestra and, seaward, a channel open to the ghat steps and the sea. The lower
+ * cavea descends the cut (fifteen rows, quay to street); the upper cavea climbs above
+ * the street on a solid substructure (thirty rows) to a colonnaded portico; its arcaded
+ * outer wall faces the city. A Roman stage along the orchestra's diameter carries an open
+ * scaenae frons, so the sea itself is the scenery. L: { x, z, a (bearing of the sea),
+ * r0 (orchestra), r1 (the cut), rOuter }.
+ */
+export function seaTheatre(B, parts, L, lod, lights, sweepLoop) {
+  const QY = 3, TOP = 9;
+  const { x, z, a, r0, r1, rOuter } = L;
+  const a0 = a + Math.PI / 2 + 0.1, a1 = a + 1.5 * Math.PI - 0.1;
+  const seg = lod ? 20 : 72;
+  const arcAt = (r) => { const pts = []; for (let i = 0; i <= seg; i++) { const t = a0 + ((a1 - a0) * i) / seg; pts.push([x + Math.cos(t) * r, z + Math.sin(t) * r]); } return pts; };
+  const block = (rIn, rA, rB, yB, yT, kTop, kFace, kOut = K.STONE) => parts.push(sweepLoop(arcAt(rIn), () => [
+    { a: [rB - rIn, yB], b: [rB - rIn, yT], kind: kOut },
+    { a: [rB - rIn, yT], b: [rA - rIn, yT], kind: kTop },
+    { a: [rA - rIn, yT], b: [rA - rIn, yB], kind: kFace },
+  ], { closed: false, closeSection: true, capEnds: true }));
+  // the lower cavea: fifteen rows from the orchestra up to the street
+  const nLo = 15, dLo = (r1 - r0) / nLo;
+  if (lod) { for (let k = 0; k < nLo; k += 5) block(r0, r0 + k * dLo, r0 + (k + 5) * dLo, QY - 0.3, QY + ((TOP - QY) * (k + 3)) / nLo, K.PAVING, K.STONE); }
+  else for (let k = 0; k < nLo; k++) block(r0, r0 + k * dLo, r0 + (k + 1) * dLo, QY - 0.3, QY + ((TOP - QY) * (k + 1)) / nLo, K.PAVING, K.STONE);
+  // the upper cavea on its substructure: thirty rows above the street, 0.9 m by 0.4 m
+  const u0 = r1 + 1.0, nUp = 30, dUp = 0.9, rise = 0.4, rTop = u0 + nUp * dUp, yTop = TOP + nUp * rise;
+  if (lod) { for (let k = 0; k < nUp; k += 6) block(u0, u0 + k * dUp, u0 + (k + 6) * dUp, TOP - 0.3, TOP + (k + 4) * rise, K.PAVING, K.STONE); }
+  else for (let k = 0; k < nUp; k++) block(u0, u0 + k * dUp, u0 + (k + 1) * dUp, TOP - 0.3, TOP + (k + 1) * rise, K.PAVING, K.STONE);
+  // the crowning walk, the arcaded outer wall, and the portico over the walk
+  const rWall = rOuter - 1.2;
+  block(rTop, rTop, rWall, TOP - 0.3, yTop, K.PAVING, K.STONE);
+  const colH = 6.2;
+  block(rWall, rWall, rOuter, TOP - 0.3, yTop + colH + 0.02, K.STONE, K.STONE, K.PUNCHED);
+  block(rTop - 0.4, rTop - 0.4, rOuter + 0.4, yTop + colH, yTop + colH + 0.9, K.STONE, K.STONE);
+  if (!lod) {
+    const n = Math.floor(((a1 - a0) * (rTop + 1.4)) / 5.6);
+    for (let i = 0; i <= n; i++) {
+      const t = a0 + ((a1 - a0) * i) / n, cx = x + Math.cos(t) * (rTop + 1.4), cz = z + Math.sin(t) * (rTop + 1.4);
+      B.frame(cx, 0, cz, 0);
+      B.lathe(0, 0, [[0.62, yTop - 0.05, K.STONE], [0.62, yTop + 0.35, K.STONE], [0.44, yTop + 0.55, K.STONE], [0.38, yTop + colH - 0.5, K.STONE], [0.62, yTop + colH + 0.02, K.STONE]], 10);
+    }
+    // warm lamps under the portico (steady)
+    if (lights) for (let i = 1; i < 8; i++) { const t = a0 + ((a1 - a0) * i) / 8; lights.push({ x: x + Math.cos(t) * (rTop + 2.6), y: yTop + colH - 0.6, z: z + Math.sin(t) * (rTop + 2.6), c: [1.0, 0.82, 0.6], s: 1.3 }); }
+  }
+  // the analemmata: stepped retaining walls that close both ends of the cavea
+  for (const t of [a0, a1]) {
+    const px = x + Math.cos(t) * ((r0 + rOuter) / 2), pz = z + Math.sin(t) * ((r0 + rOuter) / 2);
+    B.frame(px, 0, pz, -t);
+    const m = (r0 + rOuter) / 2, R = (r) => r - m;
+    B.vprism([[R(r0 - 0.4), QY - 0.3], [R(r1), QY - 0.3], [R(r1), TOP - 0.3], [R(rOuter), TOP - 0.3], [R(rOuter), yTop + 1.1], [R(rTop), yTop + 1.1], [R(u0), TOP + 1.0], [R(r1), TOP + 0.9], [R(r0 - 0.4), QY + 0.9]], -0.8, 0.8, K.STONE);
+  }
+  // the orchestra: the thymele (a low round dais) at its centre
+  B.frame(x, 0, z, 0);
+  B.lathe(0, 0, [[4.2, QY - 0.2, K.STONE], [4.2, QY + 0.32, K.STONE], [3.7, QY + 0.32, K.PAVING], [0, QY + 0.32, K.PAVING]], lod ? 12 : 32);
+  // the stage along the orchestra's diameter, and its open scaenae frons
+  const c = Math.cos(a), s = Math.sin(a);
+  B.frame(x, 0, z, -a);                 // local x toward the sea, local z along the stage
+  const hw = r0 + 5, s0 = 3, s1 = 15;
+  B.box(s0, s1, -hw, hw, QY - 0.3, QY + 1.4, K.STONE, K.TIMBER);
+  if (!lod) for (let k = 0; k < 3; k++) B.box(s0 - 0.45 * (k + 1), s0 - 0.45 * k + 0.02, -8, 8, QY - 0.3, QY + 1.4 - 0.35 * (k + 1), K.STONE, K.STONE);
+  const nCol = 11, colTop = QY + 1.4 + 9.5;
+  for (let i = 0; i < nCol; i++) {
+    const zz = -hw + 2.5 + ((2 * hw - 5) * i) / (nCol - 1);
+    if (!lod) B.lathe(s1 - 1.6, zz, [[0.95, QY + 1.35, K.STONE], [0.95, QY + 1.9, K.STONE], [0.72, QY + 2.2, K.STONE], [0.62, colTop - 0.6, K.STONE], [0.95, colTop + 0.02, K.STONE]], 12);
+    else B.box(s1 - 2.2, s1 - 1.0, zz - 0.6, zz + 0.6, QY + 1.35, colTop, K.STONE, K.STONE);
+  }
+  B.box(s1 - 2.7, s1 - 0.5, -hw, hw, colTop, colTop + 1.5, K.STONE, K.STONE);
+  B.box(s1 - 2.9, s1 - 0.3, -hw - 0.3, hw + 0.3, colTop + 1.5, colTop + 1.9, K.STONE, K.STONE);
+  // the pediment over the royal door, facing the cavea and the sea
+  B.frame(x + c * (s1 - 1.6), 0, z + s * (s1 - 1.6), -a + Math.PI / 2);
+  B.vprism([[-9, colTop + 1.9], [9, colTop + 1.9], [0, colTop + 5.2]], -1.1, 1.1, K.STONE);
+  B.frame(0, 0, 0, 0);
+  if (lights) lights.push({ x: x + c * (s1 - 1.6), y: colTop + 5.8, z: z + s * (s1 - 1.6), c: [1.0, 0.86, 0.62], s: 1.8 });
+}
+
+// -------------------------------------------------------- Coral Reach --
+/**
+ * A reef-garden pavilion: a scallop shell of bone-white composite, fluted, rising from a
+ * hinge at its back and opening toward the garden, on five slender coral-white posts over
+ * a round paved dais. rot turns its mouth (local +z) toward the garden's centre.
+ */
+export function shellPavilion(B, parts, L, y, lod, lights) {
+  const { x, z, rot } = L;
+  const c = Math.cos(rot), s = Math.sin(rot);
+  const W = (lx, ly, lz) => V(x + lx * c + lz * s, y + ly, z - lx * s + lz * c);
+  B.frame(x, y, z, rot);
+  B.lathe(0, 0, [[8.6, -0.35, K.STONE], [8.6, 0.3, K.STONE], [8.1, 0.3, K.PAVING], [0, 0.3, K.PAVING]], lod ? 16 : 40);
+  const hinge = [0, 5.4, -5.6];
+  const mid = (u, v) => {
+    const th = (u - 0.5) * 2.2, rho = 1 + v * 11.4, t = 2 * u - 1;
+    const h = 0.2 + 3.2 * Math.sin(v * Math.PI) - 1.2 * v - 1.4 * t * t * t * t * v + (lod ? 0 : 0.26 * Math.sin(u * Math.PI * 9) * Math.pow(v, 0.8));
+    return [hinge[0] + Math.sin(th) * rho, hinge[1] + h, hinge[2] + Math.cos(th) * rho];
+  };
+  parts.push(closedWardSurface(lod ? 10 : 36, lod ? 5 : 12, (u, v) => W(...mid(u, v)), 0.34, K.STONE, K.STONE));
+  const posts = [[0.5, 0.0], [0.16, 0.62], [0.84, 0.62], [0.36, 0.9], [0.64, 0.9]];
+  for (const [u, v] of posts) {
+    const [px, py, pz] = mid(u, v);
+    const r = v === 0 ? 0.55 : 0.2;
+    if (lod) B.box(px - r, px + r, pz - r, pz + r, 0.25, py, K.STONE, K.STONE);
+    else B.lathe(px, pz, [[r * 1.8, 0.25, K.STONE], [r * 1.8, 0.45, K.STONE], [r, 0.6, K.STONE], [r * 0.85, py - 0.4, K.STONE], [r * 1.25, py, K.STONE]], 10);
+  }
+  B.frame(0, 0, 0, 0);
+  if (lights) { const p = W(0, 4.2, -1.0); lights.push({ x: p.x, y: p.y, z: p.z, c: [0.35, 0.95, 1.0], s: 1.2 }); }
+}

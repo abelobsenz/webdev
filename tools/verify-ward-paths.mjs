@@ -30,10 +30,16 @@ for (const rec of wardRecords().filter((r) => !process.env.WARD_ID || r.w.id ===
       }
     }
   }
-  // 2. trees: the production planner's trees in this ward
-  const world = { metro: null };
-  void world;
-  metrics.push({ id, paths: P.paths.length, pathSamples, pathHits });
+  // 2. landmarks and monuments clear of the arcologies' measured footprints
+  const wt = towers.filter((t) => t.def.ward === id).map((t) => ({ x: t.def.x - rec.w.x, z: t.def.z - rec.w.z, r: t.footprint }));
+  let towerHits = 0;
+  const pieces = [];
+  for (const L of P.landmarks) {
+    if (L.list) for (const q of L.list) if (q.x !== undefined) pieces.push({ type: `${L.type}/${q.kind || ''}`, x: q.x, z: q.z, r: q.island || q.r || q.s || 12 });
+    if (L.x !== undefined) pieces.push({ type: L.type, x: L.x, z: L.z, r: L.rOuter || L.r || Math.max(L.w || 0, L.d || 0, L.len || 0) / 2 || 20 });
+  }
+  for (const q of pieces) for (const t of wt) if (Math.hypot(q.x - t.x, q.z - t.z) < q.r + t.r) { towerHits++; issues.push(`${id}: ${q.type} at ${q.x.toFixed(0)},${q.z.toFixed(0)} inside an arcology footprint`); }
+  metrics.push({ id, paths: P.paths.length, pathSamples, pathHits, landmarkPieces: pieces.length, towerHits });
 }
 console.log(JSON.stringify(metrics));
 if (issues.length) { console.log(issues.join('\n')); process.exitCode = 1; } else console.log('WARD_PATHS_VERIFIED');
