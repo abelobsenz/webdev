@@ -3,7 +3,7 @@ import { buildLiner, buildTender, buildRefinery, CB, CK } from '../craft/craftGe
 import { buildShuttle, buildTug, buildCourier, buildFreighter, lathe } from '../craft/craftClasses.js';
 import { createGlowMesh } from '../craft/craftMaterial.js';
 import { craftMesh, craftPart, addEngines, addLamps, placeMerge, placeLamps, KM } from './craftMesh.js';
-import { LAMP } from './lamps.js';
+import { LAMP, createLamps } from './lamps.js';
 import { R_EARTH, R_MOON, MERIDIAN_LON, bodyDir } from './sim.js';
 import { stationFrame, CORRIDORS } from './stations.js';
 import { HS } from './harbour.js';
@@ -105,14 +105,36 @@ export function shuttleRun(t, c, outPos, outFwd) {
   return moving ? 0.55 * (1 - smooth(0.12, 0.3, q)) + 0.4 * smooth(0.72, 0.8, q) * (1 - smooth(0.9, 1, q)) : 0;
 }
 
+/** Beacon pairs along Selene's corridors (refinery frame, km): hold/start points and directions from the tanker's voyage. */
+export function seleneLanes(c) {
+  const out = [];
+  for (const [from, dir, color, inward] of [[c.hold, c.dA, LAMP.AMBER, true], [c.start, c.dD, LAMP.BLUE, false]]) {
+    const e1 = new THREE.Vector3().crossVectors(dir, V(0, 0, 1)).normalize();
+    for (let i = 0; i < 16; i++) {
+      const s = 6 + i * i * 4.6;
+      for (const sd of [-1, 1]) out.push({ p: from.clone().addScaledVector(dir, s).addScaledVector(e1, sd * (0.9 + i * 0.12)), r: 0.03 + i * 0.01, color, i: 2.8, breathe: 0.4, phase: ((inward ? i : 16 - i) / 16) % 1 });
+    }
+  }
+  return out;
+}
+
+/** The capturing tender's cradle opening (1 wide open .. 0.12 closed on the relic), a 200 s cycle. */
+export function captureOpen(t) {
+  const u = (((t / 200) + 0.3) % 1 + 1) % 1;
+  if (u < 0.4) return 1;
+  if (u < 0.55) return 1 - 0.88 * smooth(0.4, 0.55, u);
+  if (u < 0.85) return 0.12;
+  return 0.12 + 0.88 * smooth(0.85, 1, u);
+}
+
 /** A dead satellite of the old kind: box bus in foil, two wings, a dish. Metres. */
-function buildRelic() {
+export function buildRelic() {
   const B = new CB();
   B.box(0, 0, 0, 6, 6, 9, CK.BRONZE);
   B.box(0, 3.4, 0, 3, 0.8, 3, CK.DARK);
   for (const s of [-1, 1]) {
     B.box(s * 4.5, 0, 0, 3, 0.3, 0.3, CK.DARK);
-    B.panel(s * 6, s * 18, -2.2, 2.2, 0, 0.12, CK.PANEL);
+    B.panel(Math.min(s * 6, s * 18), Math.max(s * 6, s * 18), -2.2, 2.2, 0, 0.12, CK.PANEL);   // (ordered: a reversed span built an inside-out wing)
   }
   B.at(0, -3.6, 1.5, Math.PI / 2 + 0.4, 0, 0);
   lathe(B, [[0.3, 0, CK.HULL], [2.8, 1.1, CK.HULL], [2.9, 1.2, CK.DARK]], 14);
@@ -155,8 +177,8 @@ export class Fleet {
     const tug = buildTug(80), courier = buildCourier(44), shuttle = buildShuttle(110);
     const A = station.data.arms;
     // (the arm heads belong to the berthing freighters and their escort tugs, src/space/geoRoads.js)
-    // a tug's loading station 420 m (drawn) over the outermost cargo rack on an arm's keel
-    const rack = (i) => A[i].d.clone().multiplyScalar(9700 * HS * KM).setY((A[i].y + (A[i].up ? 1 : -1) * 1000 * HS) * KM);
+    // a tug's loading station 530 m (drawn) off the arm, clear over the outermost cargo rack's pods on an arm's keel
+    const rack = (i) => A[i].d.clone().multiplyScalar(9700 * HS * KM).setY((A[i].y + (A[i].up ? 1 : -1) * 1260 * HS) * KM);
     // the shuttle's stand beside the customs pod on arm 6, on the side away from its berthed ships
     const pod = (i, dy) => A[i].d.clone().multiplyScalar((A[i].L - 980 - 250) * KM).addScaledVector(A[i].side, -0.55).setY((A[i].y + (A[i].up ? 1 : -1) * 590) * KM + dy);
     const flat = (p, k) => p.clone().setY(0).multiplyScalar(k).setY(p.y);
@@ -214,15 +236,17 @@ export class Fleet {
       m.add(createGlowMesh(tender.glows, { color: [0.6, 1.0, 0.85], strength: 1.0, scale: KM }));
       addEngines(m, tender.glows, { scale: 0.7, length: 9, color: 0x8affd8, core: 0xf0fff8, throttle: 0.4 });
       addLamps(m, tenderLamps(tender), { minPx: 1.2 });
-      if (i === 1) {
+      let captured = null;
+      if (i === 1 || i === 0) {
+        // tender 1 carries a relic home; tender 0 is closing its cradle on one (captureCycle)
         const rm = craftPart(m, relic);
         rm.position.set(0, 0, 398);
         rm.rotation.set(0.4, 0.9, 0.2);
         m.add(rm);
-        this.relic = rm;
+        if (i === 1) this.relic = rm; else captured = rm;
       }
       this.tenderGroup.add(m);
-      this.tenders.push({ mesh: m, arms, phase: i * 2.1, offset: V((i - 1) * 1.25, 0.3 * Math.sin(i * 2.0), (i - 1) * 0.5 - Math.abs(i - 1) * 0.55), grip: i === 1 });
+      this.tenders.push({ mesh: m, arms, phase: i * 2.1, offset: V((i - 1) * 1.25, 0.3 * Math.sin(i * 2.0), (i - 1) * 0.5 - Math.abs(i - 1) * 0.55), grip: i === 1, capture: captured });
       this.crafts.push(m);
     }
     space.scene.add(this.tenderGroup);
@@ -258,6 +282,17 @@ export class Fleet {
       dA: V(0.35, 1, 0.25).normalize(), dD: V(-0.3, 1, -0.3).normalize(), S: 1800, bulge: V(0, 2, 0), T: 1300, offset: 0.62,
       engine: { scale: 0.62, length: 16, color: 0xffb070, core: 0xfff2e0 }, glow: [1.0, 0.72, 0.45], accent: [1.0, 0.72, 0.45], radius: 1.2,
     });
+    // the tanker road to the Harbour: beacon pairs out along Selene's two corridors (inbound amber,
+    // outbound blue), closer together near the works, a body of their own (they reach 1,200 km)
+    {
+      const tc = this.movers[this.movers.length - 1].c;
+      this.seleneLaneData = seleneLanes(tc);
+      this.seleneLanes = new THREE.Group();
+      this.seleneLanes.add(createLamps(this.seleneLaneData, { minPx: 1.3 }));
+      space.scene.add(this.seleneLanes);
+      const _c = new THREE.Vector3();
+      space.addBody('seleneLanes', [this.seleneLanes], () => this.seleneLanes.localToWorld(_c.set(0, 600, 0)), 700);
+    }
   }
 
   /** A ship on a voyage cycle: a top-level group (its own depth-sliced body) placed from a station frame. */
@@ -370,9 +405,16 @@ export class Fleet {
         const w = realTime * 0.05 + t.phase;
         t.mesh.position.copy(t.offset).add(_v.set(Math.sin(w) * 0.06, Math.sin(w * 0.7) * 0.03, Math.cos(w) * 0.06));
         t.mesh.rotation.set(0.1 * Math.sin(w * 0.5), w * 0.2, 0.05 * Math.sin(w * 0.3));
-        // the tender with a relic keeps its cradle closed round it
-        const open = t.grip ? 0.12 : 0.5 + 0.5 * Math.sin(realTime * 0.25 + t.phase);
+        // the tender with a relic keeps its cradle closed round it; the capturing tender opens
+        // wide, lets the tumbling relic settle into the cradle, closes on it, and later lets it
+        // go for inspection (the relic stops tumbling as the petals meet it)
+        const open = t.grip ? 0.12 : t.capture ? captureOpen(realTime) : 0.5 + 0.5 * Math.sin(realTime * 0.25 + t.phase);
         for (const a of t.arms) a.pivot.quaternion.setFromAxisAngle(a.axis, -0.15 + 0.55 * open);
+        if (t.capture) {
+          const free = (open - 0.12) / 0.88, q = realTime * 0.11;
+          t.capture.position.set(Math.sin(q * 1.3) * 5 * free, Math.cos(q) * 4 * free, 398 + 16 * free);
+          t.capture.rotation.set(0.4 + free * 0.5 * Math.sin(q * 0.7), 0.9 + free * q * 0.35, 0.2 + free * 0.4 * Math.cos(q * 0.5));
+        }
       }
       if (this.relic) this.relic.rotation.z = 0.2 + 0.05 * Math.sin(realTime * 0.3);
     }
@@ -380,6 +422,8 @@ export class Fleet {
     {
       this.pose('selene', sim, this.refinery.position, this.refinery.quaternion);
       this.refinery.updateMatrixWorld(true);
+      this.seleneLanes.position.copy(this.refinery.position);
+      this.seleneLanes.quaternion.copy(this.refinery.quaternion);
       this.wheel.rotation.y = realTime * 0.04;
     }
   }

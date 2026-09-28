@@ -1,4 +1,5 @@
-// Checks for the orbital system added in the space-b refinement: the Geostationary Roads
+// Checks for the orbital system added in the space-b refinement and round 2 (the Refuge's docks,
+// the release yard, the Helianth's tugs, the foundry's unloading, Selene's wheel): the Geostationary Roads
 // (Concord Yard, the tether Water Store, docking movements, lane buoys) and the craft docked
 // at the liner. Run: node tools/verify-orbital-system.mjs
 import assert from 'node:assert/strict';
@@ -16,6 +17,16 @@ import { buildHaloArch, haloArchAngles, ringBasis } from '../src/space/rings.js'
 import { RINGS } from '../src/sky/celestial.js';
 import { HALO_PORTS } from '../src/space/earthData.js';
 import { bodyDir } from '../src/space/sim.js';
+import { buildHearthRefuge, buildRefugeApproach, RS } from '../src/space/hearth.js';
+import { buildRefugeSleeves, galleryLoop, buildGalleryStubs, buildFeeder, SLEEVE } from '../src/space/hearthWorks.js';
+import { buildReleaseYard, releasePose, YARD as RYARD } from '../src/space/releaseYard.js';
+import { buildCounterworks } from '../src/space/stations.js';
+import { buildCounterweightRock } from '../src/space/counterweightRock.js';
+import { helianthCircuits, circuitPose, helianthRelays } from '../src/space/helianthTraffic.js';
+import { buildSolarCollector, buildFoundry } from '../src/space/workingStations.js';
+import { buildFoundryUnload } from '../src/space/foundryUnload.js';
+import { buildRefinery } from '../src/craft/craftGeometry.js';
+import { captureOpen, seleneLanes } from '../src/space/fleet.js';
 
 const V = (x, y, z) => new THREE.Vector3(x, y, z), results = {};
 const closed = (name, g, tolerance = 1e-3) => {
@@ -288,6 +299,159 @@ for (const c of plans) {
   }
   assert.ok(angles.length > 280 && angles.length < 314, `${angles.length} hub arches`);
   results.haloArches = angles.length; results.archVaultClearanceMetres = +(vault * 1000).toFixed(0); results.archCrestKm = +top.toFixed(2);
+}
+
+// ==== round 2: the working places (the Refuge's docks and gallery, the release yard, the
+// Helianth's circuits, the foundry's unloading, Selene's wheel) ====
+const verts = (g, m = new THREE.Matrix4(), step = 1) => { const p = g.attributes.position, out = []; for (let i = 0; i < p.count; i += step) out.push(V().fromBufferAttribute(p, i).applyMatrix4(m)); return out; };
+// ---- the Hearth Refuge (km, refuge frame)
+{
+  const refuge = buildHearthRefuge(), root = V(Math.cos(0.82) * 30 * RS, 0, Math.sin(0.82) * 30 * RS).sub(V(Math.cos(0.82) * 944, 32, Math.sin(0.82) * 944));
+  const approach = buildRefugeApproach(root);
+  const fixedT = tree([...tris(refuge.geo, new THREE.Matrix4(), 1), ...tris(approach.geo, new THREE.Matrix4(), 1)]);
+  // rotor envelopes: everything that turns stays within r <= 13.4 km and |y -/+ 8| <= 1.35 km
+  const inRotor = (p) => Math.hypot(p.x, p.z) < 13.45 && (Math.abs(p.y - 8) < 1.4 || Math.abs(p.y + 8) < 1.4);
+  const sl = buildRefugeSleeves(refuge.docks);
+  closed('refuge-sleeves', sl.sleeves, 1e-6);
+  for (const [i, g] of sl.ships.entries()) closed(`refuge-carrier-${i}`, g, 1e-6);
+  const shipT = sl.ships.map((g) => probe(g));
+  for (const [i, b] of sl.berths.entries()) {
+    ray.set(b.face.clone().add(V(0, 0, -0.05)), V(0, 0, 1)); ray.far = 1;
+    const hit = ray.intersectObject(shipT[i], false)[0];
+    assert.ok(hit && Math.abs(hit.point.z - SLEEVE.face) < 0.001, `carrier ${i} bow meets its sleeve face (${hit ? ((hit.point.z - SLEEVE.face) * 1000).toFixed(2) : 'miss'} m)`);
+    const vs = verts(sl.ships[i], new THREE.Matrix4(), 3);
+    assert.ok(!vs.some(inRotor), `carrier ${i} stays outside both wheels' sweeps`);
+    let clear = Infinity;
+    for (const p of vs) if (p.z > SLEEVE.face + 0.25) clear = Math.min(clear, dist(fixedT, p, clear + 1));
+    assert.ok(clear > 0.2, `carrier ${i} hull clears the Refuge by ${(clear * 1000).toFixed(0)} m beyond its bow`);
+    results[`refugeCarrier${i}ClearanceMetres`] = +(clear * 1000).toFixed(0);
+  }
+  // the gallery loop: two shuttles, half a loop apart, clear of everything but their stubs
+  const loop = galleryLoop(approach.path[0], approach.path[1]);
+  const stubs = buildGalleryStubs(loop);
+  closed('refuge-gallery-stubs', stubs, 1e-6);
+  const stubT = tree(tris(stubs, new THREE.Matrix4(), 1));
+  const allT = tree([...tris(refuge.geo, new THREE.Matrix4(), 1), ...tris(approach.geo, new THREE.Matrix4(), 1), ...sl.ships.flatMap((g) => tris(g, new THREE.Matrix4(), 1))]);
+  const shR = 0.42, P = V(), F = V(), U = V(), P2 = V();
+  let loopClear = Infinity, stubClear = Infinity, pair = Infinity, hatchErr = 0;
+  for (let t = 0; t < loop.T; t += 0.5) {
+    loop.pose(t + loop.T / 2, P2, F, U);
+    loop.pose(t, P, F, U);
+    loopClear = Math.min(loopClear, dist(allT, P) - shR);
+    assert.ok(!inRotor(P), 'gallery shuttle keeps out of the wheels');
+    pair = Math.min(pair, P.distanceTo(P2));
+    // the hatch: over the ship's back, ahead of its centre
+    const hatch = P.clone().addScaledVector(U, loop.hatch.y).addScaledVector(F, loop.hatch.z);
+    const dStub = dist(stubT, hatch);
+    // docked (the hatch on the collar face), on the final radial approach, or under way
+    const toEnd = Math.min(...loop.stubs.map((s) => s.end.distanceTo(hatch)));
+    if (toEnd < 0.0005) hatchErr = Math.max(hatchErr, dStub); else if (toEnd > 0.35) stubClear = Math.min(stubClear, dStub);
+  }
+  assert.ok(loopClear > 0.5, `gallery shuttles clear the Refuge, its gallery and its carriers by ${loopClear.toFixed(2)} km`);
+  assert.ok(pair > 5, `the two gallery shuttles keep ${pair.toFixed(1)} km apart`);
+  assert.ok(hatchErr < 0.002, `docked shuttle hatches meet their stub collars (${(hatchErr * 1000).toFixed(2)} m)`);
+  assert.ok(stubClear > 0.03, `moving shuttles' hatches clear the stubs by ${(stubClear * 1000).toFixed(0)} m`);
+  const a0 = approach.path[0], b0 = approach.path[1], ab = b0.clone().sub(a0);
+  for (const st of loop.stubs) {
+    const t = THREE.MathUtils.clamp(st.start.clone().sub(a0).dot(ab) / ab.lengthSq(), 0, 1);
+    assert.ok(a0.clone().addScaledVector(ab, t).distanceTo(st.start) < 0.7 - 0.07, 'every transfer stub is rooted inside the gallery tube');
+  }
+  // the feeder: outside the disc, inside the collector line; its stream falls into the disc
+  const fd = buildFeeder();
+  closed('feeder-injector', fd.injector, 1e-6);
+  const fr = Math.hypot(fd.pos.x, fd.pos.z);
+  assert.ok(fr > 15 * RS + 50 && fr < 30 * RS - 100, `feeder at ${fr.toFixed(0)} km: clear of the disc and the collector ring`);
+  const end = fd.stream.pts[fd.stream.pts.length - 1], rEnd = Math.hypot(end.x, end.z);
+  assert.ok(rEnd < 15 * RS * 0.6 && Math.abs(end.y) < 1e-6 && rEnd > 2 * RS, `the stream ends in the disc plane at ${rEnd.toFixed(0)} km`);
+  assert.ok(fd.stream.pts.every((p, i, a) => !i || Math.hypot(p.x, p.z) <= Math.hypot(a[i - 1].x, a[i - 1].z) + 1e-6), 'the stream only ever falls inward');
+  results.refugeLoopClearanceKm = +loopClear.toFixed(2); results.feederRadiusKm = +fr.toFixed(0); results.streamEndKm = +rEnd.toFixed(0);
+}
+// ---- the counterweight's release yard (metres, counterweight frame)
+{
+  const rock = buildCounterweightRock(), cw = buildCounterworks({ surfaceRadius: rock.surfaceRadius });
+  const liner = buildLiner(2400);
+  const yd = buildReleaseYard(liner.geo);
+  closed('release-yard', yd.geo, 1e-3);
+  yd.rods.forEach((g, i) => closed(`release-rod-${i}`, g, 1e-3));
+  const cwT = tree(tris(cw.geo, new THREE.Matrix4(), 1));
+  const rockT = tree(tris(rock.geo, new THREE.Matrix4().makeScale(1000, 1000, 1000), 1));
+  const E = yd.axes.E, N = yd.axes.N;
+  const rootPts = [E.clone().multiplyScalar(RYARD.ringR), ...[-1, 1].map((sd) => E.clone().multiplyScalar(Math.cos(RYARD.stayRoot)).addScaledVector(N, sd * Math.sin(RYARD.stayRoot)).multiplyScalar(RYARD.ringR))];
+  const yv = verts(yd.geo, new THREE.Matrix4(), 2).filter((p) => rootPts.every((r) => p.distanceTo(r) > 1600));
+  let cwClear = Infinity;
+  for (const p of yv) cwClear = Math.min(cwClear, dist(cwT, p, cwClear + 1), dist(rockT, p, cwClear + 1));
+  assert.ok(cwClear > 200, `the release yard clears the counterworks and the rock by ${cwClear.toFixed(0)} m away from its ring saddles`);
+  for (const r of rootPts) assert.ok(dist(cwT, r.clone().multiplyScalar((RYARD.ringR + RYARD.ringTube - 30) / RYARD.ringR)) < 60, 'yard saddles sit on the habitat ring tube');
+  for (const c of [...yd.clampsFixed, ...yd.clampsMoving]) assert.ok(c.rodTo.distanceTo(c.contact) < 1e-6, 'every clamp rod ends on its surveyed contact');
+  const lg = liner.geo, lp = V(), lf = V();
+  const linerAt = (u) => { releasePose(u, yd, lp, lf); return new THREE.Matrix4().makeBasis(yd.axes.N, yd.axes.U, lf).setPosition(lp); };
+  const heldT = tree(tris(lg, linerAt(0.4), 1));
+  for (const c of yd.clampsMoving) assert.ok(dist(heldT, c.contact) < 0.5, 'released-liner clamps meet the hull while held');
+  const heldFixedT = tree(tris(lg, yd.cradles.find((c) => c.side > 0).frame, 1));
+  for (const c of yd.clampsFixed) assert.ok(dist(heldFixedT, c.contact) < 0.5, 'held-liner clamps meet the hull');
+  // leaving: sample her run out of the cradle; drawn-back rods and the whole yard stay clear
+  const movingRodPts = yd.clampsMoving.flatMap((c, i) => verts(yd.rods[i]).map((p) => p.addScaledVector(c.dirW, -c.retract)));
+  const yardT = tree(tris(yd.geo, new THREE.Matrix4(), 1));
+  const linerPts = verts(lg, new THREE.Matrix4(), 9);
+  let runClear = Infinity;
+  for (let u = 0.6; u < 0.75; u += 0.002) {
+    const m = linerAt(u);
+    if (lp.distanceTo(yd.cradles.find((c) => c.side < 0).center) > 3500) break;
+    const T2 = tree(tris(lg, m, 1));
+    for (const q of movingRodPts) runClear = Math.min(runClear, dist(T2, q, runClear + 1));
+    for (const q of linerPts) runClear = Math.min(runClear, dist(yardT, q.clone().applyMatrix4(m), runClear + 1));
+  }
+  assert.ok(runClear > 15, `the released liner leaves the cradle clear of the yard and its drawn-back clamps by ${runClear.toFixed(0)} m`);
+  results.releaseYardWorksClearanceMetres = +cwClear.toFixed(0); results.releaseRunClearanceMetres = +runClear.toFixed(0);
+}
+// ---- the Helianth's tug circuits (metres, station frame)
+{
+  const sc = buildSolarCollector();
+  const stT = tree(tris(sc.geo, new THREE.Matrix4(), 1));
+  const circuits = helianthCircuits(), tugR = 230, P = V(), F = V();
+  const col = sc.service.approach;
+  let clear = Infinity, apart = Infinity;
+  for (let t = 0; t < 460; t += 0.5) {
+    const ps = circuits.map((c) => { circuitPose(c, t, P, F); return P.clone(); });
+    for (const p of ps) {
+      clear = Math.min(clear, dist(stT, p, clear + tugR) - tugR);
+      assert.ok(!(p.x > col.min.x - tugR && p.x < col.max.x + tugR && p.y > col.min.y && p.y < col.max.y + 400 && p.z > col.min.z - tugR && p.z < col.max.z + tugR), 'no circuit enters the crown\'s reserved departure column');
+    }
+    for (let i = 0; i < ps.length; i++) for (let j = i + 1; j < ps.length; j++) apart = Math.min(apart, ps[i].distanceTo(ps[j]));
+  }
+  assert.ok(clear > 150, `Helianth tugs clear the station by ${clear.toFixed(0)} m`);
+  assert.ok(apart > 1500, `Helianth tugs keep ${apart.toFixed(0)} m apart`);
+  for (const r of helianthRelays()) assert.ok(Math.hypot(r.base.x, r.base.z) > 15500 + 1500, 'relays stand beyond the petal tips');
+  results.helianthTugClearanceMetres = +clear.toFixed(0); results.helianthTugSeparationMetres = +apart.toFixed(0);
+}
+// ---- the tender unloading in the foundry's middle hall (metres, foundry frame)
+{
+  const fo = buildFoundry(), un = buildFoundryUnload();
+  closed('foundry-unload', un.geo, 1e-3);
+  const foT = tree(tris(fo.geo, new THREE.Matrix4(), 1));
+  const bay = fo.bays[1];
+  const tenderPts = verts(un.geo, new THREE.Matrix4(), 2).filter((p) => p.y < un.bridge.y - 30);
+  assert.ok(tenderPts.every((p) => p.x > bay.min.x && p.x < bay.max.x && p.y > bay.min.y && p.z > bay.min.z && p.z < bay.max.z), 'the unloading tender and its relic stay inside the reserved receiving volume');
+  let clear = Infinity;
+  for (const p of tenderPts) clear = Math.min(clear, dist(foT, p, clear + 1));
+  assert.ok(clear > 40, `the unloading tender clears the hall by ${clear.toFixed(0)} m`);
+  assert.ok(Math.abs(un.bridge.y + 12 - 712) < 1e-6, 'the hoist bridge meets the gondola floors');
+  assert.ok(un.spreader - 1.5 - un.relicTop < 6 + 1e-6 && un.spreader > un.relicTop, 'the spreader hangs just over the relic, its slings on its top');
+  results.foundryUnloadClearanceMetres = +clear.toFixed(0);
+}
+// ---- Selene's wheel: closed, within its checked envelope; the capture cycle; the lanes
+{
+  const ref = buildRefinery(1);
+  closed('selene-wheel', ref.wheel, 1e-3);
+  const wp = ref.wheel.attributes.position;
+  let rMax = 0, yMin = Infinity, yMax = -Infinity;
+  for (let i = 0; i < wp.count; i++) { rMax = Math.max(rMax, Math.hypot(wp.getX(i), wp.getZ(i))); yMin = Math.min(yMin, wp.getY(i)); yMax = Math.max(yMax, wp.getY(i)); }
+  const env = ref.wheelEnvelope;
+  assert.ok(rMax <= env.rMax + 1e-6 && yMin >= env.yMin - 1e-6 && yMax <= env.yMax + 1e-6, `Selene's wheel stays inside its checked envelope (r ${rMax.toFixed(0)}, y ${yMin.toFixed(0)}..${yMax.toFixed(0)})`);
+  for (let t = 0; t < 400; t += 1) { const o = captureOpen(t); assert.ok(o >= 0.12 - 1e-9 && o <= 1 + 1e-9, 'capture cycle stays within the cradle range'); }
+  assert.ok(Math.abs(captureOpen(0) - captureOpen(200)) < 1e-9, 'the capture cycle loops seamlessly');
+  const lanes = seleneLanes({ hold: V(3.2, 5.5, 1.5), start: V(-2.5, 5.2, -2.2), dA: V(0.35, 1, 0.25).normalize(), dD: V(-0.3, 1, -0.3).normalize() });
+  assert.ok(lanes.length === 64 && lanes.every((l) => l.p.length() > 5), 'Selene\'s tanker lanes: 32 beacon pairs clear of the works');
 }
 results.movementClearanceMetres = clearances;
 results.yardClampContactErrorMetres = +clampErr.toFixed(3);

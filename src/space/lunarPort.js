@@ -35,9 +35,23 @@ export function buildLunarPort({receiving=true}={}) {
     B.pop();
     lamps.push({p:d.clone().multiplyScalar(3600).setY(1480),r:22,color:LAMP.AMBER,i:1.8});
   }
+  // Lantern galleries: a lit promenade along the crown of every radial gallery, and a lit
+  // walk round the commons ring above its glazed hall, so the Exchange reads at night.
+  for(let k=0;k<6;k++) {
+    const a=k/6*TAU,d=V(Math.cos(a),0,Math.sin(a));
+    B.tube([d.clone().multiplyScalar(1200).setY(1080+135),d.clone().multiplyScalar(3420).setY(1080+135)],32,8,CK.LANTERN);
+    for(let j=0;j<4;j++)lamps.push({p:d.clone().multiplyScalar(1500+j*620).setY(1080+150),r:14,color:LAMP.AMBER,i:1.6,breathe:.25,phase:(k+j)/10});
+  }
+  // (a lit belt round the commons ring's outer equator, clear of the glazed hall above it)
+  B.push(new THREE.Matrix4().makeTranslation(0,1080,0).multiply(new THREE.Matrix4().makeRotationX(Math.PI/2)));
+  B.torus(3915,40,160,8,CK.LANTERN);B.pop();
+  for(let k=0;k<24;k++){const a=(k+.5)/24*TAU;lamps.push({p:V(Math.cos(a)*3600,1080+380,Math.sin(a)*3600),r:16,color:LAMP.WHITE,i:1.4});}
   // Through concourse along the orbital ring, with mounted passenger halls and shelters.
   for(const sd of [-1,1]) {
     B.tube([V(sd*1300,-120,0),V(sd*6800,-120,0)],260,14,CK.HULL);
+    // its lit promenade: a lantern strip along the crown, lamps at the passenger halls' doors
+    B.tube([V(sd*1350,-120+260+30,0),V(sd*6750,-120+260+30,0)],42,8,CK.LANTERN);
+    for(let x=1700;x<6800;x+=700)for(const zz of [-280,280])lamps.push({p:V(sd*x,-120,zz),r:12,color:LAMP.AMBER,i:1.5,breathe:.2,phase:x/7000});
     for(let j=0;j<3;j++) {
       const x=sd*(4400+j*900);
       B.box(x,20,0,740,240,1150,CK.HULL);
@@ -306,7 +320,7 @@ function buildReceivingCourt() {
 
 /** Continuous edge shields, two transit rails, and regular lunar-ring neighbourhood halls. */
 export function buildLunarRingDistricts(radiusKm=2117) {
-  const B=new CB(), R=radiusKm*1000, districts=[], N=768;
+  const B=new CB(), R=radiusKm*1000, districts=[], lamps=[], N=768;
   // These pressure/service rails have physical thickness and rest in the ring slab.
   for(const z of [-5200,5200]) {
     B.push(new THREE.Matrix4().makeTranslation(0,z,0).multiply(new THREE.Matrix4().makeRotationX(Math.PI/2)));
@@ -326,15 +340,26 @@ export function buildLunarRingDistricts(radiusKm=2117) {
       const z=sd*4100;
       B.box(0,85,z,1500,190,1550,CK.HULL);
       B.at(0,170,z);B.push(new THREE.Matrix4().makeRotationX(-Math.PI/2));
-      B.lathe([[560,0,CK.BRONZE],[590,110,CK.HULL],[560,220,CK.GLASS],[490,460,CK.GLASS],[390,550,CK.BRONZE],[0,760,CK.ROOF]],16);B.pop();B.pop();
+      B.lathe([[560,0,CK.BRONZE],[590,110,CK.HULL],[590,150,CK.LANTERN],[560,220,CK.GLASS],[490,460,CK.GLASS],[390,550,CK.BRONZE],[0,760,CK.ROOF]],16);B.pop();B.pop();
       B.box(-560,230,z,250,130,1500,CK.PANEL);
       B.box(560,230,z,250,130,1500,CK.PANEL);
       // Protected vestibules open toward a parallel local access walk, away from fast rails.
       B.box(0,225,z-sd*730,480,270,350,CK.HULL);
-      B.box(0,250,z-sd*916,350,140,36,CK.GLASS);
+      B.box(0,250,z-sd*916,350,140,36,CK.LANTERN);
       districts.push({center:V(0,85,z).applyMatrix4(m),base:V(0,-10,z).applyMatrix4(m),sector:j});
+      // the hall's lit door toward the walk, and a lamp on its lantern
+      lamps.push({p:V(0,250,z-sd*960).applyMatrix4(m),r:40,color:LAMP.AMBER,i:2.2,breathe:.2,phase:(j*.37)%1});
+      lamps.push({p:V(0,945,z).applyMatrix4(m),r:30,color:LAMP.WHITE,i:1.3});
     }
     B.pop();
   }
-  return {geo:B.geometry(),districts};
+  // parapet lamps on both edge shields and signal lamps along both transit rails, one set per
+  // half sector (8.7 km), the rails' teal a half step out of phase with the walls' warm white
+  for(let j=0;j<N*2;j++) {
+    const a=(j+.5)/(N*2)*TAU,c=Math.cos(a),sn=Math.sin(a);
+    for(const zz of [-5200,5200])lamps.push({p:V(c*(R+345),zz,sn*(R+345)),r:36,color:LAMP.WHITE,i:1.2});
+    const b=(j+1)/(N*2)*TAU;
+    for(const zz of [-1700,1700])lamps.push({p:V(Math.cos(b)*(R+80),zz,Math.sin(b)*(R+80)),r:26,color:LAMP.TEAL,i:1.1});
+  }
+  return {geo:B.geometry(),districts,lamps};
 }

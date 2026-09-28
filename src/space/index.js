@@ -23,6 +23,7 @@ import { Traffic } from './traffic.js';
 import { Lanes } from './lanes.js';
 import { WorkingStations } from './workingStations.js';
 import { GeoRoads, geoRoadTargets } from './geoRoads.js';
+import { ReleaseYard } from './releaseYard.js';
 
 const smooth = (a, b, x) => { const t = Math.min(Math.max((x - a) / (b - a), 0), 1); return t * t * (3 - 2 * t); };
 const easeInOut = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
@@ -115,7 +116,7 @@ export class SpaceMode {
     });
     T('counter', {
       position: (o) => o.copy(merid).multiplyScalar(R_EARTH + COUNTERWEIGHT_ALT + 10).applyQuaternion(sim.earthQuat),
-      frame: (q) => q.copy(sim.earthQuat).multiply(meridQ), minDist: 20, maxDist: 400000, defaultDist: 105, view: { az: 0.8, el: 1.12 },   // the Earth below, the cable falling to it
+      frame: (q) => q.copy(sim.earthQuat).multiply(meridQ), minDist: 20, maxDist: 400000, defaultDist: 88, view: { az: 0.1, el: 1.0 },   // the release yard across the frame, the Earth below, the cable falling to it
     });
     T('hearth', {
       position: (o) => o.copy(sim.hearthPos),
@@ -161,7 +162,7 @@ export class SpaceMode {
     T('solarCollector', {
       position:o=>o.copy(sim.sunPos).add(solarOffset),
       frame:q=>q.setFromUnitVectors(_v2.set(0,1,0),_v3.copy(solarOffset).normalize()),
-      minDist:12,maxDist:1e8,defaultDist:42,view:{az:.55,el:.48},
+      minDist:12,maxDist:1e8,defaultDist:56,view:{az:.55,el:1.08},   // the flower over the Sun's disc
     });
     T('solarService', {
       position:o=>o.set(0,3.7,0).applyQuaternion(_q.setFromUnitVectors(_v2.set(0,1,0),_v3.copy(solarOffset).normalize())).add(solarOffset).add(sim.sunPos),
@@ -171,7 +172,7 @@ export class SpaceMode {
     T('hearthworks', {
       position:o=>self.hearth?o.copy(self.hearth.refugePosition).applyAxisAngle(_v2.set(0,0,1),.12).applyQuaternion(self.hearth.quat).add(sim.hearthPos):o.copy(sim.hearthPos),
       frame:q=>self.hearth?q.copy(self.hearth.quat):q.identity(),
-      minDist:16,maxDist:1.4e6,defaultDist:64,view:{az:2.2,el:.35},
+      minDist:16,maxDist:1.4e6,defaultDist:95,view:{az:.9,el:.12},   // the Refuge against the disc it serves
     });
   }
 
@@ -245,6 +246,9 @@ export class SpaceMode {
     // the Harbour's neighbourhood on the geostationary arc: yard, store, ship movements
     this.geoRoads = new GeoRoads(this);
     this.modules.push(this.geoRoads);
+    // the counterweight's release yard: cradles, a held liner, one let go, its lit lane
+    this.releaseYard = new ReleaseYard(this);
+    this.modules.push(this.releaseYard);
     for (const b of this.bodies) if (!b.local) b.remote = true;
     // post: crossfade helper
     this.fadeRT = new THREE.WebGLRenderTarget(1, 1, { type: THREE.UnsignedByteType, depthBuffer: false });

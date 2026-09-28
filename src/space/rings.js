@@ -129,15 +129,18 @@ void main() {
 #ifdef ROOF
   // ---- glass vault over the habitat: arched ribs every 2 km, mullions 1 km apart across it,
   //      clear glass that turns to a Fresnel sheen at grazing angles, a bounded sun glint ----
-  float rib = 1.0 - fPulse(u, 2.0, 0.0, 1.93, fk);
-  float mull = 1.0 - fPulse(v * uWidth + 1.0, 2.0, 0.0, 1.95, fk);
-  float frame = max(rib, mull * 0.55);
+  // ribs across the vault every 2 km, fading toward a faint tint once they are under ~10 px
+  // apart (a far-off vault read as graph paper laid over the deck); the long mullions only near
+  float ribFade = 1.0 - smoothstep(2.0 / 26.0, 2.0 / 9.0, fk);
+  float rib = (1.0 - fPulse(u, 2.0, 0.0, 1.94, fk)) * mix(0.3, 1.0, ribFade);
+  float mull = (1.0 - fPulse(v * uWidth + 1.0, 2.0, 0.0, 1.965, fk)) * (1.0 - smoothstep(0.02, 0.07, fk));
+  float frame = max(rib, mull * 0.5);
   float ndv = clamp(abs(dot(N, V)), 0.0, 1.0);
   float Fg = 0.04 + 0.96 * pow(1.0 - ndv, 5.0);
   float nh = max(dot(N, H), 0.0);
   vec3 glint = min(sunL * (pow(nh, 400.0) * 1.6 + pow(nh, 40.0) * 0.05) * Fg, sunL * 0.5);
   vec3 sky = vec3(0.02, 0.03, 0.05) * uSunE * 0.05 * Fg + earthshine * 0.3 * Fg;
-  vec3 frameC = uAlbedo * 0.9 / 3.14159 * (sunL * ndl + earthshine * 2.0) + min(sunL * pow(nh, 60.0) * 0.3, sunL * 0.4);
+  vec3 frameC = uAlbedo * 0.7 / 3.14159 * (sunL * ndl + earthshine * 2.0) + min(sunL * pow(nh, 60.0) * 0.3, sunL * 0.4);
   frameC += uHabitatColor * (0.02 + 0.06 * nightSide) * rib;      // the ribs' own faint lamps
   float glassA = 0.05 + 0.5 * Fg;
   // premultiplied: frame opaque, glass a thin tint that reflects the sky and the Sun
@@ -199,13 +202,19 @@ void main() {
       vec3 park = vec3(0.05, 0.1, 0.035) * (0.85 + 0.3 * mix(0.5, vnoise(vec2(u * 0.4, vk * 0.6)), dT));
       vec3 wood = vec3(0.022, 0.055, 0.02) * (0.85 + 0.3 * mix(0.5, vnoise(vec2(u * 1.3, vk * 1.3) + 5.0), dT));
       // fields in long strips across the deck (one farm lane splits each side), muted crops
-      float strip = hash12(vec2(floor(u / 0.85), floor(abs(vk) / 4.3) + step(0.0, vk) * 17.0) + uSeed);
-      vec3 cropC = strip < 0.28 ? vec3(0.19, 0.165, 0.08) : strip < 0.55 ? vec3(0.09, 0.14, 0.05) : strip < 0.8 ? vec3(0.13, 0.15, 0.065) : vec3(0.15, 0.125, 0.07);
-      vec3 farm = mix(vec3(0.135, 0.145, 0.065), cropC, dF);
+      // each farm (3.4 km along, one side of its lane) keeps one crop family; its strips differ
+      // only a shade, so the patchwork reads as holdings rather than a checkerboard
+      float side2 = floor(abs(vk) / 4.3) + step(0.0, vk) * 17.0;
+      float farmId = hash12(vec2(floor(u / 3.4), side2) + uSeed);
+      float strip = hash12(vec2(floor(u / 0.85), side2) + uSeed * 1.7);
+      vec3 cropC = farmId < 0.3 ? vec3(0.165, 0.155, 0.078) : farmId < 0.62 ? vec3(0.105, 0.145, 0.056) : vec3(0.135, 0.15, 0.066);
+      cropC *= 0.93 + 0.14 * strip;
+      vec3 farm = mix(vec3(0.135, 0.148, 0.066), cropC, dF);
       farm *= 1.0 - 0.14 * (1.0 - fPulse(u, 0.85, 0.0, 0.81, aa));        // hedges between strips
       farm *= 1.0 - 0.2 * aaBand(mod(abs(vk), 4.3) - 2.15, 0.02, aa);      // farm lanes
       float forest = smoothstep(0.57, 0.67, vnoise(vec2(u * 0.055, vk * 0.13) + 3.0) * 0.7 + vnoise(vec2(u * 0.21, vk * 0.4) + 9.0) * 0.3);
-      vec3 townC = mix(vec3(0.22, 0.21, 0.19), mix(vec3(0.17, 0.165, 0.155), vec3(0.3, 0.285, 0.255), cellT), dB);
+      // pale stone towns (bone-white blocks, darker lanes, green yards) that stand out on the fields
+      vec3 townC = mix(vec3(0.31, 0.295, 0.26), mix(vec3(0.25, 0.24, 0.215), vec3(0.42, 0.4, 0.35), cellT), dB);
       float streets = 1.0 - fPulse(u, 0.5, 0.0, 0.44, aa) * fPulse(vk, 0.5, 0.0, 0.44, aa);
       townC = mix(townC, vec3(0.12, 0.12, 0.125), streets * 0.5);
       townC = mix(townC, park, 0.28 * mix(0.5, vnoise(vec2(u * 2.0, vk * 2.0)), dB));    // yards and street trees

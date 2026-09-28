@@ -6,6 +6,8 @@ import { craftMesh, addLamps, placeMerge, placeLamps } from './craftMesh.js';
 import { stationFrame } from './stations.js';
 import { R_EARTH, bodyDir } from './sim.js';
 import { NAURU_LON } from './fleet.js';
+import { HelianthTraffic } from './helianthTraffic.js';
+import { addFoundryUnload } from './foundryUnload.js';
 
 const V=(x,y,z)=>new THREE.Vector3(x,y,z), TAU=Math.PI*2;
 const TO_Y=new THREE.Matrix4().makeRotationX(-Math.PI/2);
@@ -348,6 +350,8 @@ export class WorkingStations {
     stationFrame(up,this.foundry.quaternion);
     const f=craftMesh(this.foundryData.geo,{accent:[.5,1,.8],lit:.58});
     addLamps(f,this.foundryData.lamps,{minPx:1.2});this.foundry.add(f);
+    // a tender unloading its relic in the middle hall (src/space/foundryUnload.js)
+    this.unload=addFoundryUnload(this.foundry);
     space.earthFixed.add(this.foundry);
     space.addBody('foundry',[this.foundry],()=>this.foundry.getWorldPosition(new THREE.Vector3()),28,{solid:true,hint:.65});
     this.solarData=buildSolarCollector();
@@ -358,7 +362,9 @@ export class WorkingStations {
     // Helianth is close to Sol, far from the Earth-centred lighting reference.
     s.userData.sunDir=this.solarOffset.clone().normalize().negate();
     addLamps(s,this.solarData.lamps,{minPx:1.2});this.solar.add(s);space.scene.add(this.solar);
-    space.addBody('solarCollector',[this.solar],()=>this.solar.getWorldPosition(new THREE.Vector3()),15.5,{solid:true,hint:.9});
+    // service tugs on their petal circuits and the relay beacons (src/space/helianthTraffic.js)
+    this.helianth=new HelianthTraffic(this.solar,s.userData.sunDir);
+    space.addBody('solarCollector',[this.solar],()=>this.solar.getWorldPosition(new THREE.Vector3()),19.8,{solid:true,hint:.9});
   }
-  update(sim) {this.solar.position.copy(sim.sunPos).add(this.solarOffset);}
+  update(sim,realTime=0) {this.solar.position.copy(sim.sunPos).add(this.solarOffset);this.helianth.update(realTime);}
 }

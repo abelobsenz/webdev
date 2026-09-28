@@ -6,6 +6,7 @@ import { SKY_UNIFORMS } from './sky.js';
 import { createHullMaterial, tag, merge, beam, KIND } from './hull.js';
 import { R_EARTH, R_MOON } from './sim.js';
 import { CB } from '../craft/craftGeometry.js';
+import { HearthWorks } from './hearthWorks.js';
 
 // THE HEARTH: a spinning black hole kept on a halo orbit around Sun-Earth L2.
 // Each pixel integrates a photon path backwards through Schwarzschild spacetime
@@ -438,6 +439,8 @@ export class Hearth {
     this.stations.rotation.z = 0.12;
     this.stations.traverse((o) => { o.frustumCulled = false; o.renderOrder = 3; });
     this.group.add(this.stations);
+    // docked carriers, gallery shuttles and the feeder with its matter stream (src/space/hearthWorks.js)
+    this.works = new HearthWorks(this);
     this.mode = 'far';
     this.scale = 1;
     this.size = new THREE.Vector2(1, 1);
@@ -446,7 +449,7 @@ export class Hearth {
   }
 
   setQuality(q) { this.q = q; this.bhMat.defines.STEPS = q.bhSteps; this.bhMat.needsUpdate = true; }
-  setSize(w, h) { this.size.set(w, h); this._resize(); }
+  setSize(w, h) { this.size.set(w, h); this._resize(); if (this.works) this.works.setSize(w, h); }
   _resize() {
     const w = Math.max(1, Math.round(this.size.x * this.scale)), h = Math.max(1, Math.round(this.size.y * this.scale));
     if (this.bhRT.width !== w || this.bhRT.height !== h) this.bhRT.setSize(w, h);
@@ -457,6 +460,7 @@ export class Hearth {
 
   update(sim, realTime, dt, space) {
     for(const rotor of this.refugeRotors)rotor.rotation.y=(realTime*rotor.userData.omega*rotor.userData.dir)%(Math.PI*2);
+    if (this.works) this.works.update(sim, realTime);
     this.group.position.copy(sim.hearthPos);
     this.group.quaternion.copy(this.quat);
     this.group.updateMatrixWorld(true);

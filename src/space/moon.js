@@ -216,6 +216,7 @@ export class Moon {
     this.group.add(this.far);
     this.districtData=buildLunarRingDistricts();
     this.districts=lunarMesh(this.districtData.geo,{accent:[.7,.85,1],lit:.5,side:THREE.DoubleSide});
+    addLamps(this.districts,this.districtData.lamps,{minPx:1.1});   // lit halls, parapets and rails (src/space/lunarPort.js)
     this.group.add(this.districts);
     this.port = new THREE.Group();
     this.port.name='Tranquillity Exchange';

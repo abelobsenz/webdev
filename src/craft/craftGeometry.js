@@ -619,8 +619,29 @@ export function buildRefinery(scale = 1, { supports = true } = {}) {
     W.at(Math.cos(a)*265,-600,Math.sin(a)*265);
     W.lathe([[0,-5.5,CK.BRONZE],[5.5,0,CK.BRONZE],[0,5.5,CK.BRONZE]],10);W.pop();
   }
+  // the rim in section: a window wall looking out, plated crown and floor with bronze trim, and
+  // conservatories along the inner face (garden rooms under glass, facing the hub)
+  {
+    const sec = [], NS = 32;
+    for (let i = 0; i < NS; i++) {
+      const t = (i / NS) * TAU, c = Math.cos(t), s = Math.sin(t);
+      const x = Math.sign(c) * Math.pow(Math.abs(c), 2 / 2.6) * 170, y = Math.sign(s) * Math.pow(Math.abs(s), 2 / 2.6) * 150;
+      const k = c > 0.5 ? CK.GLASS : c < -0.5 ? CK.CONSERVATORY : Math.abs(s) > 0.93 ? CK.HULL : CK.BRONZE;
+      sec.push([2200 + x, -600 + y, k]);
+    }
+    sec.push([...sec[0]]);
+    W.push(toY);
+    W.lathe(sec, 128, 0, { closedProfile: true });
+    // twelve glazed garden halls on the rim's crown (the side away from the Moon)
+    for (let k = 0; k < 12; k++) {
+      const a = (k / 12) * TAU + TAU / 24;
+      W.at(Math.cos(a) * 2200, -Math.sin(a) * 2200, -452);
+      W.lathe([[0.1, -2, CK.HULL], [100, -2, CK.HULL], [100, 14, CK.BRONZE], [86, 44, CK.CONSERVATORY], [52, 70, CK.CONSERVATORY], [0.1, 78, CK.BRONZE]], 24);
+      W.pop();
+    }
+    W.pop();
+  }
   W.push(new THREE.Matrix4().makeTranslation(0, -600, 0).multiply(new THREE.Matrix4().makeRotationX(Math.PI / 2)));
-  W.torus(2200, 170, 128, 16, CK.GLASS);
   W.torus(2380, 30, 128, 6, CK.LANTERN);
   W.torus(2020, 22, 128, 6, CK.BRONZE);
   W.pop();
@@ -631,5 +652,5 @@ export function buildRefinery(scale = 1, { supports = true } = {}) {
   W.pop();
   B.pop();
   const glows = [{ p: new THREE.Vector3(0, -3010, 0).multiplyScalar(scale), r: 160 * scale, dir: new THREE.Vector3(0, -1, 0) }];
-  return { geo: B.geometry(), wheel: W.geometry(), glows, wheelY: -600 * scale, size: 6000 * scale, tanks, radiators, berths, supportRanges, wheelEnvelope:{rMin:2020*scale,rMax:2410*scale,yMin:-770*scale,yMax:-430*scale} };
+  return { geo: B.geometry(), wheel: W.geometry(), glows, wheelY: -600 * scale, size: 6000 * scale, tanks, radiators, berths, supportRanges, wheelEnvelope:{rMin:2020*scale,rMax:2410*scale,yMin:-770*scale,yMax:-370*scale} };
 }
