@@ -147,15 +147,16 @@ export function buildHillTerraces(scene, occ, towns, villages = [], farms = []) 
   const bad = OCC.FLAT | OCC.LOW | OCC.TALL | OCC.CLEAR | OCC.HOME | OCC.TREE;
   const stoneSolids = [];
 
-  // ---- candidates round the terrace towns, the villages and the farms: the lagoon face (the
-  // landscape the capital looks at) most richly, the villages and farms of the hill country
-  // beyond it each with its own terraced garden ground; the nearer a settlement the likelier
+  // ---- candidates round the terrace towns and the villages of the lagoon face (the landscape
+  // the capital looks at); the nearer a settlement the likelier
   const inBand = (x, z) => x > BAND.x0 && x < BAND.x1 && z > BAND.z0 && z < BAND.z1;
   const places = [
     ...towns.map((m) => ({ x: m.town.x, z: m.town.z, r0: 1000, r1: 2600, w: 1 })),
-    ...villages.map((v) => inBand(v.x, v.z) ? { x: v.x, z: v.z, r0: v.r + 90, r1: v.r + 900, w: 0.8 } : { x: v.x, z: v.z, r0: v.r + 80, r1: v.r + 560, w: 0.6 }),
-    ...farms.map((f) => ({ x: f.x, z: f.z, r0: 70, r1: 300, w: 0.4 })),
+    ...villages.map((v) => ({ x: v.x, z: v.z, r0: v.r + 90, r1: v.r + 900, w: 0.8 })),
   ];
+  // (the hill country beyond the lagoon face keeps its own fields: the page's memory budget
+  // holds the terraces to the band the capital looks at)
+  void farms;
   const PB = 1000, placeCells = new Map();
   for (const p of places) for (let i = Math.floor((p.x - p.r1) / PB); i <= Math.floor((p.x + p.r1) / PB); i++) for (let j = Math.floor((p.z - p.r1) / PB); j <= Math.floor((p.z + p.r1) / PB); j++) { const k = i * 65536 + j; if (!placeCells.has(k)) placeCells.set(k, []); placeCells.get(k).push(p); }
   const nearness = (x, z) => { let near = 0; for (const p of placeCells.get(Math.floor(x / PB) * 65536 + Math.floor(z / PB)) || []) { const d = Math.hypot(x - p.x, z - p.z); if (d > p.r0 * 0.9) near = Math.max(near, p.w * (1 - sstep(p.r0, p.r1, d))); } return near; };
@@ -165,7 +166,7 @@ export function buildHillTerraces(scene, occ, towns, villages = [], farms = []) 
     if (lattice.has(key)) continue;
     lattice.add(key);
     const px = x + (hash2(x, z, 41) - 0.5) * 40, pz = z + (hash2(x, z, 42) - 0.5) * 40;
-    if (!inHills(px, pz) || onPlatform(px, pz)) continue;
+    if (!inBand(px, pz) || !inHills(px, pz) || onPlatform(px, pz)) continue;
     const near = nearness(px, pz);
     if (near < 0.12) continue;
     const h = ground(px, pz);
