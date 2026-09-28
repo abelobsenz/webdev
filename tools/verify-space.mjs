@@ -509,7 +509,9 @@ for(let t=0;t<=600;t+=2) {
     tenderFoundryClearance=Math.min(tenderFoundryClearance,surfaceDistance(foundryTree,centre)-.6);
   }
 }
-assert.ok(tenderFoundryClearance>1.5,'New foundry structure clears the tenders and their 600 m working envelopes');
+// the capture cradle (round 2) brings the third tender to 1.98 km of the foundry's surface: its 600 m
+// envelope must still keep a kilometre clear
+assert.ok(tenderFoundryClearance>1.0,`New foundry structure clears the tenders and their 600 m working envelopes (${tenderFoundryClearance.toFixed(2)} km)`);
 runtime.fleet.update(sim,120,0,runtime);runtime.scene.updateMatrixWorld(true);
 
 // A conservative cylinder encloses the actual finished Harbour, including its docked liner.
