@@ -561,7 +561,16 @@ function buildTown(m, rnd, lights, audit = false) {
   const connectedPlans=terracePlans.filter(p=>root(p.id)===root(arrival));
   const network={town:m.name,arrival,runs:connectedPlans.length,connectedRuns:connectedPlans.map(p=>p.id),omittedRuns:terracePlans.filter(p=>root(p.id)!==root(arrival)).map(p=>p.id)};
   base.components[0].network=network;
-  for(const plan of connectedPlans)terraceRun(base,near,plan.run,plan.L,plan.garden,mulberry32(plan.seed),landings,lights,stairCorridors,plan.id,terraceQuads.filter(t=>t.id===plan.id).map(t=>t.walkQ),terraceQuads.filter(t=>t.L===plan.L).map(t=>t.walkQ));
+  const houseFeet=[];
+  for(const plan of connectedPlans)terraceRun(base,near,plan.run,plan.L,plan.garden,mulberry32(plan.seed),landings,lights,stairCorridors,plan.id,terraceQuads.filter(t=>t.id===plan.id).map(t=>t.walkQ),terraceQuads.filter(t=>t.L===plan.L).map(t=>t.walkQ),houseFeet);
+  // what the gardeners need to plant the terraces (hills/townGardens.js): the built terrace tops,
+  // their walks, every house, chapel, stair and civic corridor, and the town's own reserves
+  {
+    const built=new Map(connectedPlans.map(p=>[p.id,p]));
+    MASSIF_GARDENS.push({town:m.id,center:[C.x,C.z],free:(p,pad=0)=>free(p,pad),
+      terraces:terraceQuads.filter(t=>built.has(t.id)).map(t=>({q:t.q,walkQ:t.walkQ,L:t.L,garden:built.get(t.id).garden,D:Math.min(t.a.D,t.b.D)})),
+      houses:houseFeet,corridors:stairCorridors.map(c=>({a:c.a,b:c.b,width:c.width})),landings:landings.slice()});
+  }
 
   const baseStructure=audit?base.geometry():null,nearStructure=audit?near.geometry():null;
   const auditParts=[];
@@ -582,7 +591,7 @@ function buildTown(m, rnd, lights, audit = false) {
 }
 
 /** Marching squares: the polylines where the height grid crosses level L. */
-function contourLines(hg, N, G, X0, Z0, L) {
+export function contourLines(hg, N, G, X0, Z0, L) {
   const pt = new Map(), adj = new Map();
   const ept = (id) => {
     let p = pt.get(id);
@@ -623,7 +632,7 @@ function contourLines(hg, N, G, X0, Z0, L) {
 }
 
 /** Points every `step` metres along a polyline. */
-function resample(line, step) {
+export function resample(line, step) {
   const out = [line[0]];
   let acc = 0;
   for (let k = 1; k < line.length; k++) {
@@ -658,7 +667,7 @@ function parapetIntervals(a,b,L,corridors,walks=[]){
 }
 
 /** A terrace along a contour: level top, retaining wall in front, houses against the slope. */
-function terraceRun(base, near, run, L, garden, rnd, landings, lights, corridors = [],runId=null,walks=[],levelWalks=walks) {
+function terraceRun(base, near, run, L, garden, rnd, landings, lights, corridors = [],runId=null,walks=[],levelWalks=walks,houseOut=null) {
   const topK = garden ? 3 : 9;
   for(let i=0;i<run.length-1;i++){
     const a=run[i],b=run[i+1];
@@ -705,11 +714,13 @@ function terraceRun(base, near, run, L, garden, rnd, landings, lights, corridors
     if (!chapelDone && dep > 8 && w > 13) {
       chapelDone = true;
       chapelAt(base, near, q, null, L, d, [tg[0] / tl, tg[1] / tl], lights);base.components[firstHouse].house={runId};
+      if (houseOut) houseOut.push({ q, L, top: L + 31, chapel: true });
       u += w + 3;
       continue;
     }
     const floors = 1 + Math.floor(rnd() * rnd() * 3.2), Hh = floors * 3.6 + 0.6;
     base.prism(q, L - 1, L + Hh, 5, rnd() < 0.35 ? 3 : 1);base.components[firstHouse].house={runId};
+    if (houseOut) houseOut.push({ q, L, top: L + Hh + 2.2 + dep * 0.22 + 4 });
     if (rnd() < 0.68) gable(base, q, L + Hh, 2.2 + dep * 0.22, 11, d);
     else {
       // a glazed roof pavilion on the roof garden (near)
@@ -796,8 +807,12 @@ function trackSolid(S, pts, dir, w, topK, H, depth) {
 }
 
 // ------------------------------------------------------------------ build --
+/** Per town, filled by buildMassifTowns: the planted-garden survey (see buildTown). */
+export const MASSIF_GARDENS = [];
+
 export function buildMassifTowns(scene, towns, lights, {audit=false} = {}) {
   const meshes = [],auditParts=[];
+  MASSIF_GARDENS.length = 0;
   let tris = 0;
   towns.forEach((m, i) => {
     const { items, tris:townTris, auditParts:townParts } = buildTown(m, mulberry32(3030 + i * 19), lights,audit);
