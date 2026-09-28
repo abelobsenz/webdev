@@ -261,6 +261,20 @@ class Builder {
     }
   }
 
+  /** Barrel vault with its axis along local z: the section of an arch, run back from it. */
+  vaultZ(x0, x1, z0, z1, y, rise, kind, seg = 12, { inside = false } = {}) {
+    const xm = (x0 + x1) / 2, hw = (x1 - x0) / 2, sg = inside ? -1 : 1;
+    this.reserve((seg + 1) * 2, seg * 6);
+    const a = [], b = [];
+    for (let i = 0; i <= seg; i++) {
+      const t = (i / seg) * Math.PI, x = xm + Math.cos(t) * hw, yy = y + Math.sin(t) * rise;
+      const nx = Math.cos(t) / hw, ny = Math.sin(t) / rise, l = Math.hypot(nx, ny);
+      a.push(this.v(x, yy, z0, (sg * nx) / l, (sg * ny) / l, 0, t * hw, z0, kind));
+      b.push(this.v(x, yy, z1, (sg * nx) / l, (sg * ny) / l, 0, t * hw, z1, kind));
+    }
+    for (let i = 0; i < seg; i++) this.quad(a[i], a[i + 1], b[i + 1], b[i]);
+  }
+
   /** Polygon in the (x, y) plane extruded along z from z0 to z1 (gables, pediments, arches). */
   vprism(poly, z0, z1, kind, capKind = kind) {
     const n = poly.length;
@@ -674,15 +688,16 @@ function pavilion(B, L, R, H, lod) {
   const span = 1.3 * r, zc = r + 1.4 * k, cr = 0.45 * k;
   const yE = 1 + h - 0.6 * k;                            // underside of the entablature
   // steps: the round plinth drawn out forward under the portico
-  const step = (rad, hx, hz) => hull([...ellipse(rad, rad, 32), [-hx, hz], [hx, hz]]);
+  const sg = lod ? 16 : 32;
+  const step = (rad, hx, hz) => hull([...ellipse(rad, rad, sg), [-hx, hz], [hx, hz]]);
   B.prism(step(r + s1, span / 2 + 1.6 * k, zc + 1.6 * k), 0, 0.5, K.STONE, K.PAVING);
   B.prism(step(r + s2, span / 2 + k, zc + k), 0.5, 1.0, K.STONE, K.PAVING);
   B.entries.push({ x: 0, w: Math.min(3.2, span), back: zc + 1.6 * k + 0.3 });
-  B.walls(ellipse(r, r, 32), 1.0, 1.0 + h, K.PUNCHED);
+  B.walls(ellipse(r, r, sg), 1.0, 1.0 + h, K.PUNCHED);
   // dome on an eaves ring closed underneath, a lantern capped at the top
   const prof = [];
   for (let i = 0; i <= 8; i++) { const a = (i / 8) * (Math.PI / 2) * 0.93; prof.push([r * 1.02 * Math.cos(a), 1 + h + r * 0.85 * Math.sin(a), K.GLASS]); }
-  B.lathe(0, 0, [[r * 0.98, 1 + h - 0.6, K.STONE], [r * 1.08, 1 + h - 0.6, K.STONE], [r * 1.08, 1 + h, K.STONE], ...prof], lod ? 20 : 32);
+  B.lathe(0, 0, [[r * 0.98, 1 + h - 0.6, K.STONE], [r * 1.08, 1 + h - 0.6, K.STONE], [r * 1.08, 1 + h, K.STONE], ...prof], sg);
   const tr = r * 1.02 * Math.cos((Math.PI / 2) * 0.93), yl = 1 + h + r * 0.85;
   B.lathe(0, 0, [[tr + 0.2 * k, yl - 0.0085 * r, K.LANTERN], [tr * 0.9, yl + 2.2 * k, K.LANTERN], [0.1 * k, yl + 3.0 * k, K.STONE], [0, yl + 3.05 * k, K.STONE]], lod ? 8 : 12);
   // portico: columns (piers in the massing) under an entablature and a pediment
@@ -934,9 +949,10 @@ function arcade(B, L, R, H, lod) {
     // columns: moulded base, shaft, capital, square abacus
     for (let k = 1; k < n; k++) {
       B.lathe(xs[k], zf - 0.55, [[0.5, 0, K.STONE], [0.52, 0.4, K.STONE], [0.38, 0.5, K.STONE], [0.34, yS - 0.45, K.STONE], [0.5, yS - 0.15, K.STONE]], 10);
-      B.box(xs[k] - 0.55, xs[k] + 0.55, zf - 1.1, zf, yS - 0.15, yS, K.STONE, K.STONE);
+      B.box(xs[k] - 0.55, xs[k] + 0.55, zf - 1.1, zf, yS - 0.15, yS, K.STONE, K.STONE, { bottom: true });
     }
-    // an arch in every bay, springing from the abaci (and the piers at the ends)
+    // an arch in every bay, springing from the abaci (and the piers at the ends), its barrel
+    // vault run back over the walk to the shops; a transverse beam over every column between
     for (let k = 0; k < n; k++) {
       const xa = xs[k], xb = xs[k + 1];
       const xl = xa + (k === 0 ? 0 : 0.55), xr = xb - (k === n - 1 ? 0 : 0.55);
@@ -947,9 +963,9 @@ function arcade(B, L, R, H, lod) {
       if (xr < xb - 1e-3) pts.push([xr, yS]);
       pts.push([xb, yS], [xb, yA]);
       B.vprism(pts, zf - 1.05, zf - 0.05, K.STONE);
+      B.vaultZ(xl, xr, zf - depth, zf - 1.05, yS, rise, K.STONE, 12, { inside: true });
+      if (k > 0) B.box(xa - 0.55, xa + 0.55, zf - depth, zf - 1.05, yS, yA, K.STONE, K.STONE, { bottom: true, noTop: true });
     }
-    // the barrel vault over the walk, seen from beneath
-    B.vault(-w / 2 + pier, w / 2 - pier, zf - depth, zf - 1.05, yS, yA - yS, K.STONE, 8, { inside: true });
   }
   roofKit(B, R, rect(-w / 2, w / 2, -d / 2, d / 2), top, w - 2, d - 2, lod, { garden: 0.7 });
   return top + 3.4;
@@ -1236,14 +1252,14 @@ function planStairs(L, entries, ground, yBot) {
 }
 
 /** The podium: lot + 0.6 m, paved on top, with the entrance flights cut into its street face. */
-function podium(B, L, yBot, stairs) {
-  const W = L.w + 1.2, D = L.d + 1.2;
-  let poly = rrect(W, D, 1.0);
+function podium(B, L, yBot, stairs, lod) {
+  const W = L.w + 1.2, D = L.d + 1.2, seg = lod ? 1 : 3;
+  let poly = rrect(W, D, 1.0, 0, 0, seg);
   if (stairs.length) {
-    // rrect runs anticlockwise from +x: its front edge (z = +D/2) lies between points 3 and 4
+    // rrect runs anticlockwise from +x: its front edge (z = +D/2) follows the first corner
     const cut = [];
     for (const st of [...stairs].sort((a, b) => b.x1 - a.x1)) cut.push([st.x1, D / 2], [st.x1, st.zb], [st.x0, st.zb], [st.x0, D / 2]);
-    poly = [...poly.slice(0, 4), ...cut, ...poly.slice(4)];
+    poly = [...poly.slice(0, seg + 1), ...cut, ...poly.slice(seg + 1)];
   }
   B.prism(poly, yBot, 0, K.STONE, K.PAVING);
   for (const st of stairs) B.stair(st.x0, st.x1, st.zf, st.td, st.n, st.yF, st.rs, yBot);
@@ -1301,7 +1317,7 @@ export function buildBuildings(scene, plan, ground, settings, opts = {}) {
       B.seed = L.seed;
       // the entrance flights (the same in both passes; the massing keeps the plain podium)
       if (!stairs) stairs = planStairs(L, B.entries, ground, yBot);
-      podium(B, L, yBot, lod ? [] : stairs);
+      podium(B, L, yBot, lod ? [] : stairs, lod);
       top = Math.max(top, h);
     }
     placements.push({ x: L.x, z: L.z, sx: L.w, sz: L.d, y: L.baseY, sy: top, rot: L.rot, type });
