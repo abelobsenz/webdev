@@ -269,7 +269,7 @@ export class Fleet {
       this.crafts.push(m);
     }
     space.scene.add(this.tenderGroup);
-    space.addBody('tenders', [this.tenderGroup], () => this.tenderGroup.getWorldPosition(_v), 2.2, { solid: true, hint: 0.85 });
+    space.addBody('tenders', [this.tenderGroup], () => this.tenderGroup.getWorldPosition(_v), 2.6, { solid: true, hint: 0.85 });   // the capture cradle reaches 2.32 km
     // ---- Selene Works over the Moon's near side, with tankers
     const ref = buildRefinery(1);
     this.refineryData = ref;

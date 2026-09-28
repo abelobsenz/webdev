@@ -401,7 +401,7 @@ for(const body of runtime.bodies) {
     const p=mesh.geometry.attributes.position;
     for(let i=0;i<p.count;i++)bound=Math.max(bound,vertex.fromBufferAttribute(p,i).applyMatrix4(mesh.matrixWorld).distanceTo(center));
   });
-  assert.ok(bound<body.radius,`${body.name} runtime geometry exceeds its depth body`);
+  assert.ok(bound<body.radius,`${body.name} runtime geometry exceeds its depth body (${bound.toFixed(3)} >= ${body.radius})`);
   runtimeBoundRatio=Math.max(runtimeBoundRatio,bound/body.radius);
 }
 // Validate the actual nearest-hull orientation at a radial +X heading, where one fallback failed.
