@@ -101,13 +101,16 @@ void craftExtraKinds(float k, vec2 f, vec2 fw, float px, inout vec3 alb, inout f
   if (k > 11.5 && k < 12.5) {
     float dM = 1.0 - smoothstep(2.0, 3.6, px);                       // 9 m mullions >= 3 px
     float dG = 1.0 - smoothstep(0.8, 2.4, px);                       // garden texture
-    float dT = 1.0 - smoothstep(60.0, 150.0, px);                    // 450 m districts
+    float dT = 1.0 - smoothstep(5.0, 14.0, px);                      // ~400 m districts, only while they span 30+ px
     float g = vnoise(f * 0.011) * 0.55 + mix(0.5, vnoise(f * 0.09), dG) * 0.45;
     vec3 garden = mix(vec3(0.03, 0.075, 0.028), vec3(0.11, 0.16, 0.055), g);
-    // districts: parkland, fields, lakes and towns along the roof's length
-    float dh = hash12(floor(f / vec2(450.0, 260.0)) + 29.0);
-    float town = mix(0.3, step(0.62, dh), dT);
-    float lake = mix(0.1, step(dh, 0.1), dT);
+    // districts: parkland, lakes and towns along the roof's length, in soft organic drifts (hashed
+    // 450 m cells read as a checkerboard on the Harbour's ring roofs), each settling to its mean
+    float fe = max(px * 1.5, 25.0);
+    float nT = vnoise(f * vec2(0.0021, 0.0034) + 29.0) * 0.7 + vnoise(f * vec2(0.0063, 0.009) + 3.0) * 0.3;
+    float nL = vnoise(f * vec2(0.0017, 0.0029) + 71.0);
+    float town = mix(0.3, smoothstep(0.58 - fe * 0.0004, 0.58 + fe * 0.0004, nT), dT);
+    float lake = mix(0.1, 1.0 - smoothstep(0.2 - fe * 0.0004, 0.2 + fe * 0.0004, nL), dT);
     vec3 townC = vec3(0.26, 0.25, 0.23) * (0.9 + 0.2 * mix(0.5, hash12(floor(f / 18.0)), dG));
     vec3 under = mix(garden, townC, town);
     under = mix(under, vec3(0.012, 0.035, 0.05), lake);

@@ -116,3 +116,11 @@ TARGET_INFO.waterStore = {
   facts:[['Tanks','24'],['Held','2.1 Mt of water'],['Crew wheel','1.1 km']],
 };
 TARGET_ORDER.push('concordYard', 'waterStore');
+
+// The counterweight's release yard (src/space/releaseYard.js).
+TARGET_INFO.releaseYard = {
+  key:'',name:'Counterweight Release Yard',district:'Tether · 100,000 km',
+  lore:'At the top of the tether a ship is already moving faster than escape. The outer-system liners are caught here stern first, clamped in the cradles beside the gallery spar, and let go: the clamps draw back into their sleeves, and the ship drifts clear down the blue-lit release line before her drive lights. The yard crews live in the ring round the rock.',
+  facts:[['Spar','23 km'],['Cradles','2'],['Release speed','7.75 km/s']],
+};
+TARGET_ORDER.push('releaseYard');

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { CB, CK, sectionEllipse } from '../craft/craftGeometry.js';
-import { lathe, sphere, buildFreighter } from '../craft/craftClasses.js';
+import { lathe, sphere, buildFreighter, buildTug } from '../craft/craftClasses.js';
 import { createGlowMesh } from '../craft/craftMaterial.js';
 import { craftMesh, craftPart, addEngines, addLamps, placeMerge, placeLamps, pixelRadius, KM } from './craftMesh.js';
 import { LAMP } from './lamps.js';
@@ -17,7 +17,7 @@ import { stationFrame, CORRIDORS } from './stations.js';
 //   Water Store    hung on the tether below the Harbour: a hollow cage round the ribbon (the
 //                  climbers pass through it), three rings of tanks, a crew wheel and radiator
 //                  leaves beneath, two tankers berthed bow-in at the upper collars
-//   movements      three freighters that really use the Harbour: in along the arrival lane
+//   movements      eight freighters that really use the Harbour, one per arm head: in along the arrival lane
 //                  (tail first, braking), flip at the gate, glide to a free arm head and dock
 //                  bow-in, lie alongside, back out, and leave by the departure gate under power
 //
@@ -381,7 +381,7 @@ function lookQuat(fwd, upHint, out) {
  *   turn  swings onto the departure path, which keeps outside the arms and wings
  *   out   departure lane under power, out past the gate into the road
  */
-export const PHASES = [['in', 0.2], ['flip', 0.04], ['glide', 0.12], ['dock', 0.05], ['stay', 0.29], ['back', 0.04], ['turn', 0.1], ['out', 0.16]];
+export const PHASES = [['in', 0.15], ['flip', 0.03], ['glide', 0.1], ['dock', 0.04], ['stay', 0.4], ['back', 0.03], ['turn', 0.09], ['out', 0.16]];
 export function movementPhase(u) {
   let a = 0;
   for (const [name, w] of PHASES) { if (u < a + w) return [name, (u - a) / w]; a += w; }
@@ -475,6 +475,41 @@ export function routeAround(from, to, r = 16.5, yLift = 3) {
   return pts;
 }
 
+// ------------------------------------------------------------- escort tugs ----
+/**
+ * Every arm head keeps an escort tug on its stand (src/space/harbour.js). It meets its ship at
+ * the staging point, rides her flank (250 m ahead of her centre, 95 m out) while she docks, goes
+ * home while she lies alongside, fetches her again, walks her back out to the staging point and
+ * returns. Harbour frame, km. stand: { pos (km), lat, fwd }. Returns the throttle.
+ */
+export const ESCORT = { along: 0.25, lateral: 0.095 };
+const _sp = new THREE.Vector3(), _sf = new THREE.Vector3(), _fl = new THREE.Vector3(), _rv = new THREE.Vector3(), _lat = new THREE.Vector3();
+export function escortWeights(u) {
+  const [ph, s] = movementPhase(u);
+  let a = 0, b = 0;
+  if (ph === 'glide') { a = smooth(0.5, 0.88, s); b = smooth(0.9, 1.0, s); }
+  else if (ph === 'dock' || ph === 'back') { a = 1; b = 1; }
+  else if (ph === 'stay') { b = 1 - smooth(0, 0.12, s) + smooth(0.86, 1, s); a = 0; }
+  else if (ph === 'turn') { b = 1 - smooth(0.22, 0.38, s); a = 1 - smooth(0.42, 0.85, s); }
+  return { a, b, ph, s };
+}
+function flankOf(pos, fwd, c, stand, out) {
+  const k = Math.sign(_lat.crossVectors(c.dockDir, V(0, 1, 0)).dot(stand.lat)) || 1;
+  _lat.crossVectors(fwd, V(0, 1, 0)).normalize().multiplyScalar(k);
+  return out.copy(pos).addScaledVector(fwd, ESCORT.along * c.scale / 0.85).addScaledVector(_lat, ESCORT.lateral);
+}
+export function escortPose(u, c, stand, outPos, outFwd) {
+  const { a, b } = escortWeights(u);
+  movementPose(u, c, _sp, _sf);
+  _sf.normalize();
+  flankOf(c.stage, c.dockDir, c, stand, _rv);
+  flankOf(_sp, _sf, c, stand, _fl);
+  outPos.copy(stand.pos).lerp(_rv, a).lerp(_fl, b);
+  outFwd.copy(stand.fwd).lerp(_sf, b).normalize();
+  const moving = (a > 0.001 && a < 0.999) || (b > 0.001 && b < 0.999);
+  return moving ? 0.35 : 0;
+}
+
 // ------------------------------------------------------------- the module ----
 /** Scene integration: the Yard, the Store and the movements, each its own depth-sliced body. */
 export class GeoRoads {
@@ -523,6 +558,16 @@ export class GeoRoads {
       return c;
     });
     const fr = buildFreighter(1100);
+    // the escort tugs: children of the Harbour (its frame, km), one on each arm head's stand
+    const tug = buildTug(80);
+    this.stands = el.station.data.stands.map((st) => ({ ...st, pos: st.pos.clone().multiplyScalar(KM) }));
+    this.escorts = this.plans.map((c) => {
+      const m = craftMesh(tug.geo, { accent: [0.55, 0.9, 1.0], lit: 0.5 });
+      const engines = addEngines(m, tug.glows, { scale: 0.7, length: 7, throttle: 0 });
+      addLamps(m, tug.lamps, { minPx: 1.2 });
+      el.harbour.add(m);
+      return { mesh: m, engines, stand: this.stands[c.arm], pos: new THREE.Vector3(), fwd: new THREE.Vector3() };
+    });
     this.movers = this.plans.map((c, i) => {
       const g = new THREE.Group();
       const m = craftMesh(fr.geo, { accent: [0.55, 0.85, 1.0], lit: 0.5 });
@@ -566,6 +611,15 @@ export class GeoRoads {
       const px = pixelRadius(space.camera, mv.group.position, 0.55 * mv.c.scale, space.size.y);
       mv.mesh.visible = px > 0.35;
     }
+    // escort tugs ride their ships' flanks in and out, and wait on their stands between
+    for (const [i, e] of this.escorts.entries()) {
+      const c = this.movers[i].c;
+      const u = (((realTime / c.T) + c.offset) % 1 + 1) % 1;
+      const thr = escortPose(u, c, e.stand, e.pos, e.fwd);
+      e.mesh.position.copy(e.pos);
+      lookQuat(e.fwd, _p.set(0, 1, 0), e.mesh.quaternion);
+      for (const g of e.engines) g.setThrottle(thr);
+    }
     // the crew wheel turns slowly (0.3 g at its rim, a comfortable working weight)
     this.yardWheel.rotation.z = (realTime * Math.sqrt(2.94 / (YARD.wheelR + 38))) % TAU;
     // (body objects are shown per depth slice: cull through the body record)
@@ -578,14 +632,19 @@ export class GeoRoads {
 export const YARD_POS = V(-16, -8, -2);
 export const STORE_POS = V(0, -12.5, 0);
 /**
- * The three movements: the free arm heads (0, 3, 7) on one shared cycle, a third of a cycle
- * apart, each in its own lane, so the roads are never shared at the same moment: one ship is
- * always berthed, one coming in and one leaving.
+ * The movements: a freighter for every one of the eight arm heads, on one 2,600 s cycle, their
+ * offsets and lanes scheduled (a searched timetable) so no two ships come within 5 km of each
+ * other near the Harbour: at any moment three or four lie alongside, the rest are on the roads.
  */
 export const MOVEMENTS = [
-  { arm: 3, scale: 0.9, offset: 0.5, lane: 0 },
-  { arm: 7, scale: 0.8, offset: 1 / 6, lane: -1 },
-  { arm: 0, scale: 0.75, offset: 5 / 6, lane: 1 },
+  { arm: 0, scale: 0.9, offset: 0.1354, lane: -1, T: 2600 },
+  { arm: 1, scale: 0.8, offset: 0.0356, lane: 0, T: 2600 },
+  { arm: 2, scale: 0.85, offset: 0.9018, lane: 1, T: 2600 },
+  { arm: 3, scale: 0.75, offset: 0.5078, lane: 0, T: 2600 },
+  { arm: 4, scale: 0.8, offset: 0.752, lane: -1, T: 2600 },
+  { arm: 5, scale: 0.85, offset: 0.386, lane: 0, T: 2600 },
+  { arm: 6, scale: 0.9, offset: 0.281, lane: -1, T: 2600 },
+  { arm: 7, scale: 0.8, offset: 0.6535, lane: 1, T: 2600 },
 ];
 
 /** Focus targets for the neighbourhood (merged into the space target list; analytic poses). */

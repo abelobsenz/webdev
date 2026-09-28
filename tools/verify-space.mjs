@@ -485,18 +485,19 @@ assert.ok(workshopRailClearance>50,'Actual workshop, access stair and coolant ma
 const oldCabinet=new THREE.Box3(V(-410,25,-256),V(-340,39,-234));
 assert.ok(court.siding.some((p,i)=>i&&Array.from({length:21},(_,j)=>court.siding[i-1].clone().lerp(p,j/20)).some(v=>oldCabinet.distanceToPoint(v)<45)),'Positive control: the original traction cabinet intruded into the siding');
 const serviceRouteClearances=[];
-for(const run of runtime.fleet.runs) {
+for(const [runIndex,run] of runtime.fleet.runs.entries()) {
   run.mesh.geometry.computeBoundingSphere();
   const bound=run.mesh.geometry.boundingSphere,radius=(bound.radius+bound.center.length())*.001;
   let gap=Infinity;
   for(let t=0;t<=2*(run.move+run.pause);t+=.5) {
     const p=V();shuttleRun(t,run,p,V());gap=Math.min(gap,surfaceDistance(serviceTree,p)-radius);
   }
-  assert.ok(gap>.1,`Harbour service route clears its actual structural and docked-ship triangles by ${gap} km`);
+  assert.ok(gap>.1,`Harbour service route ${runIndex} clears its actual structural and docked-ship triangles by ${gap} km`);
   serviceRouteClearances.push(gap);
 }
-const oldTugRoute={...runtime.fleet.runs[0],pts:runtime.fleet.runs[0].pts.map(p=>p.clone())};
-oldTugRoute.pts[1].y=-5.2;oldTugRoute.pts[2].y=station.data.arms[5].y*.001-1.3;
+// the original lower-tug route to arm 5's head, rebuilt explicitly (the live run now loads a keel rack)
+const arm5=station.data.arms[5],armHead5=(extra)=>arm5.d.clone().multiplyScalar((arm5.L+650+extra)*.001).setY(arm5.y*.001);
+const oldTugRoute={...runtime.fleet.runs[0],pts:[V(1.25,-6.1,.35),V(3.8,-5.2,1.7),armHead5(0).setY(arm5.y*.001-1.3),armHead5(150)]};
 const oldTugAt=V();shuttleRun(43.5,oldTugRoute,oldTugAt,V());
 assert.ok(surfaceDistance(serviceTree,oldTugAt)<.005,'Positive control: old tug centre passes through the actual radiator surface');
 const foundryTree=triangleTree(meshTriangles([runtime.works.foundry],runtime.works.foundry)),toFoundry=runtime.works.foundry.matrixWorld.clone().invert();

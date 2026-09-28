@@ -24,8 +24,14 @@ uniform float uGain;
 uniform float uHalo;       // drawn glow radius / lamp radius
 varying vec2 vQ;
 varying vec3 vC;
+#ifdef BEHIND_MASK
+varying float vDist;
+#endif
 void main() {
   vec4 c = modelViewMatrix * vec4(iLamp.xyz, 1.0);
+#ifdef BEHIND_MASK
+  vDist = length(c.xyz);
+#endif
   float s = length(modelViewMatrix[0].xyz);          // object -> view units
   float r = iLamp.w * s;
   float d = -c.z;
@@ -65,15 +71,28 @@ void main() {
 const FRAG = /* glsl */ `
 varying vec2 vQ;
 varying vec3 vC;
+#ifdef BEHIND_MASK
+// lamps beyond the Hearth's centre fade where its lensed image (disc, shadow) lies in front
+uniform float uBehindMask;
+uniform sampler2D uHearthTex;
+uniform vec2 uHearthRes;
+uniform float uHearthDepth;
+varying float vDist;
+#endif
 void main() {
   float r2 = dot(vQ, vQ);
   if (r2 > 1.0 || vC.r + vC.g + vC.b < 1e-5) discard;
+  float mask = 1.0;
+#ifdef BEHIND_MASK
+  if (uBehindMask > 0.5 && vDist > uHearthDepth) mask = 1.0 - texture(uHearthTex, gl_FragCoord.xy / uHearthRes).a;
+  if (mask < 0.02) discard;
+#endif
   // the skirt falls to zero at the quad's rim (no square or cross-shaped edge)
   float rim = 1.0 - r2;
   // a bright core with a soft skirt; normalised so the total stays close to the disc's
   float core = exp(-r2 * 7.0);
   float skirt = exp(-r2 * 2.2) * 0.18 * rim;
-  gl_FragColor = vec4(vC * (core + skirt) * 2.4, 0.0);
+  gl_FragColor = vec4(vC * (core + skirt) * 2.4 * mask, 0.0);
 }
 `;
 
@@ -90,7 +109,7 @@ export const LAMP = {
  * lamps: [{ p: Vector3, r: radius, color: [r, g, b], i: intensity, dir?: Vector3, breathe?: 0..1, phase?: 0..1 }]
  * Add the returned mesh as a child of the ship or station it belongs to.
  */
-export function createLamps(lamps, { minPx = 1.5, gain = 1, halo = 2.2 } = {}) {
+export function createLamps(lamps, { minPx = 1.5, gain = 1, halo = 2.2, mask = null } = {}) {
   const g = new THREE.InstancedBufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute([-1, -1, 0, 1, -1, 0, 1, 1, 0, -1, 1, 0], 3));
   g.setIndex([0, 1, 2, 0, 2, 3]);
@@ -109,7 +128,10 @@ export function createLamps(lamps, { minPx = 1.5, gain = 1, halo = 2.2 } = {}) {
   g.instanceCount = lamps.length;
   const m = new THREE.ShaderMaterial({
     vertexShader: VERT, fragmentShader: FRAG,
-    uniforms: { uRes: LAMP_UNIFORMS.uRes, uMinPx: { value: minPx }, uTime: LAMP_UNIFORMS.uTime, uGain: { value: gain }, uHalo: { value: halo } },
+    uniforms: { uRes: LAMP_UNIFORMS.uRes, uMinPx: { value: minPx }, uTime: LAMP_UNIFORMS.uTime, uGain: { value: gain }, uHalo: { value: halo },
+      // (mask: the Hearth hull material's uniforms, shared, so the lens image masks these lamps too)
+      ...(mask ? { uBehindMask: mask.uBehindMask, uHearthTex: mask.uHearthTex, uHearthRes: mask.uHearthRes, uHearthDepth: mask.uHearthDepth } : {}) },
+    defines: mask ? { BEHIND_MASK: 1 } : {},
     transparent: true, depthWrite: false, depthTest: true, blending: THREE.AdditiveBlending, premultipliedAlpha: true,
   });
   const mesh = new THREE.Mesh(g, m);
