@@ -203,7 +203,7 @@ void main() {
   vec3 toE = uEarthView - vView;
   float dE = length(toE);
   vec3 eDir = toE / max(dE, 1.0);
-  vec3 earthL = uSunE * vec3(0.55, 0.7, 1.0) * 9.0e-4 * uEarthLit * smoothstep(-0.05, 0.1, dot(upV, eDir));
+  vec3 earthL = uSunE * vec3(0.55, 0.7, 1.0) * 2.4e-3 * uEarthLit * smoothstep(-0.05, 0.1, dot(upV, eDir));
   vec3 skyL = uSunE * vec3(0.03, 0.05, 0.1) * smoothstep(-0.1, 0.3, mu) * (1.0 - smoothstep(20.0, 80.0, hh));
   float ndl = max(dot(N, uSunView), 0.0);
   vec3 H = normalize(V + uSunView);

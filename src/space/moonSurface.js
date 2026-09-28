@@ -242,7 +242,7 @@ void main() {
     vec3 sky = uSunE * vec3(0.03, 0.05, 0.1) * smoothstep(-0.1, 0.3, mu);
     // earthshine: the Earth fills 2 degrees of the sky; lit fraction and elevation
     float eEl = dot(up, uEarthM);
-    vec3 earth = uSunE * vec3(0.55, 0.7, 1.0) * 9.0e-4 * uEarthLit * smoothstep(-0.02, 0.2, eEl);
+    vec3 earth = uSunE * vec3(0.55, 0.7, 1.0) * 2.4e-3 * uEarthLit * smoothstep(-0.02, 0.2, eEl);
     vec3 V = -rd;
     vec3 landCol = vec3(0.0), seaCol = vec3(0.0);
     if (waterF < 0.999) {
