@@ -40,7 +40,10 @@ vec3 lagoonFloorColor(vec2 p, float depth, float expo, float crest, float fw, in
   float sg = smoothstep(0.54, 0.64, fbm2_3(p * 0.0042 + 11.0)) * smoothstep(1.8, 4.5, depth) * (1.0 - smoothstep(13.0, 19.0, depth)) * (1.0 - expo);
   vec3 c = mix(sandC, vec3(0.10, 0.17, 0.07) * (0.8 + 0.4 * vnoise(p * 0.5)), sg * 0.85);
   // coral cover
-  float cover = smoothstep(9.0, 2.5, depth) * (0.45 + 0.55 * smoothstep(0.3, 0.62, vnoise(p * 0.028)));
+  // coral cover: patchy (sand channels between the patches) and none on the beach face, where
+  // the swash keeps the bottom clean sand; the exposed reef crest keeps its cover (below)
+  float cover = smoothstep(9.0, 2.5, depth) * smoothstep(0.38, 0.68, vnoise(p * 0.028) + 0.25 * vnoise(p * 0.11 + 4.0) - 0.1)
+              * smoothstep(0.5, 2.2, depth);
   // patch reefs (bommies): clustered, irregular, of every size, each ringed by a pale grazing halo
   // (sparse over open sand, crowded where the field says so; the odd big knoll 40-60 m across).
   // Each scale hands over to its expected cover while its cells still span a few pixels.
@@ -89,12 +92,18 @@ vec3 lagoonFloorColor(vec2 p, float depth, float expo, float crest, float fw, in
       float k = cw.z;
       vec3 pal = k < 0.16 ? vec3(0.42, 0.30, 0.18) : k < 0.32 ? vec3(0.62, 0.48, 0.24) : k < 0.46 ? vec3(0.36, 0.42, 0.22)
                : k < 0.58 ? vec3(0.46, 0.26, 0.44) : k < 0.70 ? vec3(0.74, 0.42, 0.46) : k < 0.84 ? vec3(0.22, 0.46, 0.48) : vec3(0.78, 0.72, 0.58);
-      float polyp = vnoise(p * 3.1 + k * 40.0);
+      // colonies as rounded heads of muted colour (no stained-glass cells): each head is lit on
+      // its crown, darker toward its rim, with polyp texture and dark crevices between heads
+      pal = mix(avg, pal, 0.3);
+      float polyp = vnoise(p * 3.1 + k * 40.0) * 0.6 + vnoise(p * 9.0 + k * 17.0) * 0.4;
       pal *= 0.72 + 0.4 * polyp;
-      pal *= 0.5 + 0.5 * smoothstep(0.0, 0.22, cw.y);          // dark crevices between colonies
+      float dome = 1.0 - smoothstep(0.1, 0.75, cw.x);
+      pal *= 0.7 + 0.4 * dome;
+      pal *= 0.78 + 0.22 * smoothstep(0.0, 0.2, cw.y);         // dark crevices between colonies
       coral = mix(avg, pal, cf);
       vec3 bd = vnoised(p * 0.9 + k * 13.0);
-      hg += bd.yz * 0.9 * 0.5 * cf * cover;
+      vec3 pd = vnoised(p * 6.0 + k * 9.0);
+      hg += (bd.yz * 0.9 * 0.5 + pd.yz * 6.0 * 0.02 * (1.0 - smoothstep(0.1, 0.4, fw))) * cf * cover;
     }
     c = mix(c, coral, cover);
     ao *= mix(1.0, 0.72, cover);
@@ -180,12 +189,33 @@ const COLOR = /* glsl */ `
     sand *= 0.95 + 0.1 * mix(0.5, vnoise(wp.xz * 2.7), nearF);
     vec3 sn = vnoised(wp.xz * 0.6);
     hg += sn.yz * 0.6 * 0.12 * nearF;
-    // the swash: pale lines of foam residue parallel to the water's edge, a glossy film at the edge
+    // megaripples (~1.2 m) and wind-scoured hummocks (~12 m): the relief that still reads from
+    // the promenades, faded to flat once a crest spans under ~3 px
+    float sdM = 1.0 - smoothstep(0.12, 0.45, fw);
+    float mph = dot(wp.xz, vec2(0.62, 0.785)) * 5.2 + vnoise(wp.xz * 0.21) * 7.0;
+    float megA = sdM * (1.0 - wetB) * (1.0 - smoothstep(0.1, 0.3, slope)) * (0.5 + 0.5 * vnoise(wp.xz * 0.05 + 9.0));
+    hg += vec2(0.62, 0.785) * cos(mph) * 0.16 * megA;
+    sand *= 1.0 + 0.05 * sin(mph) * megA;
+    float sdH = 1.0 - smoothstep(1.5, 5.0, fw);
+    vec3 hum = vnoised(wp.xz * 0.085 + 4.0);
+    hg += hum.yz * 0.085 * 2.2 * sdH * (1.0 - wetB);
+    sand *= mix(1.0, 0.94 + 0.12 * hum.x, sdH);
+    // the swash: pale lines of foam residue parallel to the water's edge, a glossy film at the edge;
+    // lines fade to their mean brightening once their 2.3 m spacing falls under a few pixels
     float sdist = nat.x;
     float sl = fract((sdist + vnoise(wp.xz * 0.12) * 3.0) / 2.3);
-    float swash = (1.0 - smoothstep(0.0, 0.05 + fw / 2.3, sl)) * sd1 * smoothstep(0.3, 1.2, sdist) * wetB;
+    float swR = 1.0 - smoothstep(0.35, 1.1, fw);
+    float swash = mix(0.08, (1.0 - smoothstep(0.0, 0.05 + fw / 2.3, sl)), swR) * smoothstep(0.3, 1.2, sdist) * wetB;
     sand = mix(sand, sand * 1.3 + 0.04, swash * 0.55);
+    // damp band above the waterline with a ragged, cusped upper edge, and the dark high-tide line
+    float dampEdge = 5.0 + 3.5 * vnoise(wp.xz * 0.045) + 1.5 * sin(dot(wp.xz, vec2(0.21, -0.14)) + vnoise(wp.xz * 0.02) * 6.0);
+    float damp = (1.0 - smoothstep(dampEdge - 1.0 - fw, dampEdge + 1.0 + fw, sdist)) * (1.0 - wetB) * smoothstep(-0.2, 0.3, h) * (1.0 - smoothstep(beachTop - 0.2, beachTop + 0.6, h));
+    sand *= 1.0 - 0.18 * damp;
+    float tideW = 0.35 + fw;
+    float tideL = (1.0 - smoothstep(0.0, tideW, abs(sdist - dampEdge - 1.4))) * (0.35 / tideW + 0.65 * min(1.0, 0.35 / tideW)) * smoothstep(0.35, 0.6, vnoise(wp.xz * 0.09 + 13.0));
+    sand = mix(sand, vec3(0.30, 0.25, 0.18), clamp(tideL, 0.0, 1.0) * 0.45 * (1.0 - wetB) * (1.0 - smoothstep(beachTop - 0.2, beachTop + 0.6, h)));
     rough = mix(rough, mix(0.3, 0.1, 1.0 - smoothstep(0.0, 1.2, sdist)), wetB);
+    rough = mix(rough, 0.72, damp);
   }
 
   // ---------------- lagoon floor ----------------
@@ -209,6 +239,13 @@ const COLOR = /* glsl */ `
       float wfl = step(0.972, hash12(fcell)) * (1.0 - forestD) * (1.0 - smoothstep(0.03, 0.1, fw));
       grass = mix(grass, flowerPalette(hash12(fcell + 7.0)) * 0.85, wfl);
       hg += vnoised(wp.xz * 5.0).yz * 0.05 * nearF;
+      // tussocks and hummocks (~1.5 m and ~6 m): lumpy turf that reads in relief at mid range
+      float tuF = 1.0 - smoothstep(0.4, 1.6, fw);
+      vec3 tu = vnoised(wp.xz * 0.65 + 3.3);
+      hg += tu.yz * 0.65 * 0.11 * tuF;
+      grass *= mix(1.0, 0.9 + 0.2 * tu.x, tuF);
+      vec3 hm = vnoised(wp.xz * 0.16 - 8.1);
+      hg += hm.yz * 0.16 * 0.45 * (1.0 - smoothstep(2.0, 6.0, fw));
     }
     float strand = 1.0 - smoothstep(beachTop + 1.0, beachTop + 6.0, h);
     grass = mix(grass, vec3(0.2, 0.22, 0.08), strand * 0.55);
@@ -330,6 +367,21 @@ const COLOR = /* glsl */ `
     vec3 sideT = normalize(cross(Ng, upT));
     float ds = vnoise(vec2((hc + 0.6) * 0.3, wp.y * 0.011)) - vnoise(vec2((hc - 0.6) * 0.3, wp.y * 0.011));
     nAdd += sideT * ds * 1.2 * midF * wRock;
+    {
+      // joint blocks (~3 m): each block face tilts its own way and the joints between them are
+      // shadowed, so the cliff reads as faceted stone rather than painted bands; the facets
+      // average out (no tilt, mean joint shade) once a block spans only a few pixels
+      float bf = 1.0 - smoothstep(0.35, 1.4, fw);
+      if (bf > 0.0) {
+        vec3 jb = worley2(vec2(hc, sy) * vec2(0.3, 0.42) + 11.0);
+        float joint = 1.0 - smoothstep(0.0, 0.06 + fw * 0.35, jb.y);
+        rockC *= mix(0.9, 1.0 - 0.4 * joint, bf);
+        nAdd += (sideT * (fract(jb.z * 7.31) - 0.5) + upT * (fract(jb.z * 3.17) - 0.5)) * 0.55 * bf * (1.0 - joint) * wRock;
+        ao *= mix(1.0, 1.0 - 0.35 * joint, bf * wRock);
+      } else {
+        rockC *= 0.9;
+      }
+    }
     c = mix(c, rockC, wRock);
     rough = mix(rough, 0.8, wRock);
   }
