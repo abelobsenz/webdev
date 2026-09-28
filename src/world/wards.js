@@ -518,9 +518,48 @@ const southmarch = {
     landmarks.push({ type: 'terminal', x: -452, z: 470, rot: Math.PI / 2, w: 170, d: 58 });
     sites.push({ box: { x: -452, z: 470, hw: 34, hd: 90 }, blockStreets: true, name: 'Passenger Terminal' });
     for (const dz of [-54.4, 0, 54.4]) sites.push({ box: { x: -379.5, z: 470 + dz, hw: 46, hd: 4 }, margin: 3, name: 'Terminal transfer gallery' });
-    const paths = [], accessRoutes = [];
-    const passengerWalk = T.curve([[-455, 236], [-552, 315], [-552, 470], [-615, 650], [-710, 715], [-790, 865]], 4);
+    const paths = [], accessRoutes = [], exclusions = [];
+    // The passenger walk leaves the Harbour Front through the terminal gardens, between the
+    // waiting pavilions and the rain gardens, and meets Chandlers' Row, the spine of the
+    // Mariners' Quarter, which carries it on to the Great Ring footbridge.
+    const passengerWalk = T.curve([[-455, 236], [-552, 315], [-552, 470], [-558, 560], [-572, 650], [-600, 700], [-633, 712]], 4);
     paths.push({ pts: passengerWalk, w: 4 });
+    // no parcel may straddle the walk between the lot planner's sample points
+    for (let i = 1; i < passengerWalk.length; i++) {
+      const [ax, az] = passengerWalk[i - 1], [bx, bz] = passengerWalk[i], len = Math.hypot(bx - ax, bz - az);
+      exclusions.push({ x: (ax + bx) / 2, z: (az + bz) / 2, w: len + 2, d: 6, rot: Math.atan2(-(bz - az), bx - ax) });
+    }
+    // ---- the Mariners' Quarter: the old port town west of the terminal gardens, a grid
+    // squared to the harbour, running down to the western sea wall
+    const MQ = { row: -640, mid: -800, walk: 450 };
+    streets.push({ pts: T.line(-364, 236, -1200, 236, 6), cls: ST.AVENUE, hw: 9, name: 'Mariners\' Parade' });
+    streets.push({ pts: T.line(MQ.row, 236, MQ.row, 706, 6), cls: ST.STREET, hw: 6, name: 'Chandlers\' Row', lotSide: 1 });
+    streets.push({ pts: T.line(MQ.row, 706, MQ.row, 1100, 6), cls: ST.STREET, hw: 6, name: 'Chandlers\' Row' });
+    streets.push({ pts: T.line(MQ.mid, 236, MQ.mid, MQ.walk - 25, 6), cls: ST.STREET, hw: 6, name: 'Compass Street' });
+    streets.push({ pts: T.line(MQ.mid, MQ.walk + 25, MQ.mid, 1100, 6), cls: ST.STREET, hw: 6, name: 'Compass Street' });
+    streets.push({ pts: T.line(-720, 236, -720, 706, 6), cls: ST.LANE, name: 'Sailmakers\' Lane' });
+    for (const z of [330, 600]) streets.push({ pts: T.line(MQ.row, z, -1200, z, 6), cls: ST.STREET, hw: 6, name: 'quarter street' });
+    streets.push({ pts: T.line(MQ.row, 720, -1200, 720, 6), cls: ST.STREET, hw: 6, name: 'quarter street' });
+    // Navigators' Walk: from Chandlers' Row through the Lantern rond to the museum steps
+    streets.push({ pts: T.line(MQ.row, MQ.walk, MQ.mid - 25, MQ.walk, 4), cls: ST.AVENUE, hw: 8, name: 'Navigators\' Walk' });
+    streets.push({ pts: T.line(MQ.mid - 25, MQ.walk, -888, MQ.walk, 4), cls: ST.AVENUE, hw: 8, name: 'Navigators\' Walk', noLots: true });
+    streets.push({ pts: T.ring(MQ.mid, MQ.walk, 24, 4), cls: ST.ESPLANADE, hw: 5.5, name: 'Lantern Circus', noLots: true });
+    squares.push({ x: MQ.mid, z: MQ.walk, r: 40, kind: 'rond', noLamps: true });
+    landmarks.push({ type: 'marinersLantern', x: MQ.mid, z: MQ.walk, r: 17 });
+    sites.push({ x: MQ.mid, z: MQ.walk, r: 17.5, margin: 0.5, name: 'Mariners\' Lantern' });
+    // the Hall of the Seven Seas: a museum of voyages roofed with an upturned hull,
+    // its bow to the western sea, its glazed transom on the Navigators' Walk
+    const hall = { x: -978, z: MQ.walk, len: 140, beam: 46 };
+    landmarks.push({ type: 'voyageHall', x: hall.x, z: hall.z, rot: Math.PI, len: hall.len, beam: hall.beam });
+    sites.push({ box: { x: hall.x, z: hall.z, hw: hall.len / 2 + 4, hd: hall.beam / 2 + 4 }, blockStreets: true, streetMargin: 3, name: 'Hall of the Seven Seas' });
+    plazas.push({ x: -893, z: MQ.walk, hw: 14, hd: 34, kind: 'forecourt' });
+    paths.push({ pts: T.line(-890, MQ.walk, hall.x + hall.len / 2 - 0.5, MQ.walk), w: 10 });
+    accessRoutes.push({ name: 'Hall of the Seven Seas portal', pts: [[-890, MQ.walk], [hall.x + hall.len / 2 + 2.5, MQ.walk]], y: 9, halfWidth: 3 });
+    // south of the terminal gardens: the Rope Walk and the way to the Great Ring footbridge
+    streets.push({ pts: T.line(-364, 800, -364, 1180, 6), cls: ST.STREET, hw: 6, name: 'harbour row' });
+    streets.push({ pts: T.line(-364, 800, MQ.row, 800, 6), cls: ST.STREET, hw: 6, name: 'Rope Walk' });
+    streets.push({ pts: T.line(-364, 915, MQ.row, 915, 6), cls: ST.STREET, hw: 6, name: 'Ring Station Way' });
+    streets.push({ pts: T.line(MQ.row, 915, -768, 925, 6), cls: ST.STREET, hw: 6, name: 'Ring Station Way', noLots: true });
     paths.push({ pts: T.line(-552, 470, -481, 470), w: 7 });
     accessRoutes.push({ name: 'Terminal garden entrance', pts: [[-552, 470], [-481, 470]], y: 9, halfWidth: 4 });
     for (const z of [420, 520]) {
@@ -547,12 +586,18 @@ const southmarch = {
         const name = Lt.street && Lt.street.name;
         if (name === 'harbour row' || name === 'channel row') return R() < 0.75 ? 'warehouse' : 'arcade';
         if (name === 'Harbour Front' || name === 'marina street') return R() < 0.6 ? 'arcade' : 'ribbon';
+        // the Mariners' Quarter: a low port town of lofts, arcades, courts and mews
+        if (Lt.lx < -380 && Lt.lz > 200) {
+          if (name === 'Mariners\' Parade' || name === 'Navigators\' Walk' || name === 'Chandlers\' Row') return pick(R, [['arcade', 0.45], ['warehouse', 0.3], ['terrace', 0.25]]);
+          if (Lt.cls === ST.LANE) return pick(R, [['mews', 0.55], ['stack', 0.25], ['warehouse', 0.2]]);
+          return pick(R, [['terrace', 0.3], ['warehouse', 0.22], ['cloister', 0.2], ['stack', 0.14], ['arcade', 0.14]]);
+        }
         if (Lt.cls === ST.LANE) return pick(R, [['mews', 0.4], ['warehouse', 0.3], ['stack', 0.3]]);
         return pick(R, [['ribbon', 0.3], ['tower', Lt.centre > 0.3 && Lt.w > 26 ? 0.3 : 0], ['terrace', 0.12], ['cloister', 0.12], ['warehouse', 0.1], ['stack', 0.06]]);
       },
-      floors: (Lt, R) => (Lt.type === 'tower' ? 15 + Math.floor(R() * 12) : Lt.type === 'warehouse' ? 3 + Math.floor(R() * 3) : 5 + Math.round(Lt.centre * (5 + R() * 8)) + Math.floor(R() * 3)),
+      floors: (Lt, R) => (Lt.type === 'tower' ? 15 + Math.floor(R() * 12) : Lt.type === 'warehouse' ? 3 + Math.floor(R() * 3) : Lt.lx < -380 && Lt.lz > 200 ? 3 + Math.floor(R() * 4) : 5 + Math.round(Lt.centre * (5 + R() * 8)) + Math.floor(R() * 3)),
     };
-    return { streets, squares, plazas, parks, sites, landmarks, lots, inlays, beds, zones, pools, trees, lotRule, paths, accessRoutes };
+    return { streets, squares, plazas, parks, sites, landmarks, lots, inlays, beds, zones, pools, trees, lotRule, paths, accessRoutes, exclusions };
   },
 };
 
@@ -693,8 +738,12 @@ const westmere = {
     const museumPrecinct = (p) => p[0] > 250 && p[0] < 1130 && Math.abs(p[1]) < 106;
     const operaPrecinct = (p) => Math.hypot(p[0] - (O.x - 10), p[1]) < 145;
     const keep = (p) => !nearAmph(p) && !inMall(p) && !inRond(p) && !museumPrecinct(p) && !operaPrecinct(p);
+    // the rond-points of the Boulevard of the Arts: every avenue meeting one turns round its
+    // monument on a ring road, so no carriageway runs through a fountain or an obelisk
+    const RONDS = [Math.PI / 4, 3 * Math.PI / 4, -Math.PI / 4, -3 * Math.PI / 4, 0].map((a) => P(a, 720));
+    const clearOfRonds = (p) => RONDS.every(([x, z]) => Math.hypot(p[0] - x, p[1] - z) > 26);
     // Museum Mile: the great boulevard from the triumphal arch to the Civic Tower
-    streets.push({ pts: T.line(256, 0, 1140, 0, 4), cls: ST.AVENUE, hw: 7, name: 'Museum Mile', noLots: true });
+    for (const run of T.split(T.line(256, 0, 1140, 0, 4), clearOfRonds)) streets.push({ pts: run, cls: ST.AVENUE, hw: 7, name: 'Museum Mile', noLots: true });
     streets.push({ pts: T.curve([[L.x - 16, L.z], [1130, L.z + 70], [1140, -100], [1140, 0]], 4), cls: ST.AVENUE, hw: 10, name: 'Concorde Approach', noLots: true });
     for (const s of [-1, 1]) streets.push({ pts: T.line(270, s * 104, 1120, s * 104, 4), cls: ST.STREET, hw: 5, name: 'Museum Service Court', lotSide: s > 0 ? 1 : -1 });
     // the Mall: twin avenues either side of the Mere, the long reflecting pool
@@ -704,9 +753,10 @@ const westmere = {
     // the patte d'oie from the arch, diagonals from the rond-point
     const E = [L.x - 90, L.z];
     for (const s of [-1, 1]) for (const pts of T.split(T.line(1120, s * 104, 330, s * 520, 6), keep)) streets.push({ pts, cls: ST.AVENUE, hw: 10, name: 'patte d\'oie' });
-    for (const a of [Math.PI / 4, 3 * Math.PI / 4, -Math.PI / 4, -3 * Math.PI / 4]) for (const run of T.split(T.radial(0, 0, a, 262, R(a) - 30, 6), keep)) streets.push({ pts: run, cls: ST.AVENUE, hw: 9, name: 'diagonal' });
+    for (const a of [Math.PI / 4, 3 * Math.PI / 4, -Math.PI / 4, -3 * Math.PI / 4]) for (const run of T.split(T.radial(0, 0, a, 262, R(a) - 30, 6), (p) => keep(p) && clearOfRonds(p))) streets.push({ pts: run, cls: ST.AVENUE, hw: 9, name: 'diagonal' });
     streets.push({ pts: T.ring(0, 0, 262, 6), cls: ST.ESPLANADE, hw: 8, name: 'Rond-Point de la Concorde' });
-    for (const run of T.split(T.ring(0, 0, 720, 7), (p) => !nearAmph(p) && !inMall(p))) streets.push({ pts: run, cls: ST.AVENUE, hw: 10, name: 'Boulevard of the Arts' });
+    for (const run of T.split(T.ring(0, 0, 720, 7), (p) => !nearAmph(p) && !inMall(p) && clearOfRonds(p))) streets.push({ pts: run, cls: ST.AVENUE, hw: 10, name: 'Boulevard of the Arts' });
+    for (const [x, z] of RONDS) streets.push({ pts: T.ring(x, z, 24, 4), cls: ST.ESPLANADE, hw: 6, name: 'rond-point', noLots: true, noBridges: true });
     // the block grid between the avenues
     for (const g of gridLines({ sx: 96, sz: 110, ext: 1500, clsX: ST.STREET, clsZ: ST.STREET, keep })) {
       if (g.axis === 'z' && g.k === 0) continue;
@@ -746,7 +796,8 @@ const westmere = {
     for (let k = 0; k < 48; k++) { const a = (k / 48) * TAU; if ([0, Math.PI, Math.PI / 4, -Math.PI / 4, 3 * Math.PI / 4, -3 * Math.PI / 4].some((q) => Math.abs(angDiff(a, q)) < 0.1)) continue; trees.push({ x: Math.cos(a) * 236, z: Math.sin(a) * 236, sp: 'flowering', s: 9 }); }
     inlays.push({ pts: T.line(L.x - 60, 0, 250, 0, 6), w: 0.25 });
     for (const r of [120, 180, 236]) inlays.push({ pts: T.ring(0, 0, r, 5), w: 0.12 });
-    landmarks.push({ type: 'monuments', list: ronds.map(([x, z], i) => ({ x, z, kind: i % 2 ? 'obelisk' : 'fountain' })) });
+    landmarks.push({ type: 'monuments', list: ronds.map(([x, z], i) => ({ x, z, kind: i % 2 ? 'obelisk' : 'fountain', island: 17 })) });
+    for (const [x, z] of ronds) sites.push({ x, z, r: 17.5, margin: 0.5, name: 'rond-point island' });
     const lotRule = {
       size: (cls, R) => (cls === ST.LANE ? [14 + R() * 10, 16 + R() * 8] : [26 + R() * 22, 22 + R() * 14]),
       gap: (cls, R) => (cls === ST.AVENUE || cls === ST.STREET ? 0.6 + R() * 0.6 : 3 + R() * 3),
@@ -772,7 +823,7 @@ const COURTS = {
   tidewater: { name: 'House of the Tide Tables', theme: 'tidal', r: 38, candidates: [[-375, 100], [300, 460], [-475, -600], [850, 260]] },
   sunward: { name: 'Solar Guild Hall', theme: 'solar', r: 38, candidates: [[-625, 55], [-720, -190], [-520, -410]] },
   seraph: { name: 'Garden of the Six Winds', theme: 'garden', r: 36, candidates: [[-275, 165], [-240, -210], [225, -235], [200, 235]] },
-  southmarch: { name: 'Harbour Exchange', theme: 'harbour', r: 44, candidates: [[-780, 590], [-710, 780], [-940, 315]] },
+  southmarch: { name: 'Harbour Exchange', theme: 'harbour', r: 44, candidates: [[-710, 780], [-940, 315]] },
   coral: { name: 'Reef Conservatory', theme: 'reef', r: 40, candidates: [[-510, 330], [525, 175], [-285, -530]] },
   westmere: { name: 'Sculptors Loggia', theme: 'civic', r: 38, candidates: [[-425, 335], [-460, -195], [-1035, -330]] },
 };
