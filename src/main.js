@@ -35,6 +35,14 @@ class App {
     this.renderer.info.autoReset = false;
 
     this.hours = params.has('t') ? parseFloat(params.get('t')) : 17.55;
+    // a new sky every visit: the cloud field starts at a seeded point in its 32 km weather tile
+    // (?clouds=<seed> repeats one; captures stay on seed 0 so review shots are comparable)
+    this.cloudSeed = params.has('clouds') ? (parseInt(params.get('clouds'), 10) >>> 0) : params.has('capture') ? 0 : (Math.random() * 1e9) >>> 0;
+    {
+      let s = this.cloudSeed || 0;
+      const rnd = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
+      U.uCloudOffset.value.set(this.cloudSeed ? rnd() * 32000 : 0, this.cloudSeed ? rnd() * 32000 : 0);
+    }
     this.timeSpeed = 0;            // game-hours per real second
     this.clock = new THREE.Timer();
     this.elapsed = 0;
