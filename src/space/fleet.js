@@ -449,6 +449,6 @@ export function fleetTargets(space) {
   return {
     liner: { ...P('liner'), minDist: 1.2, maxDist: 20000, defaultDist: 2.6, view: { az: 1.5, el: 0.4 } },
     tenders: { ...P('tenders'), minDist: 0.5, maxDist: 20000, defaultDist: 2.6, view: { az: 2.5, el: 0.3 } },
-    selene: { ...P('selene'), minDist: 4, maxDist: 60000, defaultDist: 15, view: { az: 0.75, el: -1.2 } },   // from the Moon's side, the Earth above the spindle
+    selene: { ...P('selene'), minDist: 4, maxDist: 60000, defaultDist: 13, view: { az: 0.75, el: 0.22 } },
   };
 }
