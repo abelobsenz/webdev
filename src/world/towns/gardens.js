@@ -334,5 +334,33 @@ export function planGardens(S, out) {
       }
     }
   }
+  // ---- courtyard trees: the lawns inside the blocks planted as a garden city's, a tree wherever
+  // a crown clears the houses round it, the island's own species with rain trees among them
+  for (const isl of ISLANDS) {
+    const [sp0, ts0] = ISLAND_TREE[isl.id] || ['flowering', 7.5];
+    const pts = [];
+    for (let x = isl.x - isl.r; x <= isl.x + isl.r; x += 6) for (let z = isl.z - isl.r; z <= isl.z + isl.r; z += 6) {
+      const jx = x + (hash(x, z) - 0.5) * 3, jz = z + (hash(z, x) - 0.5) * 3;
+      if (Math.hypot(jx - isl.x, jz - isl.z) > isl.r * 0.86 || S.ground(jx, jz) < 3) continue;
+      if (F.edge(jx, jz) < 4.2) continue;
+      pts.push([jx, jz, hash(jx * 0.7, jz * 1.3)]);
+    }
+    pts.sort((a, b) => a[2] - b[2]);
+    let n = 0;
+    for (const [x, z, h] of pts) {
+      if (n >= isl.r * 0.45) break;
+      const rain = h > 0.42, sp = rain ? 'rainTree' : sp0, ts = rain ? 9 : ts0, cr = CROWN[sp] * ts * 0.5;
+      if (room(x, z, 5) < 2.2) continue;
+      if (lotDist(x, z, 8) < Math.min(cr, 3.2) + 1.3 || S.lampNear(x, z, Math.max(2.4, cr * 0.8 + 0.3))) continue;
+      if (!S.free(x, z, Math.max(cr * 0.75, 4.5)) || !S.towerClear(x, z, cr, 2) || S.headroom(x, z, cr) < ts + 2) continue;
+      const g = S.groundRange(x, z, 0.8);
+      if (g.lo < 2.2) continue;
+      out.trees.push({ x, z, y: g.lo - 0.15, sp, s: ts * (0.9 + h * 0.2) });
+      S.claim(x, z, Math.max(cr * 0.75, 4.5), 'tree');
+      stats.trees++; stats.courtyard = (stats.courtyard || 0) + 1; n++;
+    }
+  }
   return stats;
 }
+
+const hash = (x, z) => { const v = Math.sin(x * 12.9898 + z * 78.233) * 43758.5453; return v - Math.floor(v); };

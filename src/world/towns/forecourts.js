@@ -1,5 +1,5 @@
 import { KIND as K } from '../buildings.js';
-import { ISLANDS } from '../layout.js';
+import { ISLANDS, promenadeAxis } from '../layout.js';
 
 // The forecourts of the inner islands' arcologies and maglev terminals. A tower square was
 // 18 m of bare paving round the podium's arcade; a terminal's forecourt the same round its
@@ -232,3 +232,82 @@ export function planForecourts(S, out) {
   }
   return { trees: nTree, benches: nBench, fountains: nFount, cafes: nCafe };
 }
+
+/**
+ * Groves in the great squares. The landing squares (where each promenade comes down) and the
+ * civic squares were wide paving between the furniture ring round their centre and the walkers'
+ * ring near their rim (streetscape.js, people.js): a ring of trees in planters now stands in that
+ * band, off the promenade deck's approach. A civic square whose centre the streetscape cannot
+ * furnish (its fountain would reach an arcology's exclusion) gets a fountain basin of its own.
+ */
+export function planSquareGroves(S, out) {
+  const plan = S.plan;
+  let nTree = 0, nFount = 0;
+  for (const q of plan.squares) {
+    if (q.kind !== 'civic' && q.kind !== 'landing') continue;
+    const isl = islandOf(q.x, q.z);
+    if (!isl) continue;
+    const innerEdge = q.r * 0.52 - 0.45;
+    let deck = null;
+    if (q.kind === 'landing') {
+      const ax = promenadeAxis(isl);
+      deck = { dx: ax.dir.x, dz: ax.dir.z };
+    }
+    // what the streetscape puts at the centre (a civic building, a fountain) and its ring
+    let Rc = 0;
+    if (q.landmarkR) Rc = q.landmarkR + 0.6;
+    else if (!deck) {
+      const R = Math.min(11, q.r * 0.3, innerEdge - 6.5), Rout = R + 0.6;
+      const blocked = plan.exclusions.some((e) => Math.hypot(e.x - q.x, e.z - q.z) < e.r + Rout + 0.3 + 2.5);
+      if (R >= 3.5 && !blocked) Rc = Rout;
+      else {
+        // the square's own fountain, as large as the exclusions round it allow
+        let Rf = Math.min(4.2, ...plan.exclusions.map((e) => Math.hypot(e.x - q.x, e.z - q.z) - e.r - 2.5));
+        if (Rf >= 2.4) {
+          const g = S.groundRange(q.x, q.z, Rf + 0.12);
+          if (g.hi - g.lo < 0.8 && S.free(q.x, q.z, Rf + 0.5) && !S.lampNear(q.x, q.z, Rf + 1) && S.headroom(q.x, q.z, Rf) > 6) {
+            out.works.push({ district: isl.id, x: q.x, z: q.z, r: Rf + 0.12, build: fountainWork(q.x, q.z, g.hi + 0.5, g.lo - 0.5, Rf), kind: 'fountain', inSquare: true });
+            S.claim(q.x, q.z, Rf + 0.5, 'fountain');
+            q.townR = Rf + 0.12;
+            Rc = q.townR + 0.6;
+            nFount++;
+          }
+        }
+      }
+    }
+    const rb = deck ? Math.min(9, innerEdge - 0.45) : Math.max(Rc + 3.4, Math.min(innerEdge - 0.45, Rc + 4.2));
+    const rk = q.kind === 'civic' && rb + 5.5 + 2.4 <= innerEdge ? rb + 5.5 : 0;
+    const qh = Math.max(0.4, Math.min(q.r * 0.15 - 0.45, q.r * 0.2 - 1.85));
+    const lo = (rk ? rk + 2.4 : rb + 0.6) + 1.2 + PLANTER_R, hi = q.r * 0.8 - qh - 0.6 - PLANTER_R;
+    if (hi < lo) continue;
+    const rG = (lo + hi) / 2;
+    const [sp, s0] = GROVE[isl.id] || ['flowering', 7.2];
+    const s = Math.min(s0, 9), cr = crownR[sp] * s * 0.5;
+    const n = Math.max(6, Math.round((TAU * rG) / 8));
+    for (let k = 0; k < n; k++) {
+      const a = (k / n) * TAU + 0.13, x = q.x + Math.cos(a) * rG, z = q.z + Math.sin(a) * rG;
+      if (deck) {
+        const u = (x - q.x) * deck.dx + (z - q.z) * deck.dz, v = -(x - q.x) * deck.dz + (z - q.z) * deck.dx;
+        if (u < 6 && Math.abs(v) < 18.5) continue;
+      }
+      if (!S.free(x, z, PLANTER_R + 0.3) || S.edgeMin(x, z, PLANTER_R) < 1.0) continue;
+      const g = S.groundRange(x, z, PLANTER_R);
+      if (g.lo < 1.8 || g.hi - g.lo > 0.85 || g.hi - S.ground(x, z) > 0.4) continue;
+      if (S.lampNear(x, z, Math.max(cr + 0.8, PLANTER_R + 0.8)) || S.discInLot(x, z, Math.min(cr, 3.2), 0.8) || S.headroom(x, z, cr + 0.5) < s + 2.5) continue;
+      if (!S.towerClear(x, z, PLANTER_R, 4.5) || !S.towerClear(x, z, cr, 1.5) || !S.stationClear(x, z, Math.max(cr, PLANTER_R), 2)) continue;
+      const top = g.hi + 0.45;
+      out.works.push({ district: isl.id, x, z, r: PLANTER_R + 0.1, build: planterWork(x, z, top, g.lo - 0.45), kind: 'planter', inSquare: true });
+      out.trees.push({ x, z, y: top - 0.27, sp, s: s * (0.95 + ((Math.abs(Math.sin(x * 12.9 + z * 78.2)) * 43758.5) % 1) * 0.1) });
+      S.claim(x, z, PLANTER_R + 0.3, 'planter');
+      nTree++;
+    }
+    out.sites.push({ x: q.x, z: q.z, r: rG, ring: true, color: [40, 140, 60] });
+  }
+  return { trees: nTree, fountains: nFount };
+}
+
+// the square groves: a tree of the island's own, a crown the benches and lamps clear
+const GROVE = {
+  aster: ['flowering', 7.2], lumen: ['palm', 10], solace: ['flowering', 7.2], verdant: ['palm', 9.5],
+  cantor: ['flowering', 7.2], halcyon: ['palm', 10], oriel: ['flowering', 7.2], thule: ['palm', 10],
+};

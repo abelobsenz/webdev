@@ -94,6 +94,16 @@ for (const f of plan.furniture) {
   const g = raw(f.x, f.z);
   if (f.y > g + 0.05 || f.y < g - 0.4) bad('furniture off its ground', { kind: f.kind, at: [R(f.x), R(f.z)], y: R(f.y), g: R(g) });
 }
+// ---- the squares' walkers (people.js walk a ring at 0.8 r, half-width qh): nothing of ours in it
+for (const q of plan.squares) {
+  if (q.kind === 'tower' || q.kind === 'station') continue;
+  const rr = q.r * 0.8, qh = Math.max(0.4, Math.min(q.r * 0.15 - 0.45, q.r * 0.2 - 1.85));
+  const inRing = (x, z, r) => { const d = Math.hypot(x - q.x, z - q.z); return d + r > rr - qh - 0.2 && d - r < rr + qh + 0.2; };
+  for (const w of plan.townWorks) for (const [sx, sz, sr] of w.samples || [[w.x, w.z, w.r]]) if (Math.hypot(sx - q.x, sz - q.z) < q.r + sr && inRing(sx, sz, sr)) { bad('structure in a square\'s walkers\' ring', { kind: w.kind, at: [R(sx), R(sz)], sq: q.kind }); break; }
+  for (const t of plan.trees) if (inRing(t.x, t.z, 1.0) && Math.hypot(t.x - q.x, t.z - q.z) < q.r) bad('tree in a square\'s walkers\' ring', { at: [R(t.x), R(t.z)], sq: q.kind });
+  for (const f of plan.furniture) if (inRing(f.x, f.z, f.r) && Math.hypot(f.x - q.x, f.z - q.z) < q.r) bad('furniture in a square\'s walkers\' ring', { at: [R(f.x), R(f.z)], sq: q.kind });
+  if (q.kind === 'village' && String(q.district).startsWith('islet')) for (const l of plan.lamps) if (inRing(l.x, l.z, 0.3) && Math.hypot(l.x - q.x, l.z - q.z) < q.r) bad('lamp in a village place\'s walkers\' ring', { at: [R(l.x), R(l.z)] });
+}
 console.log(`works ${plan.townWorks.length}, near triangles ${tris}, trees ${plan.trees.length}, furniture ${plan.furniture.length}`);
 if (!issues.size) console.log('inner towns: all checks passed');
 for (const [k, v] of issues) console.log(`FAIL ${k}: ${v.length}`, JSON.stringify(v.slice(0, 4)));

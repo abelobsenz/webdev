@@ -3,7 +3,7 @@ import { Builder } from '../buildings.js';
 import { createLowriseMaterial } from '../facade.js';
 import { ST } from '../urban.js';
 import { Survey } from './survey.js';
-import { planForecourts } from './forecourts.js';
+import { planForecourts, planSquareGroves } from './forecourts.js';
 import { planIslets } from './islets.js';
 import { planGardens } from './gardens.js';
 
@@ -16,13 +16,36 @@ import { planGardens } from './gardens.js';
 //   plan.furniture  benches and small furniture (streetscape.js instances them)
 //   plan.townWorks  structures: { district, x, z, r, build(B, lod), samples? } built into chunk meshes
 
+// Each island town builds in its own stone and glass, the palette of its civic building
+// (innerCivic.js): silver Aster and Thule, rose Solace, jade Verdant, marble Cantor, warm sand
+// Oriel and the islet villages; the ring town, Lumen, Halcyon and the rim stay pearl.
+const PALETTE = { aster: 'silver', solace: 'rose', verdant: 'jade', cantor: 'marble', oriel: 'sand', thule: 'silver' };
+export function townPalette(district) {
+  if (!district) return 'pearl';
+  if (PALETTE[district]) return PALETTE[district];
+  return district.startsWith('islet') ? 'sand' : 'pearl';
+}
+
 export function planTowns(plan, { ground, towers = [], stations = [] }) {
   const S = new Survey(plan, ground, towers, stations);
   const out = { works: [], trees: [], furniture: [], sites: [] };
   const stats = {};
+  // a civic square that fell back to its island's heart where an arcology stands (its civic
+  // building went to a park) lies inside the tower's base: its paving is the tower's forecourt
+  // already, and its walkers' ring would run through the podium. It goes.
+  for (let i = plan.squares.length - 1; i >= 0; i--) {
+    const q = plan.squares[i];
+    if (q.kind !== 'civic' || q.landmarkR) continue;
+    if (S.towers.some((t) => Math.hypot(t.x - q.x, t.z - q.z) + q.r * 0.5 < t.base)) {
+      plan.squares.splice(i, 1);
+      S.removeLamps((l) => l.cls === 0 && Math.abs(Math.hypot(l.x - q.x, l.z - q.z) - (q.r - 2.5)) < 1.2);
+      stats.civicInTower = (stats.civicInTower || 0) + 1;
+    }
+  }
   // the islet villages first: they reshape their squares and move their lamps
   stats.islets = planIslets(S, out);
   stats.forecourts = planForecourts(S, out);
+  stats.groves = planSquareGroves(S, out);
   stats.gardens = planGardens(S, out);
   plan.trees = [...(plan.trees || []), ...out.trees];
   plan.furniture = [...(plan.furniture || []), ...out.furniture];
@@ -55,11 +78,14 @@ export function buildTowns(scene, plan, settings) {
       B.frame(0, 0, 0, 0);
     }
   }
-  const mat = createLowriseMaterial('pearl', { litFrac: 0.5, warmth: 0.75 });
+  const mats = new Map();
   const list = [], meshes = [];
   let tris = 0;
   for (const [key, ch] of chunks) {
     if (!ch.near.ni) continue;
+    const pal = townPalette(key);
+    if (!mats.has(pal)) mats.set(pal, createLowriseMaterial(pal, { litFrac: 0.5, warmth: 0.75 }));
+    const mat = mats.get(pal);
     const near = new THREE.Mesh(ch.near.geometry(), mat), far = new THREE.Mesh(ch.far.geometry(), mat);
     for (const m of [near, far]) { m.castShadow = true; m.receiveShadow = true; m.matrixAutoUpdate = false; scene.add(m); meshes.push(m); }
     near.name = `Towns ${key}`; far.name = `Towns ${key} far`;

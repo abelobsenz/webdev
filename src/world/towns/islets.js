@@ -49,9 +49,11 @@ export function planIslets(S, out) {
     S.removeLamps((l) => l.cls === 0 && Math.abs(Math.hypot(l.x - q.x, l.z - q.z) - (r0 - 2.5)) < 1.2);
     q.r = rp; q.r0 = r0;
     stats.villages++;
-    // new lamps round the place, just inside its edge, clear of the lanes' carriageways
+    // new lamps round the place, just inside its edge (outside the ring its walkers keep to,
+    // people.js), clear of the lanes' carriageways
     {
-      const rl = rp - 2.5, n = Math.max(6, Math.floor((TAU * rl) / 18));
+      const qh = Math.max(0.4, Math.min(rp * 0.15 - 0.45, rp * 0.2 - 1.85));
+      const rl = Math.min(rp - 0.8, Math.max(rp - 2.5, rp * 0.8 + qh + 0.6)), n = Math.max(6, Math.floor((TAU * rl) / 18));
       for (let k = 0; k < n; k++) {
         const a = (k / n) * TAU + 0.2, x = q.x + Math.cos(a) * rl, z = q.z + Math.sin(a) * rl;
         if (S.edgeMin(x, z, 0.5) < 0.6 || S.lampNear(x, z, 4) || S.ground(x, z) < 1.8) continue;
@@ -172,23 +174,24 @@ export function planIslets(S, out) {
       let ux = e[0] - f[0], uz = e[1] - f[1]; const ul = Math.hypot(ux, uz) || 1; ux /= ul; uz /= ul;
       // over the strand from the lane's paved end to where the beach falls to the jetty's level
       let t0 = 1.5;
-      while (t0 < 30 && S.ground(e[0] + ux * t0, e[1] + uz * t0) > 1.9) t0 += 1;
+      while (t0 < 30 && S.ground(e[0] + ux * t0, e[1] + uz * t0) > 1.85) t0 += 1;
       if (t0 >= 30) continue;
       const x0 = e[0] + ux * t0, z0 = e[1] + uz * t0;
       let deep = 0;
-      for (let t = 4; t < 110; t += 2) if (S.ground(x0 + ux * t, z0 + uz * t) < -1.6) { deep = t + 6; break; }
+      for (let t = 4; t < 150; t += 2) if (S.ground(x0 + ux * t, z0 + uz * t) < -1.6) { deep = t + 6; break; }
       if (!deep) continue;
       if (!best || deep < best.len) best = { x0, z0, ux, uz, len: deep };
     }
     if (best) {
       const { x0, z0, ux, uz, len } = best;
-      const deckY = Math.max(S.ground(x0, z0) + 0.12, 1.5);
+      // the deck two metres above the lagoon: its root rests on the strand where the lane ends
+      const deckY = 2.0;
       // clear of the lots, lamps, streets and anything placed along its length
       let ok = true;
       for (let t = 0; t <= len + 3; t += 2) {
         const x = x0 + ux * t, z = z0 + uz * t, w = t > len - 1 ? 7 : 2.2;
         if (S.inLot(x, z, w) || S.lampNear(x, z, w + 0.5) || (t > 3 && S.edgeMin(x, z, w) < 0.5) || !S.free(x, z, w)) { ok = false; break; }
-        if (t > 2 && S.groundRange(x, z, w).hi > deckY - 0.45) { ok = false; break; }
+        if (t > 2 && (t > 6 ? S.groundRange(x, z, w).hi : S.ground(x, z)) > deckY - 0.4) { ok = false; break; }
       }
       if (ok) {
         out.works.push({ district: d.id, x: x0 + ux * len * 0.5, z: z0 + uz * len * 0.5, r: len * 0.5 + 8, kind: 'jetty', shore: true, deckY,
