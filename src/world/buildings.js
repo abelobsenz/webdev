@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { createLowriseMaterial } from './facade.js';
 import { mulberry32 } from './noise.js';
 import { ST } from './urban.js';
+import { rimLotType, rimLotFloors } from './rim/rimLots.js';
 
 // Low- and mid-rise MERIDIAN, generated lot by lot.
 //
@@ -1340,8 +1341,7 @@ function chooseType(L, R) {
   const r = R();
   const big = L.w > 26 && L.d > 24;
   // the rim towns: arcades along their waterfront esplanades, terraces and mews behind
-  if (L.dk === 'rim' && L.cls === ST.ESPLANADE && r < 0.5) return 'arcade';
-  if (L.dk === 'rim') return r < 0.55 ? 'mews' : r < 0.75 ? 'terrace' : r < 0.87 && big ? 'cloister' : r < 0.94 ? 'stack' : 'pavilion';
+  if (L.dk === 'rim') return rimLotType(L, r);        // by quarter and frontage (rim/rimLots.js)
   if (L.dk === 'islet') return r < 0.45 ? 'mews' : r < 0.65 ? 'terrace' : r < 0.85 ? 'ribbon' : 'stack';
   if (L.cls === ST.LANE) return r < 0.5 ? 'mews' : r < 0.8 ? 'stack' : 'terrace';
   // the Outer Wards: denser and taller, towers gathering toward each ward's heart
@@ -1361,7 +1361,7 @@ function heightFor(L, R, type) {
   const c = L.centre;
   let floors;
   switch (L.dk) {
-    case 'rim': floors = 3 + Math.floor(R() * 4); break;
+    case 'rim': floors = rimLotFloors(L, R, type); break;
     case 'islet': floors = 2 + Math.floor(R() * 3); break;
     case 'central': floors = 3 + Math.floor(R() * 5); break;
     case 'ward': floors = 4 + Math.round(Math.pow(c, 1.2) * (5 + R() * 12)) + Math.floor(R() * 3); break;

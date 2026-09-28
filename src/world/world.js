@@ -27,6 +27,7 @@ import { INNER } from './terrain.js';
 import { renderedHeight } from './outerCities.js';
 import { planInnerCivic, buildInnerCivic } from './innerCivic.js';
 import { planShorePromenades, buildShoreJetties } from './innerShore.js';
+import { buildRim } from './rim/rimBuild.js';
 
 import { buildInfrastructure, createBeacons } from './infrastructure.js';
 import { Traffic } from '../life/traffic.js';
@@ -169,6 +170,10 @@ export class World {
     // benches ring them, so they are marked before the streetscape furnishes the squares)
     this.civic = buildInnerCivic(this.scene, this.plan, raw, this.colliders);
     this.jetties = buildShoreJetties(this.scene, this.shoreWalks, raw);
+    // the Rim's country, shores and avenue (rim/rimBuild.js): vineyards and gardens, the set
+    // pieces, lighthouses at the channel mouths, sea walls, lidos, jetties, stops on Rim Way
+    this.rim = buildRim(this.scene, this, raw, { quality: this.settings });
+    this.updaters.push({ applyQuality: (s) => this.rim.applyQuality(s), update: () => this.app.camera && this.rim.update(this.app.camera) });
     this.updaters.push({ update: () => this.app.camera && this.civic.update(this.app.camera) });
     this.streetscape = buildStreetscape(this.scene, this.plan, raw, [...this.infra.promLamps, ...this.rimCourts.lamps]);
     this.colliders.push(...(this.streetscape.colliders || []));   // square fountains, obelisks, kiosks

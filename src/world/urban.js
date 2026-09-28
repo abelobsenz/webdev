@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { CENTRAL_ISLAND, ISLANDS, PLAZA_R, GATE, promenadeAxis } from './layout.js';
 import { ISLETS, INNER, edt2d } from './terrain.js';
 import { mulberry32, createNoise2D, smoothstep } from './noise.js';
+import { planRim } from './rim/rimPlan.js';
 
 // The town plan of MERIDIAN.
 //
@@ -935,36 +936,20 @@ export function planCity({ ground, towers, promenades, urbanMask, stations = [] 
     squares.push({ x: L.x, z: L.z, r: L.r * 0.45 - HALF_W[ST.STREET] - 1.5, kind: 'village', district: d.id });
   }
 
-  // ---- the rim: Rim Way all the way round, towns strung along it
+  // ---- the rim: Rim Way all the way round each run of land, ten planned towns strung along it,
+  // the strand and the sea walks, the country's lanes, parcels and squares (rim/rimPlan.js lays
+  // them out in the rim's own frame; they are clipped here like every other street)
   {
     const d = { id: 'rim', x: 0, z: 0, R: 6200, tall: 0.3, kind: 'rim' };
     districts.push(d);
-    add(ringPts(0, 0, 5870, 7.7, 0, TAU, 8, 0.012), ST.AVENUE, d, 'Rim Way');
-    const town = (a) => {
-      const x = Math.cos(a) * 5900, z = Math.sin(a) * 5900;
-      return urbanMask(x, z, Math.max(ground(x, z), 2)) > 0.45;
-    };
-    // runs of angles inside towns
-    const runs = [];
-    let cur = null;
-    const steps = 1600;
-    for (let s = 0; s <= steps; s++) {
-      const a = (s / steps) * TAU;
-      if (town(a)) { if (!cur) cur = [a, a]; else cur[1] = a; } else if (cur) { runs.push(cur); cur = null; }
+    const rimTowers = rimArcologies(towers).map((t) => ({ x: t.def.x, z: t.def.z, base: towerBase(t) }));
+    const rimHeads = stations.filter((st) => st.head).map((st) => st.head);
+    const gateFeet = [-1, 1].map((sx) => ({ x: GATE.x + (sx * GATE.span) / 2, z: GATE.z, r: 130 }));
+    d.rim = planRim({ ground, towers: rimTowers, heads: rimHeads, gateFeet });
+    for (const s of d.rim.streets) {
+      for (const seg of clipByGround(s.pts, ground)) room.clipStreet(seg, s.hw).forEach((piece, k) => (k ? extra : streets).push({ ...s, pts: piece, district: d.id }));
     }
-    if (cur) runs.push(cur);
-    for (const [a0, a1] of runs) {
-      if ((a1 - a0) * 5900 < 180) continue;
-      add(ringPts(0, 0, 5710, 8.1, a0, a1, 7, 0.01), ST.ESPLANADE, d);
-      add(ringPts(0, 0, 6040, 8.9, a0, a1, 7, 0.01), ST.STREET, d);
-      const m = Math.floor(((a1 - a0) * 5900) / 115);
-      for (let q = 1; q < m; q++) {
-        const a = a0 + ((a1 - a0) * q) / m;
-        add(radialPts(0, 0, a, 5710, 6040, q * 3.3 + a0, 6, 0.002), ST.LANE, d);
-      }
-      const am = (a0 + a1) / 2;
-      squares.push({ x: Math.cos(am) * 5955, z: Math.sin(am) * 5955, r: 24, kind: 'village', district: d.id });
-    }
+    for (const q of d.rim.squares) squares.push(q);
     // the rim's streets end at the arcologies' terraces and at the bridgeheads (clipAtStops):
     // lots are still laid along the whole streets, the field, lamps and plan get the kept ends
     const rimT = rimArcologies(towers);
@@ -1054,7 +1039,7 @@ export function planCity({ ground, towers, promenades, urbanMask, stations = [] 
   const order = [ST.AVENUE, ST.ESPLANADE, ST.STREET, ST.LANE];
   for (const cls of order) {
     for (const st of streets) {
-      if (st.cls !== cls) continue;
+      if (st.cls !== cls || st.noLots) continue;
       const d = districtOf.get(st.district);
       const P = st.pts;
       // each street draws its lots from its own stream, so a change to one frontage leaves
@@ -1073,10 +1058,10 @@ export function planCity({ ground, towers, promenades, urbanMask, stations = [] 
         const tl = Math.hypot(tx, tz) || 1;
         return { x, z, tx: tx / tl, tz: tz / tl };
       };
-      for (const side of [-1, 1]) {
+      for (const side of st.lotSides || [-1, 1]) {
         let s = 6 + rnd() * 8;
         while (s < total - 8) {
-          const small = d.kind === 'rim' || d.kind === 'islet' || cls === ST.LANE;
+          const small = st.lotSize ? st.lotSize === 'small' : d.kind === 'rim' || d.kind === 'islet' || cls === ST.LANE;
           let w = small ? 11 + rnd() * 14 : 16 + rnd() * 22;
           let dep = small ? 12 + rnd() * 9 : 18 + rnd() * 16;
           let placed = false;
