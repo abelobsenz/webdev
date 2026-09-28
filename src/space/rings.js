@@ -203,14 +203,37 @@ void main() {
       em += uStreamColor * keel * (0.08 + 1.2 * kpulse);
     }
   } else if (part < 1.5) {
-    // ---- retaining walls ----
+    // ---- retaining walls: an inhabited terrace city two kilometres high. Galleries every
+    //      280 m of height behind glazed bands, piers every 120 m, a buttress every 3 km, a
+    //      plinth of dark service decks at the foot and a bronze parapet along the crest.
+    //      Every order falls to its exact mean while its cell still spans ~3 px. ----
+    float wallH = max(1.2, uWidth * 0.07);
+    float hk = v * wallH;                                  // height above the deck, km
+    float vert = 1.0 - abs(dot(N, rhat));                  // 1 on the faces, 0 on the crest
+    float fh = max(fwidth(hk), 1e-5);
+    float fwk = max(fu, fh);
     vec3 alb = uAlbedo * 1.1;
     float rib = 1.0 - fPulse(u, 3.0, 0.0, 2.76, fk);
+    float band = fPulse(hk, 0.28, 0.14, 0.24, fh) * step(0.2, hk) * (1.0 - step(wallH - 0.12, hk));
+    float pier = 1.0 - fPulse(u, 0.12, 0.0, 0.1, fu);
+    float glaze = band * (1.0 - pier) * vert;
+    float plinth = (1.0 - smoothstep(0.14, 0.2, hk)) * vert;
+    float crest = smoothstep(wallH - 0.1, wallH - 0.05, hk) * vert;
     alb *= 1.0 - 0.3 * rib;
+    alb = mix(alb, vec3(0.05, 0.06, 0.07), glaze * 0.85);
+    alb = mix(alb, uAlbedo * 0.45, plinth);
+    alb = mix(alb, vec3(0.5, 0.36, 0.2), crest * (1.0 - rib));
+    float spec = mix(0.5, 1.4, glaze);
     col = alb / 3.14159 * (sunL * ndl + earthshine * 2.0);
-    col += min(sunL * pow(max(dot(N, H), 0.0), 70.0) * 0.5, sunL * 0.6);
+    col += min(sunL * pow(max(dot(N, H), 0.0), mix(70.0, 200.0, glaze)) * spec, sunL * 0.6);
+    // lit rooms behind the glazing: neighbourhoods a shade apart, warmer and fuller at night
+    float room = hash12(floor(vec2(u / 0.12, hk / 0.28)) + uSeed);
+    float hood = hash12(floor(vec2(u / 4.0, hk / 1.2)) + uSeed * 3.1);
+    float rl = 1.0 - smoothstep(0.03, 0.09, fwk);
+    float lit = mix(0.42, step(0.52, room) * (0.6 + 0.8 * hood), rl);
+    em += uHabitatColor * glaze * lit * (0.05 + 0.3 * nightSide);
     float stripe = 1.0 - smoothstep(0.0, 0.06, abs(v - 0.9));
-    em += uHabitatColor * stripe * 0.25;
+    em += uHabitatColor * stripe * 0.2;
     // small marker lamps every 25 km, filtered so they never shrink below their energy
     float md = abs(fract(u / 25.0 + 0.5) - 0.5) * 25.0;
     float mw = 0.12;

@@ -72,6 +72,19 @@ export function voyage(u, c, outPos, outFwd) {
 
 const TURN_AXIS = new THREE.Vector3(0, 1, 0);
 
+/**
+ * The visiting liner's voyage (Harbour frame, km): it holds high above the freighters'
+ * arrival lanes (8 km off their axis) and turns over the top to leave well above the
+ * departure lanes, so the three docking movements (src/space/geoRoads.js) keep their roads.
+ */
+export function approachVoyage() {
+  const c = CORRIDORS;
+  return {
+    hold: c.dA.clone().multiplyScalar(30).add(V(0, 9, 0)), start: c.dD.clone().multiplyScalar(28).add(V(0, 8, 3)),
+    dA: c.dA.clone().add(V(0.05, -0.1, 0.12)).normalize(), dD: c.dD.clone().add(V(0, -0.08, -0.1)).normalize(), S: 3000, bulge: V(0, 10, 0), T: 2100, offset: 0.3,
+  };
+}
+
 /** Back-and-forth transit along a cubic Bezier with pauses at both ends. */
 export function shuttleRun(t, c, outPos, outFwd) {
   const T = c.move * 2 + c.pause * 2;
@@ -123,15 +136,18 @@ export class Fleet {
       el.harbour.add(m);
       this.docked = m;
       this.crafts.push(m);
+      // port shuttles docked at two keel collars, dorsal hatch to the collar's face
+      this.linerAttendants = linerAttendants(liner.geo);
+      const att = craftPart(m, this.linerAttendants.geo);
+      m.add(att);
+      addLamps(m, this.linerAttendants.lamps, { minPx: 1.2 });
     }
     // ---- voyage cycles through the Harbour's corridors (harbour frame, km)
     const H = el.harbour;
     const corr = CORRIDORS;
     this.corridors = corr;
     // (freighters now dock at the arm heads: src/space/geoRoads.js movements)
-    this._addVoyager('approach', liner, H, {
-      hold: corr.dA.clone().multiplyScalar(27).add(V(3.5, 4, 0)), start: corr.dD.clone().multiplyScalar(26).add(V(0, -3.5, 2.5)),
-      dA: corr.dA.clone().add(V(0.05, -0.1, 0.12)).normalize(), dD: corr.dD.clone().add(V(0, -0.08, -0.1)).normalize(), S: 3000, bulge: V(0, 10, 0), T: 2100, offset: 0.3,
+    this._addVoyager('approach', liner, H, { ...approachVoyage(),
       engine: { scale: 0.55, length: 16, color: 0x7fd8ff }, glow: [0.55, 0.8, 1.0], accent: [1.0, 0.72, 0.45],
     });
     // ---- tugs and a courier working the Harbour (children of the Harbour: short hops)
@@ -362,6 +378,35 @@ export class Fleet {
   }
 }
 
+/**
+ * Craft berthed at the docked liner's keel collars (liner-local metres). Both the collar face
+ * and the shuttle's dorsal hatch are found by casting against the real meshes, and the hatch
+ * is seated 0.3 m into the collar's docking face.
+ */
+export function linerAttendants(linerGeo, collars = [-170, 330]) {
+  const sh = buildShuttle(110);
+  const mat = new THREE.MeshBasicMaterial({ side: THREE.DoubleSide });
+  const liner = new THREE.Mesh(linerGeo, mat), shuttle = new THREE.Mesh(sh.geo, mat);
+  liner.updateMatrixWorld(true); shuttle.updateMatrixWorld(true);
+  const ray = new THREE.Raycaster();
+  ray.set(V(0, 100, 6), V(0, -1, 0));
+  const hatch = ray.intersectObject(shuttle, false)[0];
+  if (!hatch) throw new Error('Shuttle dorsal hatch not found');
+  const list = [], lamps = [], docks = [];
+  for (const z of collars) {
+    ray.set(V(0, -400, z), V(0, 1, 0));
+    const face = ray.intersectObject(liner, false)[0];
+    if (!face) throw new Error('Liner keel collar not found');
+    const pos = face.point.clone().sub(hatch.point).add(V(0, 0.3, 0));
+    const m = new THREE.Matrix4().makeTranslation(pos.x, pos.y, pos.z);
+    list.push({ geo: sh.geo, m });
+    lamps.push(...placeLamps(sh.lamps, m, 3));
+    docks.push({ face: face.point.clone(), hatch: hatch.point.clone().add(pos), matrix: m });
+  }
+  mat.dispose();
+  return { geo: placeMerge(list), lamps, docks };
+}
+
 function tenderLamps(t) {
   const s = t.length / 300;
   const out = [
@@ -404,6 +449,6 @@ export function fleetTargets(space) {
   return {
     liner: { ...P('liner'), minDist: 1.2, maxDist: 20000, defaultDist: 2.6, view: { az: 1.5, el: 0.4 } },
     tenders: { ...P('tenders'), minDist: 0.5, maxDist: 20000, defaultDist: 2.6, view: { az: 2.5, el: 0.3 } },
-    selene: { ...P('selene'), minDist: 4, maxDist: 60000, defaultDist: 13, view: { az: 0.75, el: 0.22 } },
+    selene: { ...P('selene'), minDist: 4, maxDist: 60000, defaultDist: 15, view: { az: 0.75, el: -1.2 } },   // from the Moon's side, the Earth above the spindle
   };
 }

@@ -115,7 +115,7 @@ export class SpaceMode {
     });
     T('counter', {
       position: (o) => o.copy(merid).multiplyScalar(R_EARTH + COUNTERWEIGHT_ALT + 10).applyQuaternion(sim.earthQuat),
-      frame: (q) => q.copy(sim.earthQuat).multiply(meridQ), minDist: 20, maxDist: 400000, defaultDist: 90, view: { az: 0.8, el: -0.25 },
+      frame: (q) => q.copy(sim.earthQuat).multiply(meridQ), minDist: 20, maxDist: 400000, defaultDist: 105, view: { az: 0.8, el: 1.12 },   // the Earth below, the cable falling to it
     });
     T('hearth', {
       position: (o) => o.copy(sim.hearthPos),
@@ -149,7 +149,7 @@ export class SpaceMode {
     T('foundry', {
       position:o=>o.copy(foundryUp).multiplyScalar(R_EARTH+627).add(_v2.set(0,42,0)).applyQuaternion(sim.earthQuat),
       frame:q=>q.copy(sim.earthQuat).multiply(stationFrame(foundryUp)),
-      minDist:8,maxDist:30000,defaultDist:31,view:{az:2.55,el:.35},
+      minDist:8,maxDist:30000,defaultDist:48,view:{az:.4,el:.55},   // the works against the Halo wall that carries them
     });
     const solarOffset=new THREE.Vector3(0,.025*1.496e8,.004*1.496e8);
     T('solarCollector', {

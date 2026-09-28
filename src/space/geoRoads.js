@@ -443,14 +443,16 @@ export function armDock(arm) {
 }
 
 /** Choreography for one movement: arrival path to arm `armIndex`, departure path back out. */
-export function movementPlan(arms, armIndex, { scale = 0.85, S = 420, T = 1500, offset = 0, lift = 0 } = {}) {
+export function movementPlan(arms, armIndex, { scale = 0.85, S = 420, T = 1600, offset = 0, lift = 0, lane = 0 } = {}) {
   const dA = CORRIDORS.dA.clone().normalize(), dD = CORRIDORS.dD.clone().normalize();
+  // each ship keeps to its own lane of the three-lane road (1.3 km apart, inside the gate ring)
+  const side = (d) => new THREE.Vector3().crossVectors(d, V(0, 1, 0)).normalize().multiplyScalar(lane * 1.3);
   const dock = armDock(arms[armIndex]);
   const bow = 530 * (1100 / 1100) * scale * KM;             // freighter bow tip ahead of its centre
   const berth = dock.tip.clone().addScaledVector(dock.d, bow + 0.0005);
   const stage = berth.clone().addScaledVector(dock.d, 3.2);
-  const gateA = dA.clone().multiplyScalar(21).add(V(0, lift, 0));
-  const gateD = dD.clone().multiplyScalar(21).add(V(0, lift, 0));
+  const gateA = dA.clone().multiplyScalar(21).add(V(0, lift, 0)).add(side(dA));
+  const gateD = dD.clone().multiplyScalar(21).add(V(0, lift, 0)).add(side(dD));
   // approach: from the gate, keep outside the arm ring (radius > 13 km) and come in along the arm
   const out = (p, r, y) => p.clone().setY(0).normalize().multiplyScalar(r).setY(y);
   const approach = [gateA.clone(), gateA.clone().lerp(out(stage, 17, stage.y + 3), 0.55), out(stage, 13 + dock.tipR * 0.35, stage.y + 0.6), stage.clone()];
@@ -575,11 +577,15 @@ export class GeoRoads {
 /** Positions in the Harbour frame (km): the yard east along the arc, the store south-west. */
 export const YARD_POS = V(-16, -8, -2);
 export const STORE_POS = V(0, -12.5, 0);
-/** The three movements: free arm heads (0, 3, 7), staggered so one is always near the Harbour. */
+/**
+ * The three movements: the free arm heads (0, 3, 7) on one shared cycle, a third of a cycle
+ * apart, each in its own lane, so the roads are never shared at the same moment: one ship is
+ * always berthed, one coming in and one leaving.
+ */
 export const MOVEMENTS = [
-  { arm: 3, scale: 0.9, T: 1500, offset: 0.52 },
-  { arm: 7, scale: 0.8, T: 1700, offset: 0.33 },
-  { arm: 0, scale: 0.75, T: 1600, offset: 0.9 },
+  { arm: 3, scale: 0.9, offset: 0.5, lane: 0 },
+  { arm: 7, scale: 0.8, offset: 1 / 6, lane: -1 },
+  { arm: 0, scale: 0.75, offset: 5 / 6, lane: 1 },
 ];
 
 /** Focus targets for the neighbourhood (merged into the space target list; analytic poses). */
