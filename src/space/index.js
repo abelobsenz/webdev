@@ -23,6 +23,7 @@ import { Traffic } from './traffic.js';
 import { Lanes } from './lanes.js';
 import { WorkingStations } from './workingStations.js';
 import { GeoRoads, geoRoadTargets } from './geoRoads.js';
+import { computeSky } from '../core/sun.js';
 
 const smooth = (a, b, x) => { const t = Math.min(Math.max((x - a) / (b - a), 0), 1); return t * t * (3 - 2 * t); };
 const easeInOut = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
@@ -103,7 +104,8 @@ export class SpaceMode {
       frame: (q) => q.setFromUnitVectors(_v2.set(0, 1, 0), _v.copy(merid).applyQuaternion(sim.earthQuat)).multiply(_q.setFromAxisAngle(_v2.set(1, 0, 0), 0)),
       minDist: 8, maxDist: 200000, defaultDist: 36, view: { az: 0.7, el: 0.32 },
     });
-    T('moon', { position: (o) => o.copy(sim.moonPos), frame: (q) => q.copy(sim.moonQuat), minDist: R_MOON + 250, maxDist: 400000, defaultDist: 7400, view: { az: 1.05, el: 0.22 } });
+    // the default view of the Moon keeps a little of the night side, the terminator's relief across it
+    T('moon', { position: (o) => o.copy(sim.moonPos), frame: (q) => q.copy(sim.moonQuat), minDist: R_MOON + 250, maxDist: 400000, defaultDist: 7400, view: { az: 1.3, el: 0.24 } });
     T('sun', { position: (o) => o.copy(sim.sunPos), frame: identity, minDist: 3e6, maxDist: 1.2e8, defaultDist: 3.2e7, view: { az: 2.2, el: 0.55 } });
     for (const [k, o] of Object.entries(fleetTargets(this))) T(k, o);
     for (const [k, o] of Object.entries(geoRoadTargets(this))) T(k, o);
@@ -137,7 +139,7 @@ export class SpaceMode {
     T('lunarLanding', {
       position:o=>o.set(R_MOON+0.02,0,0).applyQuaternion(sim.moonQuat).add(sim.moonPos),
       frame:q=>q.copy(sim.moonQuat).multiply(lunarFrame),
-      minDist:.25,maxDist:20000,defaultDist:15,view:{az:2.35,el:.3},
+      minDist:.25,maxDist:20000,defaultDist:15,view:{az:-0.55,el:.3},   // from over the Bay, the town lit by the morning Sun
     });
     const terraceLocal=new THREE.Vector3(Math.cos(.2),0,Math.sin(.2)).multiplyScalar(9.174).addScaledVector(new THREE.Vector3(-Math.sin(.2),0,Math.cos(.2)),.32).setY(-1.07);
     T('harbourTerrace',{
@@ -299,7 +301,11 @@ export class SpaceMode {
     if (this.mode !== 'off' && !(immediate && this.mode === 'ascend')) return;
     this.build();
     const app = this.app;
-    this.sim.syncFromHours(app.hours, app.skyState ? app.skyState.moonDir : null);
+    // the Moon from this hour's sky, not the last city frame's (a clock set without a city
+    // frame between, as the tour and the capture harness do, put the near side in the dark)
+    const sky = { sunDir: new THREE.Vector3(), moonDir: new THREE.Vector3(), celestial: new THREE.Matrix3() };
+    computeSky(app.hours, sky);
+    this.sim.syncFromHours(app.hours, sky.moonDir);
     this.savedTimeSpeed = app.timeSpeed;
     app.timeSpeed = 0;
     if (app.controls) { app.controls.enabled = false; app.controls.flight = null; app.controls.orbit = null; app.controls.keys.clear(); }

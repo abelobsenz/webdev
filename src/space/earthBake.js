@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { FullscreenPass, FS_VERT } from '../core/fullscreen.js';
 import { SNOISE_GLSL } from './glsl.js';
+import { NOISE_GLSL } from '../shaders/noise.glsl.js';
 import { LAND_MASK_PNG } from './landmask.js';
 import { CITIES, RANGES, DESERTS, HALO_PORTS, WILDS } from './earthData.js';
 import { bodyDir } from './sim.js';
@@ -8,8 +9,7 @@ import { bodyDir } from './sim.js';
 // GPU bake of the planet's surface and weather into cube maps (body frame).
 //   surfA: rgb = sqrt(albedo), a = height (0.5 = sea level)
 //   surfB: r = night-light density, g = ice, b = aridity, a = shallow shelf
-//   clouds: r, g = two weather "potential" fields (cross-faded while they drift),
-//           b = static coverage bias, a = cirrus streaks
+//   clouds (half float): r = cloud potential, g = stratiform share, b = open cells, a = cirrus
 
 const D2R = Math.PI / 180;
 
@@ -30,6 +30,7 @@ uniform vec4 uWild[10];
 uniform vec4 uSc[5];
 uniform float uTexelKm;
 varying vec2 vUv;
+${NOISE_GLSL}
 ${SNOISE_GLSL}
 #define PI 3.14159265359
 
@@ -58,62 +59,134 @@ vec3 rotAround(vec3 p, vec3 axis, float a) {
   return p * c + cross(axis, p) * s + axis * dot(axis, p) * (1.0 - c);
 }
 
-float cloudPotential(vec3 d, float seed, out float hurricane) {
+// Weather in the body frame, baked once (the Earth shader drifts it slowly and adds every
+// scale below ~60 km). Outputs:
+//   P  low/middle cloud potential: cloud from 0.5, thicker above (0.8 = deep convection)
+//   S  stratiform share: 0 cumuliform (puffs, towers), 1 sheets (stratocumulus, frontal cloud)
+//   O  open cells: 1 where cold air over warm sea breaks into rings of cumulus round clear hearts
+//   CI cirrus cover
+// Regimes: the ITCZ's convective complexes under their anvils, trade cumulus fields just over
+// the threshold, clear subtropical highs, stratocumulus sheets over the cold eastern currents
+// fraying westward into open cells, comma clouds on the mid-latitude lows (cold-front tail,
+// warm-front shield, hooked head, dry slot) with open cells in the cold air behind them,
+// tropical cyclones (eye, eyewall, central dense overcast, broken rainbands, ice canopy), polar
+// stratus, and cirrus streaming along the jets.
+void cloudPotential(vec3 d, float seed, out float P, out float S, out float O, out float CI) {
   float lat = asin(clamp(d.y, -1.0, 1.0));
   float alat = abs(lat);
   vec3 p = d;
-  hurricane = 0.0;
+  float comma = 0.0, shieldC = 0.0, dry = 0.0, calm = 0.0, trop = 0.0, eye = 0.0, canopy = 0.0, coldAir = 0.0, frontS = 0.0, tcS = 0.0;
   for (int i = 0; i < 28; i++) {
     if (i >= uNumCyc) break;
     vec4 c = uCyc[i];
     float R = length(c.xyz);
+    if (R < 1e-4 || c.w == 0.0) continue;
     vec3 cd = c.xyz / R;
     float r = length(p - cd);
     float fall = exp(-r * r / (R * R));
     float ang = c.w * fall * (1.0 + 0.8 * exp(-r * r / (R * R * 0.1)));
     p = rotAround(p, cd, ang);
-    if (abs(c.w) > 7.0) hurricane = max(hurricane, fall);
+    if (r > R * 4.5) continue;
+    float hemi = cd.y >= 0.0 ? 1.0 : -1.0;
+    vec3 e = normalize(cross(vec3(0.0, 1.0, 0.0), cd));
+    vec3 nn = cross(cd, e);
+    // local coordinates in radii, y poleward in both hemispheres; the warp already spun p, so
+    // the features wind into a spiral toward the centre
+    float x = dot(p - cd, e) / R, y = dot(p - cd, nn) / R * hemi;
+    float rr = length(vec2(x, y));
+    float brk = sfbm(p * 70.0 + float(i) * 3.7, 3) * 0.5 + 0.5;           // convective breakup
+    if (abs(c.w) > 7.0) {
+      // tropical cyclone: a clear eye inside a bright eyewall, the central dense overcast with a
+      // ragged edge, two or three rainbands broken into convective cells, the canopy over all
+      float th = atan(y, x) * hemi;
+      float edgeN = sfbm(p * 40.0 + float(i), 3);
+      float cdo = 1.0 - smoothstep(0.4, 0.72, rr + 0.12 * edgeN);
+      float wall = exp(-pow((rr - 0.11) / 0.05, 2.0));
+      float spiral = 0.5 + 0.5 * cos(2.0 * th + 5.0 * log(rr + 0.04) + 1.3 * edgeN);
+      float arms = pow(spiral, 3.0) * smoothstep(0.3, 0.55, rr) * exp(-rr / 0.9) * smoothstep(0.25, 0.7, brk + 0.2 * spiral);
+      trop = max(trop, max(cdo * 1.0 + wall * 0.25, arms * 0.85));
+      tcS = max(tcS, max(cdo, arms * 0.7));
+      eye = max(eye, 1.0 - smoothstep(0.035, 0.075, rr));
+      // the canopy spreads a little beyond the overcast, its outflow fibrous
+      canopy = max(canopy, (1.0 - smoothstep(0.35, 1.1, rr + 0.25 * edgeN)) * (0.75 + 0.25 * spiral));
+    } else if (c.w * hemi > 0.0) {
+      // extratropical low: the comma
+      float t = max(-y, 0.0);
+      float xc = 0.42 - 0.06 * t - 0.12 * t * t;                          // cold front, trailing west
+      float wT = 0.13 + 0.07 * t;
+      float tail = exp(-pow((x - xc) / wT, 2.0)) * smoothstep(-0.25, 0.2, -y) * exp(-t / 2.6);
+      float shield = exp(-(pow(x - 0.62, 2.0) / 0.45 + pow(y - 0.3, 2.0) / 0.2));   // warm-front shield
+      float hook = exp(-pow((rr - 0.33) / 0.12, 2.0)) * smoothstep(-0.2, 0.5, 0.8 * y - 0.6 * x) + 0.8 * exp(-rr * rr / 0.02);
+      float slot = exp(-(pow(x + 0.02, 2.0) / 0.06 + pow(y + 0.4, 2.0) / 0.11));    // the dry slot
+      float st = clamp(c.w * hemi / 1.6, 0.5, 1.4);
+      float band = max(tail * (0.75 + 0.35 * brk), hook) * 0.95 + shield * 0.55;
+      comma = max(comma, band * st);
+      frontS = max(frontS, max(tail * 0.7, shield) * st);
+      shieldC = max(shieldC, (shield * 0.85 + tail * 0.4 + hook * 0.3) * st);
+      dry = max(dry, slot * st);
+      // the cold air behind the front, streaming out over the sea: open cells
+      coldAir = max(coldAir, smoothstep(0.05, 0.5, xc - x) * smoothstep(-2.8, -0.4, y) * (1.0 - smoothstep(0.0, 0.8, y)) * exp(-rr / 2.2) * st);
+    } else {
+      calm = max(calm, fall);                                               // subsiding high
+    }
   }
-  // domain-warped fractal weather
+  // domain-warped weather at three scales
   vec3 q = p * 2.6 + seed;
   vec3 warp = vec3(sfbm(q * 1.3 + 3.1, 4), sfbm(q * 1.3 + 7.7, 4), sfbm(q * 1.3 + 1.9, 4));
   float large = sfbm(q + warp * 0.55, 5) * 0.5 + 0.5;
   vec3 w2 = vec3(sfbm(p * 9.0 + 5.3, 3), sfbm(p * 9.0 + 2.2, 3), sfbm(p * 9.0 + 8.8, 3));
-  float mid = sfbm(p * 8.0 + w2 * 0.5 + seed * 1.3, 6) * 0.5 + 0.5;
-  float cells = sridged(p * 34.0 + seed * 3.0, 4);
-  float n = large * 0.74 + mid * 0.26;
+  float mid = sfbm(p * 8.0 + w2 * 0.5 + seed * 1.3, 5) * 0.5 + 0.5;
+  float fine = sfbm(p * 30.0 + w2 * 1.2 + seed * 3.0, 3) * 0.5 + 0.5;
   float lon = atan(-p.z, p.x);
-  // zonal climate: ITCZ (a little north in June, wandering with longitude and broken into
-  // convective clusters), dry subtropics, stormy mid-latitudes
-  float itczLat = 0.1 + 0.06 * sin(lon * 2.0 + 0.7) + 0.04 * sfbm(vec3(lon * 3.0, seed, 1.0), 2);
-  float itcz = exp(-pow(abs(lat - itczLat) / 0.07, 2.0));
-  float clusters = smoothstep(0.42, 0.72, sfbm(p * 11.0 + seed * 2.1, 4) * 0.5 + 0.5);
-  float subtrop = exp(-pow(abs(alat - 0.43) / 0.12, 2.0));
-  float storm = exp(-pow(abs(alat - 0.96) / 0.22, 2.0));
-  float polar = smoothstep(1.15, 1.4, alat);
-  float bias = 0.03 + 0.34 * itcz * clusters - 0.06 * itcz - 0.22 * subtrop + 0.16 * storm + 0.05 * polar;
-  // marine stratocumulus decks over the cold eastern boundary currents: closed cells
+  // the ITCZ sits north of the equator in June, wandering with longitude
+  float itczLat = 0.12 + 0.05 * sin(lon * 2.0 + 0.7) + 0.04 * sfbm(vec3(lon * 3.0, seed, 1.0), 2);
+  float itcz = exp(-pow((lat - itczLat) / 0.08, 2.0));
+  // convective complexes a few hundred km across, merged by their anvils
+  float mcsN = sfbm(p * 6.0 + warp * 0.8 + seed * 2.1, 4) * 0.5 + 0.5;
+  float mcs = smoothstep(0.5, 0.7, mcsN);
+  float subtrop = exp(-pow((alat - 0.5) / 0.1, 2.0));
+  float trades = exp(-pow((alat - 0.29) / 0.12, 2.0));
+  // the southern winter's storm track is the stronger
+  float storm = exp(-pow((alat - 0.93) / 0.2, 2.0)) * (lat < 0.0 ? 1.15 : 0.85);
+  float polar = smoothstep(1.12, 1.35, alat);
+  float n = large * 0.62 + mid * 0.38;
+  float pot = 0.46 + (n - 0.5) * 1.5 + 0.05 * (fine - 0.5);
+  pot += 0.09 * storm + 0.07 * polar - 0.24 * subtrop - 0.04 * trades;
+  // ITCZ: bright complexes, fair-weather cumulus between them
+  pot = mix(pot, mix(0.45 + 0.08 * (fine - 0.5), 0.8, mcs) + 0.1 * (n - 0.5), itcz * 0.9);
+  // trade cumulus: patchy fields just over the threshold (a soft grey texture from afar, and
+  // discrete puffs close up), thinned under the highs
+  float tradeP = 0.42 + 0.14 * (mid - 0.5) + 0.07 * smoothstep(0.55, 0.8, fine);
+  pot = mix(pot, tradeP, trades * (1.0 - itcz) * 0.8);
+  // storm tracks: long frontal bands
+  float frontN = pow(max(1.0 - abs(sfbm(p * vec3(2.2, 6.0, 2.2) + seed * 1.7, 4)), 0.0), 4.0) * storm;
+  pot += frontN * 0.18;
+  pot += comma * 0.32 - dry * 0.25 - calm * 0.12;
+  // the cold air behind the fronts: open cells at the threshold
+  pot = mix(pot, 0.52 + 0.06 * (mid - 0.5), coldAir * 0.7);
+  // marine stratocumulus sheets over the cold eastern boundary currents
   float deck = 0.0;
   for (int i = 0; i < 5; i++) deck = max(deck, uSc[i].w * exp(-pow(length((vec2(lat, lon) - uSc[i].xy) / uSc[i].z), 2.0)));
-  float wor = 1.0;
-  {
-    vec3 cq = d * 95.0 + seed;
-    vec3 ci = floor(cq);
-    float f1 = 9.0, f2 = 9.0;
-    for (int k = 0; k < 27; k++) {
-      vec3 c = ci + vec3(float(k / 9) - 1.0, float((k / 3) % 3) - 1.0, float(k % 3) - 1.0);
-      vec3 o = c + fract(sin(vec3(dot(c, vec3(127.1, 311.7, 74.7)), dot(c, vec3(269.5, 183.3, 246.1)), dot(c, vec3(113.5, 271.9, 124.6)))) * 43758.5453);
-      float dd = length(cq - o);
-      if (dd < f1) { f2 = f1; f1 = dd; } else if (dd < f2) f2 = dd;
-    }
-    wor = smoothstep(0.05, 0.35, f2 - f1);            // bright cell interiors, dark lanes between
-  }
-  float pot = n * 0.8 + cells * 0.2 + bias;
-  pot = mix(pot, 0.56 + 0.12 * wor + 0.16 * (large - 0.5) + 0.08 * (mid - 0.5), deck * 0.85 * (1.0 - itcz));
-  // storm tracks: fronts as broad bands, not filaments
-  float front = pow(max(1.0 - abs(sfbm(p * vec3(2.2, 6.0, 2.2) + seed * 1.7, 4)), 0.0), 4.0) * storm;
-  pot += front * 0.22;
-  return pot;
+  deck *= 1.0 - itcz;
+  float sheetP = 0.6 + 0.06 * (large - 0.5) + 0.05 * (mid - 0.5);
+  // the sheet frays at its western and equatorward edge into open cells
+  float core = smoothstep(0.35, 0.8, deck + 0.15 * (mid - 0.5));
+  pot = mix(pot, mix(0.51 + 0.04 * (fine - 0.5), sheetP, core), smoothstep(0.08, 0.35, deck) * 0.92);
+  // tropical cyclones override the field
+  pot = max(pot, 0.44 + 0.4 * trop);
+  pot -= eye * 0.6;
+  P = pot;
+  // regime
+  S = clamp(max(max(core * smoothstep(0.08, 0.35, deck), frontS * 0.9), max(polar * 0.7, frontN * 0.6 + storm * 0.25)), 0.0, 1.0);
+  S *= 1.0 - 0.8 * itcz * mcs;
+  S = max(S, tcS);                                                          // the overcast and its bands are sheets
+  O = clamp(max(coldAir, (1.0 - core) * smoothstep(0.1, 0.3, deck) * 0.7) * (1.0 - frontS), 0.0, 1.0);
+  // --- cirrus: streaks along the jets, anvils over the convection, frontal shields, canopies ---
+  float ci = sfbm(vec3(p.x * 5.0, p.y * 42.0, p.z * 5.0) + vec3(sfbm(p * 6.0, 3) * 2.0), 5) * 0.5 + 0.5;
+  float jet = exp(-pow((alat - 0.62) / 0.2, 2.0)) + 0.15 * exp(-pow((lat - 0.1) / 0.17, 2.0));
+  float anvil = itcz * smoothstep(0.45, 0.72, mcsN) * (0.75 + 0.25 * ci);
+  CI = max(max(smoothstep(0.56, 0.86, ci) * jet * 0.7, anvil), max(shieldC * (0.45 + 0.55 * ci), canopy));
+  CI *= 1.0 - eye;
 }
 
 void main() {
@@ -128,17 +201,9 @@ void main() {
   if (latD < -85.0) { m0 = 1.0; mc = 1.0; mC = 1.0; }
 
   if (uOut == 2) {
-    float hA, hB;
-    float a = cloudPotential(d, 0.0, hA);
-    float b = cloudPotential(d, 37.0, hB);
-    // cirrus: streaks along the jets
-    float ci = sfbm(vec3(d.x * 5.0, d.y * 42.0, d.z * 5.0) + vec3(sfbm(d * 6.0, 3) * 2.0), 5) * 0.5 + 0.5;
-    float jet = exp(-pow(abs(alat - 38.0) / 14.0, 2.0)) + 0.5 * exp(-pow(abs(latD - 6.0) / 10.0, 2.0));
-    // land: clearer deserts, cloudier rainforest
-    float des = 0.0;
-    for (int i = 0; i < 10; i++) des = max(des, boxMask(latD, lonD, uDeserts[i], 3.0));
-    float bias = -0.22 * des * mc + 0.06 * exp(-pow(abs(latD) / 10.0, 2.0)) * mc;
-    gl_FragColor = vec4(clamp(a * 0.8, 0.0, 1.0), clamp(b * 0.8, 0.0, 1.0), clamp(0.5 + bias, 0.0, 1.0), clamp(ci * jet, 0.0, 1.0));
+    float P, S, O, CI;
+    cloudPotential(d, 0.0, P, S, O, CI);
+    gl_FragColor = vec4(P, S, O, CI);
     return;
   }
 
@@ -169,56 +234,112 @@ void main() {
   arid *= smoothstep(0.1, 0.6, mc + 0.2);
 
   if (uOut == 3) {
-    // ---- night lights of the Terran Concord (r: warm cores, g: cool new districts,
-    // b: transit filaments; each stored as sqrt for range in 8 bits) ----
+    // ---- night lights of the Terran Concord (linear, half float): r warm (old cores, towns,
+    // roads), g cool (new districts, stations), b transit (maglev lines, rail) ----
     float wild = 0.0;
     for (int i = 0; i < 10; i++) wild = max(wild, boxMask(latD, lonD, uWild[i], 3.0));
-    float habit = land * (1.0 - arid * 0.93) * (1.0 - smoothstep(58.0, 68.0, alat)) * (1.0 - step(latD, -50.0)) * (1.0 - 0.92 * wild);
+    float landS = smoothstep(-0.04, 0.06, s);
+    float habit = land * (1.0 - arid * 0.93) * (1.0 - smoothstep(58.0, 68.0, alat)) * (1.0 - step(latD, -50.0)) * (1.0 - 0.96 * wild);
     float coastNear = smoothstep(0.98, 0.55, mc);                 // within ~a hundred km of the sea
+    float c50 = maskAt(muv, 1.6);
+    float coastStrip = (1.0 - abs(2.0 * c50 - 1.0)) * step(0.0, s);  // within ~50 km of the coast, on land
     float warm = 0.0, cool = 0.0, net = 0.0;
-    // metros from the atlas: a bright old core, lattice-textured districts spreading out
     float grain = sfbm(d * 210.0 + 3.0, 3) * 0.5 + 0.5;
     float arter = pow(max(sridged(d * 140.0 + 11.0, 3), 0.0), 3.0);
+    float nearMetro = 0.0;
+    // metros from the atlas: a small bright old core inside a wide, irregular built-up
+    // footprint of lit districts, dark parks and water between them, on the land (the
+    // harbours and sea-steads off its waterfront a little dimmer)
     for (int i = 0; i < 160; i++) {
       if (i >= uNumCity) break;
       vec4 c = texelFetch(uData, ivec2(i, 2), 0);
       vec3 dv = d - c.xyz;
       float dk2 = dot(dv, dv) * 40589641.0;                         // km^2
       float w = c.w;
-      float rc = 6.0 + 10.0 * w, rm = 20.0 + 48.0 * w;
-      if (dk2 > rm * rm * 9.0) continue;
+      float rc = 3.0 + 4.0 * w, rm = 12.0 + 26.0 * w;
+      if (dk2 > rm * rm * 30.0) continue;
+      nearMetro = max(nearMetro, w * exp(-dk2 / (rm * rm * 16.0)));
+      float dk = sqrt(dk2);
       float core = exp(-dk2 / (rc * rc));
-      float metro = exp(-dk2 / (rm * rm));
       float modern = fract(sin(float(i) * 12.9898) * 43758.5453);
-      // an irregular built-up footprint with a hard edge (lit districts, dark parkland and
-      // water between them), not a soft halo
-      float edgeN = sfbm(d * 330.0 + float(i) * 1.7, 3);
-      float urban = smoothstep(0.3, 0.42, metro + 0.28 * edgeN + 0.2 * arter);
-      float dist = (0.55 + 0.45 * grain) * (0.7 + 0.6 * arter);
-      warm += w * (core * 0.6 + urban * 0.3 * dist * (1.0 - 0.5 * modern));
-      cool += w * urban * (0.12 + 0.4 * modern) * dist + w * core * 0.3 * modern;
+      // the built-up fabric thins outward from the old core, reaching further along the
+      // corridors that radiate from it; parks and water break it up
+      vec3 ce = normalize(cross(vec3(0.0, 1.0, 0.0), c.xyz));
+      vec3 cn = cross(c.xyz, ce);
+      float ang = atan(dot(dv, cn), dot(dv, ce));
+      float nArms = 5.0 + floor(modern * 4.0);
+      float arms = pow(0.5 + 0.5 * cos(ang * nArms + 2.2 * sfbm(d * 30.0 + float(i) * 1.3, 2) + modern * 6.28), 6.0);
+      float edgeN = sfbm(d * 330.0 + float(i) * 1.7, 3) + 0.5 * sfbm(d * 90.0 + float(i) * 3.1, 2);
+      float dens = exp(-dk / rm) + 0.45 * arms * exp(-dk / (rm * 2.4));
+      float urban = smoothstep(0.12, 0.45, dens + 0.16 * edgeN + 0.1 * arter);
+      float lit = urban * (0.3 + 0.7 * grain) * (0.55 + 0.45 * arter) * (0.4 + 0.6 * min(dens * 1.6, 1.0));
+      float onLand = mix(0.1, 1.0, landS);
+      warm += w * (core * 0.12 + lit * 0.11 * (1.0 - 0.45 * modern)) * onLand;
+      cool += w * (lit * (0.02 + 0.1 * modern) + core * 0.05 * modern) * onLand;
     }
-    // coastal and river towns everywhere people can live: cellular points ~95 km apart
+    // towns everywhere people live (a jittered lattice ~60 km apart, denser round the metros
+    // and along the coasts and river valleys), joined by a lit web of roads and local rail
+    float valley = pow(max(sridged(d * 16.0 + 5.0, 3), 0.0), 5.0);     // river valleys inland
+    // where people live: settled coasts, river plains and the metros' hinterlands, with wide
+    // dark country between them (the interiors given back to forest, steppe and marsh)
+    float popN = sfbm(d * 5.5 + 13.0, 4) * 0.5 + 0.5;
+    float region = smoothstep(0.5, 0.72, popN + 0.28 * coastNear + 0.5 * nearMetro + 0.2 * valley - 0.12 * (1.0 - mc));
+    float place = habit * region * clamp(max(coastNear * 0.9, valley * 0.85) + 0.15 + nearMetro * 0.8, 0.0, 1.0);
     {
-      vec3 q = d * 105.0;
+      const float QS = 105.0;
+      vec3 q = d * QS;
       vec3 cq = floor(q);
-      float towns = 0.0, tcool = 0.0;
+      float towns = 0.0, tcool = 0.0, road = 0.0;
+      float rw = max(0.012, uTexelKm * 0.6 / (6371.0 / QS));        // road half-width, cells
       for (int x = -1; x <= 1; x++) for (int y = -1; y <= 1; y++) for (int z = -1; z <= 1; z++) {
         vec3 cell = cq + vec3(float(x), float(y), float(z));
-        vec3 h = vec3(fract(sin(dot(cell, vec3(127.1, 311.7, 74.7))) * 43758.5453), fract(sin(dot(cell, vec3(269.5, 183.3, 246.1))) * 43758.5453), fract(sin(dot(cell, vec3(113.5, 271.9, 124.6))) * 43758.5453));
-        vec3 pt = cell + h;
-        float r2 = dot(q - pt, q - pt);                              // in cell units (~95 km)
-        float size = 0.04 + 0.13 * h.x * h.x;
+        vec3 h = hash33(cell * 1.013 + 0.37);
+        vec3 pt = normalize(cell + 0.2 + 0.6 * h) * QS;
+        float r2 = dot(q - pt, q - pt);
+        float size = 0.035 + 0.1 * h.x * h.x;
         float t = exp(-r2 / (size * size));
-        towns += t * (0.35 + 0.65 * h.y);
+        towns += t * (0.12 + 1.4 * h.y * h.y * h.y);
         tcool += t * h.z;
+        // roads to the towns in the next cells along each axis (and one diagonal)
+        for (int k = 0; k < 4; k++) {
+          vec3 dc = k == 0 ? vec3(1.0, 0.0, 0.0) : k == 1 ? vec3(0.0, 1.0, 0.0) : k == 2 ? vec3(0.0, 0.0, 1.0) : (h.y > 0.5 ? vec3(1.0, 1.0, 0.0) : vec3(0.0, 1.0, 1.0));
+          vec3 c2 = cell + dc;
+          vec3 h2 = hash33(c2 * 1.013 + 0.37);
+          if (hash13(cell * 3.1 + dc * 7.3) > 0.82) continue;            // not every pair is joined
+          vec3 pt2 = normalize(c2 + 0.2 + 0.6 * h2) * QS;
+          vec3 ab = pt2 - pt;
+          float tt = clamp(dot(q - pt, ab) / dot(ab, ab), 0.0, 1.0);
+          vec3 dq = q - pt - ab * tt;
+          float dd = dot(dq, dq);
+          if (dd > rw * rw * 16.0) continue;
+          // villages strung along the road
+          float bq = fract(tt * 3.0 + h.x) - 0.5;
+          road = max(road, exp(-dd / (rw * rw)) * (0.45 + 0.55 * exp(-bq * bq * 30.0)));
+        }
       }
-      float valley = pow(max(sridged(d * 16.0 + 5.0, 3), 0.0), 5.0);     // river valleys inland
-      float place = habit * max(coastNear, valley * 0.8 + 0.12);
-      warm += towns * place * 0.3 * (1.0 - 0.4 * clamp(tcool, 0.0, 1.0));
-      cool += tcool * place * 0.16;
+      // coastal strings: small towns ~20 km apart along every settled shore
+      float ctown = 0.0;
+      {
+        vec3 q2 = d * 320.0;
+        vec3 c2 = floor(q2);
+        for (int x = 0; x <= 1; x++) for (int y = 0; y <= 1; y++) for (int z = 0; z <= 1; z++) {
+          vec3 cell = c2 + vec3(float(x), float(y), float(z));
+          vec3 h = hash33(cell + 5.1);
+          if (h.z < 0.35) continue;
+          vec3 pt = normalize(cell + 0.2 + 0.6 * h) * 320.0;
+          ctown += exp(-dot(q2 - pt, q2 - pt) / (0.02 + 0.05 * h.x)) * (0.15 + 1.2 * h.y * h.y);
+        }
+        // coastal towns come in strings with dark shore between them
+        ctown *= smoothstep(0.45, 0.72, sfbm(d * 24.0 + 7.0, 3) * 0.5 + 0.5 + 0.3 * nearMetro);
+      }
+      float rural = habit * (1.0 - 0.7 * wild) * step(0.35, hash13(floor(d * 18.0) + 3.0) + region);
+      warm += towns * place * 0.2 * (1.0 - 0.4 * clamp(tcool, 0.0, 1.0));
+      cool += tcool * place * 0.08;
+      warm += ctown * coastStrip * habit * (0.3 + 0.7 * region) * 0.18;
+      warm += road * rural * region * (0.002 + 0.01 * place);
+      net += road * rural * 0.003 * place;
     }
-    // sea-steads and floating cities on the continental shelves
+    // sea-steads and floating towns on the continental shelves
     {
       float shelfT = (1.0 - land) * smoothstep(0.35, 0.95, mc + 0.25 * coastBand + n1 * 0.1) * (1.0 - smoothstep(48.0, 60.0, alat));
       vec3 q = d * 38.0;
@@ -231,12 +352,13 @@ void main() {
         float r2 = dot(q - cell - h, q - cell - h);
         sea += exp(-r2 / 0.004) * (0.5 + h.y);
       }
-      cool += sea * shelfT * 0.5;
-      warm += sea * shelfT * 0.2;
+      cool += sea * shelfT * 0.35;
+      warm += sea * shelfT * 0.15;
     }
-    // settled countryside: a faint even glow; the coast road
-    warm += habit * 0.0012 * (0.4 + 1.2 * grain);
-    // maglev corridors between the metros: great-circle filaments, dim where they run under the sea
+    // settled countryside: a faint even glow, none in the wilds
+    warm += habit * place * 0.0015 * (0.4 + 1.2 * grain);
+    // maglev corridors between the metros: great-circle filaments, dim where they run under the
+    // sea or through the wilds, stations every ~45 km
     for (int i = 0; i < 400; i++) {
       if (i >= uNumArc) break;
       vec4 N = texelFetch(uData, ivec2(i, 3), 0);
@@ -248,23 +370,31 @@ void main() {
       vec3 pp = d - N.xyz * off;
       if (dot(cross(A.xyz, pp), N.xyz) < 0.0 || dot(cross(pp, Bq.xyz), N.xyz) < 0.0) continue;
       float dk = abs(off) * 6371.0;
-      // stations and towns strung along the line every ~45 km
       float along = acos(clamp(dot(normalize(pp), A.xyz), -1.0, 1.0)) * 6371.0;
       float bq = fract(along / 45.0 + float(i) * 0.37) - 0.5;
-      float beads = 0.12 + 0.88 * exp(-bq * bq * 60.0);
-      net += A.w * 0.22 * beads * beads * exp(-dk * dk / (wk * wk)) * (0.15 + 0.85 * land) * (1.0 - 0.8 * wild) * (N.w / wk);
+      float beads = 0.4 + 0.6 * exp(-bq * bq * 60.0);
+      net += A.w * 0.2 * beads * beads * exp(-dk * dk / (wk * wk)) * (0.12 + 0.88 * land) * (1.0 - 0.75 * wild) * (N.w / wk);
     }
-    // the Halo's ground ports: tether stations, the brightest nodes after Meridian
+    // the Halo's ground ports: the brightest cities after Meridian, their avenues radiating from
+    // the tether station, built out over the water where the coast is short of room
     for (int i = 0; i < 7; i++) {
       vec3 dv = d - uPorts[i].xyz;
       float dk2 = dot(dv, dv) * 40589641.0;
-      warm += uPorts[i].w * exp(-dk2 / 110.0) * 1.2;
-      cool += uPorts[i].w * exp(-dk2 / 900.0) * 0.5;
-      net += uPorts[i].w * exp(-dk2 / 5000.0) * 0.25;
+      if (dk2 > 40000.0) continue;
+      float pw = uPorts[i].w;
+      float dk = sqrt(dk2);
+      vec3 pe = normalize(cross(vec3(0.0, 1.0, 0.0), uPorts[i].xyz));
+      vec3 pn = cross(uPorts[i].xyz, pe);
+      float ang = atan(dot(dv, pn), dot(dv, pe));
+      float av = pow(0.5 + 0.5 * cos(ang * 12.0), 24.0) * exp(-dk / 70.0) * smoothstep(3.0, 8.0, dk);
+      float footprint = smoothstep(0.22, 0.4, exp(-dk2 / (46.0 * 46.0)) + 0.22 * sfbm(d * 300.0 + float(i) * 5.3, 3));
+      float rings = exp(-pow((dk - 16.0) / 1.5, 2.0)) * 0.6 + exp(-pow((dk - 30.0) / 2.0, 2.0)) * 0.35;
+      warm += pw * (exp(-dk2 / 90.0) * 0.9 + footprint * (0.3 + 0.25 * grain) + av * 0.5 + rings * 0.4);
+      cool += pw * (exp(-dk2 / 12.0) * 2.5 + footprint * 0.12 + av * 0.2);
+      net += pw * exp(-dk2 / 5000.0) * 0.12;
     }
     warm *= 1.0 - 0.85 * wild;
     cool *= 1.0 - 0.85 * wild;
-    // linear, in a half-float target: mip averages stay true means, so a far planet keeps its lights
     gl_FragColor = vec4(min(warm, 8.0), min(cool, 8.0), min(net, 8.0), 1.0);
     return;
   }
@@ -347,8 +477,17 @@ void main() {
   vec3 iceC = vec3(0.78, 0.82, 0.88) * (0.92 + 0.08 * n2);
   c = mix(c, iceC, max(snow, ice));
   // ocean
+  // shelf seas: turquoise over the tropical sand banks and reef lagoons, green and silty on
+  // the temperate shelves with plankton swirls, deep blue beyond the break
   float shelf = smoothstep(0.35, 0.95, mc + 0.25 * coastBand + n1 * 0.1);
-  vec3 ocean = mix(vec3(0.004, 0.011, 0.028), vec3(0.012, 0.05, 0.06), shelf);
+  float tropic = 1.0 - smoothstep(22.0, 34.0, alat);
+  float bank = smoothstep(0.52, 0.9, maskAt(muv, 2.0) + 0.3 * coastBand + 0.12 * n2) * (1.0 - land);
+  float swirl = sfbm(d * 44.0 + vec3(sfbm(d * 11.0 + 5.0, 3) * 2.2), 4) * 0.5 + 0.5;
+  vec3 shelfC = mix(vec3(0.009, 0.038, 0.044), vec3(0.012, 0.062, 0.07), tropic);
+  shelfC = mix(shelfC, vec3(0.02, 0.062, 0.046), (1.0 - tropic) * smoothstep(0.52, 0.8, swirl) * 0.7);
+  vec3 bankC = mix(vec3(0.018, 0.06, 0.05), vec3(0.05, 0.2, 0.18), tropic) * (0.8 + 0.4 * smoothstep(0.3, 0.7, n2 * 0.5 + 0.5));
+  vec3 ocean = mix(vec3(0.004, 0.011, 0.028), shelfC, shelf);
+  ocean = mix(ocean, bankC, bank * (0.35 + 0.65 * tropic) * smoothstep(0.3, 0.6, n1 * 0.5 + 0.5 + 0.25 * tropic));
   float seaIce = smoothstep(77.0, 82.0, latD + n2 * 6.0) + smoothstep(-68.0, -71.0, latD + n2 * 4.0);
   ocean = mix(ocean, vec3(0.7, 0.75, 0.8) * (0.85 + 0.15 * n2), clamp(seaIce, 0.0, 1.0));
   vec3 alb = land > 0.5 ? c : ocean;
@@ -472,7 +611,10 @@ export class EarthBake {
     };
     this.surfA = mk(size);
     this.surfB = mk(size);
-    this.clouds = mk(cloudSize);
+    // weather: half floats, so the thresholds the Earth shader draws its cloud edges at never
+    // show 8-bit contour steps
+    this.clouds = new THREE.WebGLCubeRenderTarget(cloudSize, { type: THREE.HalfFloatType, format: THREE.RGBAFormat, generateMipmaps: true, minFilter: THREE.LinearMipmapLinearFilter, magFilter: THREE.LinearFilter, depthBuffer: false });
+    this.clouds.texture.colorSpace = THREE.NoColorSpace;
     // night lights: linear half floats, so mip levels average true light, not its square root
     this.lights = new THREE.WebGLCubeRenderTarget(size, { type: THREE.HalfFloatType, format: THREE.RGBAFormat, generateMipmaps: true, minFilter: THREE.LinearMipmapLinearFilter, magFilter: THREE.LinearFilter, depthBuffer: false });
     this.lights.texture.colorSpace = THREE.NoColorSpace;

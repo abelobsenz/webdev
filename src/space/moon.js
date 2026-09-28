@@ -10,14 +10,17 @@ import { addLamps, pixelRadius } from './craftMesh.js';
 import { buildLunarServiceCourt } from './interfaces.js';
 import { MoonSurface } from './moonSurface.js';
 import { buildMediiLanding } from './lunarLanding.js';
-import { lunarMesh, LUNAR_FRAME } from './lunarMaterial.js';
+import { lunarMesh, LUNAR_FRAME, LK, createLunarMaterial } from './lunarMaterial.js';
 import { CB } from '../craft/craftGeometry.js';
 
 // The terraformed Moon: seas in the old maria, green highlands softened craters,
 // polar ice, clouds, city lights, a thin blue atmosphere and an equatorial ring.
 // Moon frame: +X faces the Earth (near side), +Y ~ orbit normal.
 
-// Thin atmosphere: analytic limb glow on a slightly larger shell
+// Thin atmosphere: analytic glow on a larger shell. Under a sixth of the Earth's gravity the
+// air's scale height is ~40 km, so the limb carries a wide, soft blue haze (warm where the
+// terminator crosses it, fading into the night), and the disc itself a faint aerial veil that
+// thickens toward the edge.
 const ATMO_FRAG = /* glsl */ `
 uniform vec3 uSunDir;
 uniform float uSunE;
@@ -25,7 +28,7 @@ uniform vec3 uCenter;
 varying vec3 vWorld;
 void main() {
   const float R = ${R_MOON.toFixed(1)};
-  const float H = 11.0;
+  const float H = 40.0;
   vec3 ro = cameraPosition - uCenter;
   vec3 rd = normalize(vWorld - cameraPosition);
   float b = dot(ro, rd);
@@ -45,12 +48,14 @@ void main() {
     path = chord * exp(-max(r - R, 0.0) / H);
   }
   float mu = dot(up, uSunDir);
-  float lit = smoothstep(-0.25, 0.2, mu);
+  float lit = smoothstep(-0.3, 0.15, mu);
   float cosT = dot(rd, uSunDir);
-  vec3 ray = vec3(0.25, 0.5, 1.0) * (0.75 + 0.25 * cosT * cosT);
-  vec3 sunset = vec3(1.0, 0.55, 0.3) * smoothstep(0.25, -0.05, mu) * lit;
-  vec3 col = (ray * lit + sunset) * path * uSunE * 2.4e-5;
-  col += vec3(1.0, 0.9, 0.8) * pow(max(cosT, 0.0), 12.0) * (path / chord) * uSunE * 0.01 * lit;
+  vec3 ray = vec3(0.22, 0.46, 1.0) * (0.75 + 0.25 * cosT * cosT);
+  vec3 sunset = vec3(1.0, 0.52, 0.28) * smoothstep(0.3, -0.05, mu) * lit;
+  // single scattering saturates along the long grazing paths (a soft shoulder, not a hard rim)
+  float pk = 1.0 - exp(-path / 520.0);
+  vec3 col = (ray * lit + sunset * 0.8) * pk * uSunE * 0.011;
+  col += vec3(1.0, 0.9, 0.8) * pow(max(cosT, 0.0), 12.0) * (path / chord) * uSunE * 0.008 * lit;
   gl_FragColor = vec4(col, 0.0);
 }
 `;
@@ -197,7 +202,7 @@ export class Moon {
     this.mesh = this.surface ? this.surface.mesh : new THREE.Group();
     this.group.add(this.mesh);
     this.atmoU = { uSunDir: this.uniforms.uSunDir, uSunE: U.uSunIlluminance, uCenter: { value: new THREE.Vector3() } };
-    this.atmo = new THREE.Mesh(new THREE.SphereGeometry(R_MOON + 70, 128, 64), new THREE.ShaderMaterial({
+    this.atmo = new THREE.Mesh(new THREE.SphereGeometry(R_MOON + 230, 128, 64), new THREE.ShaderMaterial({
       vertexShader: ATMO_VERT, fragmentShader: ATMO_FRAG, uniforms: this.atmoU,
       transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.FrontSide,
     }));
@@ -261,6 +266,26 @@ export class Moon {
       C.pop(); C.pop();
       this.collar = lunarMesh(C.geometry(), { lit: 0.4 });
       this.port.add(this.collar);
+      // lift cars riding the tether: six capsules with a lit band and glazed saloons, climbing
+      // steadily (each enters the Exchange's collar as the next leaves the Crown)
+      const K = new CB();
+      K.push(new THREE.Matrix4().makeRotationX(-Math.PI / 2));
+      K.lathe([[0, -16, LK.BRONZE], [4.2, -15, LK.HULL], [7, -11, LK.HULL], [7.2, -5, LK.GLASS], [7.2, 5, LK.GLASS], [7, 11, LK.HULL], [4.2, 15, LK.HULL], [0, 16, LK.BRONZE]], 16);
+      K.lathe([[7.7, -0.7, LK.LANTERN], [7.7, 0.7, LK.LANTERN]], 16);
+      K.lathe([[7.5, -12.2, LK.BRONZE], [7.5, -11.2, LK.BRONZE]], 16);
+      K.lathe([[7.5, 11.2, LK.BRONZE], [7.5, 12.2, LK.BRONZE]], 16);
+      K.pop();
+      const carMat = createLunarMaterial({ lit: 0.85 });
+      const carGeo = K.geometry();
+      this.cars = [];
+      this.carSpan = [top.y + 0.035, end - 0.06];
+      this.carXZ = [top.x, top.z];
+      for (let i = 0; i < 6; i++) {
+        const m = lunarMesh(carGeo, {}, carMat);
+        m.name = 'Lift car';
+        this.landing.add(m);
+        this.cars.push(m);
+      }
     }
     this.group.add(this.landing);
     this.group.traverse((o) => { o.frustumCulled = false; });
@@ -300,6 +325,16 @@ export class Moon {
       const cam = this.space.camera;
       this.landing.getWorldPosition(_lp);
       this.landingMesh.visible = pixelRadius(cam, _lp, this.landingData.radius, this.space.size.y) > 1.5;
+      // the lift cars climb at ~0.4 km/s, a quarter of an hour from the Crown to the Exchange
+      const [y0, y1] = this.carSpan;
+      for (let i = 0; i < this.cars.length; i++) {
+        const car = this.cars[i];
+        const f = ((i / this.cars.length + realTime / 900) % 1 + 1) % 1;
+        car.position.set(this.carXZ[0], y0 + (y1 - y0) * f, this.carXZ[1]);
+        car.updateMatrixWorld();
+        car.getWorldPosition(_lp);
+        car.visible = pixelRadius(cam, _lp, 0.016, this.space.size.y) > 0.6;
+      }
     }
     this.atmoU.uCenter.value.copy(sim.moonPos);
     const fu = this.farMat.uniforms;
