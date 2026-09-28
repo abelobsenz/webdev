@@ -306,9 +306,22 @@ const sunward = {
     const { R, rnd } = ctx;
     const streets = [], squares = [], plazas = [], parks = [], sites = [], landmarks = [], lots = [], inlays = [], beds = [], zones = [], pools = [], trees = [];
     const west0 = Math.PI / 2 + 0.12, west1 = 1.5 * Math.PI - 0.12;
+    // the Mirror Walks: the town's edge on the heliostat field, north and south, an
+    // esplanade 9.5 m off the field's gravel with its buildings facing the mirrors; the
+    // crescents run on to meet it (they used to stop short, leaving a dead wedge between
+    // the town and the field)
+    const fieldEdge = Math.PI / 2 - 0.05;
+    const walkAt = (sgn) => (r) => sgn * (fieldEdge + 9.5 / r);
+    for (const sgn of [1, -1]) {
+      const pts = [];
+      for (let r = 262; r <= 1400; r += 6) { const a = walkAt(sgn)(r); if (r > R(a) - 40) break; pts.push([Math.cos(a) * r, Math.sin(a) * r]); }
+      // lots on the town side only (toward -x): the side whose normal points west
+      const t = [pts[1][0] - pts[0][0], pts[1][1] - pts[0][1]];
+      streets.push({ pts, cls: ST.ESPLANADE, hw: 6.5, name: 'Mirror Walk', lotSide: t[1] > 0 ? 1 : -1, noBridges: true });
+    }
     // crescents of the sun-plan town (west half), rays between them
     const cres = [[330, ST.STREET], [450, ST.AVENUE], [570, ST.STREET], [690, ST.AVENUE], [810, ST.STREET]];
-    for (const [r, cls] of cres) streets.push({ pts: T.arc(0, 0, r, west0, west1, 7), cls, name: 'crescent' });
+    for (const [r, cls] of cres) streets.push({ pts: T.arc(0, 0, r, walkAt(1)(r), 2 * Math.PI + walkAt(-1)(r), 7), cls, name: 'crescent' });
     for (let k = 0; k <= 12; k++) {
       const a = west0 + ((west1 - west0) * k) / 12;
       streets.push({ pts: T.radial(0, 0, a, 250, R(a) - 40, 6), cls: k % 2 ? ST.STREET : ST.AVENUE, name: 'ray' });
@@ -322,6 +335,10 @@ const sunward = {
     const paths = [];
     for (let k = 0; k <= 18; k++) { const a = e0 + ((e1 - e0) * k) / 18; paths.push({ pts: T.radial(0, 0, a, 250, R(a) - 44, 6), w: k % 3 === 0 ? 2.4 : 1.2 }); }
     for (const r of [420, 610, 800]) paths.push({ pts: T.arc(0, 0, r, e0, e1, 6), w: 2.0 });
+    // bronze guide lines down the main service paths and round the arcs: by day a fine
+    // inlay in the gravel, by night the field reads as rays of light from the receiver
+    for (let k = 0; k <= 18; k += 3) { const a = e0 + ((e1 - e0) * k) / 18; inlays.push({ pts: T.radial(0, 0, a, 258, R(a) - 46, 6), w: 0.3 }); }
+    for (const r of [420, 610, 800]) inlays.push({ pts: T.arc(0, 0, r, e0 + 4 / r, e1 - 4 / r, 5), w: 0.26 });
     const heliostats = { a0: e0, a1: e1, r0: 262, r1: (a) => R(a) - 52, rowStep: 12, colStep: 9.5, paths };
     landmarks.push({ type: 'heliostats', ...heliostats });
     // the Heliodrome on the axis to the bridge, the Plaza of Dawn with its gnomon at the landing
@@ -430,6 +447,14 @@ const seraph = {
     zones.push({ prim: { bbox: [-1200, -1200, 1200, 1200], d: (x, z) => { const r = Math.hypot(x, z); if (r < 180) return 30; return Math.abs(angDiff(Math.atan2(z, x), ca)) * r - (ctx.cascade.w * 0.5 + 10); } }, v: 0, reserve: true });
     // pergola gardens on the terraces, flower beds along every terrace edge
     for (const [f, w] of [[0.64, 5], [0.355, 4]]) for (const run of T.split(T.arc(0, 0, (a) => R(a) * f, 0, TAU, 5), keep)) beds.push({ pts: run, w });
+    // columnar trees along the crest of every terrace, set back from the balustrade: the
+    // terraces read as the stepped gardens they are, from the quay and from the air
+    for (const [f, y, s] of [[0.66, 16, 12], [0.37, 23, 11]]) {
+      for (const p of T.arc(0, 0, (a) => R(a) * f - 6.5, 0, TAU, 11)) {
+        if (!keep(p) || ctx.levelAt(p[0], p[1], 3.5) !== y || ctx.blocked(p[0], p[1], 6)) continue;
+        trees.push({ x: p[0], z: p[1], sp: 'araucaria', s });
+      }
+    }
     // A level garden promenade gives the broad first terrace a public purpose.
     // It joins the radial stairs, with open pergola rooms between the towers.
     const promenade = T.arc(0, 0, a => R(a) * .615, 0, TAU, 4);
