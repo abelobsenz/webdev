@@ -18,11 +18,12 @@ import { R_MOON } from './sim.js';
 // (facade x = metres along the guideway).
 
 export const LK = { GLASS: 0, HULL: 1, LANTERN: 2, GARDEN: 3, CONDUIT: 4, PANEL: 7, BRONZE: 8, DECK: 9, DARK: 10, RADIATOR: 11, ROOF: 12, CONSERVATORY: 13, STONE: 20, ROOFG: 21, PAVE: 22, PAD: 23, COURT: 24, TILE: 25, POOL: 26, WALL: 27, COIL: 28,
-  REGOLITH: 29, SOLAR: 30, HAZARD: 31, SIGN: 32, PAINT: 33, GROUND: 34, LIGHT: 35 };
+  REGOLITH: 29, SOLAR: 30, HAZARD: 31, SIGN: 32, PAINT: 33, GROUND: 34, LIGHT: 35, FOIL: 36 };
 // 29 sintered regolith (berms, bagged shielding, spoil, boulders), 30 photovoltaic cells,
 // 31 hazard chevrons, 32 lit signage and concourse bands, 33 livery paint (the instance
 // colour: suits, clothes, rover and tram liveries), 34 packed regolith with tyre tracks
-// (aprons and haul roads), 35 lamp lenses and lit cab windows (always glowing).
+// (aprons and haul roads), 35 lamp lenses and lit cab windows (always glowing), 36 gold
+// multi-layer insulation over cryogenic tanks (crinkled facets, taped seams, beta-cloth patches).
 
 const VERT = /* glsl */ `
 attribute vec3 aFacade;
@@ -316,6 +317,21 @@ void main() {
     float grit = vnoise(f * 0.35) * 0.5 + vnoise(f * 3.0) * 0.5 * detP;
     alb = mix(vec3(0.24, 0.23, 0.21), vec3(0.34, 0.325, 0.3), grit) * (1.0 - 0.3 * ruts);
     rough = 0.97;
+  } else if (k > 35.5) {
+    // multi-layer insulation: gold-coated film in blankets ~2 x 3 m, crinkled into facets that
+    // each catch the Sun at their own angle (the normal tilted by a smooth noise of the
+    // blanket, settling to a rougher, flatter gold where the facets no longer resolve), dark
+    // taped seams, and the odd white beta-cloth patch over a fitting
+    vec2 bl = floor(f / vec2(2.0, 3.0));
+    float hb = hash12(bl + 31.0);
+    float cr = detP;
+    vec3 tilt = vec3(vnoise(f * 1.7 + hb * 9.0), vnoise(f * 1.7 + 17.0), vnoise(f * 4.3 + 5.0)) - 0.5;
+    N = normalize(N + tilt * 0.7 * cr);
+    float seam = max(gridLine(f.x, 2.0, 0.04, fw.x), gridLine(f.y, 3.0, 0.04, fw.y)) * det;
+    alb = mix(vec3(0.78, 0.56, 0.2), vec3(0.62, 0.44, 0.16), hb) * (1.0 - 0.45 * seam);
+    float patchW = step(0.93, hb);
+    alb = mix(alb, vec3(0.8, 0.79, 0.75), patchW);
+    rough = mix(mix(0.36, 0.18, cr), 0.8, patchW); metal = mix(1.0, 0.0, patchW);
   } else {
     // lamp lenses and lit cab glazing: a steady warm glow, stronger by night
     alb = vec3(0.3); rough = 0.2;

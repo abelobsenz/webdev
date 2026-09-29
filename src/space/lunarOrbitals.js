@@ -334,10 +334,14 @@ export function buildDepot() {
   const B = new CB();
   const lamps = [];
   const { spine, clusters, tankR, tankOff } = DEPOT;
-  // the spine: a 16 m truss along x
+  // the spine: a 16 m truss along x, members stout enough to read at a few kilometres, a
+  // service walkway and a lit power bus down one face
   B.push(new THREE.Matrix4().makeRotationY(Math.PI / 2));
-  truss(B, 0, 0, spine[0], spine[1], 16, 26);
+  truss(B, 0, 0, spine[0], spine[1], 16, 26, LK.HULL, 1.8);
   B.pop();
+  // (on the face away from the arm's base)
+  B.box((spine[0] + spine[1]) / 2, -2, -9.2, spine[1] - spine[0] - 20, 3, 0.4, LK.DECK);
+  B.box((spine[0] + spine[1]) / 2, 3.5, -9.4, spine[1] - spine[0] - 20, 0.9, 0.9, LK.CONDUIT);
   // tank clusters: four spheres round the spine on struts, gold foil and white alternating,
   // a red beacon on each
   for (const x of clusters) {
@@ -345,8 +349,10 @@ export function buildDepot() {
       const a = (i + 0.5) / 4 * TAU;
       const y = Math.cos(a) * tankOff, z = Math.sin(a) * tankOff;
       B.at(x, y, z, 0, Math.PI / 2, 0);
-      B.lathe(Array.from({ length: 11 }, (_, j) => { const t = -Math.PI / 2 + Math.PI * j / 10; return [Math.cos(t) * tankR, Math.sin(t) * tankR * 1.25, (i + (x > 0 ? 1 : 0)) % 2 ? LK.BRONZE : LK.HULL]; }), 22);
-      band(B, tankR + 0.3, -2, 2, 22, LK.DARK, 1);
+      B.lathe(Array.from({ length: 11 }, (_, j) => { const t = -Math.PI / 2 + Math.PI * j / 10; return [Math.cos(t) * tankR, Math.sin(t) * tankR * 1.25, (i + (x > 0 ? 1 : 0)) % 2 ? LK.FOIL : LK.HULL]; }), 28);
+      band(B, tankR + 0.3, -2, 2, 28, LK.DARK, 1);
+      // the polar boss and fill line toward the spine
+      B.lathe([[5, tankR * 1.25 - 1, LK.BRONZE], [5, tankR * 1.25 + 2.5, LK.BRONZE], [2.5, tankR * 1.25 + 3.5, LK.DARK]], 12);
       B.pop();
       B.at(x, y / 3, z / 3, Math.atan2(z, y), 0, 0);   // the strut from the spine's face into the tank
       B.box(0, 0, 0, 5, 18, 5, LK.HULL);
