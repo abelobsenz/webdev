@@ -95,7 +95,8 @@ vec3 craterDetail(vec3 p, float sc, float fpCells, float quiet, float seed) {
     float x = dl / rr;
     if (x > 2.2) continue;
     // bowl (depth 0.2 D) with a raised rim and a thinning ejecta skirt
-    float g = exp(-pow((x - 1.0) * 4.5, 2.0));
+    float gx = (x - 1.0) * 4.5;
+    float g = exp(-gx * gx);
     float dh = (x < 1.0 ? 0.8 * x : 0.0) - 9.0 * (x - 1.0) * g * 0.16 - (x > 1.0 ? 0.3 * pow(x, -4.0) : 0.0);
     slope += dh * dv / max(dl, 1e-5) * (1.0 - 0.7 * h.z);
   }
@@ -221,6 +222,7 @@ void main() {
     float siteD = length(loc.xz);
     float nearSite = 1.0 - smoothstep(24.0, 32.0, siteD);
     vec3 bed = alb;
+    float wk = 0.0;                                 // Medii Works' worked ground (0..1)
     if (nearSite > 0.0) {
       float bd = bayDist(loc.xz);
       float aa = max(fp * 0.7, 0.001);
@@ -236,6 +238,22 @@ void main() {
       alb = mix(alb, park, 1.0 - smoothstep(2.6, 4.0, siteD));
       // the shore: a strip of pale shingle
       alb = mix(alb, vec3(0.3, 0.28, 0.22), (1.0 - smoothstep(0.01, 0.05 + fp, -bd)) * nearSite);
+      // Medii Works (lunarWorks.js): the mine, the plant and the array stand on worked regolith,
+      // not farmland: a grey-brown mottle of disturbed ground under the boulders and craters
+      vec2 wuv = vec2(loc.x + loc.z, loc.z - loc.x) * 0.70710678;          // (u, v) planning axes, km
+      float wbox = max(max(0.3 - wuv.x, wuv.x - 6.3), max(-7.6 - wuv.y, wuv.y + 2.3));
+      wk = (1.0 - smoothstep(0.0, 0.35, wbox)) * nearSite;
+      if (wk > 0.0) {
+        float gn = snoise(vec3(wuv * 1.7, 11.0)) * 0.5 + 0.5;
+        vec3 reg = mix(vec3(0.19, 0.18, 0.165), vec3(0.3, 0.285, 0.26), gn);
+        alb = mix(alb, reg, wk);
+      }
+    }
+    // regolith grain close up: two octaves of mottle, 45 m and 12 m, where they resolve
+    if (fp < 0.05) {
+      vec3 e2 = up * (RM / 0.045);
+      float mn = snoise(e2) * 0.6 + snoise(e2 * 3.7) * 0.4;
+      alb *= 1.0 + 0.16 * mn * (1.0 - smoothstep(0.012, 0.05, fp)) * (1.0 - waterF) * (1.0 - nearSite * (1.0 - wk));
     }
     float depth = max(-h, 0.0015);
     float hl = max(h, 0.0);
@@ -264,6 +282,9 @@ void main() {
       float quiet = smoothstep(9.0, 26.0, acos(clamp(dot(up, SITE_UP), -1.0, 1.0)) * RM);
       if (fp < 2.0) grad -= craterDetail(up, RM / 5.0, fp / 5.0, quiet, 0.0) * 0.55;
       if (fp < 0.6) grad -= craterDetail(up, RM / 1.4, fp / 1.4, quiet, 37.0) * 0.5;
+      // a third octave of small fresh craters (tens of metres) for the ground a lander sees,
+      // on the worked ground of the Works too
+      if (fp < 0.08) grad -= craterDetail(up, RM / 0.25, fp / 0.25, max(quiet, wk * 0.7), 71.0) * 0.42;
       if (fp < 0.25) {
         vec3 e = up * RM / 0.35;
         vec3 gn = vec3(snoise(e), snoise(e + 5.2), snoise(e + 9.7)) * 0.08 * (1.0 - smoothstep(0.03, 0.1, fp / 0.35));
@@ -284,13 +305,16 @@ void main() {
         // towns cluster: a low-frequency pattern breaks the lit coasts into strings of places
         float clus = smoothstep(0.6, 0.9, snoise(up * 30.0) * 0.5 + 0.5 + 0.22 * snoise(up * 95.0));
         float dens = suit * side * (band * 0.5 * clus + 0.02);
+        float ownT = 1.0;
         for (int i = 0; i < ${TOWNS.length}; i++) {
           float dk = acos(clamp(dot(up, uTown[i].xyz), -1.0, 1.0)) * RM;
           dens += uTown[i].w * (exp(-dk * dk / 60.0) * 1.2 + exp(-dk * dk / 1500.0) * 0.25) * (i == 0 ? 0.12 : 1.0);
+          // the outposts (lunarOutposts.js) draw their own lamps within a few kilometres
+          if (i > 0) ownT = min(ownT, smoothstep(1.8, 3.8, dk));
         }
         float pat = 0.55 * lightLattice(up, 3.0, 0.03, fp, 0.0) + 0.45 * lightLattice(up, 0.9, 0.012, fp, 17.0);
         // the Landing draws its own lamps and windows close up
-        float own = nearSite > 0.0 ? smoothstep(2.0, 4.5, siteD) : 1.0;
+        float own = (nearSite > 0.0 ? smoothstep(2.0, 4.5, siteD) : 1.0) * ownT;
         landCol += vec3(1.0, 0.7, 0.42) * dens * pat * night * 0.12 * own;
       }
     }

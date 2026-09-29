@@ -8,7 +8,7 @@ import { stationFrame } from './stations.js';
 import { addLamps, pixelRadius } from './craftMesh.js';
 import { TOWNS } from './moonBake.js';
 import { R_MOON } from './sim.js';
-import { Path } from './lunarTraffic.js';
+import { Path, LunarTraffic, plumeMesh } from './lunarTraffic.js';
 
 // The Moon's other settlements: the towns whose lights the night side shows (moonBake.js
 // TOWNS), each a working outpost built where its lights are. Every one is generated from its
@@ -121,7 +121,8 @@ export function buildOutpost(seed, weight = 0.5, lat = 0) {
   }
 
   // --- the landing field ---
-  const pads = [];
+  const pads = [], parked = [];
+  let cycler = null;
   const nPads = 1 + Math.round(weight * 3);
   const fieldA = rnd() * TAU;
   for (let i = 0; i < nPads; i++) {
@@ -142,13 +143,16 @@ export function buildOutpost(seed, weight = 0.5, lat = 0) {
     }
     B.pop(); B.pop();
     for (let k = 0; k < 12; k++) { const a = k / 12 * TAU; const lx = x + Math.cos(a) * 92, lz = z + Math.sin(a) * 92; lamps.push({ p: new THREE.Vector3(lx, gy(lx, lz) + 1.6, lz), r: 1.3, color: k % 3 ? LAMP.AMBER : LAMP.GREEN, i: 1.1 }); }
-    // craft standing on it
-    const nCraft = 1 + Math.floor(rnd() * 2.2);
+    // craft standing on it; the first field keeps its centre for the shuttle that comes and goes
+    const first = pads.length === 0;
+    const nCraft = first ? 1 + Math.floor(rnd() * 1.99) : 1 + Math.floor(rnd() * 2.2);
+    if (first) cycler = [x, z, rnd() * TAU];
     for (let c = 0; c < nCraft; c++) {
-      const a = rnd() * TAU, d = nCraft === 1 ? 0 : 45;
+      const a = rnd() * TAU, d = first ? 55 : nCraft === 1 ? 0 : 45;
       const lx = x + Math.cos(a + c * Math.PI) * d, lz = z + Math.sin(a + c * Math.PI) * d;
       const part = rnd() < 0.5 ? 'lander' : 'cargoLander';
       put(part, seat(_m, lx, lz, rnd() * TAU, 0.9), LIVERY[Math.floor(rnd() * LIVERY.length)]);
+      parked.push([lx, lz]);
     }
     pads.push([x, z]);
     road([x * (1 - 100 / Math.hypot(x, z)), z * (1 - 100 / Math.hypot(x, z))], [x * 60 * sz / Math.hypot(x, z), z * 60 * sz / Math.hypot(x, z)], 12);
@@ -274,7 +278,7 @@ export function buildOutpost(seed, weight = 0.5, lat = 0) {
     put('boulder' + (k % 3), seat(_m, x, z, rnd() * TAU, -0.1 * s, s), [tone, tone * 0.97, tone * 0.93]);
   }
 
-  return { geo: B.geometry(), lamps, inst, plan, loops, radius: outer + 200 };
+  return { geo: B.geometry(), lamps, inst, plan, loops, pads, parked, cycler, radius: outer + 200 };
 }
 
 // ------------------------------------------------------------------------ runtime --
@@ -324,6 +328,23 @@ export class LunarOutposts {
     site.rovers.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     site.riders.forEach((r, i) => site.rovers.instanceColor.setXYZ(i, ...LIVERY[(i + idx) % LIVERY.length]));
     site.group.add(site.rovers);
+    // the field's shuttle, its plume, and suited crews round the parked craft
+    site.crew = [];
+    for (const [x, z] of d.parked) for (let i = 0; i < 5; i++) site.crew.push({ x, z, r: 22 + ((i * 37 + idx * 11) % 50) / 10, a0: i * 1.3 + idx, w: i % 2 ? 1 : -1.2 });
+    site.suits = lunarInstanced(kit('suit'), Math.max(1, site.crew.length), {}, this.mat, { tint: true });
+    site.suits.count = site.crew.length;
+    site.suits.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    for (let i = 0; i < site.crew.length; i++) site.suits.instanceColor.setXYZ(i, ...(i % 3 ? [0.92, 0.9, 0.86] : [0.95, 0.62, 0.18]));
+    site.group.add(site.suits);
+    site.shuttle = null;
+    if (d.cycler) {
+      site.shuttle = lunarInstanced(kit('lander'), 1, {}, this.mat);
+      site.shuttle.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      site.plume = plumeMesh();
+      site.plume.scale.setScalar(0.001);
+      site.group.add(site.shuttle, site.plume);
+    }
+    site.live = [site.rovers, site.suits, site.shuttle].filter(Boolean);
     site.group.traverse((o) => { o.frustumCulled = false; });
     site.built = true;
     this.buildMs += performance.now() - t0;
@@ -344,10 +365,37 @@ export class LunarOutposts {
       // the furniture (craft, domes, vaults, trackers, boulders) and the rovers only near enough
       // to be told apart; from farther the merged ground plan and its lamps stand for the town
       const near = s.group.visible && d < DETAIL_KM;
-      if (near !== s.detailOn) { s.detailOn = near; for (const m of s.detail || []) m.visible = near; s.rovers.visible = near; }
-      if (near && d < 40) this.moveRovers(s, t);
+      if (near !== s.detailOn) { s.detailOn = near; for (const m of s.detail || []) m.visible = near; for (const m of s.live) m.visible = near; if (!near && s.plume) s.plume.visible = false; }
+      if (near && d < 40) { this.moveRovers(s, t); this.moveLife(s, t, i); }
     }
     if (want >= 0) this.build(this.sites[want], want);
+  }
+
+  moveLife(s, t, idx) {
+    for (let i = 0; i < s.crew.length; i++) {
+      const c = s.crew[i], a = c.a0 + t * c.w / c.r;
+      seat(_m, c.x + Math.cos(a) * c.r, c.z + Math.sin(a) * c.r, -a + (c.w > 0 ? 0 : Math.PI), 0.9);
+      s.suits.setMatrixAt(i, _m);
+    }
+    s.suits.instanceMatrix.needsUpdate = true;
+    if (!s.shuttle) return;
+    const [x, z, yaw] = s.data.cycler;
+    const { h, thr } = LunarTraffic.landerCycle(t, idx * 53.1);
+    if (h < 0) { _m.makeScale(0, 0, 0); s.plume.visible = false; }
+    else {
+      seat(_m, x, z, yaw + h * 1e-4, 0.9 + h);
+      s.plume.visible = thr > 0.01;
+      if (s.plume.visible) {
+        _p.set(0, 0.9, 0).applyMatrix4(_m);
+        s.plume.position.copy(_p).multiplyScalar(0.001);
+        s.plume.quaternion.setFromRotationMatrix(_m);
+        const len = Math.min(1, (h + 0.9) / 42 + 0.05);
+        s.plume.scale.set(0.001 * (1 + (1 - len) * 1.8), 0.001 * len, 0.001 * (1 + (1 - len) * 1.8));
+        s.plume.material.uniforms.uI.value = thr * (0.8 + 0.2 * Math.sin(t * 37 + idx));
+      }
+    }
+    s.shuttle.setMatrixAt(0, _m);
+    s.shuttle.instanceMatrix.needsUpdate = true;
   }
 
   moveRovers(s, t) {

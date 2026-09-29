@@ -267,6 +267,10 @@ report.landingTris = tris(L.geo); report.worksTris = tris(W.geo);
     for (let a = 0; a < P.length; a++) for (let b = a + 1; b < P.length; b++) ok(Math.hypot(P[a].x - P[b].x, P[a].z - P[b].z) > P[a].r + P[b].r - 1e-6, `outpost ${i}: ${P[a].kind} overlaps ${P[b].kind}`);
     for (const [part, list] of Object.entries(d.inst)) { inst += list.length * tris(kit(part)); for (const e of list) ok(e.m.elements.every(Number.isFinite), `outpost ${i} ${part} finite`); }
     ok(d.loops.length >= 1, `outpost ${i} has roads`);
+    // craft on their fields: inside the apron, apart, the shuttle's centre spot kept clear
+    for (const [x, z] of d.parked) ok(d.pads.some(([px, pz]) => Math.hypot(px - x, pz - z) + 13 < 95), `outpost ${i} craft on a field`);
+    for (let a = 0; a < d.parked.length; a++) for (let b = a + 1; b < d.parked.length; b++) ok(Math.hypot(d.parked[a][0] - d.parked[b][0], d.parked[a][1] - d.parked[b][1]) > 13 + 13 + 5, `outpost ${i} craft apart`);
+    if (d.cycler) for (const [x, z] of d.parked) ok(Math.hypot(d.cycler[0] - x, d.cycler[1] - z) > 13 + 27 + 13, `outpost ${i} shuttle spot clear of crews`);
   });
   // no two outposts (or an outpost and Medii Landing) overlap on the sphere
   const dirs = TOWNS.map(([la, lo]) => townDir(la, lo));

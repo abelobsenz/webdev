@@ -120,7 +120,7 @@ void main() {
   gl_FragColor = vec4(c * (core * 1.6 + a * 0.12) * uI, 0.0);
 }
 `;
-function plumeMesh() {
+export function plumeMesh() {
   const g = new THREE.ConeGeometry(9, 42, 18, 1, true);
   g.translate(0, -21, 0);                                     // the narrow top at the nozzle
   const m = new THREE.ShaderMaterial({
