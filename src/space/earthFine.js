@@ -276,8 +276,15 @@ vec3 ef_limbGain(float hMin, bool ground, float cosV, float gain) {
 }
 `;
 
+/** Mean light lost to the unresolved self-shadowing of a cloud field (0..1) at cos(sun zenith) mu, stratiform share S. */
+export function meanSelfShadow(mu, S) { return MEAN_SELF_K * (1 - S) * (1 - smooth(0.08, 0.85, mu)); }
+const MEAN_SELF_K = 0.32;
+
 // ---- GLSL, part 2: after the Earth's lowCloud(); needs uToBody ----------------------------------
 export const EARTH_FINE_SHADOW_GLSL = /* glsl */ `
+// The mean of the self-shadowing once it falls below the pixels (see meanSelfShadow in JS)
+float ef_meanSelfShadow(float mu, float S) { return ${f(MEAN_SELF_K)} * (1.0 - S) * (1.0 - smoothstep(0.08, 0.85, mu)); }
+
 // Self-shadowing of the cloud tops: the height field (tops up to ~3 km above the deck, read from
 // the optical depth) marched toward the Sun in ${SHADOW_MARCH.steps} growing steps; each neighbour that stands
 // above the ray to the Sun takes a share of the light. A low Sun gives long shadows (the relief

@@ -463,6 +463,31 @@ lint('meteors', metMat);
   const pre = efs.slice(iMain, iLand);
   ok(iLand > iMain && pre.split('{').length - pre.split('}').length === 1, 'ef_land called outside any branch');
   ok(earth.uniforms.uLimbGain.value > 0 && earth.uniforms.uLimbGain.value < 1.5, 'limb gain');
+  // derivatives and implicit-LOD reads in main() only at its top level (uniform control flow),
+  // whatever the ground-skip and relief branches around them
+  {
+    const body = efs.slice(iMain);
+    let depth = 0, nDeriv = 0;
+    for (let i = 0; i < body.length; i++) {
+      const c = body[i];
+      if (c === '{') depth++;
+      else if (c === '}') { depth--; if (depth === 0) break; }
+      const m = /^(dFdx|dFdy|fwidth|texture)\s*\(/.exec(body.slice(i, i + 12));
+      if (m && !/\w/.test(body[i - 1])) { nDeriv++; ok(depth === 1, `earth main: ${m[1]}() at brace depth ${depth}`); }
+    }
+    ok(nDeriv >= 8, `earth main: derivative and implicit-LOD calls found ${nDeriv}`);
+    // and the functions main calls inside branches use explicit LOD only
+    for (const fn of ['lowCloud', 'weatherAt', 'landBias', 'cirrusCloud', 'ef_deck', 'ef_cloudSelfShadow', 'cityLattice', 'meridianSite', 'meridianNight']) {
+      const i0 = efs.search(new RegExp(`\\b(?:vec[234]|float|bool)\\s+${fn}\\s*\\(`));
+      ok(i0 >= 0, `earth: ${fn} defined`);
+      let d = 0, j = efs.indexOf('{', i0);
+      const start = j;
+      for (; j < efs.length; j++) { if (efs[j] === '{') d++; else if (efs[j] === '}' && --d === 0) break; }
+      const fsrc = efs.slice(start, j);
+      ok(!/\b(dFdx|dFdy|fwidth|texture)\s*\(/.test(fsrc), `earth: ${fn} safe in non-uniform flow`);
+    }
+    ok(/bool seen = cA < 0\.997;/.test(efs) && efs.indexOf('bool seen') < efs.indexOf('if (seen) {') && efs.indexOf('if (seen) {') < efs.indexOf('if (seen && landF < 0.999)'), 'ground shading skipped only under an opaque deck');
+  }
 }
 {
   // the bake's mesoscale weather never aliases into stair steps: its finest drawn octave spans

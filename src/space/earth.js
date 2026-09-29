@@ -493,14 +493,43 @@ void main() {
   vec3 nb = normalize(abs(det) * n - grad * landF);
   if (abs(det) < 1e-12) nb = n;
 
+  // clouds: the low and middle deck (8 km) and the cirrus above it (12.5 km), each on its own
+  // shell, so they part in parallax at a slant and the cirrus shadows the deck beneath it
+  // (at a slant the deck is marched as a height field: towers stand up toward the horizon)
+  vec2 tC = sphereHits(ro, rd, RC);
+  vec2 lcl;
+  float tCl, biasC;
+  bool deckHit = ef_deck(ro, rd, tC, lcl, tCl, biasC);
+  vec3 pC = ro + rd * tCl;
+  vec3 nC = normalize(pC);
+  vec3 bC = uToBody * nC;
+  float fpC = max(tCl * uPixAng, 1e-3);
+  float muVC = max(abs(dot(rd, nC)), 0.04);
+  // what the deck hides of what lies below: the covered share times its direct-beam opacity
+  float cA = lcl.x * (1.0 - exp(-lcl.y * 0.5 / muVC));
+  // relief: the tops' height read from the optical depth, so towers catch the Sun on one side;
+  // resolved only where it spans a few pixels
+  float hTop = lcl.x * sqrt(clamp(lcl.y / 48.0, 0.0, 1.0));
+  vec3 dcx = dFdx(pC), dcy = dFdy(pC);
+  float dax = dFdx(hTop), day = dFdy(hTop);
+  vec3 cr1 = cross(dcy, nC), cr2 = cross(nC, dcx);
+  float cdet = dot(dcx, cr1);
+  vec3 cgrad = abs(cdet) > 1e-9 ? (dax * cr1 + day * cr2) / cdet : vec3(0.0);
+  cgrad *= (1.0 - smoothstep(1.0, 5.0, fpC)) * EF_TOP_KM;         // tops ~3 km proud
+  float cgl = length(cgrad);
+  if (cgl > 2.0) cgrad *= 2.0 / cgl;
+  vec3 nRel = normalize(nC - cgrad);
+  // (the ground's costly shading is skipped where the deck hides it: under ~0.3% of it shows)
+  bool seen = cA < 0.997;
+
   float mu = dot(n, sun);
   vec3 sunT = sampleTransmittance(uTransmittanceLUT, Rg + 0.3, mu) * smoothstep(-0.03, 0.02, mu);
   float rsh = ringShadow(pG, sun);
   // cloud shadows where the sun ray crosses each shell (the cirrus's falls further off): a
   // cloud takes away the light it reflects, so thin cloud barely shades and thick cloud does
   float csh = 1.0;
-  float biasG = landBias(b);
-  {
+  if (seen) {
+    float biasG = landBias(b);
     vec2 ts = sphereHits(pG, sun, RC);
     vec2 cs = lowCloud(uToBody * normalize(pG + sun * max(ts.y, 0.0)), max(fp, 0.4), biasG, fp < 6.0 ? EF_SHADOW_OCT : 0);
     vec2 ti = sphereHits(pG, sun, RCI);
@@ -519,57 +548,59 @@ void main() {
   // ocean with sun glint
   // whitecaps: where the storms blow the sea is streaked with foam (Monahan's W = 3.8e-6 U^3.41:
   // a few per cent of the surface at gale force), lifting its albedo and roughening its glint
-  float gale = smoothstep(0.55, 0.85, weatherAt(b, max(fp, 12.0)).r) * smoothstep(0.55, 0.85, abs(b.y));
-  float U10 = 6.0 + 12.0 * gale;
-  // the water's own colour: blooms drawn into filaments by the eddies, sediment on the shelves
-  seaAlb = mix(ef_seaColour(b, fp, B.a, H, seaAlb), seaAlb, ice);
-  float wcap = 3.84e-6 * pow(U10, 3.41);
-  seaAlb += vec3(0.5 * wcap) * (1.0 - ice);
-  vec3 seaCol;
-  // ships on the lane the bake found here (the id cube, nearest-filtered)
-  float shRough, shSlick, shFoam;
-  vec3 shipLight;
+  vec3 seaCol = vec3(0.0);
+  vec3 shipLight = vec3(0.0);
   vec4 trafficIds = textureLod(uIds, b, 0.0);
-  od_ships(b, trafficIds.r, fp, shRough, shSlick, shFoam, shipLight);
-  {
-    // sea-surface roughness from the wind (Cox-Munk, ~7 m/s): a broad smooth glint, gently
-    // varied by weather systems, with calm slicks streaking it where they are resolved
-    float wind = snoise(rotY(b, -uCloudRot) * 7.0) * 0.5 + 0.5;
-    float al = mix(0.17, 0.25, wind);
-    float slick = smoothstep(0.55, 0.8, snoise(b * vec3(90.0, 260.0, 90.0) + wind * 3.0) * 0.5 + 0.5) * (1.0 - smoothstep(2.0, 8.0, fp));
-    al -= 0.05 * slick;
-    // wind rows and cat's paws in the glint
-    al *= ef_windRows(b, fp);
-    al *= 1.0 + 0.35 * gale;                         // Cox-Munk: rougher in a gale
-    // the sea's texture in the glint, and the ships' wakes through it
-    al *= od_seaTexture(b, fp, B.a);
-    al *= 1.0 + 0.7 * shRough - 0.45 * clamp(shSlick, 0.0, 1.0);
-    al = clamp(al, 0.05, 0.6);
-    // the waves themselves where the pixel resolves them: their slope tilts the facet normal, and
-    // the roughness keeps only what is still below the pixel
-    float swVar;
-    vec3 swSlope = od_swell(b, fp, uTime, swVar);
-    al = sqrt(max(al * al - swVar, 0.0016));
-    vec3 nw = normalize(n - transpose(uToBody) * swSlope * (1.0 - ice));
-    al = mix(al, 0.5, ice);
-    vec3 Hh = normalize(V + sun);
-    float nh = max(dot(nw, Hh), 0.0), nv = max(dot(nw, V), 1e-3), nl = max(dot(n, sun), 0.0);
-    float a2 = al * al;
-    float dd = nh * nh * (a2 - 1.0) + 1.0;
-    float D = a2 / (S_PI * dd * dd);
-    float k = al * 0.5;
-    float G = (nv / (nv * (1.0 - k) + k)) * (nl / (nl * (1.0 - k) + k));
-    float F = 0.02 + 0.98 * pow(1.0 - max(dot(V, Hh), 0.0), 5.0);
-    float Fv = 0.02 + 0.98 * pow(clamp(1.0 - nv, 0.0, 1.0), 5.0);
-    vec3 spec = vec3(D * G * F / (4.0 * nv + 1e-4)) * uSunE * sunT * shadow;
-    // the reflected sky whitens toward grazing (the horizon's haze), and warms at the terminator
-    float graze = clamp(1.0 - nv, 0.0, 1.0);
-    vec3 skyRefl = uSunE * (mix(vec3(0.03, 0.06, 0.13), vec3(0.075, 0.095, 0.14), graze * graze * graze) * smoothstep(-0.2, 0.3, mu) + ef_skyAmbient(mu) * 0.3);
-    vec3 body = seaAlb / S_PI * (uSunE * sunT * nl * shadow + skyAmb);
-    seaCol = body * (1.0 - Fv) + Fv * skyRefl + spec * (1.0 - ice);
-    seaCol = mix(seaCol, seaAlb / S_PI * (uSunE * sunT * nl * shadow + skyAmb), ice);
-    // white water at the bows and close astern
-    seaCol += vec3(0.55) * clamp(shFoam, 0.0, 1.0) * (1.0 - ice) / S_PI * (uSunE * sunT * nl * shadow + skyAmb);
+  if (seen && landF < 0.999) {
+    float gale = smoothstep(0.55, 0.85, weatherAt(b, max(fp, 12.0)).r) * smoothstep(0.55, 0.85, abs(b.y));
+    float U10 = 6.0 + 12.0 * gale;
+    // the water's own colour: blooms drawn into filaments by the eddies, sediment on the shelves
+    seaAlb = mix(ef_seaColour(b, fp, B.a, H, seaAlb), seaAlb, ice);
+    float wcap = 3.84e-6 * pow(U10, 3.41);
+    seaAlb += vec3(0.5 * wcap) * (1.0 - ice);
+    // ships on the lane the bake found here (the id cube, nearest-filtered)
+    float shRough, shSlick, shFoam;
+    od_ships(b, trafficIds.r, fp, shRough, shSlick, shFoam, shipLight);
+    {
+      // sea-surface roughness from the wind (Cox-Munk, ~7 m/s): a broad smooth glint, gently
+      // varied by weather systems, with calm slicks streaking it where they are resolved
+      float wind = snoise(rotY(b, -uCloudRot) * 7.0) * 0.5 + 0.5;
+      float al = mix(0.17, 0.25, wind);
+      float slick = smoothstep(0.55, 0.8, snoise(b * vec3(90.0, 260.0, 90.0) + wind * 3.0) * 0.5 + 0.5) * (1.0 - smoothstep(2.0, 8.0, fp));
+      al -= 0.05 * slick;
+      // wind rows and cat's paws in the glint
+      al *= ef_windRows(b, fp);
+      al *= 1.0 + 0.35 * gale;                         // Cox-Munk: rougher in a gale
+      // the sea's texture in the glint, and the ships' wakes through it
+      al *= od_seaTexture(b, fp, B.a);
+      al *= 1.0 + 0.7 * shRough - 0.45 * clamp(shSlick, 0.0, 1.0);
+      al = clamp(al, 0.05, 0.6);
+      // the waves themselves where the pixel resolves them: their slope tilts the facet normal, and
+      // the roughness keeps only what is still below the pixel
+      float swVar;
+      vec3 swSlope = od_swell(b, fp, uTime, swVar);
+      al = sqrt(max(al * al - swVar, 0.0016));
+      vec3 nw = normalize(n - transpose(uToBody) * swSlope * (1.0 - ice));
+      al = mix(al, 0.5, ice);
+      vec3 Hh = normalize(V + sun);
+      float nh = max(dot(nw, Hh), 0.0), nv = max(dot(nw, V), 1e-3), nl = max(dot(n, sun), 0.0);
+      float a2 = al * al;
+      float dd = nh * nh * (a2 - 1.0) + 1.0;
+      float D = a2 / (S_PI * dd * dd);
+      float k = al * 0.5;
+      float G = (nv / (nv * (1.0 - k) + k)) * (nl / (nl * (1.0 - k) + k));
+      float F = 0.02 + 0.98 * pow(1.0 - max(dot(V, Hh), 0.0), 5.0);
+      float Fv = 0.02 + 0.98 * pow(clamp(1.0 - nv, 0.0, 1.0), 5.0);
+      vec3 spec = vec3(D * G * F / (4.0 * nv + 1e-4)) * uSunE * sunT * shadow;
+      // the reflected sky whitens toward grazing (the horizon's haze), and warms at the terminator
+      float graze = clamp(1.0 - nv, 0.0, 1.0);
+      vec3 skyRefl = uSunE * (mix(vec3(0.03, 0.06, 0.13), vec3(0.075, 0.095, 0.14), graze * graze * graze) * smoothstep(-0.2, 0.3, mu) + ef_skyAmbient(mu) * 0.3);
+      vec3 body = seaAlb / S_PI * (uSunE * sunT * nl * shadow + skyAmb);
+      seaCol = body * (1.0 - Fv) + Fv * skyRefl + spec * (1.0 - ice);
+      seaCol = mix(seaCol, seaAlb / S_PI * (uSunE * sunT * nl * shadow + skyAmb), ice);
+      // white water at the bows and close astern
+      seaCol += vec3(0.55) * clamp(shFoam, 0.0, 1.0) * (1.0 - ice) / S_PI * (uSunE * sunT * nl * shadow + skyAmb);
+    }
   }
   vec3 col = mix(seaCol, landCol, landF);
 
@@ -636,32 +667,6 @@ void main() {
   emis += shipLight * 0.05 * (1.0 - landF);
   emis += od_trains(b, trafficIds.g, fp) * 0.05;
 
-  // clouds: the low and middle deck (8 km) and the cirrus above it (12.5 km), each on its own
-  // shell, so they part in parallax at a slant and the cirrus shadows the deck beneath it
-  // (at a slant the deck is marched as a height field: towers stand up toward the horizon)
-  vec2 tC = sphereHits(ro, rd, RC);
-  vec2 lcl;
-  float tCl, biasC;
-  bool deckHit = ef_deck(ro, rd, tC, lcl, tCl, biasC);
-  vec3 pC = ro + rd * tCl;
-  vec3 nC = normalize(pC);
-  vec3 bC = uToBody * nC;
-  float fpC = max(tCl * uPixAng, 1e-3);
-  float muVC = max(abs(dot(rd, nC)), 0.04);
-  // what the deck hides of what lies below: the covered share times its direct-beam opacity
-  float cA = lcl.x * (1.0 - exp(-lcl.y * 0.5 / muVC));
-  // relief: the tops' height read from the optical depth, so towers catch the Sun on one side;
-  // resolved only where it spans a few pixels
-  float hTop = lcl.x * sqrt(clamp(lcl.y / 48.0, 0.0, 1.0));
-  vec3 dcx = dFdx(pC), dcy = dFdy(pC);
-  float dax = dFdx(hTop), day = dFdy(hTop);
-  vec3 cr1 = cross(dcy, nC), cr2 = cross(nC, dcx);
-  float cdet = dot(dcx, cr1);
-  vec3 cgrad = abs(cdet) > 1e-9 ? (dax * cr1 + day * cr2) / cdet : vec3(0.0);
-  cgrad *= (1.0 - smoothstep(1.0, 5.0, fpC)) * EF_TOP_KM;         // tops ~3 km proud
-  float cgl = length(cgrad);
-  if (cgl > 2.0) cgrad *= 2.0 / cgl;
-  vec3 nRel = normalize(nC - cgrad);
   vec3 cloudCol = vec3(0.0);
   {
     float muC = dot(nC, sun);
@@ -674,7 +679,12 @@ void main() {
     // and at the scale of the puffs and towers: the height field marched toward the Sun
     float h0 = EF_TOP_KM * hTop;
     float selfRes = 1.0 - smoothstep(2.5, 5.0, fpC);
-    float selfSh = (lcl.x > 0.02 && selfRes > 0.0) ? mix(1.0, ef_cloudSelfShadow(nC, sun, muC, fpC, biasC, h0), selfRes) : 1.0;
+    // beyond, its mean: cumulus fields (not the smooth sheets) lose light to the shadows of
+    // their own unresolved tops, the more the lower the Sun, so a field of puffs reads grey and
+    // textured next to a bright stratiform deck, most of all toward the terminator
+    float wS = weatherAt(bC, fpC).g;
+    float meanSh = 1.0 - ef_meanSelfShadow(muC, wS) * lcl.x;
+    float selfSh = (lcl.x > 0.02 && selfRes > 0.0) ? mix(meanSh, ef_cloudSelfShadow(nC, sun, muC, fpC, biasC, h0), selfRes) : meanSh;
     // tall tops keep the Sun a little past the terminator (the horizon dips ~0.03 rad at 3 km)
     float wrap = clamp((dot(nRel, sun) + 0.15) / 1.15, 0.0, 1.0) * smoothstep(-0.06, 0.02, muC + 0.01 * h0) * selfSh;
     float rs = ringShadow(pC, sun);
@@ -700,7 +710,7 @@ void main() {
     // lightning: storm cells brighten in soft, brief pulses (no hard on/off), only where a
     // cell spans a few pixels; from high orbit single-pixel strikes read as blinking lights
     // (deep convection: thick, cumuliform cloud; the storms of the ITCZ, the cyclones' walls)
-    float convS = weatherAt(bC, fpC).g;
+    float convS = wS;
     float conv = smoothstep(0.55, 0.95, lcl.x * clamp(lcl.y / 40.0, 0.0, 1.0)) * (1.0 - 0.8 * convS) * nightC * (1.0 - smoothstep(25.0, 60.0, fpC));
     float flash = od_lightning(bC, fpC, conv, uTime);
     cloudCol += vec3(0.75, 0.82, 1.0) * flash * 0.9;
