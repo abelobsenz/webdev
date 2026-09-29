@@ -9,7 +9,8 @@ import { R_EARTH, R_MOON, MERIDIAN_LON, bodyDir } from './sim.js';
 import { stationFrame, CORRIDORS } from './stations.js';
 import { HS } from './harbour.js';
 import { FleetTraffic } from './fleetTraffic.js';
-import { smoothLiner, smoothTender } from './linerSkin.js';
+import { smoothTender } from './linerSkin.js';
+import { buildConcordLiner } from './linerHull.js';
 import { buildLinerDetail, buildFreighterDetail, buildTenderDetail, buildEvaWorker, evaPose, evaLines, EVA_PARTIES } from './linerDetail.js';
 import { buildWheelDetail, buildLiftCar, buildRingCrane, liftPose, craneAngle, RING } from './seleneDetail.js';
 
@@ -186,15 +187,16 @@ export class Fleet {
     const el = space.elevator;
     const station = el.station;
     // ---- the Concord-class liner at the liner pier (engines dark, lamps lit)
+    // (the builder's liner stays the reference the pier, the clamps and the fittings are
+    // surveyed against; she is drawn rebuilt on the same envelope: src/space/linerHull.js)
     const liner = buildLiner(2400);
     this.linerGeo = liner;
-    // her skin re-tessellated smooth (src/space/linerSkin.js) and her markings (livery band, keel
-    // and drive-section plate) painted on it
-    const linerPainted = { ...liner, geo: markLiner(smoothLiner(liner)) };
+    const linerPainted = buildConcordLiner(2400);
+    this.linerHull = linerPainted;
     {
       const m = dressedMesh(linerPainted.geo, { accent: [0.55, 0.85, 1.0], lit: 0.62, livery: [0.58, 0.2, 0.12], livery2: [0.88, 0.84, 0.74] });
       station.linerBerth(m.position, m.quaternion);
-      addLamps(m, liner.lamps, { minPx: 1.3 });
+      addLamps(m, linerPainted.lamps, { minPx: 1.3 });
       el.harbour.add(m);
       this.docked = m;
       this.crafts.push(m);
