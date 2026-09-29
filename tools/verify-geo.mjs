@@ -9,6 +9,7 @@ import { LIFE, cranePose, podR, PODS_PER_LINE, dronePose, armFrame } from '../sr
 import { buildConcordYard, buildWaterStore, YARD, STORE, sectionPoint } from '../src/space/geoRoads.js';
 import { YardWorks, WORKS, craneBay, cranePlate, droneSites, dronePos, crewPodPos, podStops } from '../src/space/yardWorks.js';
 import { StoreWorks, PLUMB, storeDronePos } from '../src/space/storeWorks.js';
+import { TL, cartZ, rimWalker, apronWalker } from '../src/space/terraceLife.js';
 import { craftMesh, placeMerge } from '../src/space/craftMesh.js';
 import { buildReleaseYard, YARD as RY } from '../src/space/releaseYard.js';
 import { ReleaseWorks, RW, crawlerS, gantryZ } from '../src/space/releaseWorks.js';
@@ -161,6 +162,34 @@ assert.ok(boxGap > 1, `berth boxes clear the ships and fingers by ${boxGap} m`);
 // positive control: a pod line through the gallery's axis must collide
 { P.set(6000, 0, 0).applyMatrix4(armF[0]); assert.ok(hc.dist(P, 200) < 230 * HS, 'positive control: the gallery axis lies inside the gallery'); }
 
+// ===================================================================== the terrace's people
+{
+  const td = st.terraceData, fl = td.floor, tc = new Collider([{ geo: td.geo }], 20);
+  const w = {};
+  let walkGap = Infinity, cartGap = Infinity;
+  for (let t = 0; t < 900; t += 1.9) {
+    for (let k = 0; k < TL.rim.crews; k++) {
+      rimWalker(k, t, w);
+      for (const h of [0.95, 1.55]) { P.set(w.x, fl + h, w.z); walkGap = Math.min(walkGap, tc.dist(P, 6) - 0.3); }
+    }
+    for (let k = 0; k < TL.apron.crew; k++) {
+      apronWalker(k, t, w);
+      for (const h of [1.35, 1.95]) { P.set(w.x, fl + h, w.z); walkGap = Math.min(walkGap, tc.dist(P, 6) - 0.3); }
+    }
+    for (const [ri, x] of TL.rails.entries()) for (let k = 0; k < TL.carts; k++) {
+      const c = cartZ(ri, k, t);
+      for (const dz of [-1.8, 0, 1.8]) { P.set(x, fl + 2.0, c.z + dz); cartGap = Math.min(cartGap, tc.dist(P, 6) - 1.1); }   // (the wheels ride the rail below)
+    }
+  }
+  // standing on the deck: the deck is right under every figure's boots
+  rimWalker(3, 10, w); P.set(w.x, fl + 0.05, w.z);
+  assert.ok(tc.dist(P, 4) < 0.1, 'rim crews stand on the deck');
+  Object.assign(results, { terraceWalkerClearM: +walkGap.toFixed(2), terraceCartClearM: +cartGap.toFixed(2), terraceLifeTriangles: 0 });
+  assert.ok(walkGap > 0.05, `terrace crews clear the terrace's railings, halls and courier by ${walkGap} m`);
+  assert.ok(cartGap > 0.05, `baggage carts clear the court by ${cartGap} m`);
+  st.terraceLife.root.traverse((o) => { if (o.isInstancedMesh) results.terraceLifeTriangles += o.geometry.index.count / 3 * o.count; });
+}
+
 // ===================================================================== Concord Yard
 const yd = buildConcordYard();
 const ym = craftMesh(yd.dockGeo);
@@ -295,7 +324,7 @@ assert.ok(gantryGap > 5, `inspection gantries clear the cradles by ${gantryGap} 
 assert.ok(RW.gantry.apothem - 10 > RY.apothem + 22 + 30, 'the gantry rings stay outside the hoops (the liners pass inside)');
 
 // ===================================================================== totals
-results.totalLifeTriangles = results.harbourLifeTriangles + results.yardWorksTriangles + results.storeWorksTriangles + results.releaseWorksTriangles;
+results.totalLifeTriangles = results.terraceLifeTriangles + results.harbourLifeTriangles + results.yardWorksTriangles + results.storeWorksTriangles + results.releaseWorksTriangles;
 results.totalUpdateMs = +(results.harbourLifeUpdateMs + results.yardWorksUpdateMs + results.storeWorksUpdateMs + results.releaseWorksUpdateMs).toFixed(4);
 assert.ok(results.totalLifeTriangles < 10e6, 'the domain stays inside its rendered-triangle budget');
 assert.ok(results.totalLifeTriangles > 300e3, 'the domain draws substantive detail');

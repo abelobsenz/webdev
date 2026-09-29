@@ -6,6 +6,7 @@ import { ctube } from './hull.js';
 import { buildEmbarkationTerrace } from './interfaces.js';
 import { craftMesh, craftPart, addLamps, placeMerge, placeLamps, pixelRadius, KM } from './craftMesh.js';
 import { HarbourLife } from './harbourLife.js';
+import { TerraceLife } from './terraceLife.js';
 
 // THE GEOSTATIONARY HARBOUR, drawn in metres with the ships' own builder and material.
 // Local frame: +Y up the tether (away from the Earth), +Z north (the Earth's axis),
@@ -458,6 +459,8 @@ export class HarbourStation {
     this.terrace.rotation.y=-pier.a;
     addLamps(this.terrace,this.terraceData.lamps,{minPx:.65});
     this.group.add(this.terrace);
+    // its people: baggage carts and handlers, rim crews, the courier's ground crew (terraceLife.js)
+    this.terraceLife = new TerraceLife(this.terrace, this.terraceData);
     this.group.traverse((o) => { o.frustumCulled = false; });
     // the port at work: conveyors, cranes, berth gantries, drones, lift cars (harbourLife.js)
     this.life = new HarbourLife(this);
@@ -491,7 +494,9 @@ export class HarbourStation {
     const px = pixelRadius(cam, this.group.getWorldPosition(this._w), 13, space.size.y);
     this.shipsSmall.visible = px > 350;
     this.shipsBig.visible = px > 40;
-    this.terrace.visible=pixelRadius(cam,this.terrace.getWorldPosition(this._w),this.terraceData.radius,space.size.y)>3;
+    const terracePx = pixelRadius(cam, this.terrace.getWorldPosition(this._w), this.terraceData.radius, space.size.y);
+    this.terrace.visible = terracePx > 3;
+    this.terraceLife.update(realTime, terracePx > 150);
     if (this.lampMesh) this.lampMesh.visible = px > 10;
     this.life.update(realTime, space);
   }
