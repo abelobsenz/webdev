@@ -11,7 +11,7 @@ import { StoreWorks } from './storeWorks.js';
 import { WaterRun } from './waterRun.js';
 import { DynLamps } from './lifeKit.js';
 import { HS } from './harbour.js';
-import { quadLoft, smoothRange } from './portMaterial.js';
+import { quadLoft, smoothRange, createPortMaterial, bakeCavity } from './portMaterial.js';
 
 // THE GEOSTATIONARY ROADS: the Harbour's neighbourhood along the geostationary arc.
 //
@@ -568,7 +568,9 @@ export class GeoRoads {
     const qYard = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(V(0, 0, 1), V(0, 1, 0), V(-1, 0, 0)));
     this.yardLocal = YARD_POS.clone();
     place(this.yard, this.yardLocal, qYard);
-    const ym = dressedMesh(this.yardData.dockGeo, { accent: [1.0, 0.72, 0.45], lit: 0.6, livery: [0.58, 0.2, 0.12], livery2: [0.88, 0.84, 0.74] });
+    // the dressed finishes with baked cavity shade (baked on first approach, _bakeNear)
+    const yOpts = { accent: [1.0, 0.72, 0.45], lit: 0.6, livery: [0.58, 0.2, 0.12], livery2: [0.88, 0.84, 0.74] };
+    const ym = craftMesh(this.yardData.dockGeo, yOpts, createPortMaterial(yOpts));
     ym.add(craftPart(ym, this.yardData.hullGeo));
     this.yardWheel = craftPart(ym, this.yardData.wheelGeo);
     ym.add(this.yardWheel);
@@ -583,7 +585,8 @@ export class GeoRoads {
     this.storeData = buildWaterStore();
     this.store = new THREE.Group();
     place(this.store, STORE_POS.clone(), new THREE.Quaternion());
-    const sm = dressedMesh(this.storeData.geo, { accent: [0.55, 0.9, 1.0], lit: 0.55, livery: [0.82, 0.8, 0.74], livery2: [0.16, 0.42, 0.52] });
+    const sOpts = { accent: [0.55, 0.9, 1.0], lit: 0.55, livery: [0.82, 0.8, 0.74], livery2: [0.16, 0.42, 0.52] };
+    const sm = craftMesh(this.storeData.geo, sOpts, createPortMaterial(sOpts));
     sm.add(craftPart(sm, this.storeData.ships));
     addLamps(sm, this.storeData.lamps, { minPx: 1.2 });
     this.store.add(sm);
@@ -717,9 +720,13 @@ export class GeoRoads {
     const yardPx = pixelRadius(space.camera, this.yard.getWorldPosition(this._w), this.yardData.radius, space.size.y);
     if (this.yardBody) this.yardBody.visible = yardPx > 0.5;
     this.yardWorks.update(realTime, yardPx);
+    // cavity shade baked the first time each works fills a good part of the view (~12 ms and
+    // ~4 ms, once, off the entry path; until then aOcc reads 0)
+    if (!this._yardBaked && yardPx > 60) { this._yardBaked = true; for (const g of [this.yardData.dockGeo, this.yardData.hullGeo, this.yardData.wheelGeo]) bakeCavity(g, { minCell: 6 }); }
     const storePx = pixelRadius(space.camera, this.store.getWorldPosition(this._w), this.storeData.radius, space.size.y);
     if (this.storeBody) this.storeBody.visible = storePx > 0.5;
     this.storeWorks.update(realTime, storePx);
+    if (!this._storeBaked && storePx > 60) { this._storeBaked = true; bakeCavity(this.storeData.geo, { minCell: 4 }); }
   }
 }
 

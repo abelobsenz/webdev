@@ -139,6 +139,9 @@ export function createPortMaterial(opts = {}) {
   const s = portShaders(m.vertexShader, m.fragmentShader);
   m.vertexShader = s.vs;
   m.fragmentShader = s.fs;
+  // meshes sharing the material without a baked aOcc (instanced fittings, lift cars) read an
+  // explicit 0 rather than whatever generic attribute value the context last held
+  m.defaultAttributeValues = { ...(m.defaultAttributeValues || {}), aOcc: [0] };
   m.userData.port = true;
   return m;
 }
@@ -154,6 +157,53 @@ export function bakeOcclusion(geo, fn) {
   for (let i = 0; i < cnt; i++) {
     const v = fn(p[i * 3], p[i * 3 + 1], p[i * 3 + 2], n[i * 3], n[i * 3 + 1], n[i * 3 + 2]);
     occ[i] = v > 1 ? 1 : v > 0 ? v : 0;
+  }
+  geo.setAttribute('aOcc', new THREE.BufferAttribute(occ, 1));
+  return geo;
+}
+
+/**
+ * Bake cavity occlusion into aOcc for a free-standing structure (no deck to measure from): the
+ * geometry's surface area is binned into a coarse voxel grid (cells ~1/48 of its size, never
+ * under `minCell` m), and each vertex looks out along its normal at one, two and three cells:
+ * surface found there is something close in front of it (the root of a boom on a hull, the
+ * inside of a truss, a can between its neighbours) and darkens it. Open faces stay clean.
+ * Keeps any stronger value already baked. Returns the geometry.
+ */
+export function bakeCavity(geo, { minCell = 4, strength = 0.75 } = {}) {
+  if (!geo.attributes.normal) geo.computeVertexNormals();
+  if (!geo.boundingBox) geo.computeBoundingBox();
+  const bb = geo.boundingBox, p = geo.attributes.position.array, n = geo.attributes.normal.array;
+  const cnt = geo.attributes.position.count, idx = geo.index ? geo.index.array : null;
+  const sx = bb.max.x - bb.min.x, sy = bb.max.y - bb.min.y, sz = bb.max.z - bb.min.z;
+  const cs = Math.max(Math.max(sx, sy, sz) / 48, minCell);
+  const nx = Math.ceil(sx / cs) + 1, ny = Math.ceil(sy / cs) + 1, nz = Math.ceil(sz / cs) + 1;
+  const grid = new Float32Array(nx * ny * nz);
+  const cell = (x, y, z) => {
+    const i = Math.floor((x - bb.min.x) / cs), j = Math.floor((y - bb.min.y) / cs), k = Math.floor((z - bb.min.z) / cs);
+    return i < 0 || j < 0 || k < 0 || i >= nx || j >= ny || k >= nz ? -1 : (k * ny + j) * nx + i;
+  };
+  const tris = idx ? idx.length / 3 : cnt / 3;
+  for (let t = 0; t < tris; t++) {
+    const a = idx ? idx[t * 3] : t * 3, b = idx ? idx[t * 3 + 1] : t * 3 + 1, c = idx ? idx[t * 3 + 2] : t * 3 + 2;
+    const ux = p[b * 3] - p[a * 3], uy = p[b * 3 + 1] - p[a * 3 + 1], uz = p[b * 3 + 2] - p[a * 3 + 2];
+    const vx = p[c * 3] - p[a * 3], vy = p[c * 3 + 1] - p[a * 3 + 1], vz = p[c * 3 + 2] - p[a * 3 + 2];
+    const area = 0.5 * Math.hypot(uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx);
+    const g = cell((p[a * 3] + p[b * 3] + p[c * 3]) / 3, (p[a * 3 + 1] + p[b * 3 + 1] + p[c * 3 + 1]) / 3, (p[a * 3 + 2] + p[b * 3 + 2] + p[c * 3 + 2]) / 3);
+    if (g >= 0) grid[g] += area;
+  }
+  const full = 1 / (cs * cs * 1.2);        // about one wall's worth of surface through a cell
+  const old = geo.attributes.aOcc ? geo.attributes.aOcc.array : null;
+  const occ = new Float32Array(cnt);
+  for (let v = 0; v < cnt; v++) {
+    let o = 0;
+    for (let s = 1; s <= 3; s++) {
+      const d = cs * (s + 0.1);
+      const g = cell(p[v * 3] + n[v * 3] * d, p[v * 3 + 1] + n[v * 3 + 1] * d, p[v * 3 + 2] + n[v * 3 + 2] * d);
+      if (g >= 0) o += Math.min(grid[g] * full, 1) * (s === 1 ? 0.5 : s === 2 ? 0.32 : 0.18);
+    }
+    o = Math.min(o * strength, 0.8);
+    occ[v] = old && old[v] > o ? old[v] : o;
   }
   geo.setAttribute('aOcc', new THREE.BufferAttribute(occ, 1));
   return geo;

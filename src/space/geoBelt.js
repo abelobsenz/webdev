@@ -1,10 +1,11 @@
 import * as THREE from 'three';
-import { dressedMesh, craftPart, addLamps, pixelRadius, CRAFT_FRAME, KM, LIVERIES } from './craftMesh.js';
+import { craftMesh, dressedMesh, craftPart, addLamps, pixelRadius, CRAFT_FRAME, KM, LIVERIES } from './craftMesh.js';
 import { LAMP } from './lamps.js';
 import { DynLamps, rng, smooth, TAU } from './lifeKit.js';
 import { R_EARTH, GEO_ALT, MERIDIAN_LON, bodyDir } from './sim.js';
 import { stationFrame } from './stations.js';
 import { buildBeltStation } from './beltStations.js';
+import { createPortMaterial, bakeCavity } from './portMaterial.js';
 import { BeltLife, buildFittings, liftCarGeo } from './beltLife.js';
 import { instancedPart, poseMatrix } from './lifeKit.js';
 import { StationTraffic, makeRoute } from './fleetTraffic.js';
@@ -233,7 +234,12 @@ export class GeoBelt {
     const d = st.desc;
     const data = buildBeltStation(d.kind, d.seed, d.livery);
     const lv = LIVERIES[d.livery];
-    const mesh = dressedMesh(data.geo, { accent: d.kind === 'relay' ? [1.0, 0.5, 0.3] : [0.55, 0.88, 1.0], lit: 0.62, livery: lv[0], livery2: lv[1], fill: 0.035 });
+    // the dressed finishes plus baked cavity shade (portMaterial.js): booms, trusses and cans
+    // darken where they crowd each other instead of every face lit as if it stood alone
+    bakeCavity(data.geo);
+    for (const p of data.parts) bakeCavity(p.geo);
+    const opts = { accent: d.kind === 'relay' ? [1.0, 0.5, 0.3] : [0.55, 0.88, 1.0], lit: 0.62, livery: lv[0], livery2: lv[1], fill: 0.035 };
+    const mesh = craftMesh(data.geo, opts, createPortMaterial(opts));
     const parts = data.parts.map((p) => {
       const m = craftPart(mesh, p.geo);
       m.position.copy(p.pivot);
