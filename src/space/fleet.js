@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { buildLiner, buildTender, buildRefinery, CB, CK } from '../craft/craftGeometry.js';
 import { buildShuttle, buildTug, buildCourier, buildFreighter, lathe } from '../craft/craftClasses.js';
 import { createGlowMesh } from '../craft/craftMaterial.js';
@@ -299,7 +300,7 @@ export class Fleet {
     const ref = buildRefinery(1);
     this.refineryData = ref;
     this.refinery = new THREE.Group();
-    const rm = craftMesh(ref.geo, { accent: [1.0, 0.7, 0.4], lit: 0.55 });
+    const rm = dressedMesh(dressSelene(ref), { accent: [1.0, 0.7, 0.4], lit: 0.55, livery: LIVERIES[3][0], livery2: LIVERIES[3][1] });
     const wm = craftPart(rm, ref.wheel);
     rm.add(wm);
     this.wheel = wm;
@@ -644,6 +645,44 @@ export function markLiner(geo, len = 2400) {
 /** The reclamation tenders' paint: works-yellow dorsal plate, weathered working plate below. */
 export function markTender(geo) {
   return repaint(geo, (x, y, z, k) => (Math.abs(k - CK.HULL) > 0.01 ? k : y > 18 ? DK.LIVERY : DK.GRIME));
+}
+
+/**
+ * Selene Works dressed (the refinery's shape is the builder's): its eight cryogenic tanks in
+ * smooth insulation-foil shells (the builder's 18-sided lathes read as faceted balls; each
+ * shell's inner chords clear the old vertices, so nothing shows through), and the spindle in
+ * weathered working plate. Returns the merged geometry (metres, the refinery frame).
+ */
+export function dressSelene(ref) {
+  const painted = repaint(ref.geo, (x, y, z, k) => (Math.abs(k - CK.HULL) < 0.01 && x * x + z * z < 300 * 300 ? DK.GRIME : k));
+  const NA = 48, NL = 24, pos = [], nrm = [], fac = [], idx = [];
+  for (const t of ref.tanks) {
+    const R = t.radius * 1.006, b = pos.length / 3;
+    for (let j = 0; j <= NL; j++) {
+      const la = -Math.PI / 2 + (j / NL) * Math.PI, cl = Math.cos(la), sl = Math.sin(la);
+      for (let i = 0; i <= NA; i++) {
+        const lo = (i / NA) * Math.PI * 2, nx = cl * Math.cos(lo), nz = cl * Math.sin(lo);
+        pos.push(t.center.x + nx * R, t.center.y + sl * R, t.center.z + nz * R);
+        nrm.push(nx, sl, nz);
+        fac.push(lo * R, (la + Math.PI / 2) * R, DK.FOIL);
+      }
+    }
+    for (let j = 0; j < NL; j++) for (let i = 0; i < NA; i++) {
+      const a = b + j * (NA + 1) + i, c = a + NA + 1;
+      idx.push(a, c, a + 1, a + 1, c, c + 1);
+    }
+  }
+  const shells = new THREE.BufferGeometry();
+  shells.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  shells.setAttribute('aFacade', new THREE.Float32BufferAttribute(fac, 3));
+  shells.setAttribute('normal', new THREE.Float32BufferAttribute(nrm, 3));
+  shells.setIndex(idx);
+  const plain = new THREE.BufferGeometry();
+  for (const k of ['position', 'aFacade', 'normal']) plain.setAttribute(k, painted.attributes[k]);
+  plain.setIndex(painted.index);
+  const g = mergeGeometries([plain, shells], false);
+  g.computeBoundingSphere(); g.computeBoundingBox();
+  return g;
 }
 
 export function linerAttendants(linerGeo, collars = [-170, 330]) {

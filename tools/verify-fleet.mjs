@@ -609,6 +609,22 @@ assert.ok(minClear > 0, `working lanes clear every structure with ${minClear} km
   assert.ok(fleet.docked.geometry.attributes.aFacade.array.some((k, i) => i % 3 === 2 && k === 20), 'the berthed liner wears her livery');
   const tg = markTender(fleet.tenderData.geo);
   assert.ok(tg.attributes.aFacade.array.some((k, i) => i % 3 === 2 && k === 24), 'tenders in working plate');
+  // Selene's foil tank shells: smooth, and their inner chords clear every vertex of the old tank
+  const sg = fleet.refineryMesh.geometry, sp = sg.attributes.position;
+  assert.ok(1.006 * Math.cos(Math.PI / 48) ** 2 > 1.0005, 'tank shell chords clear the builder tank');
+  out.seleneFoilVertices = sg.attributes.aFacade.array.filter((k, i) => i % 3 === 2 && k === 22).length;
+  assert.ok(out.seleneFoilVertices === 8 * 49 * 25, `Selene foil shells (${out.seleneFoilVertices})`);
+  // buffer sanity: indices in range, finite positions, instanced capacity respected
+  for (const g of [sg, fleet.docked.geometry, pg, tg]) {
+    let mx = 0; for (const i of g.index.array) if (i > mx) mx = i;
+    assert.ok(mx < g.attributes.position.count, 'index max below the vertex count');
+    assert.ok(g.attributes.aFacade.count === g.attributes.position.count && g.attributes.normal.count === g.attributes.position.count, 'attributes sized to the vertices');
+    for (let i = 0; i < g.attributes.position.array.length; i += 97) assert.ok(Number.isFinite(g.attributes.position.array[i]), 'finite positions');
+  }
+  for (const st of traffic.stations) for (const s of st.sets) {
+    assert.ok(s.im.count <= s.im.instanceMatrix.count, 'hull instances within capacity');
+    for (const sp2 of s.spins) assert.ok(sp2.im.count <= sp2.im.instanceMatrix.count, 'spin-ring instances within capacity');
+  }
   const h = plain.uniforms.uAoH.value;
   assert.ok(h.x > 0 && h.z > 150 && h.z < 200, `occlusion envelope from the box (${h.toArray()})`);
   assert.equal(dressed.uniforms.uAoH.value.x, 0, 'instanced hulls without an envelope skip the occlusion');
