@@ -3,8 +3,13 @@ import { CB, CK } from '../craft/craftGeometry.js';
 import { buildCourier, sphere } from '../craft/craftClasses.js';
 import { placeMerge } from './craftMesh.js';
 import { LAMP } from './lamps.js';
+import { DK } from './craftMesh.js';
+import { PK, bakeOcclusion, rectDist } from './portMaterial.js';
 
 const V=(x,y,z)=>new THREE.Vector3(x,y,z),TO_Y=new THREE.Matrix4().makeRotationX(-Math.PI/2),TAU=Math.PI*2;
+// While the Harbour terrace is built its rooms take the port finishes (portMaterial.js: stone,
+// glasshouse, planted beds); the lunar court keeps the plain craft kinds its material draws.
+let PORT=false;
 
 // All dimensions here are ordinary metres: doors, waiting rooms and pressure walks,
 // sitting on the much larger kilometre-scale structures around them.
@@ -18,12 +23,15 @@ function door(B,x,y,z,w=6,h=7,dir=1) {
 function sideDoor(B,x,y,z,dir=1) {
   B.at(x,y,z,0,Math.PI/2,0);door(B,0,0,0,6,7,dir);B.pop();
 }
-function hall(B,x,y,z,w,d,h,{garden=false}={}) {
-  B.box(x,y-.8,z,w+3,1.6,d+3,CK.HULL);
+function hall(B,x,y,z,w,d,h,{garden=false,plinth=PORT?PK.STONE:CK.HULL,rooms=null}={}) {
+  // a stone plinth with a sill proud of the paving, the vault seated on it
+  B.box(x,y-.8+(plinth===PK.STONE?0:.14),z,w+3,1.6,d+3,plinth);
+  if(plinth===PK.STONE)B.box(x,y+.12,z,w+3.6,.24,d+3.6,PK.STONE);
+  if(rooms)rooms.push({x,z,w:w+3.6,d:d+3.6,h});
   const pts=[[-w/2,0],[w/2,0],[w/2,h*.55]];
   for(let k=1;k<=12;k++){const a=k/12*Math.PI;pts.push([Math.cos(a)*w/2,h*.55+Math.sin(a)*h*.45]);}
   B.at(x,y,z);
-  const kind=garden?CK.CONSERVATORY:CK.GLASS;
+  const kind=garden?(PORT?PK.GLASSHOUSE:CK.CONSERVATORY):CK.GLASS;
   B.loft([{z:-d/2,pts},{z:d/2,pts}],kind,{capStart:kind,capEnd:kind});
   const bays=Math.max(6,Math.ceil(d/18));
   for(let k=0;k<=bays;k++) {
@@ -35,10 +43,22 @@ function hall(B,x,y,z,w,d,h,{garden=false}={}) {
   for(const sd of [-1,1])door(B,x,y,z+sd*d/2,6,7,sd);
 }
 function planter(B,x,y,z,w=6,d=6) {
-  B.box(x,y+.55,z,w,1.1,d,CK.BRONZE);
-  B.box(x,y+1.08,z,w-.5,.24,d-.5,CK.GARDEN);
-  B.tube([V(x,y+1.1,z),V(x,y+4.6,z)],.23,7,CK.DARK);
-  B.at(x,y+4.8,z,0,0,0,1);sphere(B,2.3,CK.GARDEN,10,8);B.pop();
+  if(!PORT) {
+    B.box(x,y+.55,z,w,1.1,d,CK.BRONZE);
+    B.box(x,y+1.08,z,w-.5,.24,d-.5,CK.GARDEN);
+    B.tube([V(x,y+1.1,z),V(x,y+4.6,z)],.23,7,CK.DARK);
+    B.at(x,y+4.8,z,0,0,0,1);sphere(B,2.3,CK.GARDEN,10,8);B.pop();
+    return;
+  }
+  // a stone planter with a bronze lip, a shrub bed and a small multi-stem tree
+  B.box(x,y+.55,z,w,1.1,d,PK.STONE);
+  B.box(x,y+1.13,z,w+.2,.1,d+.2,CK.BRONZE);
+  B.box(x,y+1.3,z,w-.6,.5,d-.6,PK.BEDS);
+  for(let k=0;k<3;k++) {
+    const a=k*2.1+x*.13,top=V(x+Math.cos(a)*.9,y+4.3+.3*k,z+Math.sin(a)*.9);
+    B.tube([V(x+Math.cos(a)*.2,y+1.3,z+Math.sin(a)*.2),top],.12,5,CK.DARK);
+    B.at(top.x,top.y+.9,top.z,0,a,0,1);sphere(B,1.5+.25*k,PK.BEDS,8,6);B.pop();
+  }
 }
 function floorSlab(B,x,y,z,w,h,d) {
   const pts=[[-w/2,-d/2],[w/2,-d/2],[w/2,d/2],[-w/2,d/2]];
@@ -103,11 +123,120 @@ function parkedCourier(B,x,floor,z) {
   probe.material.dispose();return {geo:g,matrix,feet};
 }
 
+
+// ------------------------------------------------------------ terrace landscape --
+/**
+ * A paved sheet of deck, closed: a regular grid on top (so the baked contact shade has vertices
+ * to live on), a skirt t deep round its subdivided edge and a fan beneath.
+ */
+function deckPatch(B,x0,x1,z0,z1,y,cell,kind,t=.3) {
+  const nx=Math.max(1,Math.round((x1-x0)/cell)),nz=Math.max(1,Math.round((z1-z0)/cell)),base=B.pos.length/3,up=V(0,1,0);
+  for(let j=0;j<=nz;j++)for(let i=0;i<=nx;i++){const x=x0+(x1-x0)*i/nx,z=z0+(z1-z0)*j/nz;B.v(x,y,z,x,z,kind);}
+  for(let j=0;j<nz;j++)for(let i=0;i<nx;i++) {
+    const a=base+j*(nx+1)+i,b=a+1,c=a+nx+1,d=c+1;
+    B.tri(a,b,d,up);B.tri(a,d,c,up);
+  }
+  // the edge ring (top grid indices) walked round once, its skirt and the fan under it
+  const ring=[];
+  for(let i=0;i<nx;i++)ring.push([i,0]);
+  for(let j=0;j<nz;j++)ring.push([nx,j]);
+  for(let i=nx;i>0;i--)ring.push([i,nz]);
+  for(let j=nz;j>0;j--)ring.push([0,j]);
+  const cx=(x0+x1)/2,cz=(z0+z1)/2,low=[];
+  for(const [i,j] of ring){const x=x0+(x1-x0)*i/nx,z=z0+(z1-z0)*j/nz;low.push(B.v(x,y-t,z,x+z,y-t,CK.DARK));}
+  const hub=B.v(cx,y-t,cz,cx,cz,CK.DARK),down=V(0,-1,0);
+  for(let k=0;k<ring.length;k++) {
+    const k2=(k+1)%ring.length,[i0,j0]=ring[k],[i1,j1]=ring[k2];
+    const a=base+j0*(nx+1)+i0,b=base+j1*(nx+1)+i1,out=V((i0+i1)/2-nx/2,0,(j0+j1)/2-nz/2);
+    const o=Math.abs(out.x)/nx>Math.abs(out.z)/nz?V(Math.sign(out.x),0,0):V(0,0,Math.sign(out.z));
+    B.tri(a,b,low[k2],o);B.tri(a,low[k2],low[k],o);
+    B.tri(hub,low[k],low[k2],down);
+  }
+}
+/** A kerbed stone frame of four low walls round a plan rectangle (inside w x d). */
+function kerb(B,x,y,z,w,d,t,h,k) {
+  for(const s of [-1,1]) {
+    B.box(x,y+h/2,z+s*(d/2+t/2),w+2*t,h,t,k);
+    B.box(x+s*(w/2+t/2),y+h/2,z,t,h,d+2*t-.2,k);   // (run into the long walls' ends: no shared edges)
+  }
+}
+/** A reflecting pool: stone coping, still water a hand below it, jets of light along its floor. */
+function pool(B,x,y,z,w,d,lamps) {
+  kerb(B,x,y,z,w,d,1.4,.75,PK.STONE);
+  B.box(x,y+.25,z,w,.5,d,PK.WATER);
+  for(let k=0;k<3;k++)lamps.push({p:V(x-w/2+w*(k+.5)/3,y+.62,z),r:.55,color:LAMP.TEAL,i:.9,breathe:.2,phase:k/3});
+}
+/** A lawn parterre: mown grass raised in a stone kerb, a shrub border at its ends. */
+function lawn(B,x,y,z,w,d) {
+  kerb(B,x,y,z,w,d,.8,.55,PK.STONE);
+  B.box(x,y+.22,z,w,.44,d,PK.LAWN);
+  for(const s of [-1,1])B.box(x,y+.9,z+s*(d/2-2.6),w-3,1.5,3.6,PK.BEDS);
+}
+/** A street tree in a grated pit: a leaning trunk and a crown of three overlapping masses. */
+function tree(B,x,y,z,s,seed) {
+  const h=(8+3.5*((seed*.618)%1))*s,lean=((seed*.37)%1-.5)*1.2*s,a=seed*2.4;
+  B.box(x,y+.06,z,3.2*s,.12,3.2*s,CK.DARK);
+  const top=V(x+Math.cos(a)*lean,y+h*.72,z+Math.sin(a)*lean);
+  B.tube([V(x,y,z),V(x,y+h*.4,z),top],.34*s,6,CK.DARK);
+  for(let c=0;c<3;c++) {
+    const ca=a+c*2.1,r=(2.6+.8*((seed*(c+1)*.29)%1))*s;
+    B.at(top.x+Math.cos(ca)*1.4*s,top.y+(c?.4:1.6)*s+r*.5,top.z+Math.sin(ca)*1.4*s,0,ca,0,1);
+    sphere(B,r,PK.BEDS,9,6);B.pop();
+  }
+  return top;
+}
+/** A lamp standard: a slim bronze post and a lantern head over the paving. */
+function lampPost(B,x,y,z,lamps) {
+  B.box(x,y+.15,z,.9,.3,.9,PK.STONE);
+  B.tube([V(x,y,z),V(x,y+6.2,z)],.13,6,CK.BRONZE);
+  B.box(x,y+6.55,z,.7,.7,.7,CK.LANTERN);B.box(x,y+7,z,1,.14,1,CK.BRONZE);
+  lamps.push({p:V(x,y+6.55,z),r:.55,color:LAMP.AMBER,i:1.4});
+}
+/**
+ * An ETFE canopy over the concourse: a cushion roof on branching bronze columns, lit from
+ * beneath. Columns stand clear of the glazed walk it shelters.
+ */
+function canopy(B,x0,x1,y,zHalf,h,lamps) {
+  const cx=(x0+x1)/2,L=x1-x0;
+  B.box(cx,y+h,0,L,.7,zHalf*2,PK.CANOPY);
+  for(const s of [-1,1])B.box(cx,y+h-.55,s*zHalf,L+1,1.1,1.1,CK.BRONZE);
+  const n=Math.max(2,Math.round(L/24));
+  for(let i=0;i<=n;i++) {
+    const x=x0+L*i/n;
+    for(const s of [-1,1]) {
+      const z=s*(zHalf-2),fork=V(x,y+h*.62,z);
+      B.box(x,y+.3,z,2.2,.6,2.2,PK.STONE);
+      B.tube([V(x,y,z),fork],.5,8,CK.BRONZE);
+      // the branches spring from inside the column head (their own start caps, never a shared one)
+      for(const [dx,dz] of [[-5,0],[5,0],[0,-s*5]]){const end=V(x+dx,y+h-.35,z+dz);B.tube([fork.clone().lerp(end,.04),end],.24,6,CK.BRONZE);}
+      if(i%2===0)lamps.push({p:V(x,y+h-1.3,z-s*4),r:.8,color:LAMP.WHITE,i:1.2,dir:V(0,-1,0)});
+    }
+  }
+}
+
 /** Concord embarkation terrace. Local +X runs along the pier; +Z is away from the liner. */
 export function buildEmbarkationTerrace() {
-  const B=new CB(),lamps=[],passengerPaths=[],gardens=[],attachmentJoints=[];
+  PORT=true;
+  try { return embarkationTerrace(); } finally { PORT=false; }
+}
+function embarkationTerrace() {
+  const B=new CB(),lamps=[],passengerPaths=[],gardens=[],attachmentJoints=[],rooms=[],walks=[],trees=[];
   const floor=11;
-  floorSlab(B,0,0,0,1000,22,480);
+  // The deck: 22 m of stone-faced slab, its long faces a lit gallery of public rooms looking out
+  // over the ring; granite paving on top (a grid, so the baked contact shade has vertices to
+  // sit on) and a band of non-slip service plate along the railed maintenance rims.
+  {
+    const pts=[[-500,-240],[500,-240],[500,240],[-500,240]];
+    B.at(0,0,0);B.push(TO_Y);B.loft([{z:-11,pts},{z:10.8,pts}],PK.STONE,{capStart:CK.DARK,capEnd:CK.DARK});B.pop();B.pop();
+    deckPatch(B,-500,500,-221.95,221.95,floor,5,PK.PAVING);
+    for(const s of [-1,1])deckPatch(B,-500,500,s<0?-240:222,s<0?-222:240,floor,5,CK.DECK);
+    for(const s of [-1,1]) {
+      B.box(0,-1.5,s*240.25,968,9,.5,DK.CONCOURSE);
+      B.box(0,3.6,s*240.45,972,1.2,.9,CK.BRONZE);B.box(0,-6.6,s*240.45,972,1.2,.9,CK.BRONZE);
+      B.box(s*500.25,-1.5,0,.5,9,448,DK.CONCOURSE);
+      B.box(0,10.1,s*240.3,1000,1.8,.6,PK.STONE);   // coping under the rim railing
+    }
+  }
   // Twin edge girders, a lower keel and six supports physically seat this deck on arm 4.
   for(const z of [-225,225])B.box(0,-15,z,990,30,18,CK.BRONZE);
   B.box(0,-22,0,980,32,32,CK.DARK);
@@ -122,15 +251,15 @@ export function buildEmbarkationTerrace() {
   closedWalk(B,[V(0,17,-320),V(0,17,-101)],7);
   B.box(0,8.995,-287.45,20,4,95.1,CK.HULL);
   passengerPaths.push({min:V(-2,11.1,-291),max:V(2,14,-155)});
-  hall(B,0,floor,-85,92,75,24);
+  hall(B,0,floor,-85,92,75,24,{rooms});
   // The longitudinal concourse is kept straight; garden rooms branch to either side.
   closedWalk(B,[V(-348,17,0),V(385,17,0),V(385,17,-58)],7);
   closedWalk(B,[V(0,17,-54),V(0,17,67)],7);
   passengerPaths.push({min:V(-2,11.1,-40),max:V(2,14,-9)});
   for(const x of [-230,230]) {
-    hall(B,x,floor,0,72,56,26);
+    hall(B,x,floor,0,72,56,26,{rooms});
     for(const sd of [-1,1])sideDoor(B,x+sd*36,floor,0,sd);
-    hall(B,x,floor,135,116,106,44,{garden:true});
+    hall(B,x,floor,135,116,106,44,{garden:true,rooms});
     closedWalk(B,[V(x,17,26),V(x,17,84)],7);
     passengerPaths.push({min:V(x-2,11.1,36),max:V(x+2,14,74)});
     for(const dx of [-32,32])for(const zz of [112,152]){planter(B,x+dx,floor,zz);bench(B,x+dx,floor,zz-8);}
@@ -141,7 +270,7 @@ export function buildEmbarkationTerrace() {
   // Three arrival-side garden courts and a long conservatory make a deliberate
   // sequence of rooms around the straight concourse, each with its own planted order.
   for(const [x,z,w,d,h] of [[-410,10,130,360,48],[-230,-150,170,104,42],[230,-150,225,104,42],[0,135,150,140,50]]) {
-    hall(B,x,floor,z,w,d,h,{garden:true});
+    hall(B,x,floor,z,w,d,h,{garden:true,rooms});
     const plants=[];
     for(const dx of [-w*.27,w*.27])for(let j=0;j<Math.max(2,Math.floor(d/40));j++) {
       const zz=z-d*.34+j*d*.68/(Math.max(2,Math.floor(d/40))-1);
@@ -156,7 +285,7 @@ export function buildEmbarkationTerrace() {
   B.box(365,floor+.2,120,146,.4,120,CK.DARK);
   for(const dx of [-58,58])B.box(365+dx,floor+.47,120,1.2,.15,96,CK.BRONZE);
   const courier=parkedCourier(B,365,floor+.4,120);
-  hall(B,385,floor,-80,60,45,19);
+  hall(B,385,floor,-80,60,45,19,{rooms});
   passengerPaths.push({min:V(309,11.1,-2),max:V(377,14,2)},{min:V(383,11.1,-49),max:V(387,14,-9)});
   // Baggage and courier servicing stay on the eastern margin, outside the gardens.
   for(const z of [-170,-135,-100]) {B.box(455,floor+2.8,z,16,5.6,10,CK.HULL);B.box(455,floor+5.7,z,17,.25,11,CK.BRONZE);}
@@ -185,7 +314,47 @@ export function buildEmbarkationTerrace() {
     for(let x=-480;x<=480;x+=24)if(z>0||Math.abs(x)>15)B.tube([V(x,floor,z),V(x,floor+1.4,z)],.1,6,CK.HULL);
   }
   for(const x of [-470,470])for(const z of [-215,215])lamps.push({p:V(x,floor+3,z),r:.8,color:LAMP.TEAL,i:1.5});
+  // ---- the open deck between the rooms: a civic landscape, not bare plate ----
+  // Where the concourse runs in the open it is sheltered by ETFE canopies on branching columns;
+  // lawns lie between the concourse and the garden vaults, reflecting pools on the forecourt
+  // before the liner, an avenue of trees along the northern rim and lamp standards throughout.
+  const cover=[],footprints=rooms.slice();
+  for(const [x0,x1] of [[-190,-42],[42,190],[-336,-272]]) {
+    canopy(B,x0,x1,floor,16,24,lamps);cover.push({x:(x0+x1)/2,z:0,w:x1-x0+10,d:32,h:24});
+  }
+  for(const s of [-1,1]) {
+    lawn(B,s*114,floor,44,118,24);footprints.push({x:s*114,z:44,w:120,d:26,h:1.4});
+    for(let k=0;k<4;k++){const x=s*(95+k*22);tree(B,x,floor,64,.8,k*7+(s>0?3:11));trees.push(V(x,floor,64));footprints.push({x,z:64,w:3,d:3,h:9});}
+  }
+  for(const [x,z,w,d] of [[-102,-156,52,84],[84,-156,36,84]]) {
+    pool(B,x,floor,z,w,d,lamps);footprints.push({x,z,w:w+2.8,d:d+2.8,h:.8});
+    for(const s of [-1,1])for(let k=0;k<4;k++){const lz=z-d/2+d*(k+.5)/4;lampPost(B,x+s*(w/2+6),floor,lz,lamps);}
+  }
+  for(let x=-330;x<=280;x+=22) {
+    if(Math.abs(x)<88)continue;
+    const seed=Math.round(x*.37+500);
+    tree(B,x,floor,213,1,seed);trees.push(V(x,floor,213));footprints.push({x,z:213,w:3.2,d:3.2,h:10});
+    if(((x+330)/22)%2===1)lampPost(B,x+11,floor,207,lamps);
+  }
+  for(const [x0,x1] of [[-190,-42],[42,190]])for(let x=x0+12;x<x1;x+=24)for(const z of [-24,24])lampPost(B,x,floor,z,lamps);
   const geo=placeMerge([{geo:B.geometry(),m:new THREE.Matrix4()},{geo:courier.geo,m:courier.matrix}]);
+  // Baked contact shading: walls dusky toward the deck, the paving darkened round every room,
+  // planter, kerb and tree pit and under the canopies, undersides in their own shade.
+  footprints.push({x:365,z:120,w:146,d:120,h:.5},{x:455,z:-135,w:17,d:80,h:6},{x:456,z:-35,w:22,d:34,h:4});
+  bakeOcclusion(geo,(x,y,z,nx,ny,nz)=>{
+    const h=y-floor;
+    if(ny<-.6)return h<-.5?.35:.6;
+    let o=0;
+    for(const c of cover)if(rectDist(c,x,z)===0&&h<c.h-1)o=Math.max(o,.34);
+    if(h<-.3||h>30)return o;
+    if(ny<=.6)return Math.max(o,.5*Math.exp(-Math.max(h,0)/2.6));
+    for(const r of footprints) {
+      if(Math.abs(x-r.x)>r.w/2+12||Math.abs(z-r.z)>r.d/2+12)continue;
+      const d=rectDist(r,x,z);
+      o=Math.max(o,(d>0?.62:.2)*Math.exp(-d/(1.2+Math.min(r.h,24)*.18)));
+    }
+    return o;
+  });
   const courierApproach={min:V(292,floor+60,60),max:V(438,floor+400,180)};
   return {geo,lamps,supports,passengerPaths,feet:courier.feet,courier,gardens,attachmentJoints,courierApproach,floor,radius:.63};
 }
