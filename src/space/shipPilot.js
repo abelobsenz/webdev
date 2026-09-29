@@ -9,7 +9,7 @@ import { EngineVoice } from '../core/engineAudio.js';
 // Flying the Lodestar in the orbital view (km, seconds). Newtonian: the drive and thrusters push
 // with realistic accelerations, gravity pulls, and nothing slows the ship but its own thrust.
 //
-//   W            main drive (12 g; with Shift, 30 g)     S           retro thrusters (3 g)
+//   W            main drive (12 g; with Shift, 300 g)    S           retro thrusters (3 g)
 //   A / D        roll       Up / Down  pitch    Q / E  yaw (RCS: rates build and stop gradually)
 //   Space / C    thrusters up / down (0.1 g)             B           brake to rest (flight computer)
 //   Z            flight assist on / off                  G           landing legs
@@ -29,8 +29,8 @@ import { EngineVoice } from '../core/engineAudio.js';
 
 const G0 = 0.00981;                    // km/s^2
 const GM_EARTH = 398600.4, GM_MOON = 4902.8;
-const DRIVE = 10;                       // a torch drive: ten times a chemical ship's push
-const A_MAIN = 1.2 * G0 * DRIVE, A_BOOST = 3.0 * G0 * DRIVE, A_RETRO = 0.3 * G0 * DRIVE, A_RCS = 0.1 * G0 * DRIVE, A_ASSIST = 1.6 * G0 * DRIVE;
+const DRIVE = 10, BOOST = 100;           // a torch drive: ten times a chemical ship's push, a hundred on boost
+const A_MAIN = 1.2 * G0 * DRIVE, A_BOOST = 3.0 * G0 * BOOST, A_RETRO = 0.3 * G0 * DRIVE, A_RCS = 0.1 * G0 * DRIVE, A_ASSIST = 1.6 * G0 * DRIVE;
 const RATE = { pitch: 0.4, yaw: 0.32, roll: 0.7 }, ANG_ACC = 0.45;
 const C_LIGHT = 299792.458;
 const V = () => new THREE.Vector3();
@@ -586,7 +586,7 @@ export class ShipPilot {
     k.acc.textContent = (j ? 0 : this.accel / G0).toFixed(2);
     const [n, u] = fmt(this.nearest.d);
     k.near.textContent = n; k.nearN.textContent = `${u} to ${this.nearest.name}`;
-    const bar = j ? (j.phase === 'transit' ? 1 : j.bubble) : this.burn / A_BOOST;
+    const bar = j ? (j.phase === 'transit' ? 1 : j.bubble) : Math.min(this.burn / A_MAIN, 1) * 0.5 + clamp((this.burn - A_MAIN) / (A_BOOST - A_MAIN), 0, 1) * 0.5;   // main fills half, boost the rest
     k.thr.style.width = `${Math.round(clamp(bar, 0, 1) * 100)}%`;
     k.thrL.textContent = j ? 'bubble' : 'drive';
     k.thr.classList.toggle('boost', !!j || this.boost);
