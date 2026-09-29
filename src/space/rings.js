@@ -9,7 +9,7 @@ import { HALO_PORTS } from './earthData.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { createHullMaterial, KIND } from './hull.js';
 import { createLamps, LAMP } from './lamps.js';
-import { HaloDistricts } from './haloDistricts.js';
+import { HaloDistricts, districtCore } from './haloDistricts.js';
 
 // The four orbital rings at planetary scale, with the same radii, widths and
 // orientations as RINGS in src/sky/celestial.js (defined there in Meridian's
@@ -117,42 +117,89 @@ const vec3 P_GLASS = vec3(0.07, 0.09, 0.11);
 const vec3 P_WATER = vec3(0.018, 0.038, 0.058);
 const vec3 P_WARM = vec3(1.0, 0.72, 0.44);
 
-// One town block (bw x bd km, local coords q from its corner): a court block, a tower on its
-// podium, stepped terraces or a pocket square, by hash. Returns the albedo; lit windows in wl.
-vec3 planBlock(vec2 q, vec2 bs, float h, float tv, float aa, out float bld) {
+// How built-up the city is (haloArchitecture densityAt, the same downtown per variant, km)
+uniform vec4 uCore[7];
+float planDensity(float tv, float x, float z) {
+  vec4 c = uCore[int(clamp(tv, 0.0, 6.0))];
+  vec2 d = vec2((x - c.x) / c.z, (z - c.y) / c.w);
+  float core = exp(-dot(d, d));
+  float spineD = exp(-(x / 3.2) * (x / 3.2));
+  return clamp(0.2 + 0.66 * core + 0.2 * spineD - 0.16 * smoothstep(9.0, 14.5, abs(x)), 0.0, 1.0);
+}
+vec3 planTileRoof(float h, float tv) {
+  vec3 terra = mix(vec3(0.50, 0.21, 0.12), vec3(0.64, 0.36, 0.2), h);
+  vec3 slate = mix(vec3(0.23, 0.24, 0.27), vec3(0.17, 0.33, 0.25), step(0.7, h));
+  float s = tv > 1.5 && tv < 2.5 ? 0.85 : tv > 3.5 && tv < 4.5 ? 0.7 : tv > 2.5 && tv < 3.5 ? 0.5 : tv > 5.5 ? 0.8 : 0.15;
+  return mix(terra, slate, step(1.0 - s, fract(h * 5.3)));
+}
+// One town block (bw x bd km, local coords q from its corner), its type drawn from the density
+// as the built blocks are: downtown towers on podiums and slabs, courts and terraces in the
+// middle city, terraced houses round back gardens and villas at the edge. Returns the albedo;
+// how much of it is building in bld, how much of that is lit glass in gl.
+vec3 planBlock(vec2 q, vec2 bs, float h, float tv, float d, float aa, out float bld, out float gl) {
   vec2 c = q - 0.5 * bs;
   float fp = pBox(q.x, 0.018, bs.x - 0.018, aa) * pBox(q.y, 0.018, bs.y - 0.018, aa);   // footprint
   float pave = pBox(q.x, 0.013, bs.x - 0.013, aa) * pBox(q.y, 0.013, bs.y - 0.013, aa);
   vec3 stone = planStone(tv) * (0.85 + 0.3 * fract(h * 13.7));
-  vec3 roof = fract(h * 7.3) < planPitched(tv) ? P_TILE * (0.85 + 0.35 * fract(h * 3.1)) : mix(P_FLAT, P_LAWN * 1.6, step(0.5, fract(h * 5.9)));
+  vec3 flatR = mix(P_FLAT, P_LAWN * 1.6, step(0.55, fract(h * 5.9)));
   vec3 col;
-  if (h < 0.1) {
+  float u = fract(h * 31.7);
+  gl = 0.0;
+  if (h < 0.035 + 0.08 * (1.2 - d)) {
     // pocket square: paving, a round basin, trees round it
     float r = length(c);
     col = mix(P_PAVE, P_WATER, pDisc(r, 0.03, aa));
     col = mix(col, P_WOOD * 1.4, pBox(r, 0.045, 0.075, aa) * 0.7);
     bld = 0.1;
-  } else if (h < 0.38) {
-    // tower on a planted podium: the tower's dark roof and lantern crown in the middle
+  } else if ((d > 0.68 && u < 0.66) || (d > 0.42 && d <= 0.68 && u < 0.18)) {
+    // a tower (or a cluster) on a planted podium: tinted glass roofs, a lit crown
     col = mix(P_LAWN * 1.3, stone * 0.8, 0.35);
-    float tw = 0.02 + 0.03 * fract(h * 17.0);
-    float tower = pBox(c.x, -tw, tw, aa) * pBox(c.y, -tw, tw, aa);
-    col = mix(col, fract(h * 23.0) < 0.5 ? P_GLASS : stone * 0.7, tower);
+    float tw = 0.022 + 0.03 * d + 0.012 * fract(h * 17.0);
+    vec2 o = d > 0.68 && u > 0.42 ? vec2(0.24 * bs.x, 0.0) : vec2(0.0);
+    float tower = max(pBox(c.x - o.x, -tw, tw, aa) * pBox(c.y, -tw, tw, aa), pBox(c.x + o.x, -tw * 0.8, tw * 0.8, aa) * pBox(c.y, -tw * 0.8, tw * 0.8, aa) * step(0.001, o.x));
+    vec3 glass = mix(vec3(0.07, 0.13, 0.16), vec3(0.14, 0.12, 0.09), step(0.5, fract(h * 23.0)));
+    col = mix(col, fract(h * 29.0) < 0.3 + 0.5 * d ? glass : stone * 0.7, tower);
+    col = mix(col, vec3(0.62, 0.5, 0.3), pDisc(length(c - o), 0.006, aa) * tower);
     bld = 0.6 + 0.4 * tower;
-  } else if (h < 0.78) {
-    // courtyard block: four wings round a green court
-    float wing = 0.015 + 0.008 * fract(h * 11.0);
-    float court = pBox(q.x, 0.018 + wing, bs.x - 0.018 - wing, aa) * pBox(q.y, 0.018 + wing, bs.y - 0.018 - wing, aa);
-    col = mix(roof, P_LAWN * 1.2, court);
-    bld = 1.0 - court;
-  } else {
+    gl = tower;
+  } else if ((d > 0.68 && u < 0.86) || (d > 0.42 && d <= 0.68 && u > 0.56 && u < 0.76)) {
+    // a slab along one side of the block, a garden court on the other
+    float along = step(0.5, fract(h * 41.0));
+    float w = along > 0.5 ? q.y : q.x, L = along > 0.5 ? bs.y : bs.x;
+    float slab = pBox(w, 0.018, 0.018 + 0.03 + 0.012 * fract(h * 7.0), aa);
+    col = mix(P_LAWN * 1.25, flatR * 0.9, slab);
+    bld = 0.35 + 0.65 * slab;
+    gl = slab * 0.5;
+    col = mix(col, P_WOOD * 1.3, pDisc(length(c + vec2(0.3, -0.2) * L * 0.2), 0.012, aa) * (1.0 - slab));
+  } else if (d <= 0.42 && u < 0.42) {
+    // terraced houses round back gardens: a ring of pitched roofs, lawn and trees inside
+    float ring = 1.0 - pBox(q.x, 0.033, bs.x - 0.033, aa) * pBox(q.y, 0.033, bs.y - 0.033, aa);
+    vec3 garden = mix(P_LAWN * 1.35, P_WOOD * 1.5, step(0.6, vnoise(q * 90.0 + h * 17.0)) * 0.7);
+    col = mix(garden, planTileRoof(fract(h * 3.1), tv) * (0.85 + 0.3 * fract(q.x * 60.0 + q.y * 37.0)), ring);
+    bld = ring * 0.8;
+  } else if (d <= 0.42 && u > 0.66 && u < 0.86) {
+    // villas in gardens: small hipped roofs scattered on lawn, pools, hedges
+    vec2 g = fract(q / (bs * 0.5)) - 0.5;
+    float house = pBox(g.x, -0.09, 0.09, aa * 2.0 / bs.x) * pBox(g.y, -0.07, 0.07, aa * 2.0 / bs.y);
+    col = mix(P_LAWN * 1.5, planTileRoof(fract(h * 7.7), tv), house);
+    col = mix(col, P_WOOD * 1.5, step(0.66, vnoise(q * 70.0 + h * 5.0)) * (1.0 - house) * 0.8);
+    bld = house * 0.6;
+  } else if (u > 0.86 || (d > 0.42 && d <= 0.68 && u > 0.76)) {
     // stepped terraces: storeys stepping down one way, a garden on every step
     float st = fract((fract(h * 29.0) < 0.5 ? q.x / bs.x : q.y / bs.y) * 4.0);
     col = mix(stone * 0.75, P_LAWN * 1.4, mix(0.35, pBox(st, 0.0, 0.35, aa * 4.0 / bs.x), 1.0 - smoothstep(0.02, 0.06, aa)));
     bld = 0.8;
+  } else {
+    // courtyard block: four wings round a green court, pitched roofs more often at the edge
+    float wing = 0.015 + 0.008 * fract(h * 11.0);
+    float court = pBox(q.x, 0.018 + wing, bs.x - 0.018 - wing, aa) * pBox(q.y, 0.018 + wing, bs.y - 0.018 - wing, aa);
+    vec3 roof = fract(h * 7.3) < planPitched(tv) * (1.25 - 0.6 * d) ? planTileRoof(fract(h * 3.1), tv) : flatR;
+    col = mix(roof, P_LAWN * 1.2, court);
+    bld = 1.0 - court;
   }
   col = mix(P_PAVE, col, fp);
   bld *= fp;
+  gl *= fp;
   return mix(P_STREET, col, pave);
 }
 
@@ -207,13 +254,21 @@ float haloPlan(float u, float x, float aa, float night, out vec3 alb, out float 
   // between the cells: streets with their lamps, the spine viaduct, the planted tram boulevards
   vec3 gut = P_STREET;
   float spineV = pBox(ax, 0.0, 0.018, aa), boul = pBox(abs(ax - 7.0), 0.0, 0.03, aa);
+  // the boulevards' verges and double avenues (32-86 m either side), the spine's planted flanks
+  float verge = pBox(abs(ax - 7.0), 0.032, 0.086, aa), avenue = pBox(abs(ax - 7.0), 0.034, 0.046, aa) + pBox(abs(ax - 7.0), 0.07, 0.082, aa);
+  float flank = pBox(ax, 0.06, 0.086, aa);
   gut = mix(gut, vec3(0.32, 0.31, 0.3), spineV);
-  gut = mix(gut, P_LAWN, boul * 0.8);
-  vec3 gutEm = P_WARM * (0.25 + 1.2 * spineV + 0.4 * boul) * lampN;
+  gut = mix(gut, P_LAWN, max(boul * 0.8, max(verge, flank)));
+  gut = mix(gut, P_WOOD * 1.3, clamp(avenue, 0.0, 1.0) * 0.9 + flank * 0.4);
+  vec3 gutEm = P_WARM * (0.25 + 1.2 * spineV + 0.4 * boul + 0.5 * pBox(abs(ax - 7.0), 0.029, 0.033, aa)) * lampN;
   // (round a port the stations own the deck: a green belt of parkland round their quarters, and
   // works round the foundry)
   float code = tv < 0.0 ? (ground > 1.5 ? 7.0 : 2.0) : floor(texelFetch(uPlanCells, ivec2(int(ix), int(tv * 4.0 + iz)), 0).r * 255.0 + 0.5);
   float cx = lx - mLo, sx = 1.0 - mLo - mHi, cz = lz - 0.03, sz = 0.94;   // inside the cell (km)
+  // kerb avenues along the streets of the town, park and civic cells (not the farms and works)
+  float urbanC = (code > 0.5 && abs(code - 5.0) > 0.5 && abs(code - 7.0) > 0.5) ? 1.0 : 0.0;
+  float kerb = max(pBox(abs(lx - 0.5), 0.477, 0.487, aa) * step(mLo + mHi, 0.07), max(pBox(lz, 0.0, 0.024, aa) * (1.0 - pBox(lz, 0.0, 0.006, aa)), pBox(lz, 0.976, 1.0, aa) * (1.0 - pBox(lz, 0.994, 1.0, aa))));
+  gut = mix(gut, P_WOOD * 1.4, kerb * urbanC * 0.7 * (1.0 - max(verge, flank)));
   vec2 cc = vec2(lx - 0.5 * (mLo + 1.0 - mHi), lz - 0.5);                // from the cell centre
   float hc = hash12(vec2(ix, k * 4.0 + iz) + 0.37);
   vec3 cAlb = P_LAWN; vec3 cEm = vec3(0.0); float cW = 0.0;
@@ -225,7 +280,8 @@ float haloPlan(float u, float x, float aa, float night, out vec3 alb, out float 
     float basin = pDisc(rH, 1.5, aa), isl = pDisc(length(hp - vec2(0.72, 0.0)), 0.3, aa);
     float quay = pBox(rH, 1.5, 1.56, aa);
     vec2 q = mod(hp + 3.0, vec2(0.25)); float bld;
-    vec3 town = planBlock(q, vec2(0.25), hash12(floor((hp + 3.0) / 0.25) + k), tv, aa, bld);
+    float glH;
+    vec3 town = planBlock(q, vec2(0.25), hash12(floor((hp + 3.0) / 0.25) + k), tv, 0.55, aa, bld, glH);
     town = mix(mix(planStone(tv) * 0.45, P_LAWN, 0.3), town, dBlk);
     cAlb = mix(town, P_WATER, basin);
     cAlb = mix(cAlb, P_LAWN * 1.2, isl * basin);
@@ -240,16 +296,24 @@ float haloPlan(float u, float x, float aa, float night, out vec3 alb, out float 
     vec2 bs = vec2(sx, sz) / 4.0;
     vec2 bq = vec2(cx, cz), bi = floor(bq / bs), q = bq - bi * bs;
     float bld;
-    vec3 blk = planBlock(q, bs, hash12(bi + vec2(ix * 4.0, k * 4.0 + iz) * 4.1 + tv), tv, aa, bld);
-    vec3 mean = mix(P_STREET, mix(planStone(tv) * 0.5, P_LAWN * 1.3, 0.25), 0.72);
+    float dn = planDensity(tv, x - lx + mLo + (bi.x + 0.5) * bs.x, zl - lz + 0.03 + (bi.y + 0.5) * bs.y);
+    float gl;
+    vec3 blk = planBlock(q, bs, hash12(bi + vec2(ix * 4.0, k * 4.0 + iz) * 4.1 + tv), tv, dn, aa, bld, gl);
+    // unresolved, a block is its mean: green and tiled at the edge, stone and glass downtown
+    vec3 sub = mix(P_LAWN * 1.35, planTileRoof(0.4, tv), 0.42);
+    vec3 mid = mix(planStone(tv) * 0.55, P_LAWN * 1.3, 0.3);
+    vec3 down = mix(vec3(0.09, 0.12, 0.14), planStone(tv) * 0.6, 0.45);
+    vec3 mean = mix(P_STREET, dn < 0.5 ? mix(sub, mid, dn / 0.5) : mix(mid, down, (dn - 0.5) / 0.5), 0.74);
     cAlb = mix(mean, blk, dBlk);
     float lit = mix(0.5, step(0.35, hash12(bi * 3.7 + floor(vec2(cx, cz) / 0.05) + k)), dBlk);
-    cEm = P_WARM * (mix(0.55, bld, dBlk) * lit * 0.45 + mix(0.28, 1.0 - bld, dBlk) * 0.3) * lampN;
+    cEm = P_WARM * (mix(0.55, bld, dBlk) * lit * (0.3 + 0.35 * dn) + mix(0.28, 1.0 - bld, dBlk) * 0.3) * lampN
+        + vec3(0.8, 0.9, 1.0) * mix(0.15 * dn * dn, gl, dBlk) * lit * 0.5 * lampN;
   } else if (code < 4.5) {
     // parks: lawns and woods in drifts, two stone walks crossing, a pond or a lake
     float n = vnoise(vec2(lx, lz + mod(k, 64.0) * 4.0) * 9.0 + ix) * 0.7 + vnoise(vec2(lx, lz) * 27.0 + ix * 3.0) * 0.3;
-    float woods = mix(0.35, smoothstep(0.45, 0.6, n), 1.0 - smoothstep(0.012, 0.04, aa));
-    cAlb = mix(P_LAWN, P_WOOD, woods);
+    float woods = mix(0.3, smoothstep(0.5, 0.62, n), 1.0 - smoothstep(0.012, 0.04, aa));
+    float mead = mix(0.25, smoothstep(0.5, 0.62, vnoise(vec2(lx, lz) * 4.5 + hc * 13.0)), 1.0 - smoothstep(0.02, 0.08, aa));
+    cAlb = mix(mix(P_LAWN * 1.15, vec3(0.21, 0.22, 0.08), mead * 0.8), P_WOOD, woods);
     float walks = max(pBox(cc.x, -0.004, 0.004, aa), pBox(cc.y, -0.004, 0.004, aa));
     cAlb = mix(cAlb, P_PAVE, walks);
     float R = code > 3.5 ? 0.29 : code > 2.5 ? 0.165 : 0.0;
@@ -1084,7 +1148,7 @@ export class Rings {
     // the Halo's deck paints the districts' own plan (known before any of them is built)
     if (this.districts) {
       const D = this.districts, m = this.meshes[0].material, def = RINGS[0];
-      const pu = { uPlanCells: { value: D.plan.cells }, uPlanTiles: { value: D.plan.tiles }, uPlan: { value: new THREE.Vector4(D.seamK, D.seamLen / 1000, D.nTiles, def.width + 2 * Math.max(0.15, def.width * 0.012)) } };
+      const pu = { uPlanCells: { value: D.plan.cells }, uPlanTiles: { value: D.plan.tiles }, uPlan: { value: new THREE.Vector4(D.seamK, D.seamLen / 1000, D.nTiles, def.width + 2 * Math.max(0.15, def.width * 0.012)) }, uCore: { value: [0, 1, 2, 3, 4, 5, 6].map((v) => { const c = districtCore(v); return new THREE.Vector4(c[0] / 1000, c[1] / 1000, c[2] / 1000, c[3] / 1000); }) } };
       Object.assign(m.uniforms, pu);
       Object.assign(this.roofs[0].material.uniforms, pu);          // (declared in the shared source; unused under the glass)
       m.defines = { ...(m.defines || {}), HALO_CELLS: 1 };
