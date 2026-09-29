@@ -90,6 +90,7 @@ check(worstBuild < 120, 'a station build over 120 ms (built on approach, one per
 const _ray = new THREE.Raycaster();
 const mat = new THREE.MeshBasicMaterial({ side: THREE.DoubleSide });
 let docks = 0, blocked = [], spinViolations = 0, minRayMargin = Infinity;
+let mooredHits = 0, mooredCount = 0; const mooredWhere = [];
 for (const st of belt.stations) {
   const d = st.built.data;
   const test = [new THREE.Mesh(d.geo, mat)];
@@ -99,6 +100,41 @@ for (const st of belt.stations) {
     test.push(m);
   }
   test[0].updateMatrixWorld(true);
+  // held ships: their hulls clear of the station's structure (bar the collar they lie against)
+  const mooredMeshes = [];
+  for (const mo of d.moored) {
+    const des = design(mo.cls, mo.seed), bb = des.geo.boundingBox;
+    const x = new THREE.Vector3().crossVectors(mo.up, mo.fwd).normalize(), y = new THREE.Vector3().crossVectors(mo.fwd, x);
+    const M = new THREE.Matrix4().makeBasis(x, y, mo.fwd).setPosition(mo.pos), inv = M.clone().invert();
+    const mm = new THREE.Mesh(des.geo, mat); mm.matrixAutoUpdate = false; mm.matrix.copy(M); mm.matrixWorld.copy(M);
+    mooredMeshes.push({ mm, inv, bb, mo });
+  }
+  {
+    const pos = d.geo.attributes.position.array, v = new THREE.Vector3();
+    for (const { inv, bb, mo } of mooredMeshes) {
+      let inside = 0;
+      for (let i = 0; i < pos.length; i += 3) {
+        v.set(pos[i], pos[i + 1], pos[i + 2]).applyMatrix4(inv);
+        // inside the hull's box, shrunk 1 m, away from the bow (where the collar holds her)
+        if (v.x > bb.min.x + 1 && v.x < bb.max.x - 1 && v.y > bb.min.y + 1 && v.y < bb.max.y - 1 && v.z > bb.min.z + 1 && v.z < bb.max.z - 6) inside++;
+      }
+      mooredHits += inside ? 1 : 0;
+      if (inside) mooredWhere.push(`${st.desc.name}(${st.desc.kind}) ${mo.cls}:${mo.seed} ${inside} vertices`);
+      mooredCount++;
+    }
+    for (let i = 0; i < mooredMeshes.length; i++) for (let j = i + 1; j < mooredMeshes.length; j++) {
+      const A = mooredMeshes[i], Bm = mooredMeshes[j];
+      const ba = A.bb.clone().applyMatrix4(A.mm.matrix), bbx = Bm.bb.clone().applyMatrix4(Bm.mm.matrix);
+      if (ba.intersectsBox(bbx)) {
+        // world boxes overlap: check the actual vertices of one inside the other's hull box
+        const pa = A.mm.geometry.attributes.position.array, w = new THREE.Vector3();
+        let n = 0;
+        for (let k = 0; k < pa.length; k += 9) { w.set(pa[k], pa[k + 1], pa[k + 2]).applyMatrix4(A.mm.matrix).applyMatrix4(Bm.inv); if (Bm.bb.containsPoint(w)) n++; }
+        if (n) mooredWhere.push(`${st.desc.name} moored ${i}/${j} overlap ${n}`), mooredHits++;
+      }
+    }
+  }
+  for (const m of mooredMeshes) test.push(m.mm);
   // berths: a clear approach down the axis from far out to the collar
   for (const k of d.docks) {
     docks++;
@@ -173,6 +209,8 @@ for (const st of belt.stations) {
   check(walkClearBad.length === 0, `crew walks obstructed: ${walkClearBad.slice(0, 4).join('; ')}`);
 }
 out.docks = docks;
+out.mooredShips = mooredCount;
+check(mooredHits === 0, `held ships intersect: ${mooredWhere.slice(0, 5).join("; ")}`);
 out.minDockApproachMarginM = +minRayMargin.toFixed(1);
 check(blocked.length === 0, `blocked berths: ${blocked.slice(0, 6).join('; ')}`);
 out.spinSweepViolations = spinViolations;

@@ -8,6 +8,7 @@ import { buildBeltStation } from './beltStations.js';
 import { BeltLife } from './beltLife.js';
 import { StationTraffic, makeRoute } from './fleetTraffic.js';
 import { design } from './shipDesigns.js';
+const _mx = new THREE.Vector3(), _mm = new THREE.Matrix4();
 
 // THE GEOSTATIONARY BELT: the whole arc, not only the Harbour's neighbourhood. Thirty sites
 // round the ring at 42,164 km, some of them pairs a few tens of kilometres apart, each a
@@ -35,7 +36,7 @@ export const DROP_RANGE = 40000;       // km: and let go beyond this
 export const TRAFFIC_RANGE = 3500;     // km: their berthing traffic runs inside this
 const KIND_COLOR = {
   comms: LAMP.RED, habitat: [1.0, 0.8, 0.5], depot: LAMP.AMBER, shipyard: LAMP.WHITE,
-  relay: [1.0, 0.35, 0.2], transit: LAMP.TEAL, farm: LAMP.GREEN, science: LAMP.BLUE,
+  relay: [1.0, 0.35, 0.2], transit: LAMP.TEAL, farm: LAMP.GREEN, science: LAMP.BLUE, anchorage: [1.0, 0.9, 0.7], drydock: LAMP.WHITE,
 };
 const NAMES = {
   comms: ['Vela Signal', 'Lyre Signal', 'Corvus Relay Deck', 'Ansa Signal', 'Tarn Listening Post'],
@@ -46,18 +47,20 @@ const NAMES = {
   transit: ['Wayhouse East', 'Crossing', 'Farstair', 'Nine Roads'],
   farm: ['Orchard', 'Greenhold', 'Maile Drum', 'Harvest Drum'],
   science: ['Deepglass', 'Keck Station', 'Pale Eye'],
+  anchorage: ['Outer Roads', 'Kapena Anchorage', 'Lee Moorings', 'Waiting Water'],
+  drydock: ['Refit Dock 2', 'Graving Dock', 'Survey Dock', 'Refit Dock 5'],
 };
 /** Ship classes that call at each kind of station. */
 const CALLERS = {
   comms: ['drone', 'lighter'], habitat: ['packet', 'lighter', 'packet'], depot: ['tanker', 'lighter', 'tug'],
-  shipyard: ['hauler', 'lighter', 'tug'], relay: ['drone', 'tug'], transit: ['packet', 'hauler', 'lighter'],
-  farm: ['lighter', 'hauler'], science: ['drone', 'lighter'],
+  shipyard: ['lighter', 'tug', 'lighter'], relay: ['drone', 'tug'], transit: ['packet', 'hauler', 'lighter'],
+  farm: ['lighter', 'hauler'], science: ['drone', 'lighter'], anchorage: ['tug'], drydock: ['lighter', 'tug'],
 };
 
 /** The belt: deterministic list of stations with their places on the arc (station-frame offsets, km). */
 export function beltLayout() {
   const r = rng(5021);
-  const order = ['habitat', 'depot', 'comms', 'transit', 'shipyard', 'relay', 'farm', 'science'];
+  const order = ['habitat', 'depot', 'comms', 'anchorage', 'transit', 'shipyard', 'relay', 'drydock', 'farm', 'science'];
   const used = {};
   const name = (k) => { const i = used[k] = (used[k] ?? -1) + 1; const list = NAMES[k]; return i < list.length ? list[i] : `${list[i % list.length]} ${Math.floor(i / list.length) + 1}`; };
   const N = 30;
@@ -66,7 +69,7 @@ export function beltLayout() {
     // the Harbour's own neighbourhood (4 degrees either side of the meridian) is left to it
     const du = (i + 0.5) / N * (TAU - 0.14) + 0.07;
     const lon = MERIDIAN_LON + du + (r() - 0.5) * 0.06;
-    const kind = order[(i * 3 + Math.floor(i / 8)) % order.length];
+    const kind = order[(i * 3 + Math.floor(i / 10)) % order.length];
     const site = { i, lon, kind, name: name(kind), seed: 101 + i * 37, livery: (i * 5 + 3) % LIVERIES.length, local: V((r() - 0.5) * 20, (r() - 0.5) * 40, (r() - 0.5) * 40), yaw: kind === 'habitat' || kind === 'farm' ? 0 : r() * TAU };
     out.push(site);
     // every third site keeps a companion a few tens of km along the arc
@@ -221,10 +224,23 @@ export class GeoBelt {
     });
     addLamps(mesh, data.lamps, { minPx: 1.2 });
     st.group.add(mesh);
+    // ships held by the station (anchorage moorings, a dry dock's refit): shared hulls, own paint
+    const moored = data.moored.map((mo, k) => {
+      const des = design(mo.cls, mo.seed);
+      des.geo.userData.shared = true;
+      const ml = LIVERIES[(d.id + k * 3) % LIVERIES.length];
+      const m = dressedMesh(des.geo, { accent: [0.55, 0.88, 1.0], lit: 0.55, livery: ml[0], livery2: ml[1] });
+      m.position.copy(mo.pos).multiplyScalar(KM);
+      _mx.crossVectors(mo.up, mo.fwd).normalize();
+      m.quaternion.setFromRotationMatrix(_mm.makeBasis(_mx, _s.crossVectors(mo.fwd, _mx), mo.fwd));
+      addLamps(m, des.lamps, { minPx: 1.1 });
+      st.group.add(m);
+      return m;
+    });
     st.body.radius = data.radius * KM + 0.05;
     // its working life: approach chains, pilot and patrol drones, crews, welders (beltLife.js)
     const life = new BeltLife(mesh, data, d.id + 1);
-    st.built = { data, mesh, parts, life };
+    st.built = { data, mesh, parts, life, moored };
     // the berthing traffic, created once (its hulls are instanced; kept when the hull is let go)
     if (!st.traffic && data.docks.length) {
       const D = this._designs();
@@ -252,6 +268,7 @@ export class GeoBelt {
     const b = st.built;
     if (!b) return;
     st.group.remove(b.mesh);
+    for (const m of b.moored) { st.group.remove(m); m.material.dispose(); }
     b.mesh.traverse((o) => { if (o.geometry && !o.geometry.userData.shared) o.geometry.dispose(); });
     b.mesh.material.dispose();
     st.built = null;

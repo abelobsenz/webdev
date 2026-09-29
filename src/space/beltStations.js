@@ -3,6 +3,7 @@ import { CB, CK, TAU, V, lerp, rng, here, hereDir, atAim, tank, sphereTank, rcsQ
 import { sectionEllipse } from '../craft/craftGeometry.js';
 import { DK } from './craftMesh.js';
 import { LAMP } from './lamps.js';
+import { design } from './shipDesigns.js';
 
 // THE BELT'S STATIONS: the geostationary arc's working platforms, each generated from a seed
 // (metres; station frame: +y radial, away from the Earth; +x west along the arc; +z north).
@@ -45,6 +46,7 @@ class Ctx {
     this.parts = [];
     this.walks = [];      // crews walk these: { a, b, up } (deck surface)
     this.welds = [];      // welding arcs
+    this.moored = [];     // ships held by the station: { cls, seed, pos, fwd, up } (hulls drawn by GeoBelt)
     this.livery = livery;
   }
   /** A moving part in its own builder: build(Bp, lamps) in the pivot frame. */
@@ -612,7 +614,85 @@ function buildScience(c) {
   c.beacon(V(-tR - 24, -tL / 2 + 18, 0), LAMP.RED, 2, 4, 0.5);
 }
 
-export const BUILDERS = { comms: buildComms, habitat: buildHabitat, depot: buildDepot, shipyard: buildShipyard, relay: buildRelay, transit: buildTransit, farm: buildFarm, science: buildScience };
+/**
+ * Anchorage: a lit mooring tower with booms radiating round it, ships lying bow-on at the
+ * boom heads while they wait for a berth at the Harbour (their hulls: GeoBelt, from `moored`).
+ */
+function buildAnchorage(c) {
+  const { B, r } = c;
+  const H = r.range(60, 90);
+  B.push(TO_Y);
+  B.lathe([[0.02, -H / 2 - 10, CK.DARK], [10, -H / 2 - 8, CK.HULL], [14, -H / 2, CK.BRONZE], [14, -H / 2 + 4, DK.LIVERY], [12, -8, DK.LIVERY], [16, -6, CK.BRONZE], [16, 6, DK.CONCOURSE], [12, 8, CK.BRONZE],
+    [12, H / 2 - 4, DK.GRIME], [14, H / 2, CK.BRONZE], [10, H / 2 + 6, CK.GLASS], [4, H / 2 + 10, CK.HULL], [0.02, H / 2 + 12, CK.HULL]], 28);
+  B.pop();
+  const tip = mast(B, V(0, H / 2 + 11, 0), Y, 26, 0.35);
+  c.beacon(tip, LAMP.WHITE, 3.4, 6);
+  c.beacon(V(0, -H / 2 - 11, 0), LAMP.AMBER, 3, 5, 0.5);
+  const classes = [['hauler', 3], ['tanker', 12], ['packet', 9], ['hauler', 8], ['tanker', 5], ['packet', 4]];
+  const n = r.int(4, 5);
+  for (let k = 0; k < n; k++) {
+    const a = (k / n) * TAU + r.range(-0.1, 0.1);
+    const u = V(Math.cos(a), 0, Math.sin(a));
+    const y = ((k % 3) - 1) * H * 0.3;
+    const len = r.range(110, 150);
+    const root = u.clone().multiplyScalar(14).setY(y), head = u.clone().multiplyScalar(14 + len).setY(y);
+    truss(B, root, head, 4, 8, 0.3);
+    catwalk(B, root.clone().add(V(0, 2.2, 0)), head.clone().add(V(0, 2.2, 0)), Y, 1.4, 1.1);
+    c.walks.push({ a: root.clone().addScaledVector(u, 4).add(V(0, 2.28, 0)), b: head.clone().addScaledVector(u, -4).add(V(0, 2.28, 0)), up: Y });
+    atAim(B, head, u);
+    B.lathe([[3.2, 0, CK.BRONZE], [5, 1.5, DK.HAZARD], [5, 4, CK.DARK], [3, 5, CK.DARK]], 16, 0, { closedProfile: false });
+    B.pop();
+    c.lamps.push({ p: head.clone().add(V(0, 5, 0)), r: 1.4, color: LAMP.AMBER, i: 3.2, breathe: 0.6, phase: k / n });
+    const [cls, seed] = classes[(k + c.r.int(0, 5)) % classes.length];
+    if (k < n - 1) c.moored.push({ cls, seed, pos: head.clone().addScaledVector(u, 8 + design(cls, seed).geo.boundingBox.max.z), fwd: u.clone().negate(), up: Y.clone() });
+    else berth(c, head.clone().addScaledVector(u, 5), u, 2.6, 4);      // one boom kept free for the tenders
+  }
+  for (const s of [-1, 1]) pvWing(c, V(0, s * (H / 2 - 10), 0).add(V(0, 0, 0)), V(0, s, 0), X, r.range(40, 70), 18);
+}
+
+/**
+ * Dry dock: a cradle frame round a ship in for survey and refit, her hull held in padded
+ * clamps, floodlit from every corner, service gantries on her flanks, the crews' block beside.
+ */
+function buildDrydock(c) {
+  const { B, r } = c;
+  const [cls, seed] = r.pick([['hauler', 3], ['tanker', 5], ['hauler', 8], ['tanker', 12]]);
+  // the ship's box (metres, from shipDesigns' seeded hulls): the cradle is sized round it
+  const bb = design(cls, seed).geo.boundingBox;
+  const box = [bb.min.x, bb.min.y, bb.min.z, bb.max.x, bb.max.y, bb.max.z];
+  const Wd = 2 * Math.max(-box[0], box[3]) + 50, Hd = 2 * Math.max(-box[1], box[4]) + 50;
+  const z0 = box[2] - 30, z1 = box[5] + 30, L = z1 - z0;
+  const nF = Math.max(4, Math.round(L / 60));
+  const zs = Array.from({ length: nF }, (_, i) => z0 + (i * L) / (nF - 1));
+  for (const z of zs) {
+    const a = V(-Wd / 2, -Hd / 2, z), b = V(Wd / 2, -Hd / 2, z), cc = V(Wd / 2, Hd / 2, z), d = V(-Wd / 2, Hd / 2, z);
+    truss(B, a, b, 4, 10, 0.3); truss(B, b, cc, 4, 10, 0.3); truss(B, cc, d, 4, 10, 0.3); truss(B, d, a, 4, 10, 0.3);
+    for (const [sx, sy] of [[1, 1], [-1, 1], [1, -1], [-1, -1]]) floodAt(c, V(sx * Wd * 0.47, sy * Hd * 0.47, z), V(0, 0, z), 1.4, LAMP.WHITE, 2.8);
+  }
+  for (const [x, y] of [[-Wd / 2, -Hd / 2], [Wd / 2, -Hd / 2], [Wd / 2, Hd / 2], [-Wd / 2, Hd / 2]]) truss(B, V(x, y, z0), V(x, y, z1), 4, 12, 0.3);
+  // service gantries: decks with railings along both flanks, clear of the hull
+  for (const s of [-1, 1]) {
+    const x = s * (Wd / 2 - 8);
+    B.box(x, 0, (z0 + z1) / 2, 8, 1, L * 0.8, CK.DECK);
+    railing(B, x - 4, x + 4, (z0 + z1) / 2 - L * 0.4, (z0 + z1) / 2 + L * 0.4, 0.5);
+    for (const z of zs) B.tube([V(s * Wd / 2, 0, z), V(x + s * 4, 0, z)], 0.6, 5, CK.DARK);
+    c.walks.push({ a: V(x, 0.5, (z0 + z1) / 2 - L * 0.38), b: V(x, 0.5, (z0 + z1) / 2 + L * 0.38), up: Y });
+  }
+  // cradle arms from the bottom frames to padded pads just under her keel
+  for (const z of zs) if (z > box[2] + 10 && z < box[5] - 10) {
+    B.tube([V(0, -Hd / 2, z), V(0, box[1] - 1.2, z)], 1.4, 6, CK.DARK);
+    B.box(0, box[1] - 1.0, z, 8, 1.2, 4, DK.HAZARD);
+  }
+  c.moored.push({ cls, seed, pos: V(0, 0, 0), fwd: Z.clone(), up: Y.clone() });
+  // the crews' block and a berth for the tenders, beside the frame
+  block(c, Wd / 2 + 26, 0, z0 + L * 0.3, 24, 26, 40, [DK.PORTS, DK.CONCOURSE]);
+  truss(B, V(Wd / 2 + 2, 0, z0 + L * 0.3), V(Wd / 2 + 14, 0, z0 + L * 0.3), 4, 5, 0.3);
+  berth(c, V(Wd / 2 + 38, 0, z0 + L * 0.3), X, 2.6, 5);
+  for (const [sx, sz] of [[1, 1], [-1, 1], [1, -1], [-1, -1]]) c.beacon(V(sx * Wd / 2, Hd / 2 + 4, sz > 0 ? z1 : z0), LAMP.RED, 3, 5, (sx + sz + 2) * 0.13);
+  radiatorWing(B, V(-Wd / 2, -Hd / 2, z0), V(-1, 0, 0), Y, r.range(60, 90), 26, c.lamps, LAMP.AMBER);
+}
+
+export const BUILDERS = { anchorage: buildAnchorage, drydock: buildDrydock, comms: buildComms, habitat: buildHabitat, depot: buildDepot, shipyard: buildShipyard, relay: buildRelay, transit: buildTransit, farm: buildFarm, science: buildScience };
 
 /** Build one station of the belt (metres, station frame). */
 export function buildBeltStation(kind, seed, livery = 0) {
@@ -627,5 +707,7 @@ export function buildBeltStation(kind, seed, livery = 0) {
     radius = Math.max(radius, p.pivot.length() + p.geo.boundingSphere.center.length() + p.geo.boundingSphere.radius + (p.travel || 0));
     tris += p.geo.index.count / 3;
   }
-  return { kind, seed, geo, parts: c.parts, lamps: c.lamps, docks: c.docks, walks: c.walks, welds: c.welds, radius, tris, spinR: c.spinR || 0, buildMs: performance.now() - t0 };
+  let mooredTris = 0;
+  for (const m of c.moored) { const d = design(m.cls, m.seed); radius = Math.max(radius, m.pos.length() + d.radius); mooredTris += d.geo.index.count / 3; }
+  return { kind, seed, geo, parts: c.parts, lamps: c.lamps, docks: c.docks, walks: c.walks, welds: c.welds, moored: c.moored, mooredTris, radius, tris, spinR: c.spinR || 0, buildMs: performance.now() - t0 };
 }
