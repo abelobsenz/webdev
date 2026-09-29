@@ -212,6 +212,18 @@ export function buildHillCountry(scene, { onComponent = null } = {}) {
   // the contours and switch back up the slopes; shared cells become trunks (no doubled roads)
   const passable = new Uint8Array(NX * NZ);
   for (let j = 0; j < NZ; j++) for (let i = 0; i < NX; i++) passable[j * NX + i] = H[j * NX + i] > 12 && !blocked(BX0 + i * GS, BZ0 + j * GS, 1300) ? 1 : 0;
+  // the summit terraces are reached by their own trails, never crossed: a trunk smoothed between
+  // two grid cells cuts a corner by up to ~57 m, so the cells within 120 m of a summit stay closed
+  // (a summit's own trail reopens them while it is routed: summitCells)
+  const summitCells = new Map();
+  for (const [x, z] of SUMMIT_SITES) {
+    const ci = Math.round((x - BX0) / GS), cj = Math.round((z - BZ0) / GS), closed = [];
+    for (let dj = -2; dj <= 2; dj++) for (let di = -2; di <= 2; di++) {
+      const i = ci + di, j = cj + dj;
+      if (i >= 0 && j >= 0 && i < NX && j < NZ && passable[j * NX + i] && Math.hypot(BX0 + i * GS - x, BZ0 + j * GS - z) < 120) { passable[j * NX + i] = 0; closed.push(j * NX + i); }
+    }
+    summitCells.set(`${x},${z}`, closed);
+  }
   const onRoad = new Uint8Array(NX * NZ);
   const cellOf = (x, z) => Math.round((z - BZ0) / GS) * NX + Math.round((x - BX0) / GS);
   const gCost = new Float32Array(NX * NZ), from = new Int32Array(NX * NZ), stamp = new Int32Array(NX * NZ);
@@ -385,11 +397,13 @@ export function buildHillCountry(scene, { onComponent = null } = {}) {
       }
       const shared=(s.shared&&t.shared)&&options.kind!=='summit-court';
       const stair=options.kind&&options.kind!=='trunk'&&Math.abs(t.y-s.y)/segL>.22;
-      const treadCount=stair?Math.ceil(Math.abs(t.y-s.y)/.18):1;
+      // shared stairs keep an absolute 0.16 m tread grid so crossing lanes' treads coincide; rounding
+      // to it (not up) with 0.15 m risers keeps every step, the first off the landing included, under 0.24 m
+      const treadCount=stair?Math.ceil(Math.abs(t.y-s.y)/(shared?.15:.18)):1;
       for(let q=0;q<treadCount;q++){
         const u0=q/treadCount,u1=(q+1)/treadCount,blend=(a,b,u)=>a.map((v,j)=>v+(b[j]-v)*u);
         const A=blend(L0,L1,u0),B=blend(R0,R1,u0),D=blend(L0,L1,u1),E=blend(R0,R1,u1);
-        if(stair){let y=s.y+(t.y-s.y)*(t.y>s.y?u1:u0);if(shared)y=Math.ceil(y/.16)*.16;for(const p of [A,B,D,E])p[1]=y;}
+        if(stair){let y=s.y+(t.y-s.y)*(t.y>s.y?u1:u0);if(shared)y=Math.round(y/.16)*.16;for(const p of [A,B,D,E])p[1]=y;}
         if(shared&&crossingSurface)for(const [p,blend,u]of [[A,s.padBlend??1,u0],[B,s.padBlend??1,u0],[D,t.padBlend??1,u1],[E,t.padBlend??1,u1]]){const original=(s.originalY??s.y)+((t.originalY??t.y)-(s.originalY??s.y))*u,center={x:s.x+(t.x-s.x)*u,z:s.z+(t.z-s.z)*u,y:original};p[1]+=(crossingSurface({x:p[0],z:p[2],y:original})-crossingSurface(center))*blend;}
         for(const [p,v]of [[A,-1],[B,1],[E,1],[A,-1],[E,1],[D,-1]])C.drape.vert(p[0],p[1],p[2],up,ROAD_COL,roadLen+segL*(p===D||p===E?u1:u0),v,0);
         C.stone.hexa([...[A,B,E,D].map(p=>[p[0],floor,p[2]]),...[A,B,E,D].map(p=>[p[0],p[1]-.015,p[2]])],1,floor);
@@ -637,11 +651,13 @@ export function buildHillCountry(scene, { onComponent = null } = {}) {
   // coarse terrain cost as the trunk, followed by fine terrain-following paving.
   for(const sh of shrines){
     const s=sh.site,near=nearestRoad(s.x,s.z),g=s.gate;
-    const coarse=route(cellOf(s.x,s.z),cellOf(near.x,near.z));
-    const path=coarse?coarse.map(n=>[BX0+(n%NX)*GS,BZ0+((n/NX)|0)*GS]):[[near.x,near.z],[s.x,s.z]];
+    // Route from the approach outside the gate (the summit's other cells stay closed), so the
+    // trail always comes in on the gate side instead of skirting the parapet round to it.
+    const approach={x:g.x+g.dx*45,z:g.z+g.dz*45};
+    const coarse=route(cellOf(approach.x,approach.z),cellOf(near.x,near.z));
+    const path=coarse?coarse.map(n=>[BX0+(n%NX)*GS,BZ0+((n/NX)|0)*GS]):[[near.x,near.z],[approach.x,approach.z]];
     // route() returns destination first: road -> summit. Trim the part that
     // would cross the occupied summit terrace, then arrive on its gate side.
-    const approach={x:g.x+g.dx*45,z:g.z+g.dz*45};
     while(path.length>1&&Math.hypot(path.at(-1)[0]-s.x,path.at(-1)[1]-s.z)<100)path.pop();
     path[0]=[near.x,near.z];path.push([approach.x,approach.z]);
     let pts=resample(smooth(path,2),3),join=near;
@@ -775,11 +791,11 @@ export function buildHillCountry(scene, { onComponent = null } = {}) {
     const junctionNodes=new Set([...roots,...doorLinks.map(({e})=>e.node),...(publicCenter?[publicCenter.selected.n]:[])]);
     const done=new Set(),edgeKey=(a,b)=>a<b?`${a}:${b}`:`${b}:${a}`;
     const draw=path=>{const p=[],h=[],main=path.every(n=>spine.has(n)&&clear(X(n),Z(n),1.4));
-      for(let k=0;k<path.length;k++){const n=path[k];p.push([X(n),Z(n)]);h.push(height[n]);if(k===0||k===path.length-2){const m=path[k+1],dx=X(m)-X(n),dz=Z(m)-Z(n),len=Math.hypot(dx,dz),landing=Math.min(1.25,len*.3);if(k===0){p.push([X(n)+dx/len*landing,Z(n)+dz/len*landing]);h.push(height[n]);}if(k===path.length-2){p.push([X(m)-dx/len*landing,Z(m)-dz/len*landing]);h.push(height[m]);}}}
+      for(let k=0;k<path.length;k++){const n=path[k];p.push([X(n),Z(n)]);h.push(height[n]);if(k===0||k===path.length-2){const m=path[k+1],dx=X(m)-X(n),dz=Z(m)-Z(n),len=Math.hypot(dx,dz),landing=Math.min(2.3,len*.46);if(k===0){p.push([X(n)+dx/len*landing,Z(n)+dz/len*landing]);h.push(height[n]);}if(k===path.length-2){p.push([X(m)-dx/len*landing,Z(m)-dz/len*landing]);h.push(height[m]);}}}
       road(p,main?1.18:hw,0,{heights:h,kerbs:false,kind:main?'village-lane':'local-lane',lamps:false});};
     for(const [n,nb]of used){if(nb.size===2&&!junctionNodes.has(n))continue;for(const m of nb){if(done.has(edgeKey(n,m)))continue;const path=[n];let a=n,b=m;for(;;){path.push(b);done.add(edgeKey(a,b));const next=used.get(b);if(next.size!==2||junctionNodes.has(b))break;const c=[...next].find(q=>q!==a);if(done.has(edgeKey(b,c)))break;a=b;b=c;}draw(path);}}
     for(const n of roots){const p=anchor.get(n);if(p&&Math.hypot(X(n)-p.x,Z(n)-p.z)>.05)road([[p.x,p.z],[X(n),Z(n)]],hw,0,{heights:[p.y,height[n]],kerbs:false,kind:'road-junction',lamps:false});}
-    for(const {s,e}of doorLinks){const node={x:X(e.node),z:Z(e.node)},dx=e.approach.x-node.x,dz=e.approach.z-node.z,len=Math.hypot(dx,dz),landing=Math.min(1.25,len*.35),first=[node.x+dx/(len||1)*landing,node.z+dz/(len||1)*landing],middle=resample([first,[e.approach.x,e.approach.z]],1),walk=[[node.x,node.z],...middle,[e.foot.x,e.foot.z]],heights=[height[e.node],...middle.map((p,k)=>Math.max(height[e.node]+(e.bottom-height[e.node])*k/(middle.length-1),joiningHeight(...p,hw))),e.bottom];heights[1]=height[e.node];heights[heights.length-2]=e.bottom;const n0=[-dz/(len||1),dx/(len||1)],n1=[e.dz,-e.dx],den=1+n0[0]*n1[0]+n0[1]*n1[1],miter=[(n0[0]+n1[0])/den,(n0[1]+n1[1])/den],normals=walk.map((p,k)=>{if(k===walk.length-1)return n1;const u=Math.min(1,Math.hypot(p[0]-node.x,p[1]-node.z)/(len||1));return n0.map((v,j)=>v+(miter[j]-v)*u);});road(walk,hw,0,{heights,normals,kerbs:false,kind:'door-walk',lamps:false});
+    for(const {s,e}of doorLinks){const node={x:X(e.node),z:Z(e.node)},dx=e.approach.x-node.x,dz=e.approach.z-node.z,len=Math.hypot(dx,dz),landing=Math.min(2.3,len*.46),first=[node.x+dx/(len||1)*landing,node.z+dz/(len||1)*landing],middle=resample([first,[e.approach.x,e.approach.z]],1),walk=[[node.x,node.z],...middle,[e.foot.x,e.foot.z]],heights=[height[e.node],...middle.map((p,k)=>Math.max(height[e.node]+(e.bottom-height[e.node])*k/(middle.length-1),joiningHeight(...p,hw))),e.bottom];heights[1]=height[e.node];heights[heights.length-2]=e.bottom;const n0=[-dz/(len||1),dx/(len||1)],n1=[e.dz,-e.dx],den=1+n0[0]*n1[0]+n0[1]*n1[1],miter=[(n0[0]+n1[0])/den,(n0[1]+n1[1])/den],normals=walk.map((p,k)=>{if(k===walk.length-1)return n1;const u=Math.min(1,Math.hypot(p[0]-node.x,p[1]-node.z)/(len||1));return n0.map((v,j)=>v+(miter[j]-v)*u);});road(walk,hw,0,{heights,normals,kerbs:false,kind:'door-walk',lamps:false});
       if(s.gate){const d=s.door;road([[e.face.x,e.face.z],[s.x+s.gate.dx*19,s.z+s.gate.dz*19],[d.x,d.z]],1.1,0,{heights:[s.base+.04,s.base+.04,s.base+.04],kerbs:false,kind:'summit-court',lamps:false});}
     }
     // A small public court off the shared village lane.
