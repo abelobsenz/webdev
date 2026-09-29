@@ -562,6 +562,36 @@ function lamppost() {
 }
 export const LAMPPOST_LAMP = V(0, 6.3, 0.9);
 
+function tree() {
+  // a street tree in lunar gravity: a slender trunk and a tall, loose crown in three lobes
+  // (they grow half again as tall as on Earth); the instance colour tints the crown
+  const B = new CB();
+  latheY(B, [[0.32, 0, LK.WALL], [0.22, 2.4, LK.BRONZE], [0.14, 7.5, LK.BRONZE]], 7);
+  const lobe = (x, y, z, r, h) => { B.at(x, 0, z); latheY(B, Array.from({ length: 7 }, (_, i) => { const t = -Math.PI / 2 + Math.PI * i / 6; return [Math.cos(t) * r * (1 + 0.12 * Math.sin(i * 2.3)), y + Math.sin(t) * h, LK.GARDEN]; }), 9, x); B.pop(); };
+  lobe(0, 8.2, 0, 2.6, 3.4);
+  lobe(0.9, 6.2, 0.5, 1.8, 2.0);
+  lobe(-0.8, 6.6, -0.6, 1.7, 2.1);
+  return B.geometry();
+}
+
+function bench() {
+  // a promenade bench: stone feet, a bronze-slatted seat and back
+  const B = new CB();
+  for (const x of [-0.8, 0.8]) B.box(x, 0.22, 0, 0.12, 0.44, 0.5, LK.WALL);
+  for (let i = 0; i < 4; i++) B.box(0, 0.46, -0.2 + i * 0.13, 1.9, 0.04, 0.09, LK.BRONZE);
+  for (let i = 0; i < 3; i++) B.box(0, 0.62 + i * 0.13, -0.3, 1.9, 0.09, 0.04, LK.BRONZE);
+  return B.geometry();
+}
+
+function planter() {
+  // a dressed-stone planter with its shrubs
+  const B = new CB();
+  B.box(0, 0.35, 0, 2.4, 0.7, 1.2, LK.WALL);
+  B.box(0, 0.72, 0, 2.2, 0.06, 1.0, LK.GARDEN);
+  for (const x of [-0.7, 0, 0.7]) ball(B, x, 1.05, 0, 0.45, LK.GARDEN, 6, 4);
+  return B.geometry();
+}
+
 function kiosk() {
   // a promenade kiosk: a counter under a striped awning (tinted), a lit name board, a lamp
   const B = new CB();
@@ -582,6 +612,7 @@ const MAKERS = {
   lander: crewLander, cargoLander, suit, walker, rover, hauler, tug, tram, excavator, wheel: bucketWheel,
   tracker: trackerPost, panel: trackerPanel, radiator: radiatorWing, boulder0: () => boulder(11), boulder1: () => boulder(29), boulder2: () => boulder(47),
   drone, launch, sled, vault, dome, silo, gantry, trolley, mast, cart, container, serviceTower, sphereTank, lamppost, kiosk,
+  tree, bench, planter,
 };
 const CACHE = new Map();
 /** A kit part's geometry (built once, shared by every settlement). */

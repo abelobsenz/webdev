@@ -8,6 +8,7 @@ import { stationFrame } from './stations.js';
 import { addLamps, pixelRadius } from './craftMesh.js';
 import { TOWNS } from './moonBake.js';
 import { FAR_TOWNS } from './lunarNetwork.js';
+import { buildSettlementQuarter, QuarterLife } from './lunarSettlement.js';
 import { R_MOON } from './sim.js';
 import { Path, LunarTraffic, plumeMesh } from './lunarTraffic.js';
 
@@ -264,6 +265,9 @@ export function buildOutpost(seed, weight = 0.5, lat = 0) {
     loops.push(pts);
   }
 
+  // --- the town quarter: terraces on a lit main street, a plaza, a tram, greenhouses, people ---
+  const quarter = buildSettlementQuarter(seed, weight, plan, B, lamps, put, loops);
+
   // --- the ground: craters and boulders beyond the works ---
   const outer = 1700 * sz;
   let nCr = 0;
@@ -296,7 +300,7 @@ export function buildOutpost(seed, weight = 0.5, lat = 0) {
     put('boulder' + (k % 3), seat(_m, x, z, rnd() * TAU, -0.1 * s, s), [tone, tone * 0.97, tone * 0.93]);
   }
 
-  return { geo: B.geometry(), lamps, inst, plan, loops, pads, parked, cycler, radius: outer + 200 };
+  return { geo: B.geometry(), lamps, inst, plan, loops, pads, parked, cycler, quarter, radius: outer + 200 };
 }
 
 // ------------------------------------------------------------------------ runtime --
@@ -368,7 +372,9 @@ export class LunarOutposts {
       site.plume.scale.setScalar(0.001);
       site.group.add(site.shuttle, site.plume);
     }
-    site.live = [site.rovers, site.roverLamps, site.suits, site.shuttle].filter(Boolean);
+    // the quarter's people and tram
+    site.town = new QuarterLife(d.quarter, this.mat, site.group, idx);
+    site.live = [site.rovers, site.roverLamps, site.suits, site.shuttle, ...site.town.objects].filter(Boolean);
     this.moveRovers(site, 0);                               // (their lamps start on the roads)
     site.group.traverse((o) => { o.frustumCulled = false; });
     site.built = true;
@@ -397,6 +403,7 @@ export class LunarOutposts {
   }
 
   moveLife(s, t, idx) {
+    s.town.update(t);
     for (let i = 0; i < s.crew.length; i++) {
       const c = s.crew[i], a = c.a0 + t * c.w / c.r;
       seat(_m, c.x + Math.cos(a) * c.r, c.z + Math.sin(a) * c.r, -a + (c.w > 0 ? 0 : Math.PI), 0.9);

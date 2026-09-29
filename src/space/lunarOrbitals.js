@@ -167,7 +167,7 @@ export function buildWheelRing(seed = 1) {
     B.push(new THREE.Matrix4().makeRotationY(Math.PI / 2));
     B.lathe([[8.5, WHEEL.hubR + 12, LK.HULL], [8.5, Ri - 36, LK.HULL]], 16);
     B.pop();
-    for (const o of [-11, 11]) B.box((Ri + WHEEL.hubR) / 2 - 16, o, 0, Ri - WHEEL.hubR - 40, 1.6, 1.6, LK.CONDUIT);
+    for (const o of [-11, 11]) B.box((Ri - 36 + 64) / 2, o, 0, Ri - 36 - 64, 1.6, 1.6, LK.CONDUIT);
     B.box(WHEEL.hubR + 14, 0, 0, 8, 22, 22, LK.BRONZE);  // the spoke's root, riding clear of the hub's bearing
     B.pop();
     lamps.push({ p: V(Math.cos(a) * (Ro + 5), Math.sin(a) * (Ro + 5), 0), r: 3.2, color: LAMP.RED, i: 2.6, breathe: 0.8 });
