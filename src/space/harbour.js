@@ -4,10 +4,10 @@ import { lathe, buildShuttle, buildTug, buildFreighter, buildCourier } from '../
 import { LAMP } from './lamps.js';
 import { ctube } from './hull.js';
 import { buildEmbarkationTerrace } from './interfaces.js';
-import { craftMesh, craftPart, addLamps, placeMerge, placeLamps, pixelRadius, KM, dressedMesh, DK } from './craftMesh.js';
+import { craftMesh, craftPart, addLamps, placeMerge, placeLamps, pixelRadius, KM, DK, setCraftEnvelope } from './craftMesh.js';
 import { HarbourLife } from './harbourLife.js';
 import { TerraceLife } from './terraceLife.js';
-import { createPortMaterial } from './portMaterial.js';
+import { createPortMaterial, PK } from './portMaterial.js';
 
 // THE GEOSTATIONARY HARBOUR, drawn in metres with the ships' own builder and material.
 // Local frame: +Y up the tether (away from the Earth), +Z north (the Earth's axis),
@@ -127,7 +127,7 @@ export function buildHarbour() {
     const side = V(-Math.sin(a), 0, Math.cos(a));
     arms.push({ a, y, L, d, side, up });
     // gallery tube and its keel truss
-    ctube(B, [d.clone().multiplyScalar(850).setY(y), d.clone().multiplyScalar(L).setY(y)], 230, 12, DK.PORTS);
+    ctube(B, [d.clone().multiplyScalar(850).setY(y), d.clone().multiplyScalar(L).setY(y)], 230, 16, PK.GALLERY);
     ctube(B, [d.clone().multiplyScalar(850).setY(y - (up ? -330 : 330)), d.clone().multiplyScalar(L - 400).setY(y - (up ? -330 : 330))], 70, 5, CK.DARK);
     for (let r = 2000; r < L - 300; r += 1400) {
       const p = d.clone().multiplyScalar(r).setY(y);
@@ -166,9 +166,15 @@ export function buildHarbour() {
       const sd = i === 4 ? 1 : (n % 2 ? 1 : -1);
       const base = d.clone().multiplyScalar(r).setY(y);
       const tip = base.clone().addScaledVector(side, sd * 900);
-      ctube(B, [base, tip], 110, 8, CK.HULL);
+      ctube(B, [base, tip], 110, 10, PK.GALLERY);
+      // the finger's pier head: square working decks top and bottom (the gantries and container
+      // stacks seat on them, as on the old block) round an octagonal lit body with bronze bands,
+      // so the heads read as buildings rather than 160 m tan cubes
       B.at(tip.x, tip.y, tip.z);
-      B.box(0, 0, 0, 380, 380, 380, CK.BRONZE);
+      for (const s of [-1, 1]) { B.box(0, s * 180, 0, 380, 20, 380, PK.ROOF); B.box(0, s * 166, 0, 392, 8, 392, CK.BRONZE); }
+      B.push(toY);
+      lathe(B, [[150, -170, CK.DARK], [205, -160, CK.BRONZE], [196, -140, PK.GALLERY], [196, -30, PK.GALLERY], [202, -24, CK.BRONZE], [202, 24, DK.CONCOURSE], [196, 30, CK.BRONZE], [196, 140, PK.GALLERY], [205, 160, CK.BRONZE], [150, 170, CK.DARK]], 8, Math.PI / 8);
+      B.pop();
       B.pop();
       berths.push({ arm: i, r, sd, base, tip, a, side: side.clone(), d: d.clone(), up, y });
     }
@@ -428,7 +434,11 @@ export class HarbourStation {
     const h = buildHarbour();
     this.data = h;
     this.group = new THREE.Group();
-    this.body = dressedMesh(h.body, { accent: [0.55, 0.85, 1.0], lit: 0.62, livery: [0.14, 0.26, 0.46], livery2: [0.9, 0.72, 0.3] });
+    // drawn with the port finishes (the arm galleries' plate and ribbon windows, the pier heads'
+    // zinc decks) and the port's white trim, so the pearl spindle and rings settle to a lit
+    // off-white instead of blowing out beside the terrace
+    const bodyOpts = { accent: [0.55, 0.85, 1.0], lit: 0.62, livery: [0.14, 0.26, 0.46], livery2: [0.9, 0.72, 0.3], trim: 0.8 };
+    this.body = craftMesh(h.body, bodyOpts, setCraftEnvelope(createPortMaterial(bodyOpts), h.body));
     this.group.add(this.body);
     this.rings = h.rings.map((r) => {
       const m = craftPart(this.body, r.geo);
@@ -455,7 +465,7 @@ export class HarbourStation {
     this.lampMesh = addLamps(this.body, h.lamps, { minPx: 1.4 });
     this.terraceData=buildEmbarkationTerrace();
     // drawn with the port finishes (paving, lawns, pools, canopies, glasshouses) and its baked contact shade
-    const terraceOpts={accent:[.55,.85,1],lit:.62,fill:.03};
+    const terraceOpts={accent:[.55,.85,1],lit:.62,fill:.03,trim:.76};
     this.terrace=craftMesh(this.terraceData.geo,terraceOpts,createPortMaterial(terraceOpts));
     const pier=h.arms[4];
     this.terrace.position.copy(pier.d).multiplyScalar((pier.L-1200)*KM).addScaledVector(pier.side,.32).setY(pier.y*KM+.19);
