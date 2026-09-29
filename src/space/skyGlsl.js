@@ -7,6 +7,10 @@
 // Frames: inertial +Y = celestial north, the June-solstice Sun in the XY plane.
 // Equatorial Cartesian (x to RA 0h, y to RA 6h, z north) = (d.z, d.x, d.y).
 import { NOISE_GLSL } from '../shaders/noise.glsl.js';
+import { raDecToVector } from './skyCatalog.js';
+
+// J2000 equatorial unit vector as a GLSL literal
+const eq = (raH, decD) => { const v = raDecToVector(raH, decD); return `vec3(${v.x.toFixed(5)}, ${v.y.toFixed(5)}, ${v.z.toFixed(5)})`; };
 
 export const SPACE_SKY_GLSL = /* glsl */ `
 ${NOISE_GLSL}
@@ -18,8 +22,13 @@ uniform float uSkyStars;      // star brightness multiplier
 uniform vec4 uSwarmN[4];      // swarm ring plane normals (xyz) + radius (w, km)
 uniform float uSwarmT;        // swarm animation phase
 uniform float uSkyTime;
-uniform vec4 uPlanets[5];     // planet directions (inertial) + brightness
-uniform vec3 uPlanetCol[5];
+uniform vec4 uPlanets[7];     // planet directions (inertial, from the ephemeris) + brightness
+uniform vec3 uPlanetCol[7];
+uniform mat3 uSkyPrec;        // equatorial of date -> J2000 (three millennia of precession)
+uniform vec3 uStarPal[8];     // blackbody colours at 2800 ... 20000 K (skyCatalog.js)
+uniform vec3 uCometPos;       // the comet's nucleus (km, inertial, Earth at the origin)
+uniform vec3 uCometVel;       // its direction of motion (unit)
+uniform vec4 uCometK;         // x brightness, y ion tail length (km), z dust tail length (km), w coma radius (km)
 
 // galactic frame (equatorial): north galactic pole, galactic centre, l = 90 deg
 const vec3 SK_GN = vec3(-0.8676, -0.1981, 0.4560);
@@ -37,22 +46,29 @@ float sk_fbm(vec3 p, int oct) {
   return s / n;
 }
 
-// Star colour from a spectral draw: the bright stars are a mix of hot blue-white giants and
-// cool orange ones; the faint crowd is mostly yellow-white dwarfs.
+// Star colour from a spectral draw through the blackbody palette. The bright stars we see are
+// mostly luminous: hot blue-white B and A stars seen from far off, and orange K and M giants;
+// the faint crowd is mostly yellow-white F, G and K dwarfs.
+vec3 sk_pal(float x) {
+  x = clamp(x, 0.0, 6.999);
+  int i = int(floor(x));
+  return mix(uStarPal[i], uStarPal[i + 1], fract(x));
+}
 vec3 sk_starColor(float t, float bright) {
-  // t in 0..1 -> temperature class, spread wider for the bright stars
-  float s = mix(0.35, 1.0, bright);
-  float u = 0.5 + (t - 0.5) * s;
-  vec3 c = u < 0.18 ? vec3(0.62, 0.72, 1.0)          // B
-         : u < 0.36 ? vec3(0.8, 0.86, 1.0)           // A
-         : u < 0.58 ? vec3(1.0, 0.98, 0.95)          // F
-         : u < 0.78 ? vec3(1.0, 0.9, 0.76)           // G
-         : u < 0.92 ? vec3(1.0, 0.78, 0.55)          // K
-         : vec3(1.0, 0.64, 0.42);                    // M
-  return c;
+  // bright: a two-humped draw (giants cool, main-sequence hot); faint: centred on G
+  float hot = 5.2 + 1.8 * t;
+  float giant = 0.6 + 1.9 * t;
+  float xb = t < 0.55 ? mix(hot, 7.0, t * 0.3) : giant + (t - 0.55) * 2.0;
+  float xf = 2.2 + (t - 0.5) * 3.4;
+  return sk_pal(mix(xf, xb, bright));
 }
 
-vec3 sk_starLayer(vec3 d, float scale, float density, float bright, float px, float crowd) {
+// One layer of the faint crowd: stars between magnitudes m0 and m1, drawn from the counts of the
+// real sky (the number brighter than m grows about threefold per magnitude, N ~ 10^(0.5 m)); the
+// stars brighter than ~3.5 are the catalogue's (skyStars.js), so the constellations are the true
+// ones. The drawn energy follows Pogson's scale with the same zero point as the catalogue's
+// sprites: a magnitude 1 star integrates to ~2.9.
+vec3 sk_starLayer(vec3 d, float scale, float density, float m0, float m1, float px, float crowd) {
   vec3 p = d * scale;
   vec3 cell = floor(p);
   vec3 h = hash33(cell);
@@ -62,10 +78,13 @@ vec3 sk_starLayer(vec3 d, float scale, float density, float bright, float px, fl
   float c = clamp(dot(sd, d), -1.0, 1.0);
   float ang2 = 2.0 * (1.0 - c);
   float sigma = max(px * 0.55, 0.00008);
-  float mag = pow(h.y, 7.0);
+  // inverse of the cumulative count between m0 and m1
+  float a0 = exp2(1.660964 * m0), a1 = exp2(1.660964 * m1);
+  float m = 0.602060 * log2(a0 + h.y * (a1 - a0));
+  float amp = 0.35 * exp2(-1.328771 * (m - 1.0));
   float core = exp(-ang2 / (2.0 * sigma * sigma)) * (px * px) / (sigma * sigma) * 1.3;
-  vec3 col = sk_starColor(h.z, smoothstep(0.02, 0.4, mag * bright));
-  return col * core * (0.006 + 0.35 * mag) * bright;
+  vec3 col = sk_starColor(h.z, 1.0 - smoothstep(3.5, 5.8, m));
+  return col * core * amp;
 }
 
 // Milky Way surface brightness in galactic coordinates (l, b radians), linear, ~1 in the band
@@ -142,6 +161,55 @@ float sk_galaxy(vec3 c, vec3 pos, vec3 ax, float ra, float rb) {
   float x = dot(dv, ax) / ra, y = dot(dv, mi) / rb;
   float r = sqrt(x * x + y * y);
   return exp(-r * 2.4) + 1.5 * exp(-r * r / 0.006);
+}
+
+// The named nebulae of the wide-field sky (J2000): Orion's great nebula and Barnard's Loop
+// round the belt, the Rosette, the California, the Heart and Soul, the Pleiades' blue
+// reflection haze, the Veil's filaments. c is J2000 equatorial.
+float sk_blob(vec3 c, vec3 pos, float r) { vec3 d = c - pos; return exp(-dot(d, d) / (r * r)); }
+vec3 sk_nebulae(vec3 c, float px) {
+  vec3 L = vec3(0.0);
+  vec3 ha = vec3(1.0, 0.3, 0.38);                        // hydrogen alpha, with a little H-beta
+  // M42 and its halo
+  L += ha * (sk_blob(c, ${eq(5.588, -5.39)}, 0.004) * 2.4 + sk_blob(c, ${eq(5.59, -5.2)}, 0.012) * 0.5);
+  L += vec3(0.5, 0.65, 1.0) * sk_blob(c, ${eq(5.61, -4.8)}, 0.006) * 0.25;           // M43 / the Running Man
+  // Barnard's Loop: an arc ~7 degrees round the belt, open to the west
+  {
+    vec3 ctr = ${eq(5.45, -4.0)};
+    float ang = acos(clamp(dot(c, ctr), -1.0, 1.0));
+    float zl = (ang - 0.122) / 0.008;
+    vec3 E = normalize(cross(vec3(0.0, 0.0, 1.0), ctr));
+    float east = dot(c - ctr, E) / max(ang, 1e-4);
+    L += ha * exp(-zl * zl) * smoothstep(-0.4, 0.4, east) * (0.5 + 0.5 * vnoise3(c * 180.0)) * 0.35;
+  }
+  // the Rosette: a ring with a hollow heart
+  {
+    vec3 ctr = ${eq(6.53, 4.95)};
+    float ang = acos(clamp(dot(c, ctr), -1.0, 1.0));
+    float zr = (ang - 0.008) / 0.004;
+    L += ha * exp(-zr * zr) * 0.45;
+  }
+  // the California (drawn out north-west to south-east) and the Heart and Soul
+  {
+    vec3 ctr = ${eq(4.05, 36.4)};
+    vec3 E = normalize(cross(vec3(0.0, 0.0, 1.0), ctr));
+    vec3 N = cross(ctr, E);
+    float x = dot(c - ctr, normalize(E - N * 0.6)), y = dot(c - ctr, normalize(N + E * 0.6));
+    L += ha * exp(-(x * x) / (0.022 * 0.022) - (y * y) / (0.006 * 0.006)) * 0.3;
+  }
+  L += ha * (sk_blob(c, ${eq(2.55, 61.45)}, 0.011) + sk_blob(c, ${eq(2.85, 60.4)}, 0.01)) * 0.22;
+  // the Pleiades' blue reflection nebula (the cluster's own stars are in the catalogue)
+  L += vec3(0.45, 0.6, 1.0) * sk_blob(c, ${eq(3.78, 24.12)}, 0.011) * (0.6 + 0.4 * vnoise3(c * 900.0)) * 0.45;
+  // the Veil: a torn ring of filaments (a supernova's shell, ten thousand years old)
+  {
+    vec3 ctr = ${eq(20.85, 31.0)};
+    float ang = acos(clamp(dot(c, ctr), -1.0, 1.0));
+    float zv = (ang - 0.025) / 0.0025;
+    float torn = smoothstep(0.45, 0.7, vnoise3(c * 400.0));
+    L += mix(vec3(0.4, 0.8, 1.0), ha, 0.5) * exp(-zv * zv) * torn * 0.3;
+  }
+  // (they are faint, extended light: they fade out rather than twinkle as the pixel grows)
+  return L * (1.0 - smoothstep(0.004, 0.02, px) * 0.6);
 }
 
 vec3 sk_extragalactic(vec3 c, float px) {
@@ -241,11 +309,67 @@ vec3 sk_swarm(vec3 ro, vec3 rd, float px) {
   return acc;
 }
 
+// Angular distance (radians) from the ray (ro, rd) to the segment a-b, the point's parameter along
+// the segment (0..1) and the range to it.
+float sk_segAng(vec3 ro, vec3 rd, vec3 a, vec3 b, out float s01, out float range) {
+  vec3 v = b - a, w0 = ro - a;
+  float L = max(length(v), 1e-3);
+  vec3 u = v / L;
+  float B = dot(rd, u), D = dot(rd, w0), E = dot(u, w0);
+  // (with |rd| = |u| = 1 the closest approach falls (E - B D) / (1 - B^2) along the segment)
+  s01 = clamp((E - B * D) / max(1.0 - B * B, 1e-6) / L, 0.0, 1.0);
+  vec3 q = a + v * s01;
+  range = max(dot(q - ro, rd), 1.0);
+  return length(ro + rd * range - q) / range;
+}
+
+// A great comet, sunward of the Earth's night sky in 5021: the coma round its nucleus, the
+// straight blue ion tail streaming directly away from the Sun, and the broad, curved,
+// yellow-white dust tail lagging behind along the orbit. Drawn in 3D (ray to tail), so it has
+// the right shape from anywhere in cislunar space.
+vec3 sk_comet(vec3 ro, vec3 rd, float px) {
+  if (uCometK.x <= 0.0) return vec3(0.0);
+  vec3 H = uCometPos;
+  vec3 toH = H - ro;
+  float dH = length(toH);
+  vec3 A = normalize(H - uSkySunPos);                  // anti-sunward
+  vec3 V = uCometVel;
+  vec3 col = vec3(0.0);
+  // coma: a soft head a few arcminutes across, and the star-like nucleus region
+  float ca = 2.0 * asin(clamp(length(rd - toH / dH) * 0.5, 0.0, 1.0));   // (exact at small angles)
+  float cr = uCometK.w / dH;
+  col += vec3(0.8, 0.95, 0.9) * exp(-ca / max(cr, px)) * min(1.0, cr / max(px, 1e-6)) * 0.35;
+  float sg = max(px * 0.6, 0.00008);
+  col += vec3(1.0, 0.97, 0.9) * exp(-ca * ca / (2.0 * sg * sg)) * (px * px) / (sg * sg) * 1.3 * 0.7;
+  // ion tail: straight, narrow, blue, with knots moving outward
+  float s01, rg;
+  float Li = uCometK.y;
+  float ai = sk_segAng(ro, rd, H, H + A * Li, s01, rg);
+  float wi = (40000.0 + 0.012 * Li * s01) / rg;
+  float wiP = max(wi, px * 0.7);
+  float knots = 0.75 + 0.25 * sin(s01 * 40.0 - uSkyTime * 0.05);
+  col += vec3(0.42, 0.62, 1.0) * exp(-ai * ai / (wiP * wiP)) * (wi / wiP) * exp(-s01 * 2.5) * knots * 0.22;
+  // dust tail: a curved fan in the orbit plane, bending back against the motion
+  float Ld = uCometK.z;
+  vec3 M = H + A * (Ld * 0.5) - V * (Ld * 0.12);
+  vec3 Et = H + A * Ld - V * (Ld * 0.42);
+  float s1, r1, s2, r2;
+  float a1 = sk_segAng(ro, rd, H, M, s1, r1);
+  float a2 = sk_segAng(ro, rd, M, Et, s2, r2);
+  float sAl = a1 < a2 ? s1 * 0.5 : 0.5 + s2 * 0.5;
+  float ad = min(a1, a2);
+  float rd2 = a1 < a2 ? r1 : r2;
+  float wd = (60000.0 + 0.09 * Ld * sAl) / rd2;
+  float wdP = max(wd, px * 0.7);
+  col += vec3(1.0, 0.9, 0.74) * exp(-ad * ad / (wdP * wdP)) * (wd / wdP) * exp(-sAl * 2.2) * 0.3;
+  return col * uCometK.x;
+}
+
 // the bright planets: points of steady light on the ecliptic with a soft optical halo
 vec3 sk_planets(vec3 d, float px) {
   vec3 acc = vec3(0.0);
   float sigma = max(px * 0.6, 0.00008);
-  for (int i = 0; i < 5; i++) {
+  for (int i = 0; i < 7; i++) {
     float c = dot(d, uPlanets[i].xyz);
     if (c < 0.9995) continue;
     float a2 = 2.0 * (1.0 - c);
@@ -257,18 +381,21 @@ vec3 sk_planets(vec3 d, float px) {
 }
 
 vec3 sk_background(vec3 d, float px) {
-  vec3 c = vec3(d.z, d.x, d.y);
+  // J2000 equatorial: the catalogues' frame (the pole of 5021 lies ~42 degrees round the ecliptic
+  // pole from Polaris)
+  vec3 c = uSkyPrec * vec3(d.z, d.x, d.y);
   // galactic latitude: the faint stars crowd toward the plane and the bulge
   float gz = dot(c, SK_GN);
   float gcos = dot(c, SK_GC);
   float crowd = 0.45 + 1.3 * exp(-gz * gz / 0.04) + 1.2 * exp(-(gz * gz + pow(1.0 - gcos, 2.0) * 4.0) / 0.05);
   vec3 col = vec3(0.0);
-  col += sk_starLayer(c, 170.0, 0.012, 1.0, px, 1.0);
-  col += sk_starLayer(c, 380.0, 0.005, 0.3, px, crowd * 0.8);
-  col += sk_starLayer(c, 800.0, 0.003, 0.12, px, crowd);
-  col += sk_starLayer(c, 1500.0, 0.0022, 0.05, px, crowd * 1.3) * (1.0 - smoothstep(0.0012, 0.003, px));
+  col += sk_starLayer(c, 170.0, 0.0032, 3.5, 5.0, px, 0.6 + 0.4 * crowd);
+  col += sk_starLayer(c, 380.0, 0.0024, 4.6, 6.0, px, crowd * 0.8);
+  col += sk_starLayer(c, 800.0, 0.003, 5.6, 7.0, px, crowd);
+  col += sk_starLayer(c, 1500.0, 0.0022, 6.6, 8.0, px, crowd * 1.3) * (1.0 - smoothstep(0.0012, 0.003, px));
   col += sk_milkyWay(c, px) * 0.025;
   col += sk_extragalactic(c, px) * 0.04;
+  col += sk_nebulae(c, px) * 0.03;
   col += sk_planets(d, px);
   // zodiacal light: dust along the ecliptic, brightening and widening toward the Sun, and
   // the faint gegenschein opposite it

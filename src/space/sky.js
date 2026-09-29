@@ -1,6 +1,10 @@
 import * as THREE from 'three';
 import { SPACE_SKY_GLSL } from './glsl.js';
 import { U } from '../core/uniforms.js';
+import { planetSky, magWeight, SKY_PLANETS, cometSky, cometGain, COMET, AU_KM } from './ephemeris.js';
+import { SUN_DIR, SUN_DIST } from './sim.js';
+import { precessionMatrix, starPalette } from './skyCatalog.js';
+import { StarPoints } from './skyStars.js';
 
 // Full-screen deep-space backdrop (drawn first, no depth).
 const VERT = /* glsl */ `
@@ -24,6 +28,7 @@ void main() {
   float px = max(length(fwidth(d)), 1e-5);
   vec3 col = sk_background(d, px);
   col += sk_swarm(cameraPosition, d, px) * uSunE * 0.06 * uSwarmFar;
+  col += sk_comet(cameraPosition, d, px) * uSkyStars;
   col += sk_sun(cameraPosition, d, px, uSunE) * uShowSun;
   // alpha 0: the backdrop is not an occluder (alpha marks solid geometry for the glare mask)
   gl_FragColor = vec4(col, 0.0);
@@ -44,31 +49,28 @@ export function swarmRings() {
   return out;
 }
 
-// The bright planets, placed on the ecliptic round the June-solstice Sun (ecliptic longitude 90):
-// Venus an evening star, Mercury low in the morning, Mars, Jupiter and Saturn in the night sky.
-// [ecliptic longitude, latitude (deg), brightness, colour]
-const PLANETS = [
-  [128, 1.8, 7.0, [1.0, 0.97, 0.9]],      // Venus
-  [72, -1.2, 0.8, [0.95, 0.88, 0.8]],     // Mercury
-  [212, 1.1, 1.3, [1.0, 0.58, 0.38]],     // Mars
-  [296, -0.4, 3.2, [1.0, 0.93, 0.8]],     // Jupiter
-  [331, 1.6, 1.0, [1.0, 0.9, 0.68]],      // Saturn
-];
-function planetDirs() {
-  const eps = THREE.MathUtils.degToRad(23.4);
-  const e1 = new THREE.Vector3(0, 0, 1);                              // the vernal equinox (inertial)
-  const e2 = new THREE.Vector3(Math.cos(eps), Math.sin(eps), 0);      // ecliptic longitude 90
-  const n = new THREE.Vector3().crossVectors(e1, e2);                  // ecliptic north
-  return PLANETS.map(([lon, lat, w]) => {
-    const l = THREE.MathUtils.degToRad(lon), b = THREE.MathUtils.degToRad(lat);
-    const v = e1.clone().multiplyScalar(Math.cos(l) * Math.cos(b)).addScaledVector(e2, Math.sin(l) * Math.cos(b)).addScaledVector(n, Math.sin(b)).normalize();
-    return new THREE.Vector4(v.x, v.y, v.z, w);
-  });
+// The planets on their orbits at the sim's epoch (ephemeris.js), refreshed by SkyLife as the
+// clock runs; the initial directions here are the epoch's.
+function initialPlanets() {
+  const rows = planetSky(0, []);
+  return {
+    dirs: rows.map((r) => new THREE.Vector4(r.dir.x, r.dir.y, r.dir.z, magWeight(r.mag))),
+    cols: SKY_PLANETS.map((p) => new THREE.Vector3(...p.col)),
+  };
 }
+const PL0 = initialPlanets();
+const CM0 = cometSky(0, SUN_DIR.clone().multiplyScalar(SUN_DIST), { pos: new THREE.Vector3(), vel: new THREE.Vector3() });
+// equatorial of date -> J2000 (the galaxy, the Clouds and Andromeda are placed in J2000)
+const PREC = precessionMatrix().transpose();
 
 export const SKY_UNIFORMS = {
-  uPlanets: { value: planetDirs() },
-  uPlanetCol: { value: PLANETS.map((p) => new THREE.Vector3(...p[3])) },
+  uPlanets: { value: PL0.dirs },
+  uPlanetCol: { value: PL0.cols },
+  uSkyPrec: { value: PREC },
+  uStarPal: { value: starPalette() },
+  uCometPos: { value: CM0.pos.clone() },
+  uCometVel: { value: CM0.vel.clone() },
+  uCometK: { value: new THREE.Vector4(cometGain(CM0.mag), COMET.ionAU * AU_KM, COMET.dustAU * AU_KM, COMET.comaKm) },
   uSkySunDir: { value: new THREE.Vector3(1, 0, 0) },
   uSkySunPos: { value: new THREE.Vector3(1.496e8, 0, 0) },
   uSkyStars: { value: 1.0 },
@@ -97,6 +99,10 @@ export function createSpaceSky() {
   const mesh = new THREE.Mesh(geo, mat);
   mesh.frustumCulled = false;
   mesh.renderOrder = -1000;
+  // the named stars ride on the backdrop (hidden with it where the Hearth's lens takes over)
+  const stars = new StarPoints(SKY_UNIFORMS);
+  mesh.add(stars.points);
+  mesh.userData.stars = stars;
   mesh.onBeforeRender = (renderer, scene, camera) => {
     mat.uniforms.uInvProj.value.copy(camera.projectionMatrixInverse);
     mat.uniforms.uCamWorld.value.copy(camera.matrixWorld);

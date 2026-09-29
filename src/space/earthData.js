@@ -105,3 +105,101 @@ export const WILDS = [
   [62, 71, 20, 45],            // Lapland and Karelia
   [-30, -18, 122, 138],        // Australian interior
 ];
+
+// The sea lanes of the Concord: great-circle legs between waypoints [lat, lon]. Meridian, on
+// the equator at 157.4 W, is the hub of the Pacific; the old trunk routes (Suez, the Cape,
+// Malacca, the North Atlantic, the transpacific great circle) still carry the bulk freight.
+// Each route: { pts, w } with w its traffic (ships per 100 km of lane, roughly).
+export const SEA_LANES = [
+  { pts: [[0.3, -157.1], [18, -140], [33.6, -118.4]], w: 1.0 },                    // Meridian - Los Angeles
+  { pts: [[-0.1, -156.9], [4, -120], [8.2, -79.8]], w: 0.9 },                      // Meridian - Panama
+  { pts: [[0.4, -157.6], [20, 175], [34.9, 139.9]], w: 1.0 },                      // Meridian - Tokyo
+  { pts: [[-0.4, -157.6], [-17, 178], [-33.9, 151.4]], w: 0.8 },                   // Meridian - Sydney
+  { pts: [[0.1, -157.9], [-2, 160], [-4, 135], [1.1, 104.2]], w: 0.7 },            // Meridian - Singapore
+  { pts: [[-0.5, -157.2], [-20, -110], [-33, -71.8]], w: 0.5 },                    // Meridian - Valparaiso
+  { pts: [[-0.5, -157.8], [-36.7, 175.1]], w: 0.45 },                              // Meridian - Auckland
+  { pts: [[1.2, 104.0], [5.8, 95], [5.6, 80], [12.4, 51.5], [12.7, 43.4], [20, 38.3], [27.6, 34.0], [29.8, 32.6]], w: 1.2 },  // Malacca - Suez
+  { pts: [[31.6, 32.3], [34.5, 20], [37.2, 10.5], [36.0, -5.8]], w: 1.1 },         // Suez - Gibraltar
+  { pts: [[36.0, -6.3], [43.5, -10.2], [48.5, -5.5], [50.2, -0.5], [51.9, 3.8]], w: 1.0 },   // Gibraltar - Rotterdam
+  { pts: [[49.3, -6.0], [44, -40], [40.3, -73.6]], w: 0.9 },                       // the Channel - New York
+  { pts: [[36.0, -6.8], [37.5, -30], [40.2, -73.4]], w: 0.6 },                     // Gibraltar - New York
+  { pts: [[1.4, 104.4], [10, 110], [22, 114.8], [31.2, 122.8], [34.0, 129.2], [34.8, 139.6]], w: 1.2 },  // Singapore - Shanghai - Tokyo
+  { pts: [[34.7, 140.3], [46.5, 170], [45, -150], [33.9, -119.2]], w: 0.8 },       // the transpacific great circle
+  { pts: [[8.6, -79.4], [15, -100], [33.4, -118.6]], w: 0.8 },                     // Panama - Los Angeles
+  { pts: [[-34.6, 18.3], [-20, 57.5], [5.4, 79.8]], w: 0.6 },                      // the Cape - Colombo
+  { pts: [[51.4, 1.8], [30, -16], [0, -12], [-34.8, 18.0]], w: 0.6 },              // Europe - the Cape
+  { pts: [[-24.1, -46.1], [-5, -32], [15, -25], [35.7, -6.8]], w: 0.5 },           // Santos - Gibraltar
+  { pts: [[26.2, 56.6], [22.5, 60], [12.8, 51.2]], w: 0.8 },                       // the Gulf - Aden
+  { pts: [[-32.1, 115.5], [-10, 110], [1.0, 103.8]], w: 0.5 },                     // Perth - Singapore
+  { pts: [[29.3, -94.4], [24.2, -83], [27.2, -79.7], [40.1, -73.7]], w: 0.6 },     // Houston - New York
+];
+
+// The Concord's arcologies: single-structure cities a few km to ten across, each the brightest
+// thing in its region at night, pale discs with their spokes by day.
+// [lat, lon, radius km, kind (0 ring, 1 star, 2 lens)]
+export const ARCOLOGIES = [
+  [22.8, 5.6, 6.5, 1],        // Tamanrasset Crown, in the greened Sahara
+  [30.9, 29.4, 5.0, 0],       // the Western Delta ring
+  [22.2, 114.0, 4.5, 2],      // the Great Bay lens
+  [35.4, 139.9, 5.0, 0],      // the Tokyo Bay stack
+  [38.4, -76.3, 4.0, 1],      // Chesapeake
+  [9.9, 76.2, 4.0, 0],        // the Kerala ring
+  [-34.2, -60.6, 6.0, 1],     // the Pampas wheel
+  [-23.7, 133.9, 7.5, 2],     // the Outback mirror
+  [59.4, 24.6, 3.5, 0],       // the Baltic crown
+  [23.9, 54.1, 5.5, 2],       // the Arabian lens
+];
+
+// Fishing grounds where the light-fleets work at night: [latMin, latMax, lonMin, lonMax]
+export const FISHING = [
+  [35, 42, 129, 138],         // the Sea of Japan
+  [-48, -39, -62, -57],       // the Patagonian shelf
+  [-17, -7, -82, -77],        // off Peru
+  [6, 12, 100, 104],          // the Gulf of Thailand
+  [26, 34, 121, 127],         // the East China Sea
+];
+
+// River mouths whose sediment stains the sea: [lat, lon, discharge weight]
+export const RIVERS = [
+  [0.2, -50.0, 1.0],          // Amazon
+  [8.6, -60.8, 0.45],         // Orinoco
+  [29.0, -89.3, 0.5],         // Mississippi
+  [21.8, 90.5, 0.8],          // Ganges - Brahmaputra
+  [31.4, 121.9, 0.75],        // Yangtze
+  [37.8, 119.3, 0.55],        // Yellow River
+  [-35.0, -56.5, 0.6],        // the Plate
+  [4.3, 6.1, 0.4],            // Niger
+  [-6.0, 12.3, 0.55],         // Congo
+  [9.7, 106.5, 0.45],         // Mekong
+  [24.0, 67.3, 0.3],          // Indus
+  [15.8, 95.2, 0.4],          // Irrawaddy
+  [-18.8, 36.3, 0.3],         // Zambezi
+  [31.5, 31.2, 0.2],          // Nile
+  [69.4, -134.5, 0.35],       // Mackenzie
+  [67.0, 72.5, 0.4],          // Ob
+];
+
+// Islands that shed von Karman vortex streets into the marine cloud decks downwind:
+// [lat, lon, radius km, azimuth the wind blows toward (deg from north)]
+export const VORTEX_ISLES = [
+  [29.0, -118.3, 14, 160],    // Guadalupe, in the California deck
+  [28.3, -16.6, 22, 215],     // Tenerife, in the Canaries trades
+  [-33.6, -78.8, 9, 5],       // Juan Fernandez, in the Peru deck
+  [32.7, -17.0, 16, 200],     // Madeira
+  [71.0, -8.4, 18, 235],      // Jan Mayen
+];
+
+// Rivers you can see from orbit: the irrigated valleys that run green through the deserts, and
+// the great rivers' dark water through forest and plain. { pts [[lat, lon]...], w (km), oasis }
+export const RIVER_VALLEYS = [
+  { pts: [[15.6, 32.5], [17.7, 34.0], [19.5, 33.3], [19.2, 30.5], [21.8, 31.3], [24.1, 32.9], [25.7, 32.6], [27.2, 31.2], [30.0, 31.2]], w: 9, oasis: 1 },  // the Nile
+  { pts: [[36.0, 38.5], [34.5, 40.9], [33.4, 43.3], [31.0, 46.0], [30.0, 48.0]], w: 7, oasis: 1 },     // Euphrates
+  { pts: [[37.0, 42.5], [35.5, 43.3], [33.3, 44.4], [31.0, 47.4]], w: 6, oasis: 1 },                   // Tigris
+  { pts: [[33.0, 71.5], [29.5, 70.9], [27.0, 68.3], [24.9, 68.0]], w: 14, oasis: 1 },                  // the Indus plain
+  { pts: [[-19.3, 22.5], [-19.8, 23.4]], w: 30, oasis: 1 },                                             // the Okavango's fan
+  { pts: [[14.3, -4.4], [15.3, -4.0], [16.3, -3.0]], w: 18, oasis: 1 },                                 // the Niger's inland delta
+  { pts: [[-4.0, -73.0], [-3.4, -65.0], [-3.1, -60.0], [-2.3, -54.7], [-1.0, -51.5], [0.0, -50.0]], w: 5, oasis: 0 },  // Amazon
+  { pts: [[38.6, -90.2], [35.1, -90.1], [32.3, -91.0], [30.0, -91.2], [29.1, -89.3]], w: 3, oasis: 0 },  // Mississippi
+  { pts: [[30.0, 78.2], [27.0, 80.5], [25.4, 82.9], [25.6, 85.1], [24.8, 87.9], [22.5, 88.4]], w: 4, oasis: 0 },  // Ganges
+  { pts: [[30.5, 114.3], [30.0, 116.0], [31.9, 118.8], [31.9, 121.0]], w: 3, oasis: 0 },                // Yangtze
+];

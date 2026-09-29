@@ -3,12 +3,13 @@ import { FullscreenPass, FS_VERT } from '../core/fullscreen.js';
 import { SNOISE_GLSL } from './glsl.js';
 import { NOISE_GLSL } from '../shaders/noise.glsl.js';
 import { LAND_MASK_PNG } from './landmask.js';
-import { CITIES, RANGES, DESERTS, HALO_PORTS, WILDS } from './earthData.js';
+import { CITIES, RANGES, DESERTS, HALO_PORTS, WILDS, FISHING, RIVERS, VORTEX_ISLES, RIVER_VALLEYS } from './earthData.js';
+import { LANE_BAKE_GLSL, buildLaneTexture } from './earthDetail.js';
 import { bodyDir } from './sim.js';
 
 // GPU bake of the planet's surface and weather into cube maps (body frame).
 //   surfA: rgb = sqrt(albedo), a = height (0.5 = sea level)
-//   surfB: r = night-light density, g = ice, b = aridity, a = shallow shelf
+//   surfB: r = mineral dust optical depth / 1.2, g = ice, b = aridity, a = shallow shelf
 //   clouds (half float): r = cloud potential, g = stratiform share, b = open cells, a = cirrus
 
 const D2R = Math.PI / 180;
@@ -18,6 +19,7 @@ precision highp float;
 uniform sampler2D uMask;
 uniform sampler2D uData;
 uniform int uNumSeg;
+uniform int uNumValley;
 uniform int uNumCity;
 uniform int uFace;
 uniform int uOut;
@@ -29,10 +31,32 @@ uniform vec4 uPorts[7];
 uniform vec4 uWild[10];
 uniform vec4 uSc[5];
 uniform float uTexelKm;
+uniform vec4 uFish[5];
+uniform vec4 uIsles[${VORTEX_ISLES.length}];
+uniform vec4 uRivers[${RIVERS.length}];
 varying vec2 vUv;
 ${NOISE_GLSL}
 ${SNOISE_GLSL}
 #define PI 3.14159265359
+${LANE_BAKE_GLSL}
+
+// the maglev corridor (index + 1) within ~20 km of d, else 0
+float nearestArc(vec3 d) {
+  float best = 20.0, id = 0.0;
+  for (int i = 0; i < 400; i++) {
+    if (i >= uNumArc) break;
+    vec4 N = texelFetch(uData, ivec2(i, 3), 0);
+    float off = abs(dot(d, N.xyz)) * 6371.0;
+    if (off >= best) continue;
+    vec4 A = texelFetch(uData, ivec2(i, 4), 0);
+    vec4 Bq = texelFetch(uData, ivec2(i, 5), 0);
+    vec3 pp = d - N.xyz * dot(d, N.xyz);
+    if (dot(cross(A.xyz, pp), N.xyz) < 0.0 || dot(cross(pp, Bq.xyz), N.xyz) < 0.0) continue;
+    best = off;
+    id = float(i + 1);
+  }
+  return id;
+}
 
 vec3 faceDir(vec2 st) {
   float sc = st.x * 2.0 - 1.0, tc = st.y * 2.0 - 1.0;
@@ -71,6 +95,51 @@ vec3 rotAround(vec3 p, vec3 axis, float a) {
 // warm-front shield, hooked head, dry slot) with open cells in the cold air behind them,
 // tropical cyclones (eye, eyewall, central dense overcast, broken rainbands, ice canopy), polar
 // stratus, and cirrus streaming along the jets.
+// Von Karman vortex streets: a mountainous island in a shallow marine deck under an inversion
+// sheds eddies alternately from either flank, and they march downwind in two staggered rows,
+// each a clear-hearted spiral in the cloud, ~5 island diameters apart, growing as they go.
+const float ISLE_AZ[${VORTEX_ISLES.length}] = float[${VORTEX_ISLES.length}](${VORTEX_ISLES.map((v) => (v[3] * Math.PI / 180).toFixed(4)).join(', ')});
+float vortexStreets(vec3 d) {
+  float dp = 0.0;
+  for (int i = 0; i < ${VORTEX_ISLES.length}; i++) {
+    vec3 c = uIsles[i].xyz;
+    float R = uIsles[i].w;
+    vec3 dv = d - c;
+    float dk = length(dv) * 6371.0;
+    if (dk > R * 70.0) continue;
+    vec3 e = normalize(cross(vec3(0.0, 1.0, 0.0), c));
+    vec3 nn = cross(c, e);
+    vec2 P2 = vec2(dot(dv, e), dot(dv, nn)) * 6371.0;
+    float az = ISLE_AZ[i];
+    vec2 w = vec2(sin(az), cos(az));
+    float x = dot(P2, w), y = w.x * P2.y - w.y * P2.x;
+    if (x < -R * 2.0) continue;
+    float a = 9.0 * R;                                   // spacing along the street
+    float fade = exp(-max(x, 0.0) / (a * 6.0));
+    // the lee: clear just behind the island, the rows of eddies beyond
+    float yl = y / (R * 1.1 + 0.08 * max(x, 0.0));
+    float lee = exp(-yl * yl) * exp(-max(x, 0.0) / (R * 5.0)) * step(0.0, x);
+    dp -= 0.22 * lee;
+    for (int k = 0; k < 7; k++) {
+      float fk = float(k);
+      float side = mod(fk, 2.0) < 0.5 ? 1.0 : -1.0;
+      vec2 vc = vec2(R * 2.5 + (fk + 0.5 * (1.0 - side) * 0.5) * a, side * (0.55 * R + 0.06 * fk * R));
+      vec2 q = vec2(x, y) - vc;
+      float rv = R * (0.9 + 0.22 * fk);
+      float r = length(q);
+      if (r > rv * 3.0) continue;
+      float th = atan(q.y, q.x) * side;
+      // a spiral arm of cloud round a clear heart
+      float spiral = 0.5 + 0.5 * cos(th - 3.2 * log(r / rv + 0.05));
+      float core = exp(-r * r / (rv * rv * 0.35));
+      float zr = (r - rv) / (rv * 0.6);
+      float ring = exp(-zr * zr);
+      dp += (-0.25 * core + 0.1 * ring * spiral) * fade;
+    }
+  }
+  return dp;
+}
+
 void cloudPotential(vec3 d, float seed, out float P, out float S, out float O, out float CI) {
   float lat = asin(clamp(d.y, -1.0, 1.0));
   float alat = abs(lat);
@@ -185,6 +254,8 @@ void cloudPotential(vec3 d, float seed, out float P, out float S, out float O, o
   // (only where there is one: a floor everywhere would lift every clear sky toward the edge)
   pot = max(pot, mix(pot, 0.41 + 0.45 * trop, smoothstep(0.0, 0.12, trop)));
   pot -= eye * 0.6;
+  // the eddies in the lee of the islands (only where there is a deck to show them)
+  pot += vortexStreets(d) * smoothstep(0.1, 0.35, deck);
   P = pot;
   // regime
   S = clamp(max(max(core * smoothstep(0.08, 0.35, deck), frontS * 0.9), max(polar * 0.7, frontN * 0.6 + storm * 0.25)), 0.0, 1.0);
@@ -211,6 +282,12 @@ void main() {
   float mC = maskAt(muv, 6.5);
   if (latD < -85.0) { m0 = 1.0; mc = 1.0; mC = 1.0; }
 
+  if (uOut == 4) {
+    // ids for the Earth shader's moving traffic, sampled unfiltered: the sea-lane leg and the
+    // maglev corridor nearest this texel (index + 1, 0 for none)
+    gl_FragColor = vec4(nearestLane(d), nearestArc(d), 0.0, 1.0);
+    return;
+  }
   if (uOut == 2) {
     float P, S, O, CI;
     cloudPotential(d, 0.0, P, S, O, CI);
@@ -287,6 +364,22 @@ void main() {
       float onLand = mix(0.1, 1.0, landS);
       warm += w * (core * 0.12 + lit * 0.11 * (1.0 - 0.45 * modern)) * onLand;
       cool += w * (lit * (0.02 + 0.1 * modern) + core * 0.05 * modern) * onLand;
+      // the harbour: container terminals and quays strung along the waterfront, their floodlit
+      // berths in dashes (sodium-warm and LED-white), within ~30 km of the old core
+      float hb = coastStrip * exp(-dk / (18.0 + 14.0 * w)) * smoothstep(3.0, 7.0, dk);
+      float dash = 0.35 + 0.65 * smoothstep(0.35, 0.8, sfbm(d * 900.0 + float(i) * 2.9, 2) * 0.5 + 0.5);
+      warm += w * hb * dash * 0.22;
+      cool += w * hb * dash * 0.16 * (0.4 + modern);
+      // ships at anchor in the roads off the port: a scatter of lights over the water
+      float roads = (1.0 - landS) * exp(-pow(max(dk - 22.0 - 10.0 * w, 0.0) / 14.0, 2.0)) * smoothstep(6.0, 14.0, dk) * (1.0 - smoothstep(0.98, 1.0, mc));
+      if (roads > 0.01) {
+        vec3 aq = d * 2400.0;
+        vec3 ac = floor(aq);
+        vec3 ah = hash33(ac + float(i));
+        float ship = step(0.78, ah.x) * exp(-dot(aq - ac - 0.5, aq - ac - 0.5) / 0.08);
+        warm += w * roads * ship * 0.5;
+        cool += w * roads * ship * 0.25;
+      }
     }
     // towns everywhere people live (a jittered lattice ~60 km apart, denser round the metros
     // and along the coasts and river valleys), joined by a lit web of roads and local rail
@@ -366,6 +459,18 @@ void main() {
       cool += sea * shelfT * 0.35;
       warm += sea * shelfT * 0.15;
     }
+    // fires on the savannas at night: prescribed burns keeping the grasslands open, strings of
+    // orange points along the fire fronts, in the dry season (June: the southern tropics)
+    {
+      float savZone = land * smoothstep(0.08, 0.2, arid) * (1.0 - smoothstep(0.45, 0.6, arid)) * (1.0 - smoothstep(-8.0, -2.0, latD)) * smoothstep(-26.0, -20.0, latD);
+      if (savZone > 0.0) {
+        vec3 fq = d * 420.0;
+        vec3 fc = floor(fq);
+        vec3 fh = hash33(fc + 61.3);
+        float front = step(0.93, fh.x) * exp(-dot(fq - fc - 0.5, fq - fc - 0.5) / 0.06);
+        warm += front * savZone * (0.3 + 0.5 * fh.y);
+      }
+    }
     // settled countryside: a faint even glow, none in the wilds
     warm += habit * place * 0.0015 * (0.4 + 1.2 * grain);
     // maglev corridors between the metros: great-circle filaments, dim where they run under the
@@ -409,31 +514,63 @@ void main() {
     }
     warm *= 1.0 - 0.85 * wild;
     cool *= 1.0 - 0.85 * wild;
+    // the light-fleets on the fishing grounds: clusters of boats under blinding green-white
+    // lamps, a few tens of km across, working the shelf edges
+    {
+      float ground = 0.0;
+      for (int i = 0; i < 5; i++) ground = max(ground, boxMask(latD, lonD, uFish[i], 1.5));
+      ground *= 1.0 - land;
+      if (ground > 0.0) {
+        vec3 fq = d * 190.0;                                            // ~34 km cells
+        vec3 fc = floor(fq);
+        float fleet = 0.0;
+        for (int x = 0; x <= 1; x++) for (int y = 0; y <= 1; y++) for (int z = 0; z <= 1; z++) {
+          vec3 cell = fc + vec3(float(x), float(y), float(z));
+          vec3 h = hash33(cell + 41.7);
+          if (h.x < 0.55) continue;
+          vec3 o = cell + 0.25 + 0.5 * hash33(cell + 3.3);
+          float r2 = dot(fq - o, fq - o);
+          // a fleet of boats in a ragged patch, brighter at its heart
+          fleet += exp(-r2 / (0.03 + 0.06 * h.y)) * (0.5 + h.z) * (0.6 + 0.4 * sfbm(d * 1400.0 + h * 9.0, 2));
+        }
+        cool += fleet * ground * 0.9;
+        warm += fleet * ground * 0.12;
+      }
+    }
+    // the alpha channel marks the sea lanes for the Earth shader's ships (an exact leg index + 1)
     gl_FragColor = vec4(min(warm, 8.0), min(cool, 8.0), min(net, 8.0), 1.0);
     return;
   }
 
   if (uOut == 1) {
-    // night lights
-    float city = 0.0;
-    for (int i = 0; i < 160; i++) {
-      if (i >= uNumCity) break;
-      vec4 c = texelFetch(uData, ivec2(i, 2), 0);
-      vec3 dv = d - c.xyz;
-      float sg = (18.0 + 42.0 * c.w) / 6371.0;
-      city += c.w * exp(-dot(dv, dv) / (sg * sg)) * (0.7 + 0.3 * sfbm(d * 900.0 + float(i), 2));
+    // r: mineral dust optical depth (x 1/1.2). The Saharan Air Layer rolls off West Africa and
+    // across the Atlantic toward the Caribbean in billowing fronts; Arabian and Thar dust over
+    // the Arabian Sea; the Taklamakan and Gobi's out over the Yellow Sea; a haze over every
+    // desert heart. Domain-warped, so the plumes' edges curl.
+    vec3 dw = vec3(sfbm(d * 9.0 + 71.0, 3), sfbm(d * 9.0 + 83.0, 3), sfbm(d * 9.0 + 97.0, 3));
+    float billow = sfbm(d * 26.0 + dw * 1.8, 4) * 0.5 + 0.5;
+    float dust = desert * 0.35;
+    {
+      // Sahara to the Caribbean: the plume leaves the coast near 15 - 20 N and drifts west, rising
+      // and thinning, bending north a little with the subtropical high
+      float t = clamp((-12.0 - lonD) / 55.0, 0.0, 1.0);
+      float inl = smoothstep(-16.0, -8.0, lonD) * (1.0 - smoothstep(20.0, 30.0, lonD));
+      float lc = mix(16.0, 21.0, t) + 5.0 * sfbm(d * 4.0 + 3.0, 3);
+      float zs = (latD - lc) / mix(7.0, 9.0, t);
+      float sahara = exp(-zs * zs) * (step(lonD, -12.0) * exp(-t * 1.6) * smoothstep(-75.0, -60.0, lonD) + inl * 0.8);
+      float za = (latD - 18.0) / 7.0;
+      float arabian = exp(-za * za) * smoothstep(50.0, 58.0, lonD) * (1.0 - smoothstep(66.0, 75.0, lonD)) * 0.7;
+      float zg = (latD - 38.0) / 5.0;
+      float gobi = exp(-zg * zg) * smoothstep(100.0, 112.0, lonD) * (1.0 - smoothstep(128.0, 140.0, lonD)) * 0.45;
+      dust = max(dust, (sahara + arabian + gobi) * smoothstep(0.3, 0.75, billow + 0.1));
     }
-    float hab = land * (1.0 - arid * 0.85) * (1.0 - smoothstep(52.0, 66.0, alat)) * (1.0 - step(latD, -56.0));
-    float coastal = 0.35 + 0.65 * (1.0 - mc);
-    float towns = smoothstep(0.5, 0.85, sfbm(d * 70.0 + 2.0, 4) * 0.5 + 0.5) * smoothstep(0.35, 0.8, sfbm(d * 9.0 + 5.0, 3) * 0.5 + 0.5);
-    city = (city + hab * coastal * towns * 0.07) * land;
     float ice = 0.0;
     if (latD < -62.0) ice = land;
     if (latD > 59.0 && lonD > -74.0 && lonD < -12.0) ice = land * smoothstep(0.35, 0.8, mc);
     ice = max(ice, (1.0 - land) * smoothstep(77.0, 82.0, latD + n2 * 6.0));
     ice = max(ice, (1.0 - land) * smoothstep(-68.0, -71.0, latD + n2 * 4.0));
     float shelf = (1.0 - land) * smoothstep(0.35, 0.95, mc + 0.25 * coastBand + n1 * 0.1);
-    gl_FragColor = vec4(clamp(city, 0.0, 1.0), ice, arid, shelf);
+    gl_FragColor = vec4(clamp(dust, 0.0, 1.0), ice, arid, shelf);
     return;
   }
 
@@ -479,7 +616,76 @@ void main() {
   // hamada and massifs: dark rock plateaus between the sand seas
   dsand = mix(dsand, vec3(0.22, 0.16, 0.11), smoothstep(0.56, 0.74, sfbm(d * 13.0 + 3.0, 4) * 0.5 + 0.5) * 0.75);
   c = mix(c, dsand, dune);
+  // the rivers: green irrigated valleys through the deserts (the Nile, the Tigris and Euphrates,
+  // the Indus plain, the inland deltas), dark water through forest and plain
+  {
+    float oasis = 0.0, water = 0.0;
+    float wob = 0.8 + 0.4 * sfbm(d * 400.0 + 5.0, 2);          // the banks' irregular width
+    for (int i = 0; i < 64; i++) {
+      if (i >= uNumValley) break;
+      vec4 va = texelFetch(uData, ivec2(i, 6), 0);
+      vec4 vb = texelFetch(uData, ivec2(i, 7), 0);
+      vec3 ab = vb.xyz - va.xyz;
+      float t = clamp(dot(d - va.xyz, ab) / max(dot(ab, ab), 1e-9), 0.0, 1.0);
+      float dk = length(d - va.xyz - ab * t) * 6371.0;
+      if (dk > va.w * 4.0) continue;
+      float wk = va.w * wob;
+      float f = exp(-dk * dk / (wk * wk));
+      if (vb.w > 0.5) oasis = max(oasis, f); else water = max(water, f);
+    }
+    c = mix(c, mix(vec3(0.05, 0.1, 0.03), vec3(0.08, 0.12, 0.05), n2 * 0.5 + 0.5), oasis * land);
+    c = mix(c, vec3(0.025, 0.04, 0.035), water * land * 0.85);
+  }
+  // the desert works: solar fields (dark, blue-grey rectangles) and centre-pivot irrigation
+  // (clusters of green discs) scattered through the dry country, ~20 km cells, a few per cent lit
+  if (dune > 0.3) {
+    vec3 wq = d * 300.0;
+    vec3 wc = floor(wq);
+    vec3 wh = hash33(wc + 13.7);
+    vec3 wf = wq - wc - 0.5;
+    if (wh.x > 0.965) {
+      // a solar field: a rectangle of panels in a sub-rectangle of the cell
+      vec2 hsz = vec2(0.12 + 0.2 * wh.y, 0.08 + 0.12 * wh.z);
+      vec2 qq = abs(vec2(wf.x + wf.z, wf.y)) - hsz;
+      float fld = 1.0 - smoothstep(-0.02, 0.02, max(qq.x, qq.y));
+      c = mix(c, vec3(0.055, 0.065, 0.085), fld * dune);
+    } else if (wh.x > 0.93) {
+      // irrigation: green pivots on the gravel plain
+      float piv = smoothstep(0.55, 0.8, sfbm(d * 2400.0 + wh * 7.0, 2) * 0.5 + 0.5) * (1.0 - smoothstep(0.25, 0.45, length(wf)));
+      c = mix(c, vec3(0.05, 0.09, 0.03), piv * dune);
+    }
+  }
   c *= 0.78 + 0.44 * (n2 * 0.5 + 0.5);
+  // farmland: the settled plains as a county-scale patchwork of crops, fallow and woodlots
+  // (greener in the wet, straw and ochre toward the steppe), none in the deserts or the far north
+  {
+    float farm = land * (1.0 - smoothstep(0.35, 0.7, arid)) * (1.0 - smoothstep(52.0, 60.0, alat)) * (1.0 - wet * 0.8) * smoothstep(0.45, 0.62, sfbm(d * 6.0 + 29.0, 3) * 0.5 + 0.5 + 0.15 * (1.0 - mc));
+    if (farm > 0.0) {
+      vec3 fq = d * 520.0;                                   // ~12 km parcels (districts of fields)
+      vec3 fh = hash33(floor(fq + 0.35 * vec3(sfbm(d * 90.0, 2))));
+      vec3 crop = fh.x < 0.4 ? vec3(0.07, 0.11, 0.035) : fh.x < 0.7 ? vec3(0.16, 0.14, 0.07) : fh.x < 0.88 ? vec3(0.11, 0.1, 0.06) : vec3(0.045, 0.07, 0.03);
+      crop *= 0.85 + 0.3 * fh.y;
+      c = mix(c, mix(crop, c, 0.35), farm * 0.75);
+    }
+  }
+  // the built-up land of the metros by day: grey-ochre fabric with green parks and dark water
+  // between, densest round the old cores
+  {
+    float urban = 0.0;
+    for (int i = 0; i < 160; i++) {
+      if (i >= uNumCity) break;
+      vec4 cc = texelFetch(uData, ivec2(i, 2), 0);
+      vec3 dv = d - cc.xyz;
+      float dk2 = dot(dv, dv) * 40589641.0;
+      float rm = 10.0 + 22.0 * cc.w;
+      if (dk2 > rm * rm * 9.0) continue;
+      float dk = sqrt(dk2);
+      urban = max(urban, smoothstep(0.2, 0.55, exp(-dk / rm) + 0.18 * sfbm(d * 330.0 + float(i) * 1.7, 3)) * cc.w);
+    }
+    vec3 urbC = mix(vec3(0.13, 0.12, 0.105), vec3(0.19, 0.175, 0.15), n2 * 0.5 + 0.5);
+    urbC = mix(urbC, vec3(0.05, 0.07, 0.035), smoothstep(0.55, 0.8, sfbm(d * 700.0 + 3.0, 2) * 0.5 + 0.5) * 0.6);
+    c = mix(c, urbC, clamp(urban, 0.0, 1.0) * land * 0.85);
+  }
   // mountains: bare rock and snow above a latitude-dependent snowline
   c = mix(c, rock * (0.8 + 0.4 * rid), smoothstep(0.18, 0.45, mount * rid));
   float snowline = mix(0.62, 0.12, smoothstep(0.0, 65.0, alat));
@@ -502,8 +708,52 @@ void main() {
   vec3 bankC = mix(vec3(0.018, 0.06, 0.05), vec3(0.05, 0.2, 0.18), tropic) * (0.8 + 0.4 * smoothstep(0.3, 0.7, n2 * 0.5 + 0.5));
   vec3 ocean = mix(vec3(0.004, 0.011, 0.028), shelfC, shelf);
   ocean = mix(ocean, bankC, bank * (0.35 + 0.65 * tropic) * smoothstep(0.3, 0.6, n1 * 0.5 + 0.5 + 0.25 * tropic));
+  // plankton blooms: milky turquoise (coccolithophores) and green (diatoms) swirling through the
+  // eddies of the high-latitude seas and the upwelling off the western coasts
+  {
+    vec3 bw = vec3(sfbm(d * 18.0 + 3.0, 3), sfbm(d * 18.0 + 9.0, 3), sfbm(d * 18.0 + 15.0, 3));
+    float eddy = sfbm(d * 70.0 + bw * 2.4, 4) * 0.5 + 0.5;
+    float zl = (alat - 55.0) / 9.0;
+    float hiLat = exp(-zl * zl);
+    float upwell = 0.0;
+    for (int i = 0; i < 5; i++) upwell = max(upwell, exp(-pow(length((vec2(lat, lon) - uSc[i].xy) / (uSc[i].z * 0.7)), 2.0)));
+    float bloomZone = (hiLat * 0.9 + upwell * 0.8) * smoothstep(0.45, 0.7, sfbm(d * 8.0 + 51.0, 3) * 0.5 + 0.5 + 0.2 * shelf);
+    float bloom = bloomZone * smoothstep(0.45, 0.75, eddy);
+    vec3 bloomC = mix(vec3(0.012, 0.05, 0.035), vec3(0.04, 0.12, 0.12), smoothstep(0.6, 0.9, eddy) * hiLat);
+    ocean = mix(ocean, bloomC, clamp(bloom, 0.0, 1.0) * (1.0 - land) * 0.85);
+  }
+  // river plumes: the sediment of the great rivers fanning out over the shelf, ochre near the
+  // mouth, green-brown at its swirling edge
+  {
+    float plume = 0.0;
+    for (int i = 0; i < ${RIVERS.length}; i++) {
+      vec3 dv = d - uRivers[i].xyz;
+      float dk = length(dv) * 6371.0;
+      float L = 60.0 + 260.0 * uRivers[i].w;
+      if (dk > L * 3.0) continue;
+      float edge = sfbm(d * 160.0 + float(i) * 4.1, 3);
+      plume = max(plume, smoothstep(0.15, 0.55, exp(-dk / L) + 0.2 * edge) * uRivers[i].w);
+    }
+    vec3 silt = mix(vec3(0.03, 0.05, 0.035), vec3(0.1, 0.075, 0.04), smoothstep(0.3, 0.8, plume));
+    ocean = mix(ocean, silt, clamp(plume * 1.3, 0.0, 1.0) * (1.0 - land) * (0.6 + 0.4 * shelf));
+  }
+  // icebergs: tabular bergs calved from the Antarctic shelves drifting in the Southern Ocean,
+  // and the Greenland bergs down Baffin Bay: white specks over the dark sea
+  {
+    float bergZone = (1.0 - smoothstep(-58.0, -52.0, latD)) * smoothstep(-70.0, -66.0, latD)
+                   + boxMask(latD, lonD, vec4(60.0, 75.0, -70.0, -48.0), 2.0) * 0.8;
+    if (bergZone > 0.0) {
+      vec3 iq = d * 900.0;
+      vec3 ic = floor(iq);
+      vec3 ih = hash33(ic + 29.3);
+      float berg = step(0.975, ih.x) * (1.0 - smoothstep(0.1 + 0.2 * ih.y, 0.2 + 0.25 * ih.y, length(iq - ic - 0.5 - 0.3 * (ih - 0.5))));
+      ocean = mix(ocean, vec3(0.62, 0.68, 0.74), berg * bergZone * (1.0 - land));
+    }
+  }
   float seaIce = smoothstep(77.0, 82.0, latD + n2 * 6.0) + smoothstep(-68.0, -71.0, latD + n2 * 4.0);
-  ocean = mix(ocean, vec3(0.7, 0.75, 0.8) * (0.85 + 0.15 * n2), clamp(seaIce, 0.0, 1.0));
+  // the pack: floes split by a network of dark leads of open water
+  float leads = pow(max(sridged(d * 140.0 + 5.0, 4), 0.0), 6.0) * 0.7 + pow(max(sridged(d * 420.0 + 9.0, 3), 0.0), 8.0) * 0.4;
+  ocean = mix(ocean, vec3(0.7, 0.75, 0.8) * (0.85 + 0.15 * n2) * (1.0 - clamp(leads, 0.0, 0.85)), clamp(seaIce, 0.0, 1.0));
   vec3 alb = land > 0.5 ? c : ocean;
   gl_FragColor = vec4(sqrt(clamp(alb, 0.0, 1.0)), clamp(0.5 + 0.5 * H, 0.0, 1.0));
 }
@@ -540,7 +790,7 @@ function mulberry(a) { return () => { a |= 0; a = (a + 0x6d2b79f5) | 0; let t = 
  * Maglev corridors: each metro joins its nearest neighbours (great-circle arcs, a few
  * thousand km at most), so the network follows the settled coasts and river plains.
  */
-function buildArcs() {
+export function buildArcs() {
   const pts = CITIES.map(([lat, lon, w]) => ({ v: bodyDir(lat * D2R, lon * D2R, new THREE.Vector3()), w }));
   const pairs = new Set();
   const arcs = [];
@@ -568,8 +818,10 @@ function buildDataTexture() {
     for (let i = 0; i < r.pts.length - 1; i++) segs.push([r.pts[i], r.pts[i + 1], r.w, r.h]);
   }
   const arcs = buildArcs();
-  const W = Math.max(segs.length, CITIES.length + 2, arcs.length, 8);
-  const ROWS = 6;
+  const valleys = [];
+  for (const r of RIVER_VALLEYS) for (let i = 0; i < r.pts.length - 1; i++) valleys.push([r.pts[i], r.pts[i + 1], r.w, r.oasis]);
+  const W = Math.max(segs.length, CITIES.length + 2, arcs.length, valleys.length, 8);
+  const ROWS = 8;
   const data = new Float32Array(W * ROWS * 4);
   const v = new THREE.Vector3();
   segs.forEach(([a, b, w, h], i) => {
@@ -585,10 +837,14 @@ function buildDataTexture() {
     data.set([a.a.x, a.a.y, a.a.z, a.s], (4 * W + i) * 4);
     data.set([a.b.x, a.b.y, a.b.z, 0], (5 * W + i) * 4);
   });
+  valleys.forEach(([a, b, w, k], i) => {
+    bodyDir(a[0] * D2R, a[1] * D2R, v); data.set([v.x, v.y, v.z, w], (6 * W + i) * 4);
+    bodyDir(b[0] * D2R, b[1] * D2R, v); data.set([v.x, v.y, v.z, k], (7 * W + i) * 4);
+  });
   const tex = new THREE.DataTexture(data, W, ROWS, THREE.RGBAFormat, THREE.FloatType);
   tex.minFilter = tex.magFilter = THREE.NearestFilter;
   tex.needsUpdate = true;
-  return { tex, numSeg: segs.length, numCity: cities.length, numArc: arcs.length };
+  return { tex, numSeg: segs.length, numCity: cities.length, numArc: arcs.length, numValley: Math.min(valleys.length, 64) };
 }
 
 function cyclones() {
@@ -615,6 +871,8 @@ function cyclones() {
   return out;
 }
 
+const LANES = buildLaneTexture();
+
 export class EarthBake {
   constructor(renderer, size, cloudSize) {
     this.renderer = renderer;
@@ -632,6 +890,9 @@ export class EarthBake {
     // night lights: linear half floats, so mip levels average true light, not its square root
     this.lights = new THREE.WebGLCubeRenderTarget(size, { type: THREE.HalfFloatType, format: THREE.RGBAFormat, generateMipmaps: true, minFilter: THREE.LinearMipmapLinearFilter, magFilter: THREE.LinearFilter, depthBuffer: false });
     this.lights.texture.colorSpace = THREE.NoColorSpace;
+    // traffic ids (sea lanes, maglev corridors): exact integers, so never filtered or mipmapped
+    this.ids = new THREE.WebGLCubeRenderTarget(Math.min(size, 512), { type: THREE.HalfFloatType, format: THREE.RGBAFormat, generateMipmaps: false, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter, depthBuffer: false });
+    this.ids.texture.colorSpace = THREE.NoColorSpace;
     this.data = buildDataTexture();
     const cyc = cyclones();
     while (cyc.length < 28) cyc.push(new THREE.Vector4(0, 1, 0, 0));
@@ -642,6 +903,7 @@ export class EarthBake {
         uMask: { value: null },
         uData: { value: this.data.tex },
         uNumSeg: { value: this.data.numSeg },
+        uNumValley: { value: this.data.numValley },
         uNumCity: { value: this.data.numCity },
         uFace: { value: 0 },
         uOut: { value: 0 },
@@ -654,12 +916,17 @@ export class EarthBake {
         // stratocumulus decks: lat, lon (rad), extent (rad), strength: California, Peru, Namibia, Canaries, Western Australia
         uSc: { value: [[27, -128, 11, 1], [-17, -85, 13, 1], [-17, 5, 11, 0.9], [22, -24, 8, 0.7], [-27, 103, 9, 0.7]].map(([la, lo, e, w]) => new THREE.Vector4(la * D2R, lo * D2R, e * D2R, w)) },
         uTexelKm: { value: (Math.PI / 2 / size) * 6371 },
+        uRivers: { value: RIVERS.map(([la, lo, w]) => { const v = bodyDir(la * D2R, lo * D2R, new THREE.Vector3()); return new THREE.Vector4(v.x, v.y, v.z, w); }) },
+        uIsles: { value: VORTEX_ISLES.map(([la, lo, r]) => { const v = bodyDir(la * D2R, lo * D2R, new THREE.Vector3()); return new THREE.Vector4(v.x, v.y, v.z, r); }) },
+        uFish: { value: FISHING.map((b) => new THREE.Vector4(b[0], b[1], b[2], b[3])) },
+        uLanes: { value: LANES.tex },
+        uNumLane: { value: LANES.count },
       },
       depthTest: false, depthWrite: false,
     });
     this.pass = new FullscreenPass(this.mat);
     this.jobs = [];
-    for (const [out, rt] of [[0, this.surfA], [1, this.surfB], [2, this.clouds], [3, this.lights]]) for (let f = 0; f < 6; f++) this.jobs.push({ out, rt, f });
+    for (const [out, rt] of [[0, this.surfA], [1, this.surfB], [2, this.clouds], [3, this.lights], [4, this.ids]]) for (let f = 0; f < 6; f++) this.jobs.push({ out, rt, f });
     this.done = false;
   }
 
@@ -690,5 +957,5 @@ export class EarthBake {
     return this.done;
   }
 
-  dispose() { this.surfA.dispose(); this.surfB.dispose(); this.clouds.dispose(); this.lights.dispose(); this.mat.dispose(); }
+  dispose() { this.surfA.dispose(); this.surfB.dispose(); this.clouds.dispose(); this.lights.dispose(); this.ids.dispose(); this.mat.dispose(); }
 }

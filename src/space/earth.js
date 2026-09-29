@@ -4,6 +4,9 @@ import { NOISE_GLSL } from '../shaders/noise.glsl.js';
 import { U } from '../core/uniforms.js';
 import { SNOISE_GLSL, SPACE_UTIL_GLSL } from './glsl.js';
 import { R_EARTH, MERIDIAN_LON, bodyDir } from './sim.js';
+import { Aurora } from './aurora.js';
+import { EARTH_DETAIL_GLSL, buildLaneTexture, buildArcTexture, arcologyUniforms, shipClock, trainClock } from './earthDetail.js';
+import { buildArcs } from './earthBake.js';
 
 // The planet, rendered in one pass on a proxy sphere at the top of the
 // atmosphere. Each fragment ray-traces the ground and the cloud shell and
@@ -92,6 +95,8 @@ float ringShadow(vec3 p, vec3 s) {
   return lit;
 }
 
+${EARTH_DETAIL_GLSL}
+
 // ---- clouds ---------------------------------------------------------------------------
 // The baked weather (earthBake.js: potential, stratiform share, open cells, cirrus) drifts
 // slowly east as one field; the land's bias (clear deserts, cloudy rainforest) stays put.
@@ -177,6 +182,21 @@ vec2 lowCloud(vec3 b, float fp, float bias, bool fine) {
   float cover = smoothstep(0.5 - edge, 0.5 + edge, Pd);
   float thick = clamp((Pd - 0.5) / 0.3, 0.0, 1.0);
   float tau = mix(mix(8.0, 5.0, S), 48.0, thick * (0.5 + 0.5 * thick)) * mix(1.0, mix(0.72, 1.12, mix(0.75, heart, cellRes)), S * (1.0 - O));
+#if QUALITY > 0
+  // deep convection resolved: the towers of a storm complex (~10 km domes, overshooting tops
+  // punching through the anvil), their optical depth, and so their relief and shadows, heaped
+  // at the centres of the updraughts
+  float convP = smoothstep(0.66, 0.82, P) * (1.0 - smoothstep(0.35, 0.7, S));
+  if (fine && convP > 0.0) {
+    float towerRes = 1.0 - smoothstep(2.5, 6.0, fp);
+    if (towerRes > 0.0) {
+      vec2 tc = cellF(q * (6371.0 / 11.0) + 17.0);
+      float dome = 1.0 - smoothstep(0.0, 0.62, tc.x);
+      float over = (1.0 - smoothstep(0.0, 0.22, tc.x)) * step(0.72, hash13(floor(q * (6371.0 / 11.0) + 17.0)));
+      tau *= mix(1.0, 0.55 + 1.2 * dome * dome + 0.9 * over, convP * towerRes);
+    }
+  }
+#endif
   return vec2(cover, tau);
 }
 // High ice cloud on its own shell: thin, fibrous, drawn out along the wind. x = cover, y = tau
@@ -230,7 +250,16 @@ vec3 integrateAtmo(vec3 ro, vec3 rd, float t0, float t1, bool ground, vec3 sun, 
       vec3 S = ((sR * pR + sM * pM) * Ts + (sR + vec3(sM)) * ms) * uSunE;
       // green oxygen airglow near 95 km (only visible against the night)
       float h = r - Rg;
-      S += vec3(0.25, 1.0, 0.45) * 2.2e-5 * exp(-pow(abs(h - 94.0) / 5.0, 2.0)) * (1.0 - smoothstep(-0.25, 0.05, mu));
+      float agN = 1.0 - smoothstep(-0.25, 0.05, mu);
+      if (agN > 0.0 && abs(h - 94.0) < 16.0) {
+        // (rippled by gravity waves from the weather far below: bands ~100 km apart)
+        vec3 ub = uToBody * up;
+        float rip = 0.72 + 0.28 * sin(dot(ub, vec3(0.62, 0.21, 0.76)) * 400.0 + 2.2 * snoise(ub * 30.0));
+        S += vec3(0.25, 1.0, 0.45) * 2.2e-5 * exp(-pow(abs(h - 94.0) / 5.0, 2.0)) * agN * rip;
+        // the sodium layer just beneath it, a thin orange-yellow band (589 nm) near 89 km
+        float zNa = (h - 89.0) / 3.5;
+        S += vec3(1.0, 0.62, 0.18) * 4.0e-6 * exp(-zNa * zNa) * agN;
+      }
       vec3 sT = exp(-ext * dt);
       L += T * (S - S * sT) / max(ext, vec3(1e-7));
       T *= sT;
@@ -361,6 +390,22 @@ float cityLattice(vec3 b, float fp) {
     float lit = 0.5 + hash12(floor(g) + 3.0);
     m *= mix(1.0, (0.45 + 2.2 * street) * lit / 0.78, fB);
   }
+  // avenues ~800 m apart, resolved from a low pass: each carries platoons of headlights and
+  // tail-lights moving along it (alternate avenues flowing opposite ways), so a resolved city
+  // is visibly alive; the mean is kept as the pattern fades with range
+  float fS = 1.0 - smoothstep(0.8 / 7.0, 0.8 / 2.5, fp);
+  if (fS > 0.0) {
+    vec2 g = q / 0.8;
+    vec2 cellA = floor(g + 0.5);
+    vec2 fr = abs(fract(g) - 0.5);
+    float ax = smoothstep(0.43, 0.5, fr.x), ay = smoothstep(0.43, 0.5, fr.y);
+    float hx = hash12(vec2(cellA.x, 3.0)), hy = hash12(vec2(cellA.y, 7.0));
+    float vx = (hx > 0.5 ? 1.0 : -1.0) * (0.018 + 0.014 * hx), vy = (hy > 0.5 ? 1.0 : -1.0) * (0.018 + 0.014 * hy);
+    float flowN = 0.5 + 0.5 * sin((q.y - uTime * vx) * 3.927 + hx * 6.2832);     // platoons ~1.6 km apart
+    float flowE = 0.5 + 0.5 * sin((q.x - uTime * vy) * 3.927 + hy * 6.2832);
+    float streets = max(ax * (0.4 + 1.2 * flowN), ay * (0.4 + 1.2 * flowE));
+    m *= mix(1.0, (0.55 + 1.9 * streets) / 0.9, fS);
+  }
   return m;
 }
 
@@ -484,7 +529,18 @@ void main() {
   float ndl = max(dot(nb, sun), 0.0);
   vec3 landCol = landAlb / S_PI * (uSunE * sunT * ndl * shadow + skyAmb * (0.6 + 0.4 * shadow));
   // ocean with sun glint
+  // whitecaps: where the storms blow the sea is streaked with foam (Monahan's W = 3.8e-6 U^3.41:
+  // a few per cent of the surface at gale force), lifting its albedo and roughening its glint
+  float gale = smoothstep(0.55, 0.85, weatherAt(b, max(fp, 12.0)).r) * smoothstep(0.55, 0.85, abs(b.y));
+  float U10 = 6.0 + 12.0 * gale;
+  float wcap = 3.84e-6 * pow(U10, 3.41);
+  seaAlb += vec3(0.5 * wcap) * (1.0 - ice);
   vec3 seaCol;
+  // ships on the lane the bake found here (the id cube, nearest-filtered)
+  float shRough, shSlick, shFoam;
+  vec3 shipLight;
+  vec4 trafficIds = textureLod(uIds, b, 0.0);
+  od_ships(b, trafficIds.r, fp, shRough, shSlick, shFoam, shipLight);
   {
     // sea-surface roughness from the wind (Cox-Munk, ~7 m/s): a broad smooth glint, gently
     // varied by weather systems, with calm slicks streaking it where they are resolved
@@ -494,9 +550,20 @@ void main() {
     float slick = smoothstep(0.55, 0.8, snoise(b * vec3(90.0, 260.0, 90.0) + wind * 3.0) * 0.5 + 0.5) * (1.0 - smoothstep(2.0, 8.0, fp));
     al -= 0.05 * slick;
 #endif
+    al *= 1.0 + 0.35 * gale;                         // Cox-Munk: rougher in a gale
+    // the sea's texture in the glint, and the ships' wakes through it
+    al *= od_seaTexture(b, fp, B.a);
+    al *= 1.0 + 0.7 * shRough - 0.45 * clamp(shSlick, 0.0, 1.0);
+    al = clamp(al, 0.05, 0.6);
+    // the waves themselves where the pixel resolves them: their slope tilts the facet normal, and
+    // the roughness keeps only what is still below the pixel
+    float swVar;
+    vec3 swSlope = od_swell(b, fp, uTime, swVar);
+    al = sqrt(max(al * al - swVar, 0.0016));
+    vec3 nw = normalize(n - transpose(uToBody) * swSlope * (1.0 - ice));
     al = mix(al, 0.5, ice);
     vec3 Hh = normalize(V + sun);
-    float nh = max(dot(n, Hh), 0.0), nv = max(dot(n, V), 1e-3), nl = max(dot(n, sun), 0.0);
+    float nh = max(dot(nw, Hh), 0.0), nv = max(dot(nw, V), 1e-3), nl = max(dot(n, sun), 0.0);
     float a2 = al * al;
     float dd = nh * nh * (a2 - 1.0) + 1.0;
     float D = a2 / (S_PI * dd * dd);
@@ -509,6 +576,8 @@ void main() {
     vec3 body = seaAlb / S_PI * (uSunE * sunT * nl * shadow + skyAmb);
     seaCol = body * (1.0 - Fv) + Fv * skyRefl + spec * (1.0 - ice);
     seaCol = mix(seaCol, seaAlb / S_PI * (uSunE * sunT * nl * shadow + skyAmb), ice);
+    // white water at the bows and close astern
+    seaCol += vec3(0.55) * clamp(shFoam, 0.0, 1.0) * (1.0 - ice) / S_PI * (uSunE * sunT * nl * shadow + skyAmb);
   }
   vec3 col = mix(seaCol, landCol, landF);
 
@@ -520,9 +589,31 @@ void main() {
     col = mix(col, sc, site.a);
   }
 
+  // the arcologies: pale platforms by day, the brightest lights of their regions at night
+  vec3 arcoNight;
+  float arcoGlass;
+  vec4 arco = od_arcology(b, fp, arcoNight, arcoGlass);
+  if (arco.a > 0.0) col = mix(col, arco.rgb / S_PI * (uSunE * sunT * max(mu, 0.0) * shadow + skyAmb), arco.a);
+  // their glazed roofs flash the Sun back where the geometry is right
+  if (arcoGlass > 0.0) col += vec3(od_glint(n, V, sun, 0.09)) * arcoGlass * uSunE * sunT * shadow;
+
+  // Kilauea's vog by day
+  vec3 volcNight;
+  vec4 volc = od_volcano(b, fp, volcNight);
+  if (volc.a > 0.0) col = mix(col, volc.rgb / S_PI * (uSunE * sunT * max(mu, 0.0) * shadow + skyAmb), volc.a);
+  // mineral dust (the bake's optical depth): a tan veil over sea and land, lit by the Sun,
+  // hiding a little of what lies beneath (the clouds above it are drawn over it)
+  float tauD = B.r * 1.2;
+  if (tauD > 0.003) {
+    float muV = max(dot(n, V), 0.08);
+    float tD = exp(-tauD / muV);
+    vec3 dustL = vec3(0.6, 0.46, 0.3) / S_PI * (uSunE * sunT * max(mu, 0.0) * rsh + skyAmb * 0.6);
+    col = col * tD + dustL * (1.0 - tD);
+  }
+
   // night lights of the Concord: warm old cores, cool new districts, transit filaments
   // (baked), with district and block lattices where they are resolved, and Meridian
-  float night = 1.0 - smoothstep(-0.12, 0.05, mu);
+  float night = od_switchOn(b, mu, fp);
   vec4 LT = texture(uLights, b);
   float lw = LT.r, lc = LT.g, ln = LT.b;
   float micro = 1.0;
@@ -532,6 +623,16 @@ void main() {
   // brighter from afar, where a city is a pixel's mean, calmer close up so districts keep their
   // structure (a smooth function of range: nothing pops)
   float rangeK = mix(0.7, 1.35, smoothstep(3.0, 30.0, fp));
+  // the city's night: full through the evening, dimmer in the small hours as the shops and
+  // offices go dark, a lift with the early shifts before dawn (local solar time from the Sun)
+  {
+    vec3 sB = uToBody * sun;
+    float hA = atan(-b.z, b.x) - atan(-sB.z, sB.x);
+    float hour = mod(12.0 + hA * 3.8197 + 48.0, 24.0);
+    float sinceDusk = mod(hour - 18.0 + 24.0, 24.0);
+    float zc = (sinceDusk - 11.5) / 1.1;
+    rangeK *= mix(1.0, 0.62, smoothstep(4.5, 9.0, sinceDusk)) + 0.22 * exp(-zc * zc);
+  }
   vec3 emis = ((vec3(1.0, 0.6, 0.28) * lw * 4.2 + vec3(0.66, 0.88, 1.0) * lc * 3.6) * micro + vec3(0.72, 0.86, 1.0) * ln * 1.05) * rangeK;
   // a soft shoulder, so a metro's heart stays warm-white instead of clipping to a white splat
   // (and stays under the bloom's threshold: no metro flares into a star)
@@ -540,6 +641,10 @@ void main() {
     emis *= 1.0 / (1.0 + le / 0.75);
   }
   emis += meridianNight(b, fp);
+  emis += arcoNight * 0.12;
+  emis += volcNight * 0.05;
+  emis += shipLight * 0.05 * (1.0 - landF);
+  emis += od_trains(b, trafficIds.g, fp) * 0.05;
 
   // clouds: the low and middle deck (8 km) and the cirrus above it (12.5 km), each on its own
   // shell, so they part in parallax at a slant and the cirrus shadows the deck beneath it
@@ -592,11 +697,13 @@ void main() {
     cloudCol += mix(vec3(1.0, 0.62, 0.34), vec3(0.8, 0.85, 0.95), 0.3) * under * 1.1 * nightC;
     // lightning: storm cells brighten in soft, brief pulses (no hard on/off), only where a
     // cell spans a few pixels; from high orbit single-pixel strikes read as blinking lights
-    vec3 cell = floor(bC * 260.0);
-    float hsh = hash13(cell);
-    float pulse = smoothstep(0.93, 1.0, sin(uTime * (0.35 + 0.5 * hsh) + hsh * 60.0)) * step(0.985, hash13(cell + 7.0));
-    float flash = pulse * smoothstep(0.6, 1.0, lcl.x * clamp(lcl.y / 40.0, 0.0, 1.0)) * nightC * (1.0 - smoothstep(6.0, 16.0, fpC));
-    cloudCol += vec3(0.75, 0.82, 1.0) * flash * 1.2;
+    // (deep convection: thick, cumuliform cloud; the storms of the ITCZ, the cyclones' walls)
+    float convS = weatherAt(bC, fpC).g;
+    float conv = smoothstep(0.55, 0.95, lcl.x * clamp(lcl.y / 40.0, 0.0, 1.0)) * (1.0 - 0.8 * convS) * nightC * (1.0 - smoothstep(25.0, 60.0, fpC));
+    float flash = od_lightning(bC, fpC, conv, uTime);
+    cloudCol += vec3(0.75, 0.82, 1.0) * flash * 0.9;
+    // the aurora's green on the cloud tops beneath the ovals
+    cloudCol += vec3(0.15, 0.8, 0.35) * od_auroraGround(bC, uToBody * sun) * 0.012 * nightC;
     // faint moonlight
     cloudCol += vec3(0.5, 0.6, 0.8) * 0.004 * max(dot(nC, uMoonDir), 0.0) * nightC;
   }
@@ -631,8 +738,12 @@ void main() {
   vec3 L = integrateAtmo(ro, rd, t0, tEnd, hitG, sun, T);
   // artistic: thin the blue veil over the disc a little, keep the limb at full strength
   L *= mix(1.0, uAtmoGain, smoothstep(0.08, 0.6, dot(n, -rd)) * (hitG ? 1.0 : 0.0));
+  // noctilucent clouds at the summer mesopause
+  vec3 nlc = od_nlc(ro, rd, sun, hitG ? tG.x : 1e9);
+  // and nacreous clouds in the Antarctic winter stratosphere
+  nlc += od_psc(ro, rd, sun, hitG ? tG.x : 1e9);
   if (hitG) {
-    gl_FragColor = vec4(col * T + L, 1.0);
+    gl_FragColor = vec4(col * T + L + nlc, 1.0);
     vec4 clip = projectionMatrix * viewMatrix * vec4(pG, 1.0);
     gl_FragDepth = clamp(clip.z / clip.w * 0.5 + 0.5, 0.0, 1.0);
   } else {
@@ -642,12 +753,22 @@ void main() {
     vec3 cc = ciCol * li + cloudCol * lcv * (1.0 - li);
     float ca = li + lcv * (1.0 - li);
     float a = max(ca, 1.0 - dot(T, vec3(1.0 / 3.0)));
-    gl_FragColor = vec4(cc * T + L, a);
+    // red sprites over the storms along the night limb
+    vec3 spr = od_sprites(ro, rd, sun, uTime);
+    gl_FragColor = vec4(cc * T + L + nlc + spr, a);
     gl_FragDepth = gl_FragCoord.z;
   }
   gl_FragColor.rgb *= uReady;
 }
 `;
+
+// the lane legs (shared with the bake, which marks where each runs) and the arcologies
+const LANES = buildLaneTexture();
+const ARCO = arcologyUniforms();
+const ARCS = buildArcTexture(buildArcs());
+export { LANES as EARTH_LANES };
+const _clock = { t: 0, wrap: 0 };
+const _act = { act: 0, surge: 0 };
 
 export class Earth {
   constructor(bake, quality) {
@@ -674,6 +795,17 @@ export class Earth {
       uPixAng: { value: 0.001 },
       uReady: { value: 0 },
       uAtmoGain: { value: 0.36 },
+      uLaneTex: { value: LANES.tex },
+      uIds: { value: bake.ids ? bake.ids.texture : null },
+      uArcTex: { value: ARCS.tex },
+      uTrainT: { value: 0 },
+      uTrainWrap: { value: 0 },
+      uShipT: { value: 0 },
+      uShipWrap: { value: 0 },
+      uArco: { value: ARCO.pos },
+      uArcoK: { value: ARCO.kind },
+      uNlcGain: { value: 1 },
+      uAuroraAct: { value: 0.5 },
     };
     this.material = new THREE.ShaderMaterial({
       vertexShader: VERT,
@@ -707,5 +839,13 @@ export class Earth {
     u.uTime.value = realTime;
     u.uMoonDir.value.copy(sim.moonPos).normalize();
     u.uReady.value = this.bake.ready ? 1 : 0;
+    // the ships run on the sim clock (wrapped per slot period so float precision never drifts)
+    shipClock(sim.t, _clock);
+    u.uShipT.value = _clock.t;
+    u.uShipWrap.value = _clock.wrap;
+    trainClock(sim.t, _clock);
+    u.uTrainT.value = _clock.t;
+    u.uTrainWrap.value = _clock.wrap;
+    u.uAuroraAct.value = Aurora.activity(realTime, _act).act;
   }
 }
