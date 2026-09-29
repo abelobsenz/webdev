@@ -7,6 +7,10 @@
 // Frames: inertial +Y = celestial north, the June-solstice Sun in the XY plane.
 // Equatorial Cartesian (x to RA 0h, y to RA 6h, z north) = (d.z, d.x, d.y).
 import { NOISE_GLSL } from '../shaders/noise.glsl.js';
+import { raDecToVector } from './skyCatalog.js';
+
+// J2000 equatorial unit vector as a GLSL literal
+const eq = (raH, decD) => { const v = raDecToVector(raH, decD); return `vec3(${v.x.toFixed(5)}, ${v.y.toFixed(5)}, ${v.z.toFixed(5)})`; };
 
 export const SPACE_SKY_GLSL = /* glsl */ `
 ${NOISE_GLSL}
@@ -157,6 +161,55 @@ float sk_galaxy(vec3 c, vec3 pos, vec3 ax, float ra, float rb) {
   float x = dot(dv, ax) / ra, y = dot(dv, mi) / rb;
   float r = sqrt(x * x + y * y);
   return exp(-r * 2.4) + 1.5 * exp(-r * r / 0.006);
+}
+
+// The named nebulae of the wide-field sky (J2000): Orion's great nebula and Barnard's Loop
+// round the belt, the Rosette, the California, the Heart and Soul, the Pleiades' blue
+// reflection haze, the Veil's filaments. c is J2000 equatorial.
+float sk_blob(vec3 c, vec3 pos, float r) { vec3 d = c - pos; return exp(-dot(d, d) / (r * r)); }
+vec3 sk_nebulae(vec3 c, float px) {
+  vec3 L = vec3(0.0);
+  vec3 ha = vec3(1.0, 0.3, 0.38);                        // hydrogen alpha, with a little H-beta
+  // M42 and its halo
+  L += ha * (sk_blob(c, ${eq(5.588, -5.39)}, 0.004) * 2.4 + sk_blob(c, ${eq(5.59, -5.2)}, 0.012) * 0.5);
+  L += vec3(0.5, 0.65, 1.0) * sk_blob(c, ${eq(5.61, -4.8)}, 0.006) * 0.25;           // M43 / the Running Man
+  // Barnard's Loop: an arc ~7 degrees round the belt, open to the west
+  {
+    vec3 ctr = ${eq(5.45, -4.0)};
+    float ang = acos(clamp(dot(c, ctr), -1.0, 1.0));
+    float zl = (ang - 0.122) / 0.008;
+    vec3 E = normalize(cross(vec3(0.0, 0.0, 1.0), ctr));
+    float east = dot(c - ctr, E) / max(ang, 1e-4);
+    L += ha * exp(-zl * zl) * smoothstep(-0.4, 0.4, east) * (0.5 + 0.5 * vnoise3(c * 180.0)) * 0.35;
+  }
+  // the Rosette: a ring with a hollow heart
+  {
+    vec3 ctr = ${eq(6.53, 4.95)};
+    float ang = acos(clamp(dot(c, ctr), -1.0, 1.0));
+    float zr = (ang - 0.008) / 0.004;
+    L += ha * exp(-zr * zr) * 0.45;
+  }
+  // the California (drawn out north-west to south-east) and the Heart and Soul
+  {
+    vec3 ctr = ${eq(4.05, 36.4)};
+    vec3 E = normalize(cross(vec3(0.0, 0.0, 1.0), ctr));
+    vec3 N = cross(ctr, E);
+    float x = dot(c - ctr, normalize(E - N * 0.6)), y = dot(c - ctr, normalize(N + E * 0.6));
+    L += ha * exp(-(x * x) / (0.022 * 0.022) - (y * y) / (0.006 * 0.006)) * 0.3;
+  }
+  L += ha * (sk_blob(c, ${eq(2.55, 61.45)}, 0.011) + sk_blob(c, ${eq(2.85, 60.4)}, 0.01)) * 0.22;
+  // the Pleiades' blue reflection nebula (the cluster's own stars are in the catalogue)
+  L += vec3(0.45, 0.6, 1.0) * sk_blob(c, ${eq(3.78, 24.12)}, 0.011) * (0.6 + 0.4 * vnoise3(c * 900.0)) * 0.45;
+  // the Veil: a torn ring of filaments (a supernova's shell, ten thousand years old)
+  {
+    vec3 ctr = ${eq(20.85, 31.0)};
+    float ang = acos(clamp(dot(c, ctr), -1.0, 1.0));
+    float zv = (ang - 0.025) / 0.0025;
+    float torn = smoothstep(0.45, 0.7, vnoise3(c * 400.0));
+    L += mix(vec3(0.4, 0.8, 1.0), ha, 0.5) * exp(-zv * zv) * torn * 0.3;
+  }
+  // (they are faint, extended light: they fade out rather than twinkle as the pixel grows)
+  return L * (1.0 - smoothstep(0.004, 0.02, px) * 0.6);
 }
 
 vec3 sk_extragalactic(vec3 c, float px) {
@@ -342,6 +395,7 @@ vec3 sk_background(vec3 d, float px) {
   col += sk_starLayer(c, 1500.0, 0.0022, 6.6, 8.0, px, crowd * 1.3) * (1.0 - smoothstep(0.0012, 0.003, px));
   col += sk_milkyWay(c, px) * 0.025;
   col += sk_extragalactic(c, px) * 0.04;
+  col += sk_nebulae(c, px) * 0.03;
   col += sk_planets(d, px);
   // zodiacal light: dust along the ecliptic, brightening and widening toward the Sun, and
   // the faint gegenschein opposite it
