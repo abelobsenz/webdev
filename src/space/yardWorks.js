@@ -158,6 +158,31 @@ function stageGeo() {
   return B.geometry();
 }
 
+// ---- the keel deck of stock (slung under the bottom rails, top at y -286, z -700..200): two
+//      stock mules on their own halves of the x = 150 lane, and deck hands on two walks
+export const DECK = { top: -286, mule: { x: 150, spans: [[-680, -262], [-238, 180]], T: 150 }, walks: [80, 175], hands: 8, z0: -680, z1: 180 };
+export function mulePos(k, t, out) {
+  const [a, b] = DECK.mule.spans[k];
+  const u = ((t / DECK.mule.T + k * 0.41) % 1 + 1) % 1;
+  const e = u < 0.5 ? smooth(0.08, 0.42, u) : 1 - smooth(0.58, 0.92, u);
+  return out.set(DECK.mule.x, DECK.top, lerp(a, b, e));
+}
+export function deckHand(k, t, out) {
+  const x = DECK.walks[k % 2], L = DECK.z1 - DECK.z0, v = 1.2 + 0.2 * hash1(k);
+  const s = ((t * v + hash1(k * 2.3) * 2 * L) % (2 * L) + 2 * L) % (2 * L);
+  const z = s < L ? DECK.z0 + s : DECK.z1 - (s - L);
+  return out.set(x, DECK.top, z);
+}
+function muleGeo() {
+  const B = new CB();
+  B.box(0, 1.5, 0, 9, 2, 16, CK.HULL);
+  for (const z of [-6, 6]) for (const x of [-4.2, 4.2]) B.box(x, 0.7, z, 1.2, 1.4, 2.2, CK.DARK);
+  B.box(0, 4, 5.5, 7, 3, 4, CK.LANTERN);
+  B.box(0, 5.7, 5.5, 7.4, 0.4, 4.4, CK.BRONZE);
+  B.box(0, 4, -2.5, 7, 3, 8, CK.BRONZE);                 // the load: a crate of fittings
+  return B.geometry();
+}
+
 let _stops = null;
 /** The pods' stops: abeam of each working frame's hatch (the hatch box meets the frame tube). */
 export function podStops() { return (_stops ||= YARD.frames.slice(1).map((z) => z - 12)); }
@@ -389,6 +414,12 @@ export class YardWorks {
     for (let i = 0; i < nC; i++) dl.push({ p: V(), r: 3, color: LAMP.AMBER, i: 2.4, breathe: 0.6, phase: i / nC });
     this.iCraneArc = dl.length;
     for (let i = 0; i < nC * 2; i++) dl.push({ p: V(), r: 2.4, color: [0.8, 0.9, 1.0], i: 6 });
+    // keel deck mules and deck hands
+    this.mules = instancedPart(yardMesh, muleGeo(), DECK.mule.spans.length);
+    this.hands = instancedPart(yardMesh, personGeo(CK.BRONZE), DECK.hands);
+    this.root.add(this.mules, this.hands);
+    this.iMule = dl.length;
+    for (let i = 0; i < DECK.mule.spans.length; i++) dl.push({ p: V(), r: 1.2, color: LAMP.AMBER, i: 2.2, breathe: 0.7, phase: i * 0.5 });
     // hanging stages with their crews and work lamps
     this.stageDefs = Array.from({ length: STAGES.n }, (_, k) => stageDef(k));
     this.stages = instancedPart(yardMesh, stageGeo(), STAGES.n);
@@ -470,6 +501,22 @@ export class YardWorks {
       d.set(this.iPod + k, p.x, p.y + 3, p.z + f.z * 5);
     }
     this.pods.instanceMatrix.needsUpdate = true;
+    // the keel deck
+    for (let k = 0; k < DECK.mule.spans.length; k++) {
+      mulePos(k, t, p);
+      const u = ((t / DECK.mule.T + k * 0.41) % 1 + 1) % 1;
+      f.set(0, 0, u < 0.5 ? 1 : -1);
+      poseMatrix(m, p, f, this._up, 1);
+      this.mules.setMatrixAt(k, m);
+      d.set(this.iMule + k, p.x, p.y + 6.6, p.z + f.z * 5.5);
+    }
+    for (let k = 0; k < DECK.hands; k++) {
+      deckHand(k, t, p);
+      deckHand(k, t + 0.5, f); f.sub(p); if (f.lengthSq() < 1e-8) f.set(0, 0, 1);
+      poseMatrix(m, p, f, this._up, 1);
+      this.hands.setMatrixAt(k, m);
+    }
+    this.mules.instanceMatrix.needsUpdate = true; this.hands.instanceMatrix.needsUpdate = true;
     // hanging stages creep along their bays; the crews face the hull
     const n = this._s, up = this._a, st = this._b;
     for (let k = 0; k < this.stageDefs.length; k++) {

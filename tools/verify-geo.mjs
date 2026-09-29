@@ -10,7 +10,7 @@ import { buildConcordYard, buildWaterStore, YARD, STORE, sectionPoint, movementP
 import { approachVoyage, voyage } from '../src/space/fleet.js';
 import { WATER, waterRunPose } from '../src/space/waterRun.js';
 import { YARD_POS, STORE_POS } from '../src/space/geoRoads.js';
-import { YardWorks, WORKS, craneBay, cranePlate, droneSites, dronePos, crewPodPos, podStops, STAGES, stageDef, stagePos } from '../src/space/yardWorks.js';
+import { YardWorks, WORKS, craneBay, cranePlate, droneSites, dronePos, crewPodPos, podStops, STAGES, stageDef, stagePos, DECK, mulePos, deckHand } from '../src/space/yardWorks.js';
 import { StoreWorks, PLUMB, storeDronePos } from '../src/space/storeWorks.js';
 import { TL, cartZ, rimWalker, apronWalker } from '../src/space/terraceLife.js';
 import { craftMesh, placeMerge } from '../src/space/craftMesh.js';
@@ -332,6 +332,23 @@ let cableGap = Infinity;
   results.yardStageClearM = +g.toFixed(2); results.yardStageCableClearM = +cableGap.toFixed(2);
   assert.ok(cableGap > 0.5, `stage cables run clear of the hull (${cableGap} m)`);
   assert.ok(g > 0.5, `hanging stages clear the hull, dock and platforms by ${g} m`);
+}
+// the keel deck: mules and hands on the deck's top, clear of its stock, hangers and the frames above
+{
+  let g = Infinity, onDeck = Infinity;
+  for (let t = 0; t < 900; t += 1.7) {
+    for (let k = 0; k < DECK.mule.spans.length; k++) {
+      mulePos(k, t, P);
+      onDeck = Math.min(onDeck, yc.dist(P.clone().add(V(4.2, 0, 6)), 10));
+      for (const dz of [-6, 0, 6]) g = Math.min(g, yc.dist(P.clone().add(V(0, 5.5, dz)), 30) - 4.8);   // (the body above its wheels)
+    }
+    for (let k = 0; k < DECK.hands; k++) { deckHand(k, t, P); for (const h of [1.0, 1.6]) g = Math.min(g, yc.dist(P.clone().add(V(0, h, 0)), 10) - 0.4); }
+  }
+  // the two mules never meet
+  for (let t = 0; t < 600; t += 1) { const a = mulePos(0, t, V()), b = mulePos(1, t, V()); assert.ok(b.z - a.z > 16, 'the keel-deck mules keep apart'); }
+  results.keelDeckClearM = +g.toFixed(2);
+  assert.ok(onDeck < 1.5, 'mules run on the deck');
+  assert.ok(g > 0.2, `keel-deck mules and hands clear the stock and hangers by ${g} m`);
 }
 // hatches meet their frames; walkway brackets end inside the frame tubes
 const dock = new Collider([{ geo: yd.dockGeo }], 40);
