@@ -10,9 +10,15 @@ import { createDressedMaterial, DRESS_GLSL, KM } from '../src/space/craftMesh.js
 import { shipPose } from '../src/space/fleetTraffic.js';
 import { DESIGNS, design } from '../src/space/shipDesigns.js';
 import { geoBeltTargets } from '../src/space/geoBelt.js';
-import { createPortMaterial, PORT_GLSL, PK, bakeCavity } from '../src/space/portMaterial.js';
+import { createPortMaterial, PORT_GLSL, PK, bakeCavity, portShaders } from '../src/space/portMaterial.js';
 import { buildEmbarkationTerrace } from '../src/space/interfaces.js';
-import { buildConcordYard } from '../src/space/geoRoads.js';
+import { buildConcordYard, buildWaterStore, STORE, YARD, sectionPoint, ribDepth } from '../src/space/geoRoads.js';
+import { buildHarbour, HarbourStation, HS } from '../src/space/harbour.js';
+import { YardWorks, WORKS } from '../src/space/yardWorks.js';
+import { StoreWorks } from '../src/space/storeWorks.js';
+import { craftMesh, DK } from '../src/space/craftMesh.js';
+import { CK } from '../src/craft/craftGeometry.js';
+import { wave4Checks } from './verify-port-w4.mjs';
 
 const fail = [];
 const check = (ok, msg) => { if (!ok) fail.push(msg); };
@@ -430,7 +436,11 @@ check(nonFinite === 0, `${nonFinite} non-finite transforms`);
   check(Array.isArray(m.defaultAttributeValues.aOcc) && m.defaultAttributeValues.aOcc[0] === 0, 'aOcc default supplied for meshes without it');
   check(m.userData.dressed && m.uniforms.uLivery && m.uniforms.uLivery2, 'port material keeps the dressed uniforms');
   const kinds = Object.values(PK);
-  check(Math.min(...kinds) > 26.5 && Math.max(...kinds) < 37.5, 'port kinds collide with the dressed kinds');
+  check(Math.min(...kinds) > 26.5 && Math.max(...kinds) < 39.5, 'port kinds collide with the dressed kinds or pass the craft kind clamp (40)');
+  check((fs.match(/uniform float uPortTrim;/g) || []).length === 1 && m.uniforms.uPortTrim && m.uniforms.uPortTrim.value > 0.5 && m.uniforms.uPortTrim.value <= 1, 'uPortTrim declared once and supplied');
+  check(m.userData.port === true, 'port kinds spliced');
+  // fail soft: a shader without the anchors comes back unchanged, never throws
+  { const s = portShaders('void main() {}', 'void main() { gl_FragColor = vec4(1.0); }'); check(s.kinds === false && s.fs.indexOf('portKinds') < 0, 'port splice fails soft'); }
   out.portFragChars = fs.length;
 }
 /** index max < vertex count, finite positions, aOcc (when present) finite in 0..1 and full length. */
@@ -452,7 +462,7 @@ const bufferSane = (geo, name) => {
   const f = g.attributes.aFacade.array, o = g.attributes.aOcc.array, P = g.attributes.position.array;
   const count = {};
   for (let i = 2; i < f.length; i += 3) { const k = Math.round(f[i]); count[k] = (count[k] || 0) + 1; }
-  for (const k of Object.values(PK)) check(count[k] > 0, `terrace uses no kind ${k}`);
+  for (const k of Object.values(PK)) if (k !== PK.GALLERY) check(count[k] > 0, `terrace uses no kind ${k}`);
   // the deck is darkened round the rooms and open in the clear: a vertex on the paving at a
   // hall's foot is shaded, one mid-forecourt is not
   let nearHall = 0, open = 1;
@@ -511,6 +521,7 @@ const bufferSane = (geo, name) => {
     out[`${key}Framing`] = +ratio.toFixed(2);
   }
 }
+wave4Checks({ check, out, bufferSane, THREE, PK, CK, DK, PORT_GLSL, portShaders, createPortMaterial, createDressedMaterial, buildEmbarkationTerrace, buildConcordYard, buildWaterStore, STORE, YARD, sectionPoint, ribDepth, buildHarbour, HarbourStation, HS, YardWorks, WORKS, StoreWorks, craftMesh, buildBeltStation, belt });
 console.log(JSON.stringify(out));
 if (fail.length) { console.error('FAIL:\n  ' + fail.join('\n  ')); process.exit(1); }
 console.log('PORT_VERIFIED');

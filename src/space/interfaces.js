@@ -41,6 +41,42 @@ function hall(B,x,y,z,w,d,h,{garden=false,plinth=PORT?PK.STONE:CK.HULL,rooms=nul
   for(const xx of [-w/2,w/2])B.tube([V(xx,h*.55,-d/2),V(xx,h*.55,d/2)],.65,8,CK.HULL);
   B.pop();
   for(const sd of [-1,1])door(B,x,y,z+sd*d/2,6,7,sd);
+  if(PORT)hallArchitecture(B,x,y,z,w,d,h,bays,garden);
+}
+/**
+ * What makes a Harbour hall a building rather than a glazed tube at 1 - 2 km: a second, broader
+ * plinth step; stone buttress piers under every rib, standing proud of the glass so the long
+ * sides carry a rhythm of light and shade; a clerestory lantern along the crown under a zinc
+ * roof; and a stone portico round each end door (piers, entablature, a zinc-capped attic), so
+ * the gables read as entrances.
+ */
+function hallArchitecture(B,x,y,z,w,d,h,bays,garden) {
+  B.box(x,y-1.2,z,w+7.5,.8,d+7.5,PK.STONE);                               // the lower step
+  B.box(x,y-.72,z,w+7.9,.12,d+7.9,CK.BRONZE);                             // its bronze nosing
+  const eave=h*.55,pierH=eave+1.6;
+  for(let k=0;k<=bays;k++) {
+    const zz=z-d/2+d*k/bays;
+    if(Math.abs(zz-z)<6)continue;                                          // (the side doors open mid-hall)
+    for(const s of [-1,1]) {
+      B.box(x+s*(w/2+1.1),y+pierH/2,zz,2.2,pierH,2.6,PK.STONE);           // the pier
+      B.box(x+s*(w/2+1.3),y+pierH+.35,zz,2.8,.7,3.2,CK.BRONZE);           // its cap
+    }
+  }
+  // the clerestory lantern: glazed sides, a zinc roof proud of them, a bronze ridge
+  const lw=Math.max(6,w*.16),lh=Math.min(5,h*.14),ld=d*.72;
+  B.box(x,y+h+lh/2-.8,z,lw,lh,ld,garden?PK.GLASSHOUSE:PK.HALL);
+  B.box(x,y+h+lh-.55,z,lw+2.2,.5,ld+2.2,PK.ROOF);
+  B.box(x,y+h+lh-.12,z,.6,.36,ld+2.2,CK.BRONZE);
+  // porticoes at the doors
+  // (the inner piers stand clear of a 7 m walk tube entering the gable; the entablature over its crown)
+  const pw=Math.max(22,Math.min(w*.42,30)),ph=14.2;
+  for(const sd of [-1,1]) {
+    const zc=z+sd*(d/2+2.6);
+    for(const px of [-pw/2,-8.4,8.4,pw/2])B.box(x+px,y+ph/2,zc,2,ph,2.4,PK.STONE);
+    B.box(x,y+ph+.9,zc,pw+3,1.8,4.2,PK.STONE);                             // entablature
+    B.box(x,y+ph+2.35,zc,pw+1.6,1.1,3.6,PK.ROOF);                          // attic under zinc
+    B.box(x,y+ph+.1,zc+sd*1.9,pw+3.2,.3,.4,CK.BRONZE);                     // bronze fascia
+  }
 }
 function planter(B,x,y,z,w=6,d=6) {
   if(!PORT) {
@@ -171,6 +207,18 @@ function lawn(B,x,y,z,w,d) {
   kerb(B,x,y,z,w,d,.8,.55,PK.STONE);
   B.box(x,y+.22,z,w,.44,d,PK.LAWN);
   for(const s of [-1,1])B.box(x,y+.9,z+s*(d/2-2.6),w-3,1.5,3.6,PK.BEDS);
+  // a parterre: clipped hedge cross-walls every 12 m, each bay's lawn split by a gravel walk,
+  // so the grass reads as a laid-out garden with relief, not a flat green slab
+  const n=Math.max(2,Math.round(w/12));
+  for(let i=1;i<n;i++)B.box(x-w/2+w*i/n,y+.95,z,1.3,1.1,d-9,PK.BEDS);
+  B.box(x,y+.47,z,w-1,.06,1.6,PK.PAVING);
+  // clipped yew cones at the bay corners
+  for(let i=0;i<=n;i++)for(const s of [-1,1]) {
+    const xx=x-w/2+.8+(w-1.6)*i/n;
+    B.at(xx,y+.44,z+s*(d/2-6.2));B.push(TO_Y);
+    B.lathe([[1.1,0,PK.BEDS],[.9,1.6,PK.BEDS],[.2,3.4,PK.BEDS],[0,3.6,PK.BEDS]],8);
+    B.pop();B.pop();
+  }
 }
 /** A street tree in a grated pit: a leaning trunk and a crown of three overlapping masses. */
 function tree(B,x,y,z,s,seed) {
@@ -198,7 +246,39 @@ function lampPost(B,x,y,z,lamps) {
  */
 function canopy(B,x0,x1,y,zHalf,h,lamps) {
   const cx=(x0+x1)/2,L=x1-x0;
-  B.box(cx,y+h,0,L,.7,zHalf*2,PK.CANOPY);
+  // the roof: a row of inflated cushion bays, each a shallow double-curved pillow 24 m long
+  // rising 3.4 m at its crown across the walk, dipping to a bronze gutter valley between bays;
+  // a closed 0.6 m sheet (lofted along x) so it has an underside the lamps light
+  const nb=Math.max(2,Math.round(L/24)),NS=12,rise=3.4,th=.6,rings=[];
+  const nr=nb*8;
+  for(let j=0;j<=nr;j++) {
+    const s=j/nr,u=(s*nb)%1,bay=.35+.65*Math.sin(Math.PI*u),top=[],bot=[];
+    for(let i=0;i<=NS;i++) {
+      const t=i/NS,zz=-zHalf+2*zHalf*t,r=rise*Math.sin(Math.PI*t)*bay;
+      top.push([-zz,h+r]);bot.push([-zz,h+r-th]);
+    }
+    rings.push({z:-L/2+L*s,pts:[...top,...bot.reverse()]});
+  }
+  B.at(cx,y,0,0,Math.PI/2,0);
+  B.loft(rings,PK.CANOPY,{capStart:false,capEnd:false});
+  // end caps as strips between the upper and lower arcs (a centroid fan folds over on so thin
+  // and curved a section)
+  for(const [R,dir] of [[rings[0],-1],[rings[nr],1]]) {
+    const hint=V(0,0,dir),m=R.pts.length;
+    for(let i=0;i<NS;i++) {
+      const t0=R.pts[i],t1=R.pts[i+1],b0=R.pts[m-1-i],b1=R.pts[m-2-i];
+      const a=B.v(t0[0],t0[1],R.z,t0[0],t0[1],CK.BRONZE),b=B.v(t1[0],t1[1],R.z,t1[0],t1[1],CK.BRONZE);
+      const c=B.v(b1[0],b1[1],R.z,b1[0],b1[1],CK.BRONZE),d=B.v(b0[0],b0[1],R.z,b0[0],b0[1],CK.BRONZE);
+      B.tri(a,b,c,hint);B.tri(a,c,d,hint);
+    }
+  }
+  B.pop();
+  // bronze gutters in the valleys (an arched rib each) and edge beams along both eaves
+  for(let b=0;b<=nb;b++) {
+    const xx=x0+L*b/nb,bay=.35,arc=[];
+    for(let i=0;i<=NS;i++){const t=i/NS;arc.push(V(xx,y+h-.35+rise*Math.sin(Math.PI*t)*bay,-zHalf+2*zHalf*t));}
+    B.tube(arc,.45,6,CK.BRONZE);
+  }
   for(const s of [-1,1])B.box(cx,y+h-.55,s*zHalf,L+1,1.1,1.1,CK.BRONZE);
   const n=Math.max(2,Math.round(L/24));
   for(let i=0;i<=n;i++) {
@@ -235,7 +315,15 @@ function embarkationTerrace() {
       B.box(0,3.6,s*240.45,972,1.2,.9,CK.BRONZE);B.box(0,-6.6,s*240.45,972,1.2,.9,CK.BRONZE);
       B.box(s*500.25,-1.5,0,.5,9,448,DK.CONCOURSE);
       B.box(0,10.1,s*240.3,1000,1.8,.6,PK.STONE);   // coping under the rim railing
+      // the long faces as architecture: stone pilasters every 24 m standing 1.4 m proud of the
+      // lit gallery (mullions to it), a deep cornice under the coping and a plinth course below,
+      // so the slab's edge reads in light and shadow instead of one flat lit band
+      for(let x=-492;x<=492;x+=24)B.box(x,-.1,s*241.2,2.6,21.6,1.4,PK.STONE);
+      B.box(0,8.4,s*241.4,1000,1.6,2.4,PK.STONE);
+      B.box(0,-9.6,s*241.1,1000,2.4,1.6,PK.STONE);
+      B.box(0,7.35,s*242.3,1000,.5,.5,CK.BRONZE);
     }
+    for(const s of [-1,1])for(let z=-216;z<=216;z+=24)B.box(s*501.2,-.1,z,1.4,21.6,2.6,PK.STONE);
   }
   // Twin edge girders, a lower keel and six supports physically seat this deck on arm 4.
   for(const z of [-225,225])B.box(0,-15,z,990,30,18,CK.BRONZE);
@@ -243,11 +331,22 @@ function embarkationTerrace() {
   const supports=[];
   for(const x of [-420,0,420])for(const z of [-195,195]) {
     const root=V(x+Math.sign(z)*25,-190,-320),end=V(x,-10,z);
-    B.tube([root,end],15,10,CK.HULL);supports.push({root,end,radius:15});
+    // working-grey struts banded in bronze every 30 m (plain pearl tubes read as white rods)
+    B.tube([root,end],15,12,DK.GRIME);supports.push({root,end,radius:15});
+    const dir=end.clone().sub(root),len=dir.length(),q=new THREE.Quaternion().setFromUnitVectors(V(0,0,1),dir.normalize());
+    for(let s=24;s<len-20;s+=30){B.push(new THREE.Matrix4().compose(root.clone().addScaledVector(dir,s),q,V(1,1,1)));B.torus(15.4,1.3,24,6,CK.BRONZE);B.pop();}
   }
   // An inhabited lift core rises out of the old gallery, with two separate enclosed walks.
   B.at(0,-190,-320);B.push(TO_Y);
-  B.lathe([[22,0,CK.HULL],[24,18,CK.BRONZE],[21,200,CK.GLASS],[26,212,CK.BRONZE],[0,222,CK.HULL]],24);B.pop();B.pop();
+  // the lift tower: a plated shaft in five storeys, each with a lit gallery band and bronze
+  // string courses, a glazed lantern at the top under a zinc cap (it was one pale glass drum)
+  {
+    const prof=[[24,0,DK.GRIME],[26,12,CK.BRONZE],[22,18,PK.GALLERY]];
+    for(let k=0;k<5;k++){const z0=22+k*35;prof.push([22,z0+22,PK.GALLERY],[23.4,z0+23,CK.BRONZE],[23.4,z0+30,DK.CONCOURSE],[22,z0+31,CK.BRONZE]);}
+    prof.push([21,200,PK.GALLERY],[27,203,CK.BRONZE],[27,212,CK.GLASS],[29,214,PK.ROOF],[0,222,PK.ROOF]);
+    B.lathe(prof,24);
+  }
+  B.pop();B.pop();
   closedWalk(B,[V(0,17,-320),V(0,17,-101)],7);
   B.box(0,8.995,-287.45,20,4,95.1,CK.HULL);
   passengerPaths.push({min:V(-2,11.1,-291),max:V(2,14,-155)});
@@ -342,13 +441,56 @@ function embarkationTerrace() {
     pool(B,x,floor,z,w,d,lamps);footprints.push({x,z,w:w+2.8,d:d+2.8,h:.8});
     for(const s of [-1,1])for(let k=0;k<4;k++){const lz=z-d/2+d*(k+.5)/4;lampPost(B,x+s*(w/2+6),floor,lz,lamps);}
   }
+  // The belvedere: a raised promenade terrace along the northern rim, 2.4 m up behind a stone
+  // retaining wall with a bronze-railed parapet, reached by broad stairs; the avenue of trees
+  // stands on it, so the rim reads as a terrace looking out over the ring rather than a flat edge.
+  const belv={x0:-470,x1:470,z0:197,z1:221,h:2.4,gap:92};
+  {
+    const {x0,x1,z0,z1,h}=belv,top=floor+h,stairs=[-360,-180,180,360];
+    // the terrace body in runs between the stairs (each run closed; the stairs fill the gaps),
+    // broken mid-deck where the long conservatory's gable stands forward
+    const runs=[];
+    for(const [s0,s1] of [[x0,-belv.gap],[belv.gap,x1]]) {
+      let a=s0;
+      for(const sx of stairs)if(sx>s0&&sx<s1){runs.push([a,sx-9]);a=sx+9;}
+      runs.push([a,s1]);
+    }
+    for(const [r0,r1] of runs) {
+      B.box((r0+r1)/2,floor+(h-.3)/2,(z0+z1)/2,r1-r0,h-.3,z1-z0,PK.STONE);
+      deckPatch(B,r0,r1,z0,z1,top,8,PK.PAVING,.3);
+      B.box((r0+r1)/2,top+.55,z0-.1,r1-r0,1.1,.7,PK.STONE);                  // parapet
+      B.box((r0+r1)/2,top+1.16,z0-.1,r1-r0,.12,.9,CK.BRONZE);                // its bronze rail
+      B.box((r0+r1)/2,floor+.3,z0-.9,r1-r0,.6,1.2,PK.STONE);                 // foot course
+    }
+    for(const sx of stairs) {
+      // eight 0.3 m risers climbing north, 18 m wide, with stone cheeks
+      // (each tread block laps 0.3 m under the next, the last runs back to the terrace's rear: no
+      // two blocks share an edge)
+      for(let k=0;k<8;k++){const zs=z0-2.4+k*.6,ze=k<7?zs+.9:z1;B.box(sx,floor+(k+1)*.15,(zs+ze)/2,18,(k+1)*.3,ze-zs,PK.STONE);}
+      for(const s of [-1,1])B.box(sx+s*9.6,floor+h/2+.3,(z0+z1)/2-1.2,1.2,h+.6,z1-z0+2.4,PK.STONE);
+      lamps.push({p:V(sx,top+1.4,z0-2.8),r:.7,color:LAMP.AMBER,i:1.3});
+    }
+    for(const [r0,r1] of [[x0,-belv.gap],[belv.gap,x1]])footprints.push({x:(r0+r1)/2,z:(z0+z1)/2,w:r1-r0,d:z1-z0,h,raised:true});
+  }
   for(let x=-330;x<=280;x+=22) {
     if(Math.abs(x)<88)continue;
-    const seed=Math.round(x*.37+500);
-    tree(B,x,floor,213,1,seed);trees.push(V(x,floor,213));footprints.push({x,z:213,w:3.2,d:3.2,h:10});
-    if(((x+330)/22)%2===1)lampPost(B,x+11,floor,207,lamps);
+    const seed=Math.round(x*.37+500),yb=floor+belv.h;
+    tree(B,x,yb,213,1,seed);trees.push(V(x,yb,213));
+    if(((x+330)/22)%2===1)lampPost(B,x+11,yb,207,lamps);
   }
   for(const [x0,x1] of [[-190,-42],[42,190]])for(let x=x0+12;x<x1;x+=24)for(const z of [-24,24])lampPost(B,x,floor,z,lamps);
+  // The lit concourse: where the glazed walk runs in the open it is flanked by a stone kerb with
+  // a lit brass line along its face and a strip of dark granite (the walk's own shadow line), so
+  // the spine of the terrace reads as a lit street from the rim and after dark.
+  for(const [x0,x1] of [[-336,-268],[-192,-10],[10,192],[268,378]]) {
+    const cx=(x0+x1)/2,L=x1-x0;
+    for(const s of [-1,1]) {
+      B.box(cx,floor+.3,s*9.4,L,.6,1.2,PK.STONE);
+      B.box(cx,floor+.32,s*10.05,L-.4,.28,.1,CK.LANTERN);
+      B.box(cx,floor+.08,s*11.8,L,.16,2.4,CK.DARK);
+    }
+    for(let x=x0+6;x<x1-3;x+=12)for(const s of [-1,1])lamps.push({p:V(x,floor+.4,s*10.3),r:.3,color:LAMP.AMBER,i:1});
+  }
   const geo=placeMerge([{geo:B.geometry(),m:new THREE.Matrix4()},{geo:courier.geo,m:courier.matrix}]);
   // Baked contact shading: walls dusky toward the deck, the paving darkened round every room,
   // planter, kerb and tree pit and under the canopies, undersides in their own shade.
@@ -362,6 +504,7 @@ function embarkationTerrace() {
     if(ny<=.6)return Math.max(o,.5*Math.exp(-Math.max(h,0)/2.6));
     for(const r of footprints) {
       if(Math.abs(x-r.x)>r.w/2+12||Math.abs(z-r.z)>r.d/2+12)continue;
+      if(r.raised&&h>r.h-.2)continue;                                 // (the belvedere's own walk is open)
       const d=rectDist(r,x,z);
       o=Math.max(o,(d>0?.62:.2)*Math.exp(-d/(1.2+Math.min(r.h,24)*.18)));
     }
