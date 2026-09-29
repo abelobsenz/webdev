@@ -6,6 +6,11 @@ import { craftMesh, craftPart, addEngines, addLamps, placeMerge, placeLamps, pix
 import { LAMP } from './lamps.js';
 import { R_EARTH, GEO_ALT, MERIDIAN_LON, bodyDir } from './sim.js';
 import { stationFrame, CORRIDORS } from './stations.js';
+import { YardWorks } from './yardWorks.js';
+import { StoreWorks } from './storeWorks.js';
+import { WaterRun } from './waterRun.js';
+import { DynLamps } from './lifeKit.js';
+import { HS } from './harbour.js';
 
 // THE GEOSTATIONARY ROADS: the Harbour's neighbourhood along the geostationary arc.
 //
@@ -20,6 +25,11 @@ import { stationFrame, CORRIDORS } from './stations.js';
 //   movements      eight freighters that really use the Harbour, one per arm head: in along the arrival lane
 //                  (tail first, braking), flip at the gate, glide to a free arm head and dock
 //                  bow-in, lie alongside, back out, and leave by the departure gate under power
+//
+//   the works    the yard's plating, bay cranes, welders, drones, crew pods, stages and keel
+//                deck (yardWorks.js); the store's mains, risers, pump houses and drones
+//                (storeWorks.js); the water run between them (waterRun.js); docking guidance
+//                lamps at the arm heads (below)
 //
 // Everything is in metres (craft builder and material), placed in the Harbour's local frame
 // (x west, y up the tether, z north) and drawn at true size.
@@ -36,12 +46,12 @@ const LA = 170, LB = 118;
 const linerProf = (u) => (u < 0.4 ? 0.62 + 0.38 * Math.sin((Math.PI / 2) * (u / 0.4)) : Math.pow(Math.max(Math.cos((Math.PI / 2) * ((u - 0.4) / 0.6)), 0), 0.8));
 const linerF = (z) => Math.max(linerProf((z + 1150) / 2400), 0.02);
 /** A point of the hull section at angle t (the superellipse of the liner's loft). */
-function sectionPoint(z, t) {
+export function sectionPoint(z, t, out) {
   const f = linerF(z), c = Math.cos(t), s = Math.sin(t);
   const x = Math.sign(c) * Math.pow(Math.abs(c), 2 / 2.3) * LA * f;
   let y = Math.sign(s) * Math.pow(Math.abs(s), 2 / 2.3) * LB * f;
   if (y < 0) y *= 0.8;
-  return V(x, y, z);
+  return out ? out.set(x, y, z) : V(x, y, z);
 }
 
 export const YARD = {
@@ -537,6 +547,8 @@ export class GeoRoads {
     addLamps(ym, this.yardData.lamps, { minPx: 1.2 });
     this.yard.add(ym);
     this.yardMesh = ym;
+    // the work on her: plating, bay cranes, welders, drones, crew pods, platforms (yardWorks.js)
+    this.yardWorks = new YardWorks(ym);
     const _c = new THREE.Vector3();
     this.yardBody = space.addBody('concordYard', [this.yard], () => this.yard.getWorldPosition(_c), this.yardData.radius, { solid: true, hint: 0.5 });
     // ---- Water Store, south-west of the Harbour, its spine along the arc
@@ -547,6 +559,8 @@ export class GeoRoads {
     sm.add(craftPart(sm, this.storeData.ships));
     addLamps(sm, this.storeData.lamps, { minPx: 1.2 });
     this.store.add(sm);
+    // its plumbing, plant rooms, tank galleries and inspection drones (storeWorks.js)
+    this.storeWorks = new StoreWorks(sm, this.storeData);
     const _c2 = new THREE.Vector3();
     this.storeBody = space.addBody('waterStore', [this.store], () => this.store.getWorldPosition(_c2), this.storeData.radius, { solid: true, hint: 0.5 });
     // ---- movements through the Harbour
@@ -585,6 +599,25 @@ export class GeoRoads {
       space.addBody(`movement${i}`, [g], () => g.getWorldPosition(_w), 1100 * KM * c.scale * 0.5 + 0.4, { solid: true, hint: 0.45 });
       return { group: g, mesh: m, engines, glow, c, pos: new THREE.Vector3(), fwd: new THREE.Vector3(0, 0, 1) };
     });
+    // docking guidance: a ring of lamps round every arm head's docking collar that chases
+    // toward the face while its freighter comes in, holds steady green while she lies
+    // alongside and breathes amber as she backs out (drawn metres, the Harbour life holder)
+    this.guideN = 12;
+    const gl = [];
+    for (const arm of arms) {
+      const up = V(0, 1, 0), side = arm.side;
+      for (let k = 0; k < this.guideN; k++) {
+        const a = (k / this.guideN) * TAU;
+        const p = arm.d.clone().multiplyScalar(arm.L + 420 * HS).addScaledVector(side, Math.cos(a) * 600 * HS).addScaledVector(up, Math.sin(a) * 600 * HS);
+        p.y += arm.y;
+        gl.push({ p, r: 7, color: LAMP.AMBER, i: 2.6 });
+      }
+    }
+    this.guide = new DynLamps(gl, { minPx: 1.2 });
+    el.station.life.root.add(this.guide.mesh);
+    this.guideCol = this.guide.C.array;
+    // the water run: a tanker between the Water Store and the yard (waterRun.js)
+    this.waterRun = new WaterRun(space);
     this._q = new THREE.Quaternion();
     this._w = new THREE.Vector3();
   }
@@ -596,7 +629,36 @@ export class GeoRoads {
     return movementPose(u, c, outPos, outFwd);
   }
 
+  /** Docking guidance for arm i's freighter at cycle fraction u: [mode, fraction] (0 off, 1 chase, 2 steady, 3 backing). */
+  guideState(u) {
+    const [ph, s] = movementPhase(u);
+    if ((ph === 'glide' && s > 0.55) || ph === 'dock') return 1;
+    if (ph === 'stay') return 2;
+    if (ph === 'back') return 3;
+    return 0;
+  }
+
+  updateGuide(t) {
+    const n = this.guideN, C = this.guideCol;
+    for (let i = 0; i < this.movers.length; i++) {
+      const c = this.movers[i].c;
+      const u = (((t / c.T) + c.offset) % 1 + 1) % 1;
+      const mode = this.guideState(u);
+      const arm = c.arm;
+      for (let k = 0; k < n; k++) {
+        const j = (arm * n + k) * 4;
+        let g = 0, r = 1, gr = 0.6, b = 0.22;                       // amber
+        if (mode === 1) { const ph = ((k / n - t * 0.8) % 1 + 1) % 1; g = 0.15 + 1.2 * Math.max(0, 1 - ph * 5); }
+        else if (mode === 2) { g = 0.8; r = 0.16; gr = 1.0; b = 0.42; }  // green
+        else if (mode === 3) g = 0.5 + 0.4 * Math.sin(t * 1.5);
+        C[j] = r * 2.6 * g; C[j + 1] = gr * 2.6 * g; C[j + 2] = b * 2.6 * g;
+      }
+    }
+    this.guide.C.needsUpdate = true;
+  }
+
   update(sim, realTime, dt, space) {
+    this.updateGuide(realTime);
     const q = this._q.copy(sim.earthQuat).multiply(this.frameQ);
     const o = this._w.copy(this.origin).applyQuaternion(sim.earthQuat);
     for (const [i, mv] of this.movers.entries()) {
@@ -611,6 +673,7 @@ export class GeoRoads {
       const px = pixelRadius(space.camera, mv.group.position, 0.55 * mv.c.scale, space.size.y);
       mv.mesh.visible = px > 0.35;
     }
+    this.waterRun.update(realTime, q, o, space, lookQuat);
     // escort tugs ride their ships' flanks in and out, and wait on their stands between
     for (const [i, e] of this.escorts.entries()) {
       const c = this.movers[i].c;
@@ -623,8 +686,12 @@ export class GeoRoads {
     // the crew wheel turns slowly (0.3 g at its rim, a comfortable working weight)
     this.yardWheel.rotation.z = (realTime * Math.sqrt(2.94 / (YARD.wheelR + 38))) % TAU;
     // (body objects are shown per depth slice: cull through the body record)
-    if (this.yardBody) this.yardBody.visible = pixelRadius(space.camera, this.yard.getWorldPosition(this._w), this.yardData.radius, space.size.y) > 0.5;
-    if (this.storeBody) this.storeBody.visible = pixelRadius(space.camera, this.store.getWorldPosition(this._w), this.storeData.radius, space.size.y) > 0.5;
+    const yardPx = pixelRadius(space.camera, this.yard.getWorldPosition(this._w), this.yardData.radius, space.size.y);
+    if (this.yardBody) this.yardBody.visible = yardPx > 0.5;
+    this.yardWorks.update(realTime, yardPx);
+    const storePx = pixelRadius(space.camera, this.store.getWorldPosition(this._w), this.storeData.radius, space.size.y);
+    if (this.storeBody) this.storeBody.visible = storePx > 0.5;
+    this.storeWorks.update(realTime, storePx);
   }
 }
 

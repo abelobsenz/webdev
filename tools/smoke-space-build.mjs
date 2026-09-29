@@ -49,5 +49,10 @@ for (const t of [0, 60, 400, 900, 1500]) {
 let bad = 0;
 space.scene.traverse((o) => { if (!o.matrixWorld.elements.every(Number.isFinite)) bad++; });
 if (bad) throw new Error(`${bad} objects with non-finite transforms`);
+// the geostationary arc at work (harbourLife, terraceLife, yardWorks, storeWorks, releaseWorks, waterRun)
+const works = { harbourLife: space.elevator.station.life, terraceLife: space.elevator.station.terraceLife, yardWorks: space.geoRoads.yardWorks, storeWorks: space.geoRoads.storeWorks, releaseWorks: space.releaseYard.works, waterRun: space.geoRoads.waterRun };
+for (const [k, w] of Object.entries(works)) if (!w) throw new Error(`${k} missing`);
+if (!space.geoRoads.guide.C.array.every(Number.isFinite) || space.geoRoads.guide.n !== space.elevator.station.data.arms.length * 12) throw new Error('docking guidance lamps');
+console.log(JSON.stringify(Object.fromEntries(Object.entries(works).filter(([, w]) => w.triangles).map(([k, w]) => [k, { tris: w.triangles(), buildMs: +(w.buildMs ?? 0).toFixed(1) }]))));
 console.log(JSON.stringify({ bodies: space.bodies.length, indexedTriangles: tri }));
 console.log('SPACE_BUILD_SMOKE_OK');

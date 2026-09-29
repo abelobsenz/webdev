@@ -6,6 +6,7 @@ import { createGlowMesh } from '../craft/craftMaterial.js';
 import { createLamps, LAMP } from './lamps.js';
 import { R_EARTH, COUNTERWEIGHT_ALT, MERIDIAN_LON, bodyDir } from './sim.js';
 import { stationFrame } from './stations.js';
+import { ReleaseWorks } from './releaseWorks.js';
 
 // THE RELEASE YARD at the counterweight (metres, in the counterweight's own frame: +Y up the
 // tether, the rock at the origin). A ship let go out here leaves at the tether's tip speed,
@@ -202,6 +203,9 @@ export class ReleaseYard {
     this.mesh.add(held);
     addLamps(held, liner.lamps, { minPx: 1.3 });
     this.held = held;
+    // the yard's machinery: crawlers on the spar, inspection gantries, winch houses, the tower
+    this.works = new ReleaseWorks(this.mesh, d);
+    this._wc = new THREE.Vector3();
     // (solid meshes cull against each depth slice; their bounds are exact)
     for (const o of [this.mesh, held, ...this.rods]) o.frustumCulled = true;
     const _c = new THREE.Vector3();
@@ -249,6 +253,8 @@ export class ReleaseYard {
     this.glow.visible = thr > 0.02;
     const px = pixelRadius(space.camera, this.ship.position, 1.2, space.size.y);
     this.shipMesh.visible = px > 0.3;
+    const cw = this.group.localToWorld(this._wc.copy(d.cradles[0].center).multiplyScalar(KM));
+    this.works.update(realTime, pixelRadius(space.camera, cw, 4, space.size.y));
   }
 }
 
