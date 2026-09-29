@@ -63,6 +63,42 @@ export const YARD = {
   wheelZ: -1640, wheelR: 460,
 };
 
+/** Depth of a skeleton rib's web at z: 14 m, less toward the fine bow (never a third of its keel-side radius). */
+export const ribDepth = (z) => Math.min(14, 0.3 * Math.abs(sectionPoint(z, 1.5 * Math.PI).y));
+
+/**
+ * A web frame round the hull section at z: a closed rectangular-section ring `depth` inboard of
+ * the final lines and `thick` along z (n stations round). Every face quad owns its vertices
+ * (hard edges), wound outward. Returns nothing; appends to B.
+ */
+function webFrame(B, z, depth, thick, kind, n = 48) {
+  const O = [], I = [];
+  for (let i = 0; i < n; i++) {
+    const p = sectionPoint(z, (i / n) * TAU), r = Math.hypot(p.x, p.y), s = Math.max(r - depth, 0.5) / r;
+    O.push([p.x, p.y]); I.push([p.x * s, p.y * s]);
+  }
+  const z0 = z - thick / 2, z1 = z + thick / 2, h = V(0, 0, 0);
+  let arc = 0;
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n, a = O[i], b = O[j], c = I[j], d = I[i];
+    const seg = Math.hypot(b[0] - a[0], b[1] - a[1]), mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2, ml = Math.hypot(mx, my) || 1;
+    // outer and inner faces (the web's flanges)
+    h.set(mx / ml, my / ml, 0);
+    let q = [B.v(a[0], a[1], z0, arc, 0, kind), B.v(b[0], b[1], z0, arc + seg, 0, kind), B.v(b[0], b[1], z1, arc + seg, thick, kind), B.v(a[0], a[1], z1, arc, thick, kind)];
+    B.tri(q[0], q[1], q[2], h); B.tri(q[0], q[2], q[3], h);
+    h.negate();
+    q = [B.v(d[0], d[1], z0, arc, depth, kind), B.v(c[0], c[1], z0, arc + seg, depth, kind), B.v(c[0], c[1], z1, arc + seg, depth + thick, kind), B.v(d[0], d[1], z1, arc, depth + thick, kind)];
+    B.tri(q[0], q[1], q[2], h); B.tri(q[0], q[2], q[3], h);
+    // fore and aft faces (the web plate itself)
+    for (const [zz, sg] of [[z0, -1], [z1, 1]]) {
+      h.set(0, 0, sg);
+      q = [B.v(a[0], a[1], zz, arc, depth, kind), B.v(b[0], b[1], zz, arc + seg, depth, kind), B.v(c[0], c[1], zz, arc + seg, 0, kind), B.v(d[0], d[1], zz, arc, 0, kind)];
+      B.tri(q[0], q[1], q[2], h); B.tri(q[0], q[2], q[3], h);
+    }
+    arc += seg;
+  }
+}
+
 /** Octagon vertex k of a dock frame (flat sides face up, down, port and starboard). */
 const octV = (k, z) => { const a = Math.PI / 8 + k * Math.PI / 4, r = YARD.frameR / Math.cos(Math.PI / 8); return V(Math.cos(a) * r, Math.sin(a) * r, z); };
 /** Mid point of the octagon side facing angle phi (a multiple of 45 degrees). */
@@ -131,16 +167,24 @@ export function buildConcordYard() {
   for (let k = 0; k < 6; k++) { const a = (k / 6) * TAU + Math.PI / 6; bell(Math.cos(a) * 88, Math.sin(a) * 58, 16); }
   // ---- the bow, still a skeleton: ribs on the final lines, eight stringers, a keel spine
   const ribLoop = (z, n = 24) => { const pts = []; for (let i = 0; i < n; i++) pts.push(sectionPoint(z, (i / n) * TAU)); pts.push(pts[0].clone()); return pts; };
-  for (const z of YARD.ribs) H.tube(ribLoop(z), 3.2, 6, CK.BRONZE);
+  // each rib a deep web frame (14 m inboard of the final lines, 5 m thick, working grey) with its
+  // bronze face flange on the lines: a 3 m pipe alone was subpixel at the yard's framing and the
+  // bow read as a wire cage; the lightening holes of the web show as dark ports along it
+  for (const [k, z] of YARD.ribs.entries()) { webFrame(H, z, ribDepth(z), 5, DK.GRIME); H.tube(ribLoop(z, 48), 3.2, 6, CK.BRONZE); }
   const zLast = YARD.ribs[YARD.ribs.length - 1];
   for (let s = 0; s < 8; s++) {
     const t = (s / 8) * TAU;
     const pts = [sectionPoint(YARD.plated - 16, t), ...YARD.ribs.map((z) => sectionPoint(z, t))];
     H.tube(pts, 2.2, 6, CK.DARK);
   }
-  H.tube([V(0, 0, YARD.plated - 10), V(0, 0, zLast + 30)], 7, 10, CK.DARK);
-  // radial spokes start inside the keel spine's surface, each from its own point
-  for (const z of YARD.ribs) for (const t of [0, Math.PI / 2, Math.PI, 1.5 * Math.PI]) H.tube([V(Math.cos(t) * 3, Math.sin(t) * 3, z), sectionPoint(z, t)], 1.6, 6, CK.DARK);
+  H.tube([V(0, 0, YARD.plated - 10), V(0, 0, zLast + 30)], 9, 12, CK.DARK);
+  // radial spokes start inside the keel spine's surface, each from its own point, and stop at the
+  // web frame's inner face
+  for (const [k, z] of YARD.ribs.entries()) for (const t of [0, Math.PI / 2, Math.PI, 1.5 * Math.PI]) {
+    const o = sectionPoint(z, t), r = Math.hypot(o.x, o.y), d = (ribDepth(z) - 0.5) / r;
+    if (r * (1 - d) < 12) continue;
+    H.tube([V(Math.cos(t) * 7, Math.sin(t) * 7, z), V(o.x * (1 - d), o.y * (1 - d), z)], 3, 8, CK.DARK);
+  }
   // welders' lamps along the construction front
   for (const [k, z] of YARD.ribs.entries()) for (const t of [Math.PI / 4, 3 * Math.PI / 4, 1.25 * Math.PI, 1.75 * Math.PI]) {
     if ((k + Math.round(t * 2)) % 3) continue;
@@ -169,11 +213,24 @@ export function buildConcordYard() {
       yardSide.tube([at(a0, u0, dz), at(a1, u1, dz)], 1.1, 6, DK.GRIME);
     }
     for (let m = 1; m < NP; m++) for (const a of [FA, FA + FD]) yardSide.tube([at(a, m / NP, -FZ), at(a, m / NP, FZ)], 0.9, 6, DK.GRIME);
+    // plated panels: knee plates boxing the truss in at both corners of the side and a painted
+    // name panel at its middle, so each portal reads as a massive octagonal frame broken by open
+    // lacing rather than a ring of wire (the lacing shows between them)
+    const mid = FA + FD / 2, nrm = V(Math.cos(Math.PI / 4), Math.sin(Math.PI / 4), 0);
+    const dir = corner(1, mid, 0).sub(corner(0, mid, 0)), sideLen = dir.length();
+    dir.normalize();
+    for (const [u0, u1, k] of [[0.02, 1.35 / NP, DK.GRIME], [1 - 1.35 / NP, 0.98, DK.GRIME], [3.6 / NP, 5.4 / NP, DK.LIVERY]]) {
+      const c = corner(0, mid, 0).lerp(corner(1, mid, 0), (u0 + u1) / 2);
+      yardSide.push(new THREE.Matrix4().makeBasis(dir, nrm, V(0, 0, 1)).setPosition(c));
+      yardSide.box(0, 0, 0, sideLen * (u1 - u0), FD - 3, 2 * FZ - 1.6, k);
+      yardSide.box(0, FD / 2 - 1.2, 0, sideLen * (u1 - u0) + 1, 1.2, 2 * FZ + 1.2, CK.BRONZE);   // capping strip on the outer face
+      yardSide.pop();
+    }
   }
   for (const z of YARD.frames) {
     for (const a of [FA, FA + FD]) for (const dz of [-FZ, FZ]) {
       const loop = []; for (let k = 0; k < 8; k++) loop.push(corner(k, a, z + dz)); loop.push(loop[0].clone());
-      B.tube(loop, 2.4, 8, DK.LIVERY);
+      B.tube(loop, 3.2, 8, DK.LIVERY);
     }
     for (let k = 0; k < 8; k++) {
       stamp(B, yardSide, new THREE.Matrix4().makeTranslation(0, 0, z).multiply(new THREE.Matrix4().makeRotationZ(k * Math.PI / 4)));
@@ -233,10 +290,20 @@ export function buildConcordYard() {
   // gantry crane on the two top rails, lowering a hull plate onto the bow
   {
     const zg = 780, xr = octV(1, 0).x, yr = octV(1, 0).y;
-    B.box(0, yr - 6 - 8, zg, 2 * xr + 30, 16, 22, CK.BRONZE);                    // bridge beam slung under the rails
-    for (const x of [-xr, xr]) B.box(x, yr - 3, zg, 22, 18, 30, CK.DARK);        // bogies on the rails
+    // a twin box-girder bridge slung under the rails (two 20 m girders in working grey, a deck
+    // between them, hazard-banded ends), end carriages on the bogies, a machinery house and a lit
+    // cab: the single 16 m beam was a thin line at the yard's framing
+    for (const dz of [-10, 10]) B.box(0, yr - 16, zg + dz, 2 * xr + 24, 20, 7, DK.GRIME);
+    B.box(0, yr - 6.6, zg, 2 * xr + 24, 1.2, 27.4, CK.DARK);
+    for (const x of [-xr + 14, xr - 14]) B.box(x, yr - 16, zg, 12, 20.4, 27.6, DK.HAZARD);
+    for (const x of [-xr, xr]) { B.box(x, yr - 3, zg, 22, 18, 36, CK.DARK); B.box(x, yr - 13, zg, 24, 4, 40, CK.BRONZE); }   // end carriages on the rails
+    B.box(-44, yr - 3.6, zg, 36, 5, 22, DK.LIVERY);                                // machinery house on the deck
+    B.box(-44, yr - 0.7, zg, 38, 0.8, 24, CK.DARK);
+    B.box(70, yr - 31, zg + 14, 14, 10, 10, CK.LANTERN);                           // the driver's cab
+    B.box(70, yr - 25.6, zg + 14, 15, 0.8, 11, CK.DARK);
     const trolleyY = yr - 6 - 16 - 10;
-    B.box(24, trolleyY, zg, 30, 20, 30, CK.DARK);
+    B.box(24, trolleyY, zg, 34, 20, 26, CK.DARK);
+    B.box(24, trolleyY + 10.5, zg, 36, 1.2, 28, CK.BRONZE);
     const plateTop = LB * linerF(zg) + 95;
     B.tube([V(24, trolleyY - 10, zg), V(24, plateTop + 2, zg)], 1.3, 6, CK.DARK);
     B.box(24, plateTop - 2, zg, 64, 4, 42, CK.HULL);

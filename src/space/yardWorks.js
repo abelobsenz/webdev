@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { CB, CK } from '../craft/craftGeometry.js';
+import { DK } from './craftMesh.js';
 import { LAMP } from './lamps.js';
 import { addLamps, placeLamps, placeMerge } from './craftMesh.js';
 import { personGeo } from './terraceLife.js';
@@ -236,7 +237,11 @@ function buildPlating(seed = 5) {
       if (!on) continue;
       const t0 = (i / NT) * TAU + 0.012, t1 = ((i + 1) / NT) * TAU - 0.012;
       const primer = zc > 260 + 760 * (0.5 + 0.3 * R());
-      const k = primer ? CK.DECK : (R() < 0.12 ? CK.BRONZE : CK.HULL);
+      // finished plate in the Concord oxide (grey working plate on the keel side, a bronze
+      // doubler here and there), primer grey behind the front, the newest still dark insulation:
+      // a skin of white plates read as more white cage
+      const bottom = Math.sin(((i + 0.5) / NT) * TAU) < -0.35, newest = zc > 260 + 760 * 0.82;
+      const k = newest && R() < 0.6 ? CK.DARK : primer ? DK.GRIME : (R() < 0.1 ? CK.BRONZE : bottom ? DK.GRIME : DK.LIVERY);
       const grid = [];
       const NZ = 4, NA = 4;
       for (let a = 0; a <= NA; a++) {
@@ -322,12 +327,20 @@ function magazineGeo(z0) {
 function bayCraneGeo() {
   const B = new CB();
   const xr = 103.5, yr = 250;
-  B.box(0, yr - 14, 0, 2 * xr + 30, 16, 22, CK.BRONZE);
-  for (const x of [-xr, xr]) B.box(x, yr - 3, 0, 22, 18, 30, CK.DARK);
+  // twin box girders in the Concord oxide with hazard-banded ends and a walkway deck between,
+  // end carriages on the rails, a machinery house, a lit cab (the one bronze beam of before
+  // read as a thin line at the yard's framing); all within the bay's +-15 m travel envelope
+  for (const dz of [-9, 9]) B.box(0, yr - 14, dz, 2 * xr + 26, 16, 6, dz < 0 ? DK.LIVERY : DK.GRIME);
+  B.box(0, yr - 5.6, 0, 2 * xr + 26, 1, 24, CK.DARK);
+  for (const x of [-xr + 12, xr - 12]) B.box(x, yr - 14, 0, 10, 16.4, 24.4, DK.HAZARD);
+  for (const x of [-xr, xr]) { B.box(x, yr - 3, 0, 22, 18, 30, CK.DARK); B.box(x, yr - 11.5, 0, 24, 3, 29, CK.BRONZE); }
+  B.box(-40, yr - 3, 0, 30, 4, 18, DK.LIVERY);           // machinery house on the deck
+  B.box(-40, yr - 0.6, 0, 32, 0.8, 20, CK.DARK);
   B.box(62, yr - 27, 12, 16, 10, 10, CK.LANTERN);         // cab under the bridge
   B.box(62, yr - 21, 12, 17, 1, 11, CK.DARK);
-  B.box(0, 218, 0, 30, 20, 30, CK.DARK);                  // trolley (on the bridge's centre)
-  B.box(0, 224, 0, 34, 4, 34, CK.BRONZE);
+  B.box(0, 218, 0, 30, 20, 26, CK.DARK);                  // trolley (on the bridge's centre)
+  B.box(0, 224, 0, 34, 4, 28, CK.BRONZE);
+  B.box(0, 213, 13.2, 8, 6, 0.6, CK.LANTERN);             // its lit hoist-house window
   return B.geometry();
 }
 function plateGeo() {
