@@ -80,7 +80,7 @@ void haloKinds(float k, vec2 f, vec2 fw, float px, inout vec3 alb, inout float r
     stone *= 1.0 - 0.1 * smoothstep(0.5, 0.9, vnoise(vec2(f.x * 0.6, f.y * 0.04) + hb * 17.0)) * detB;     // rain-streak weathering
     vec2 wc = vec2(fract(f.x / 3.0) * 3.0, fract(f.y / 3.6) * 3.6);
     float wx = hBox(wc.x, 0.55, 2.45, fw.x), wy = hBox(wc.y, 0.85, 3.1, fw.y);
-    float win = mix(0.53, wx * wy, det);
+    float win = mix(0.4, wx * wy, det);                   // (0.4: the windows' mean coverage)
     float cornice = min(1.0, hBox(fract(f.y / 14.4) * 14.4, 0.0, 0.7, fw.y) * 1.0) * detB;
     win *= 1.0 - cornice;
     vec3 glass = mix(vec3(0.05, 0.07, 0.09), vec3(0.14, 0.16, 0.17), hb);
@@ -93,7 +93,7 @@ void haloKinds(float k, vec2 f, vec2 fw, float px, inout vec3 alb, inout float r
     vec2 room = floor(f / vec2(3.0, 3.6));
     float hr = hash12(room + 31.0);
     float fl = 0.35 + 0.65 * hash12(vec2(bc.x, room.y) + 5.0);
-    float lit = mix(0.55 * 0.62, step(1.0 - 0.62 * fl, hr), det);
+    float lit = mix(0.42, step(1.0 - 0.62 * fl, hr), det);   // (0.42: 0.62 x the mean floor factor)
     vec3 lamp = mix(vec3(1.0, 0.72, 0.44), vec3(0.85, 0.9, 1.0), step(0.82, fract(hr * 9.1)));
     lamp = mix(lamp, vec3(1.0, 0.55, 0.35), step(0.95, fract(hr * 5.3)));
     em = lamp * lit * win * 0.6;
