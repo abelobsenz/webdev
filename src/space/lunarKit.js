@@ -38,6 +38,8 @@ import { R_MOON } from './sim.js';
 //   container     12 m freight container (tinted)
 //   serviceTower  pad umbilical tower with its swing arm (+z toward the craft)
 //   sphereTank    propellant sphere on its legs, with a catwalk
+//   lamppost      town street lamp (lantern at LAMPPOST_LAMP)
+//   kiosk         promenade kiosk under a tinted awning
 
 const TAU = Math.PI * 2;
 const V = (x, y, z) => new THREE.Vector3(x, y, z);
@@ -525,12 +527,38 @@ function sphereTank() {
   return B.geometry();
 }
 
+function lamppost() {
+  // a street lamp: a bronze post on a stone foot, a swan-neck arm, a lantern (lamp sprite at 6.3 m)
+  const B = new CB();
+  B.box(0, 0.25, 0, 0.5, 0.5, 0.5, LK.WALL);
+  latheY(B, [[0.1, 0.5, LK.BRONZE], [0.08, 5.9, LK.BRONZE], [0.14, 6.0, LK.BRONZE]], 6);
+  B.tube([V(0, 5.8, 0), V(0, 6.5, 0.3), V(0, 6.5, 0.9)], 0.05, 4, LK.BRONZE);
+  B.box(0, 6.3, 0.9, 0.34, 0.4, 0.34, LK.LIGHT);
+  B.box(0, 6.55, 0.9, 0.44, 0.1, 0.44, LK.BRONZE);
+  return B.geometry();
+}
+export const LAMPPOST_LAMP = V(0, 6.3, 0.9);
+
+function kiosk() {
+  // a promenade kiosk: a counter under a striped awning (tinted), a lit name board, a lamp
+  const B = new CB();
+  B.box(0, 0.55, 0, 2.8, 1.1, 2.2, LK.STONE);
+  B.box(0, 1.14, 0, 3.0, 0.08, 2.4, LK.DECK);
+  for (const [sx, sz] of [[-1.35, -1.05], [1.35, -1.05], [-1.35, 1.05], [1.35, 1.05]]) B.box(sx, 1.9, sz, 0.08, 1.5, 0.08, LK.BRONZE);
+  B.loft([{ z: -1.6, pts: [[-1.8, 2.65], [1.8, 2.65], [0, 3.35]] }, { z: 1.6, pts: [[-1.8, 2.65], [1.8, 2.65], [0, 3.35]] }], LK.PAINT);
+  for (const sx of [-1.8, 1.8]) B.box(sx, 2.5, 0, 0.04, 0.3, 3.2, LK.PAINT);
+  B.box(0, 2.35, 1.12, 1.9, 0.34, 0.05, LK.SIGN);
+  B.box(0, 2.35, -1.12, 1.9, 0.34, 0.05, LK.SIGN);
+  B.box(0, 2.1, 0, 0.3, 0.15, 0.3, LK.LIGHT);
+  return B.geometry();
+}
+
 // ------------------------------------------------------------------------ registry --
 
 const MAKERS = {
   lander: crewLander, cargoLander, suit, walker, rover, hauler, tug, tram, excavator, wheel: bucketWheel,
   tracker: trackerPost, panel: trackerPanel, radiator: radiatorWing, boulder0: () => boulder(11), boulder1: () => boulder(29), boulder2: () => boulder(47),
-  drone, launch, sled, vault, dome, silo, gantry, trolley, mast, cart, container, serviceTower, sphereTank,
+  drone, launch, sled, vault, dome, silo, gantry, trolley, mast, cart, container, serviceTower, sphereTank, lamppost, kiosk,
 };
 const CACHE = new Map();
 /** A kit part's geometry (built once, shared by every settlement). */

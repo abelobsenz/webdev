@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { lunarMesh, lunarInstanced, createLunarMaterial } from './lunarMaterial.js';
-import { kit, seat, mulberry, EXCAVATOR_HUB, TRACKER_AXLE } from './lunarKit.js';
+import { kit, seat, mulberry, EXCAVATOR_HUB, TRACKER_AXLE, LAMPPOST_LAMP } from './lunarKit.js';
+import { LAMP } from './lamps.js';
 import { buildMediiWorks, TRACK_X, LANDER_SLOTS, slotFrame, YARD } from './lunarWorks.js';
 import { shoreV } from './lunarLanding.js';
 import { surfaceY } from './lunarSite.js';
@@ -321,11 +322,11 @@ export class LunarTraffic {
       for (const [r, n] of [[300, 90], [345, 110]]) for (let i = 0; i < n; i++) walks.push({ kind: 2, a: r + (rnd() - 0.5) * 3, v0: 0, v1: 0, h: T.LIFT, ph: rnd() * TAU, sp: (rnd() < 0.5 ? -1 : 1) * (1.0 + rnd() * 0.5) });
       // the cross streets of the courtyard town: along v between the blocks, along u between the rows
       const streets = [];
-      for (const [v0, v1, h] of [[V.MID + 12, V.LOW - 116, T.MID], [V.LOW + 12, V.STRAND - 72, T.LOW]]) for (const s of [-1, 1]) for (let u = 200; u < U_TOWN - 150; u += 170) streets.push({ along: 'v', c: s * u, a0: v0, a1: v1, h });
-      for (let v = V.MID + 9 + 110 + 9; v < V.LOW - 20; v += 128) for (const s of [-1, 1]) streets.push({ along: 'u', c: v, a0: s > 0 ? 44 : -U_TOWN + 12, a1: s > 0 ? U_TOWN - 12 : -44, h: T.MID });
-      for (let v = V.LOW + 9 + 110 + 9; v < V.STRAND - 80; v += 128) for (const s of [-1, 1]) streets.push({ along: 'u', c: v, a0: s > 0 ? 44 : -U_TOWN + 12, a1: s > 0 ? U_TOWN - 12 : -44, h: T.LOW });
+      for (const [v0, v1, h] of [[V.MID + 12, V.LOW - 116, T.MID], [V.LOW + 12, V.STRAND - 72, T.LOW]]) for (const s of [-1, 1]) for (let u = 200; u < U_TOWN - 150; u += 170) streets.push({ along: 'v', c: s * u, a0: v0, a1: v1, h, half: 10 });
+      for (let v = V.MID + 9 + 110 + 9; v < V.LOW - 20; v += 128) for (const s of [-1, 1]) streets.push({ along: 'u', c: v, a0: s > 0 ? 44 : -U_TOWN + 12, a1: s > 0 ? U_TOWN - 12 : -44, h: T.MID, half: 9 });
+      for (let v = V.LOW + 9 + 110 + 9; v < V.STRAND - 80; v += 128) for (const s of [-1, 1]) streets.push({ along: 'u', c: v, a0: s > 0 ? 44 : -U_TOWN + 12, a1: s > 0 ? U_TOWN - 12 : -44, h: T.LOW, half: 9 });
       this.streets = streets;
-      for (const st of streets) for (const off of [-7.2, 7.2]) {
+      for (const st of streets) for (const off of [-(st.half - 2.6), st.half - 2.6]) {
         const n = Math.round((st.a1 - st.a0) / 60);
         for (let i = 0; i < n; i++) walks.push({ kind: st.along === 'v' ? 0 : 3, a: st.c + off + (rnd() - 0.5) * 0.8, v0: st.a0, v1: st.a1, h: st.h, ph: rnd() * 6000, sp: 1.0 + rnd() * 0.6 });
       }
@@ -336,6 +337,37 @@ export class LunarTraffic {
       this.walkers.name = 'Townspeople';
       this.group.add(this.walkers);
       this.townCentre = new THREE.Vector3(...(() => { const [x, z] = UV(0, 1600); return [x, 0, z]; })());
+    }
+
+    // --- the cross streets' lamps, and kiosks along the Strand ---
+    {
+      const posts = [], lampsT = [], kiosks = [];
+      const crossing = (st, a) => this.streets.some((o) => o.along !== st.along && Math.abs(o.c - a) < 12 && (() => { const x = st.c; return x >= o.a0 - 12 && x <= o.a1 + 12; })());
+      for (const st of this.streets) for (const side of [-1, 1]) for (let a = st.a0 + 12 + (side > 0 ? 18 : 0); a < st.a1 - 8; a += 36) {
+        if (crossing(st, a)) continue;
+        const off = side * (st.half - 1.0);                   // a metre in from the building line
+        const [u, v] = st.along === 'v' ? [st.c + off, a] : [a, st.c + off];
+        // the lantern's arm reaches over the street (+z of the post toward the centreline)
+        const yaw = st.along === 'v' ? (side > 0 ? -Math.PI / 2 : Math.PI / 2) : (side > 0 ? Math.PI : 0);
+        const [x, z] = UV(u, v);
+        const m = new THREE.Matrix4().makeRotationY(ROT_UV + yaw).setPosition(x, surfaceY(x, z) + st.h, z);
+        posts.push(m);
+        lampsT.push({ p: LAMPPOST_LAMP.clone().applyMatrix4(m), r: 0.7, color: LAMP.AMBER, i: 0.8 });
+      }
+      for (let u = -1669; u <= 1669; u += 66) {
+        if (Math.abs(u) < 60 || Math.abs(Math.abs(u) - 620) < 40) continue;
+        const [x, z] = UV(u, landingData.S.V.STRAND + 90);
+        kiosks.push(new THREE.Matrix4().makeRotationY(ROT_UV).setPosition(x, surfaceY(x, z) + landingData.S.T.STRAND, z));
+        lampsT.push({ p: new THREE.Vector3(x, surfaceY(x, z) + landingData.S.T.STRAND + 2.1, z), r: 0.5, color: LAMP.WHITE, i: 0.6 });
+      }
+      this.lampposts = lunarInstanced(kit('lamppost'), posts.length, {}, this.mat);
+      posts.forEach((m, i) => this.lampposts.setMatrixAt(i, m));
+      this.kiosks = lunarInstanced(kit('kiosk'), kiosks.length, {}, this.mat, { tint: true });
+      kiosks.forEach((m, i) => { this.kiosks.setMatrixAt(i, m); this.kiosks.instanceColor.setXYZ(i, ...[[0.8, 0.22, 0.16], [0.2, 0.42, 0.6], [0.9, 0.7, 0.2], [0.25, 0.5, 0.3]][i % 4]); });
+      this.lampposts.name = 'Street lamps'; this.kiosks.name = 'Strand kiosks';
+      this.streetLamps = addLamps(this.lampposts, lampsT, { minPx: 0.9 });
+      this.group.add(this.lampposts, this.kiosks);
+      this.streetPosts = posts; this.kioskMats = kiosks;
     }
 
     // --- runabouts on the cross streets, keeping right ---
@@ -493,6 +525,7 @@ export class LunarTraffic {
     if (this.suits.visible) this.updateCrews(t);
     if (this.walkers.visible) this.updateWalkers(t);
     this.cartMesh.visible = dTown < 9000;
+    this.lampposts.visible = this.kiosks.visible = dTown < 12000;
     if (this.cartMesh.visible) this.updateCarts(t);
   }
 

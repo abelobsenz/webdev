@@ -221,6 +221,16 @@ report.landingTris = tris(L.geo); report.worksTris = tris(W.geo);
     }
     for (let i = 0; i < 9; i++) { life.haulers.getMatrixAt(i, m); p.setFromMatrixPosition(m); life.haulers.getMatrixAt((i + 1) % 9, m); q.setFromMatrixPosition(m); haulGap = Math.min(haulGap, p.distanceTo(q)); }
   }
+  // street lamps and kiosks: out of the buildings, clear of the trunks
+  let furnBad = 0;
+  for (const mm of [...life.streetPosts, ...life.kioskMats]) {
+    p.setFromMatrixPosition(mm);
+    const [u, v] = toUV(p.x, p.z);
+    if (blocks.some((r) => inRect(u, v, r, 0.7))) furnBad++;
+    for (const tr of trees) if (Math.hypot(tr.u - u, tr.v - v) < 2.2) furnBad++;
+  }
+  ok(furnBad === 0, `street furniture clear (${furnBad} bad)`);
+  report.streetLamps = life.streetPosts.length; report.kiosks = life.kioskMats.length;
   ok(walkBad === 0, `townspeople clear of trunks and buildings (${walkBad} bad)`);
   ok(rovBad === 0, `rovers on their roads (${rovBad} off)`);
   ok(tramBad === 0, `trains on their tracks (${tramBad} off)`);
