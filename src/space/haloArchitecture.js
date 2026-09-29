@@ -143,8 +143,35 @@ export function gableRoof(B, x, y, z, w, h, len, k, capK, alongX = false) {
 export function tree(L, T, x, y, z, s, species) {
   // a five-sided double cone (10 triangles): the crown's silhouette without its cost
   const k = treeKind(species);
-  latheAt(L, x, y + s * 0.3, z, [[0, 0, k], [s * 0.48, s * 0.4, k], [0, s * 0.72, k]], 5, false, (species * 1.3) % 1.2);
+  if (L.stack.length === 1) treeCone(L, x, y + s * 0.3, z, s, k, (species * 1.3) % 1.2);
+  else latheAt(L, x, y + s * 0.3, z, [[0, 0, k], [s * 0.48, s * 0.4, k], [0, s * 0.72, k]], 5, false, (species * 1.3) % 1.2);
   if (T) T.box(x, y + s * 0.18, z, s * 0.07 + 0.3, s * 0.36, s * 0.07 + 0.3, CK.DARK);
+}
+/**
+ * The same double cone written straight into an unstacked builder: the lathe's own vertices
+ * (three a facet, so the crown stays faceted), facade coordinates and outward winding, without
+ * its per-vertex matrix and per-triangle vectors (a tile plants some twenty thousand trees).
+ */
+const _cone = { c: new Float64Array(5), s: new Float64Array(5), ph: NaN };
+function treeCone(L, x, y0, z, s, k, ph) {
+  if (_cone.ph !== ph) { for (let i = 0; i < 5; i++) { const a = ph + (i / 5) * TAU; _cone.c[i] = Math.cos(a); _cone.s[i] = Math.sin(a); } _cone.ph = ph; }
+  const R = s * 0.48, hr = s * 0.4, ht = s * 0.72, P = L.pos, Fc = L.fac, I = L.idx;
+  for (let i = 0; i < 5; i++) {
+    // lower facets (apex under the crown), wound outward and down
+    const j = (i + 1) % 5, a = ph + (i / 5) * TAU, b = ph + (j / 5) * TAU;
+    const n = P.length / 3;
+    P.push(x, y0, z, x + _cone.c[i] * R, y0 + hr, z - _cone.s[i] * R, x + _cone.c[j] * R, y0 + hr, z - _cone.s[j] * R);
+    Fc.push(a * R, 0, k, a * R, hr, k, b * R, hr, k);
+    I.push(n, n + 2, n + 1);
+  }
+  for (let i = 0; i < 5; i++) {
+    // upper facets (apex on top)
+    const j = (i + 1) % 5, a = ph + (i / 5) * TAU, b = ph + (j / 5) * TAU;
+    const n = P.length / 3;
+    P.push(x + _cone.c[i] * R, y0 + hr, z - _cone.s[i] * R, x, y0 + ht, z, x + _cone.c[j] * R, y0 + hr, z - _cone.s[j] * R);
+    Fc.push(a * R, hr, k, a * R, ht, k, b * R, hr, k);
+    I.push(n, n + 2, n + 1);
+  }
 }
 /** Railing along a straight edge (top rail and posts as two thin boxes). */
 function railing(N, x, y, z, lx, lz) {
@@ -638,7 +665,7 @@ export function townCell(C, x0, x1, z0, z1) {
     // street trees: both long sides of the block outside downtown, one side within it
     const rows = d > 0.75 ? [(i + 2 * j) % 2 ? -1 : 1] : [-1, 1];
     const sp = pickTree(C);
-    for (const s of rows) for (let t = -sx / 2 + 12, q = 0; t < sx / 2 - 8; t += 22, q++) {
+    for (const s of rows) for (let t = -sx / 2 + 12, q = 0; t < sx / 2 - 8; t += 27, q++) {
       const tx = cx + t, tz = cz + s * (sz / 2 + 8);
       tree(N, null, tx, S.deck(tx) + 0.9, tz, 7 + r() * 3 + (q % 3) * 0.6, sp);
     }
@@ -792,31 +819,160 @@ export function farmCell(C, x0, x1, z0, z1) {
   void N;
 }
 
+/**
+ * The civic landmark at the heart of a plaza, in one of three forms by draw, each on a
+ * colonnaded podium drum with a planted roof, each in its own curtain glass:
+ *   0  the drum: a tapering glass tower girdled by lantern sky-lobbies, bronze fins running
+ *      its full height (the silhouette keeps its taper and its rhythm from 40 km);
+ *   1  the stack: six square prisms, each turned fifteen degrees on the one below and a little
+ *      narrower, a lit band at every joint - a twisting skyline landmark;
+ *   2  the gate: twin shafts of unequal height joined by glazed sky bridges, a bronze arch
+ *      springing between their heads.
+ * Returns the height over y its beacon is reckoned from, and whether a crown ring of lamps
+ * stands clear round it.
+ */
+function landmark(C, cx, y, cz, top) {
+  const { B, M, F, r } = C;
+  const form = Math.floor(r() * 3);
+  const gk = tintKind(HK.CURTAIN, r()), sk = tintKind(facadeKind(C.style.pal + 2), r());
+  latheAt(B, cx, y - 10, cz, [[0.1, 0, CK.HULL], [150, 0, CK.HULL], [150, 26, sk], [146, 30, CK.BRONZE], [0.1, 30, HK.ROOFGARDEN]], 32);
+  for (let q = 0; q < 24; q++) { const a = ((q + 0.5) / 24) * TAU; M.box(cx + Math.cos(a) * 154, y + 3, cz + Math.sin(a) * 154, 3.6, 26, 3.6, HK.STONE); }
+  if (form === 0) {
+    const prof = [[0.1, -10, CK.HULL], [124, -10, CK.HULL], [124, 20, CK.BRONZE]];
+    const lobbies = 5, R0 = 118, R1 = 58;
+    for (let q = 0; q < lobbies; q++) {
+      const a = q / lobbies, b = (q + 1) / lobbies, ra = R0 - (R0 - R1) * a, rb = R0 - (R0 - R1) * b;
+      prof.push([ra, 22 + a * top, gk], [rb, b * top - 14, gk], [rb + 4, b * top - 12, CK.LANTERN], [rb + 4, b * top - 2, CK.LANTERN], [rb, b * top, CK.BRONZE]);
+    }
+    prof.push([46, top + 30, CK.HULL], [12, top + 60, CK.BRONZE], [3, top + 150, CK.DARK], [0.1, top + 152, CK.DARK]);
+    latheAt(B, cx, y, cz, prof, 28);
+    for (let q = 0; q < 12; q++) {
+      const a = (q / 12) * TAU;
+      B.tube([V3(cx + Math.cos(a) * (R0 + 3), y + 20, cz + Math.sin(a) * (R0 + 3)), V3(cx + Math.cos(a) * (R1 + 3), y + top - 16, cz + Math.sin(a) * (R1 + 3))], 2.4, 4, CK.BRONZE);
+    }
+    for (let q = 0; q < 12; q++) {
+      const a = (q / 12) * TAU * 2.5, t = 0.08 + (q / 12) * 0.84, rr = R0 - (R0 - R1) * t + 4;
+      M.at(cx + Math.cos(a) * rr, y + t * top, cz + Math.sin(a) * rr, 0, -a, 0);
+      M.box(0, 0, 0, 10, 2, 34, HK.ROOFGARDEN);
+      M.pop();
+    }
+    if (F) latheAt(F, cx, y, cz, [[0.1, -10, CK.HULL], [R0, -10, gk], [R1, top, gk], [R1 + 4, top + 4, CK.LANTERN], [3, top + 150, CK.DARK], [0.1, top + 152, CK.DARK]], 8);
+    return { crown: top, ring: true };
+  }
+  if (form === 1) {
+    const n = 6, h = (top - 30) / n;
+    let w = 176;
+    for (let q = 0; q < n; q++) {
+      const yq = y + 20 + q * h, a = (q * Math.PI) / 12;
+      B.at(cx, yq, cz, 0, a, 0);
+      B.box(0, h / 2 - 3, 0, w, h - 6, w, gk);
+      B.box(0, h - 3, 0, w * 0.94, 6, w * 0.94, CK.LANTERN);
+      for (const [ax, az] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) M.box(ax * (w / 2 - 1.5), h / 2 - 3, az * (w / 2 - 1.5), 4, h - 6, 4, CK.BRONZE);
+      B.pop();
+      if (F) { F.at(cx, yq, cz, 0, a, 0); F.box(0, h / 2, 0, w, h, w, gk); F.pop(); }
+      w *= 0.87;
+    }
+    latheAt(B, cx, y + 20 + n * h, cz, [[0.1, 0, CK.BRONZE], [w * 0.5, 0, CK.BRONZE], [w * 0.2, 40, CK.LANTERN], [3, 150, CK.DARK], [0.1, 152, CK.DARK]], 4, false, Math.PI / 4);
+    return { crown: 20 + n * h, ring: true };
+  }
+  // the gate: twin shafts, bridges, an arch
+  const H = [top, top * (0.8 + r() * 0.1)];
+  [-1, 1].forEach((s, i) => {
+    const x = cx + s * 72;
+    B.box(x, y + 20 + H[i] / 2, cz, 76, H[i], 108, gk);
+    for (let q = 1; q < 4; q++) B.box(x, y + 20 + (H[i] * q) / 4, cz, 78, 4, 110, CK.LANTERN);
+    B.box(x, y + 22 + H[i], cz, 70, 4, 100, CK.BRONZE);
+    if (F) F.box(x, y + 20 + H[i] / 2, cz, 76, H[i], 108, gk);
+  });
+  for (let q = 1; q <= 3; q++) {
+    const yb = y + 20 + (H[1] * q) / 4 + 30;
+    B.box(cx, yb, cz, 70, 14, 40, CK.GLASS);
+    B.box(cx, yb + 7.6, cz, 70, 1.2, 42, CK.LANTERN);
+  }
+  const pts = [];
+  for (let q = 0; q <= 12; q++) { const a = (q / 12) * Math.PI; pts.push(V3(cx - Math.cos(a) * 72, y + 22 + H[1] + Math.sin(a) * 150, cz)); }
+  B.tube(pts, 5, 6, CK.BRONZE);
+  if (F) F.tube(pts.filter((p, i) => i % 3 === 0), 6, 4, CK.BRONZE);
+  return { crown: H[1] + 22, ring: false };
+}
+
+/**
+ * The street hierarchy between the cells, dressed after they are built (codeAt(ix, iz) gives
+ * each cell's kind, 0 for the harbour quarter):
+ *  - the tram boulevards at x = +-7 km: lawn verges either side of the rails with a double
+ *    avenue of trees and lamp standards down each;
+ *  - the spine's flanks: a linear park along both sides of the maglev viaduct, clear of its
+ *    stations;
+ *  - every street between cells: an avenue of kerb trees on both sides wherever the cells on
+ *    either side are town, park or civic ground (not along the farms and works);
+ *  - far: each avenue as a low strip of canopy, so the street grid reads from 12-40 km as
+ *    green lines between the blocks, heavier along the boulevards.
+ */
+export function boulevards(C, codeAt, cellsX, cellsZ) {
+  const { B, M, N, S, r, F } = C, TL = C.tileL;
+  const urban = (c) => c > 0 && c !== 5 && c !== 7;       // not the harbour, farms or works
+  const canopy = () => tintKind(HK.CANOPY, r());
+  // tram boulevards
+  for (const bx of [-7000, 7000]) for (const s of [-1, 1]) {
+    const yb = S.deck(bx + s * 58), sp = pickTree(C);
+    standBox(B, S, bx + s * 59, 0, 52, TL, 1.0, tintKind(HK.LAWN, r()), 8);
+    for (let z = -TL / 2 + 10; z < TL / 2 - 4; z += 16) {
+      if (Math.abs(Math.abs(z) - 1000) < 34) continue;               // the tram stops
+      tree(M, null, bx + s * 40, yb + 1.0, z, 10 + r() * 3, sp);
+      tree(N, null, bx + s * 76, yb + 1.0, z + 8, 11 + r() * 3, sp);
+    }
+    for (let z = -TL / 2 + 24; z < TL / 2; z += 48) C.flamps.push({ p: V3(bx + s * 31, yb + 8, z), r: 1.3, color: C.style.street, i: 1.4 });
+    if (F) F.box(bx + s * 58, yb + 6, 0, 44, 12, TL, canopy());
+  }
+  // the spine's flanks, a kilometre at a time (not over the harbour)
+  for (let iz = 0; iz < cellsZ; iz++) {
+    const zc = -TL / 2 + (iz + 0.5) * 1000;
+    if (!codeAt(14, iz) || !codeAt(15, iz)) continue;
+    for (const s of [-1, 1]) {
+      const x = s * 73, yb = S.deck(x);
+      standBox(B, S, x, zc, 26, 1000, 1.0, tintKind(HK.LAWN, r()), 8);
+      const sp = pickTree(C);
+      for (let z = zc - 490; z < zc + 490; z += 18) {
+        if (Math.abs(z) < 230) continue;                              // the station and its stairs
+        tree(M, null, x, yb + 1.0, z, 11 + r() * 4, sp);
+      }
+      if (F) F.box(x, yb + 6, zc, 22, 12, 1000, canopy());
+    }
+  }
+  // kerb avenues along the streets between cells: along z between columns...
+  for (let ix = 1; ix < cellsX; ix++) {
+    if (ix === 15 || ix === 8 || ix === 22) continue;                 // the spine and the tram boulevards
+    const x = -15000 + ix * 1000;
+    for (let iz = 0; iz < cellsZ; iz++) {
+      const a = codeAt(ix - 1, iz), b = codeAt(ix, iz);
+      if (!urban(a) || !urban(b)) continue;
+      const zc = -TL / 2 + (iz + 0.5) * 1000, sp = pickTree(C);
+      for (const s of [-1, 1]) for (let z = zc - 470 + (s > 0 ? 20 : 0); z < zc + 470; z += 40) tree(N, null, x + s * 18, S.deck(x + s * 18) + 0.6, z, 8 + r() * 3, sp);
+      if (F) standBox(F, S, x, zc, 30, 940, 8, canopy(), 4);
+    }
+  }
+  // ...and along x between rows (the tile's own edges carry one row each; the next tile the other)
+  for (let iz = 0; iz <= cellsZ; iz++) {
+    const zg = -TL / 2 + iz * 1000, rowsZ = iz === 0 ? [12] : iz === cellsZ ? [-12] : [-18, 18];
+    for (let ix = 0; ix < cellsX; ix++) {
+      const a = iz > 0 ? codeAt(ix, iz - 1) : codeAt(ix, iz), b = iz < cellsZ ? codeAt(ix, iz) : codeAt(ix, iz - 1);
+      if (!urban(a) || !urban(b)) continue;
+      const x0 = -15000 + ix * 1000, sp = pickTree(C);
+      for (const dz of rowsZ) for (let x = x0 + 40 + (dz > 0 ? 20 : 0); x < x0 + 960; x += 40) tree(N, null, x, S.deck(x) + 0.6, zg + dz, 8 + r() * 3, sp);
+      if (F && iz > 0 && iz < cellsZ) standBox(F, S, x0 + 500, zg, 920, 30, 8, canopy(), 4);
+    }
+  }
+}
+
 export function civicCell(C, x0, x1, z0, z1) {
   const { B, M, N, S, r, F } = C;
   const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2, sx = x1 - x0, sz = z1 - z0;
   standBox(B, S, cx, cz, sx, sz, 2, HK.STONE, 12);
   const y = Math.max(S.deck(cx - 120), S.deck(cx + 120)) + 2;
   const top = Math.min(1300, Math.min(S.roofLow(cx - 100), S.roofLow(cx + 100)) - y - 320) * (0.6 + r() * 0.4);
-  // a tapering glass tower with lantern sky-lobbies every ~quarter, a crown and a mast
-  const prof = [[0.1, -10, CK.HULL], [110, -10, CK.HULL], [110, 20, CK.BRONZE]];
-  const lobbies = 4;
-  for (let q = 0; q < lobbies; q++) {
-    const a = q / lobbies, b = (q + 1) / lobbies, ra = 100 - 45 * a, rb = 100 - 45 * b;
-    prof.push([ra, 22 + a * top, CK.GLASS], [rb, b * top - 14, CK.GLASS], [rb + 4, b * top - 12, CK.LANTERN], [rb + 4, b * top - 2, CK.LANTERN], [rb, b * top, CK.BRONZE]);
-  }
-  prof.push([44, top + 30, CK.HULL], [12, top + 60, CK.BRONZE], [3, top + 150, CK.DARK], [0.1, top + 152, CK.DARK]);
-  latheAt(B, cx, y, cz, prof, 28);
-  // sky gardens: planted balconies spiralling up between the lobbies
-  for (let q = 0; q < 12; q++) {
-    const a = (q / 12) * TAU * 2.5, t = 0.08 + (q / 12) * 0.84, rr = 100 - 45 * t + 4;
-    M.at(cx + Math.cos(a) * rr, y + t * top, cz + Math.sin(a) * rr, 0, -a, 0);
-    M.box(0, 0, 0, 10, 2, 34, HK.ROOFGARDEN);
-    M.pop();
-  }
-  if (F) { latheAt(F, cx, y, cz, [[0.1, -10, CK.HULL], [100, -10, CK.GLASS], [55, top, CK.GLASS], [58, top + 4, CK.LANTERN], [3, top + 150, CK.DARK], [0.1, top + 152, CK.DARK]], 8); }
-  C.lamps.push({ p: V3(cx, y + top + 156, cz), r: 6, color: LAMPC.RED, i: 3.0, breathe: 0.5 });
-  for (let k = 0; k < 6; k++) { const a = (k / 6) * TAU; C.lamps.push({ p: V3(cx + Math.cos(a) * 60, y + top + 34, cz + Math.sin(a) * 60), r: 3.5, color: C.style.accent, i: 2.0 }); }
+  const lm = landmark(C, cx, y, cz, top);
+  C.lamps.push({ p: V3(cx, y + lm.crown + 156, cz), r: 6, color: LAMPC.RED, i: 3.0, breathe: 0.5 });
+  if (lm.ring) for (let k = 0; k < 6; k++) { const a = (k / 6) * TAU; C.lamps.push({ p: V3(cx + Math.cos(a) * 60, y + lm.crown + 34, cz + Math.sin(a) * 60), r: 3.5, color: C.style.accent, i: 2.0 }); }
   // four halls round the plaza: colonnaded stone, pitched copper or planted roofs
   const fk = facadeKind(C.style.pal + 2);
   for (let k = 0; k < 4; k++) {

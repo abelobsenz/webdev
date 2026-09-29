@@ -7,7 +7,7 @@ import { createLamps, LAMP } from './lamps.js';
 import { HALO_PORTS } from './earthData.js';
 import { createHaloMaterial } from './haloMaterial.js';
 import { HB } from './haloBuilder.js';
-import { canalCell, buildCraneJib, CRANE_JIB, buildPerson, buildDrone, DISTRICT_STYLE, standBox, vault, ribArc, cliffs, townCell, parkCell, farmCell, civicCell, worksCell, stadiumCell, marketCell, buildVaultFrame, harbourTown, HARBOUR, buildHarbourBoat, portQuarter } from './haloArchitecture.js';
+import { canalCell, boulevards, tree, buildCraneJib, CRANE_JIB, buildPerson, buildDrone, DISTRICT_STYLE, standBox, vault, ribArc, cliffs, townCell, parkCell, farmCell, civicCell, worksCell, stadiumCell, marketCell, buildVaultFrame, harbourTown, HARBOUR, buildHarbourBoat, portQuarter } from './haloArchitecture.js';
 import { bodyDir, MERIDIAN_LON } from './sim.js';
 
 // The Halo, lived in. Seen from orbit the deck shader already paints a continent of towns and
@@ -129,7 +129,7 @@ function spine(B, M, lamps, S, withStation) {
     standBox(B, S, bx, 0, 60, TILE_L, 0.8, CK.DECK, 8);
     for (const x of [-10.7, -5.3, 5.3, 10.7]) M.box(bx + x, yb + 1.0, 0, 0.8, 0.4, TILE_L, CK.BRONZE);
     M.box(bx, yb + 1.1, 0, 4, 0.6, TILE_L, CK.GARDEN);
-    for (let z = -TILE_L / 2 + 25; z < TILE_L / 2; z += 50) M.box(bx + (z % 100 ? 22 : -22), yb + 7, z, 7, 10, 7, CK.GARDEN);
+    for (let z = -TILE_L / 2 + 25; z < TILE_L / 2; z += 50) tree(M, null, bx + (z % 100 ? 22 : -22), yb + 0.8, z, 11 + (z % 150) * 0.01, 1);
     for (const z of [-1000, 1000]) for (const sd of [-1, 1]) {
       M.box(bx + sd * 17, yb + 4, z, 4, 6, 40, CK.GLASS);
       lamps.push({ p: V3(bx + sd * 17, yb + 8, z), r: 1.6, color: LAMP.AMBER, i: 1.8 });
@@ -367,6 +367,8 @@ function* buildDistrictSteps(C, bay, variant) {
     else if (kind === 'canal') canalCell(C, x0, x1, z0, z1);
     else worksCell(C, x0, x1, z0, z1);
   }
+  yield;
+  boulevards(C, (ix, iz) => codes[iz * CELLS_X + ix], CELLS_X, CELLS_Z);
   B.cells = cells;
 }
 
