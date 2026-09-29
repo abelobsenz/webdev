@@ -415,7 +415,7 @@ for(const body of runtime.bodies) {
 }
 // Validate the actual nearest-hull orientation at a radial +X heading, where one fallback failed.
 const traffic=new Traffic(runtime,rings,{traffic:200});
-traffic.shipPosJS=(i,t,out)=>{out.set(10000+t,0,0);return i===0?1:0;};
+traffic.band=null;traffic.shipPosJS=(i,t,out)=>{out.set(10000+t,0,0);return i===0?1:0;};
 traffic.updateHulls(120,V(10120,0,0));
 const hullMatrix=new THREE.Matrix4();traffic.hullSets[0].getMatrixAt(0,hullMatrix);
 assert.ok(Math.abs(hullMatrix.determinant()-1e-9)<1e-15,'Traffic hull orientation preserves kilometre scale at a radial heading');

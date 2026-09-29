@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { updateCraftMaterial } from '../craft/craftMaterial.js';
-import { CRAFT_FRAME, KM, createDressedMaterial, LIVERIES } from './craftMesh.js';
+import { CRAFT_FRAME, KM, createDressedMaterial, setCraftEnvelope, LIVERIES } from './craftMesh.js';
 import { createLamps, LAMP } from './lamps.js';
 import { CORRIDORS } from './stations.js';
 import { design } from './shipDesigns.js';
@@ -34,7 +34,8 @@ const fract = (x) => x - Math.floor(x);
 const hash = (n) => fract(Math.sin(n * 127.1 + 311.7) * 43758.5453);
 
 export const HULL_RANGE = 900;          // km from the station: hulls drawn inside this
-export const LAMP_RANGE = 60000;        // km: beyond this the whole station's traffic is under a pixel
+export const LAMP_RANGE = 30000;        // km: beyond this the whole station's traffic is not drawn
+const LAMP_FADE = 5000;                 // km: the traffic lights begin to fade out here
 const PUFF_SLOTS = 4;                   // RCS puffs a ship can show at once
 const PUFF_LIFE = 0.9;                  // s
 /** A drive plume as lamp sprites along the exhaust: [distance aft in bell radii, size, brightness, whiteness]. */
@@ -300,7 +301,7 @@ export class StationTraffic {
     // instanced hulls, one per design
     this.sets = designs.map((d) => {
       const lv = LIVERIES[((d.seed ?? 0) * 3 + (d.kind || '').length) % LIVERIES.length];
-      const mat = createDressedMaterial({ accent: d.accent || [0.55, 0.88, 1.0], lit: 0.6, livery: d.livery || lv[0], livery2: d.livery2 || lv[1] });
+      const mat = setCraftEnvelope(createDressedMaterial({ accent: d.accent || [0.55, 0.88, 1.0], lit: 0.6, livery: d.livery || lv[0], livery2: d.livery2 || lv[1] }), d.geo);
       const im = new THREE.InstancedMesh(d.geo, mat, Math.max(1, roster.filter((r) => r.design === d).length));
       im.count = 0;
       im.frustumCulled = false;
@@ -389,7 +390,11 @@ export class StationTraffic {
     this.group.updateMatrixWorld(true);
     this.group.userData.world.copy(this.group.position);
     const camD = cam ? cam.position.distanceTo(this.group.position) : 0;
-    this.group.visible = camD < LAMP_RANGE;
+    // the station's traffic lights thin out with distance (seen from across cislunar space the
+    // lanes are a faint glitter round the station, then nothing, never a cloud of dots)
+    const lg = 1 - smooth(LAMP_FADE, LAMP_RANGE, camD);
+    this.lamps.material.uniforms.uGain.value = lg;
+    this.group.visible = lg > 0.002;
     if (!this.group.visible) return;
     const hulls = camD < HULL_RANGE + 1800;
     for (const s of this.sets) { s.im.visible = hulls; for (const sp of s.spins) sp.im.visible = hulls; }

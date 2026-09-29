@@ -1,13 +1,15 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { buildLiner, buildTender, buildRefinery, CB, CK } from '../craft/craftGeometry.js';
 import { buildShuttle, buildTug, buildCourier, buildFreighter, lathe } from '../craft/craftClasses.js';
 import { createGlowMesh } from '../craft/craftMaterial.js';
-import { craftMesh, craftPart, addEngines, addLamps, placeMerge, placeLamps, KM, dressedMesh } from './craftMesh.js';
+import { craftMesh, craftPart, addEngines, addLamps, placeMerge, placeLamps, KM, dressedMesh, DK, LIVERIES } from './craftMesh.js';
 import { LAMP, createLamps } from './lamps.js';
 import { R_EARTH, R_MOON, MERIDIAN_LON, bodyDir } from './sim.js';
 import { stationFrame, CORRIDORS } from './stations.js';
 import { HS } from './harbour.js';
 import { FleetTraffic } from './fleetTraffic.js';
+import { smoothLiner, smoothTender } from './linerSkin.js';
 import { buildLinerDetail, buildFreighterDetail, buildTenderDetail, buildEvaWorker, evaPose, evaLines, EVA_PARTIES } from './linerDetail.js';
 import { buildWheelDetail, buildLiftCar, buildRingCrane, liftPose, craneAngle, RING } from './seleneDetail.js';
 
@@ -186,8 +188,11 @@ export class Fleet {
     // ---- the Concord-class liner at the liner pier (engines dark, lamps lit)
     const liner = buildLiner(2400);
     this.linerGeo = liner;
+    // her skin re-tessellated smooth (src/space/linerSkin.js) and her markings (livery band, keel
+    // and drive-section plate) painted on it
+    const linerPainted = { ...liner, geo: markLiner(smoothLiner(liner)) };
     {
-      const m = dressedMesh(liner.geo, { accent: [0.55, 0.85, 1.0], lit: 0.62, livery: [0.58, 0.2, 0.12], livery2: [0.88, 0.84, 0.74] });
+      const m = dressedMesh(linerPainted.geo, { accent: [0.55, 0.85, 1.0], lit: 0.62, livery: [0.58, 0.2, 0.12], livery2: [0.88, 0.84, 0.74] });
       station.linerBerth(m.position, m.quaternion);
       addLamps(m, liner.lamps, { minPx: 1.3 });
       el.harbour.add(m);
@@ -204,7 +209,7 @@ export class Fleet {
     const corr = CORRIDORS;
     this.corridors = corr;
     // (freighters now dock at the arm heads: src/space/geoRoads.js movements)
-    this._addVoyager('approach', liner, H, { ...approachVoyage(),
+    this._addVoyager('approach', linerPainted, H, { ...approachVoyage(), livery: LIVERIES[1],
       engine: { scale: 0.55, length: 16, color: 0x7fd8ff }, glow: [0.55, 0.8, 1.0], accent: [1.0, 0.72, 0.45],
     });
     // ---- tugs and a courier working the Harbour (children of the Harbour: short hops)
@@ -254,11 +259,12 @@ export class Fleet {
     // ---- reclamation tenders above the Halo near the Nauru port
     const tender = buildTender(620);
     this.tenderData = tender;
+    const tenderPainted = markTender(smoothTender(tender));   // smooth spine (src/space/linerSkin.js), works paint
     const relic = buildRelic();
     this.tenders = [];
     this.tenderGroup = new THREE.Group();
     for (let i = 0; i < 3; i++) {
-      const m = craftMesh(tender.geo, { accent: [0.5, 1.0, 0.8], lit: 0.5 });
+      const m = dressedMesh(tenderPainted, { accent: [0.5, 1.0, 0.8], lit: 0.5, livery: LIVERIES[4][0], livery2: LIVERIES[4][1] });
       const arms = tender.arms.map((Ar) => {
         const pivot = new THREE.Group();
         pivot.position.copy(Ar.pivot);
@@ -296,7 +302,7 @@ export class Fleet {
     const ref = buildRefinery(1);
     this.refineryData = ref;
     this.refinery = new THREE.Group();
-    const rm = craftMesh(ref.geo, { accent: [1.0, 0.7, 0.4], lit: 0.55 });
+    const rm = dressedMesh(dressSelene(ref), { accent: [1.0, 0.7, 0.4], lit: 0.55, livery: LIVERIES[3][0], livery2: LIVERIES[3][1] });
     const wm = craftPart(rm, ref.wheel);
     rm.add(wm);
     this.wheel = wm;
@@ -328,7 +334,8 @@ export class Fleet {
       const tc = this.movers[this.movers.length - 1].c;
       this.seleneLaneData = seleneLanes(tc);
       this.seleneLanes = new THREE.Group();
-      this.seleneLanes.add(createLamps(this.seleneLaneData, { minPx: 1.3 }));
+      this.seleneLaneLamps = createLamps(this.seleneLaneData, { minPx: 1.3 });
+      this.seleneLanes.add(this.seleneLaneLamps);
       space.scene.add(this.seleneLanes);
       const _c = new THREE.Vector3();
       space.addBody('seleneLanes', [this.seleneLanes], () => this.seleneLanes.localToWorld(_c.set(0, 600, 0)), 700);
@@ -343,7 +350,7 @@ export class Fleet {
   /** A ship on a voyage cycle: a top-level group (its own depth-sliced body) placed from a station frame. */
   _addVoyager(name, craft, frameObj, c) {
     const g = new THREE.Group();
-    const m = craftMesh(craft.geo, { accent: c.accent, lit: 0.5 });
+    const m = c.livery ? dressedMesh(craft.geo, { accent: c.accent, lit: 0.5, livery: c.livery[0], livery2: c.livery[1] }) : craftMesh(craft.geo, { accent: c.accent, lit: 0.5 });
     const engines = addEngines(m, craft.glows, { scale: c.engine.scale, length: c.engine.length, color: c.engine.color, core: c.engine.core, throttle: 0 });
     const glow = createGlowMesh(craft.glows, { color: c.glow, strength: 2.0, scale: KM });
     m.add(glow);
@@ -469,6 +476,10 @@ export class Fleet {
       this.refinery.updateMatrixWorld(true);
       this.seleneLanes.position.copy(this.refinery.position);
       this.seleneLanes.quaternion.copy(this.refinery.quaternion);
+      // the corridor beacons are for the tankers: full on the run, faded out from across the sky
+      const lg = space.camera ? 1 - smooth(900, 2600, space.camera.position.distanceTo(this.refinery.position)) : 1;
+      this.seleneLaneLamps.material.uniforms.uGain.value = lg;
+      this.seleneLaneLamps.visible = lg > 0.002;
       this.wheel.rotation.y = realTime * 0.04;
     }
     // the working lanes: outer roads, holding stacks, Selene's ore run, patrol and convoys
@@ -594,6 +605,93 @@ export class Fleet {
  * and the shuttle's dorsal hatch are found by casting against the real meshes, and the hatch
  * is seated 0.3 m into the collar's docking face.
  */
+/**
+ * A copy of a craft geometry with its plate kinds repainted (kinds only: the shape, normals and
+ * index are the builder's and shared). paint(x, y, z, kind) returns the new kind, or the old one.
+ */
+export function repaint(geo, paint) {
+  const P = geo.attributes.position, F = geo.attributes.aFacade;
+  const fac = new Float32Array(F.array);
+  for (let i = 0; i < P.count; i++) fac[i * 3 + 2] = paint(P.getX(i), P.getY(i), P.getZ(i), fac[i * 3 + 2]);
+  const g = new THREE.BufferGeometry();
+  for (const [k, a] of Object.entries(geo.attributes)) g.setAttribute(k, a);
+  g.setAttribute('aFacade', new THREE.BufferAttribute(fac, 3));
+  g.setIndex(geo.index);
+  g.boundingBox = geo.boundingBox; g.boundingSphere = geo.boundingSphere;
+  return g;
+}
+
+/**
+ * The Concord liner's markings on her pearl skin (src/craft/craftGeometry.js buildLiner's
+ * spindle: superellipse sections, half-widths 170 x 118 m, belly 0.8): the Concord oxide-red
+ * livery band down each lower flank under the window galleries (cream hoops and registration
+ * marks), working plate along the keel where the tenders and shuttles dock and round the drive
+ * section astern, the rest pearl. Only skin vertices change (the ribs, masts and scoop ring
+ * keep their finishes).
+ */
+export function markLiner(geo, len = 2400) {
+  const s = len / 2400, A = 170, Bh = 118;
+  const prof = (u) => (u < 0.4 ? 0.62 + 0.38 * Math.sin((Math.PI / 2) * (u / 0.4)) : Math.pow(Math.max(Math.cos((Math.PI / 2) * ((u - 0.4) / 0.6)), 0), 0.8));
+  return repaint(geo, (x, y, z, k) => {
+    if (Math.abs(k - CK.HULL) > 0.01) return k;
+    x /= s; y /= s; z /= s;
+    const f = Math.max(prof((z + 1150) / 2400), 0.02);
+    if (z < -1150 || z > 1250 || f < 0.08) return k;
+    const ax = Math.abs(x) / (A * f), ay = Math.abs(y) / (Bh * f * (y < 0 ? 0.8 : 1));
+    const rho = Math.pow(Math.pow(ax, 2.3) + Math.pow(ay, 2.3), 1 / 2.3);
+    if (Math.abs(rho - 1) > 0.04) return k;                    // not the skin
+    const t = Math.atan2(y / (Bh * f), x / (A * f));
+    const side = Math.abs(Math.cos(t)), below = Math.sin(t) < 0;
+    if (z < -930) return DK.GRIME;                             // the drive section
+    if (below && Math.sin(t) < -0.62) return DK.GRIME;         // the keel
+    if (below && side > 0.78 && side < 0.95 && z < 1060) return DK.LIVERY;
+    return k;
+  });
+}
+
+/** The reclamation tenders' paint: works-yellow dorsal plate, weathered working plate below. */
+export function markTender(geo) {
+  return repaint(geo, (x, y, z, k) => (Math.abs(k - CK.HULL) > 0.01 ? k : y > 18 ? DK.LIVERY : DK.GRIME));
+}
+
+/**
+ * Selene Works dressed (the refinery's shape is the builder's): its eight cryogenic tanks in
+ * smooth insulation-foil shells (the builder's 18-sided lathes read as faceted balls; each
+ * shell's inner chords clear the old vertices, so nothing shows through), and the spindle in
+ * weathered working plate. Returns the merged geometry (metres, the refinery frame).
+ */
+export function dressSelene(ref) {
+  const painted = repaint(ref.geo, (x, y, z, k) => (Math.abs(k - CK.HULL) < 0.01 && x * x + z * z < 300 * 300 ? DK.GRIME : k));
+  const NA = 48, NL = 24, pos = [], nrm = [], fac = [], idx = [];
+  for (const t of ref.tanks) {
+    const R = t.radius * 1.006, b = pos.length / 3;
+    for (let j = 0; j <= NL; j++) {
+      const la = -Math.PI / 2 + (j / NL) * Math.PI, cl = Math.cos(la), sl = Math.sin(la);
+      for (let i = 0; i <= NA; i++) {
+        const lo = (i / NA) * Math.PI * 2, nx = cl * Math.cos(lo), nz = cl * Math.sin(lo);
+        pos.push(t.center.x + nx * R, t.center.y + sl * R, t.center.z + nz * R);
+        nrm.push(nx, sl, nz);
+        fac.push(lo * R, (la + Math.PI / 2) * R, DK.FOIL);
+      }
+    }
+    for (let j = 0; j < NL; j++) for (let i = 0; i < NA; i++) {
+      const a = b + j * (NA + 1) + i, c = a + NA + 1;
+      idx.push(a, c, a + 1, a + 1, c, c + 1);
+    }
+  }
+  const shells = new THREE.BufferGeometry();
+  shells.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  shells.setAttribute('aFacade', new THREE.Float32BufferAttribute(fac, 3));
+  shells.setAttribute('normal', new THREE.Float32BufferAttribute(nrm, 3));
+  shells.setIndex(idx);
+  const plain = new THREE.BufferGeometry();
+  for (const k of ['position', 'aFacade', 'normal']) plain.setAttribute(k, painted.attributes[k]);
+  plain.setIndex(painted.index);
+  const g = mergeGeometries([plain, shells], false);
+  g.computeBoundingSphere(); g.computeBoundingBox();
+  return g;
+}
+
 export function linerAttendants(linerGeo, collars = [-170, 330]) {
   const sh = buildShuttle(110);
   const mat = new THREE.MeshBasicMaterial({ side: THREE.DoubleSide });

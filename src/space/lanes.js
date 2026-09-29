@@ -16,6 +16,8 @@ import { harbourRoad, harbourStack } from './fleetTraffic.js';
 // Beacons are lamp sprites: filtered, energy-kept below a pixel, gently breathing.
 
 const _v = new THREE.Vector3();
+const _inv = new THREE.Matrix4();
+const smooth = (a, b, x) => { const t = Math.min(Math.max((x - a) / (b - a), 0), 1); return t * t * (3 - 2 * t); };
 
 /**
  * A lane buoy (metres, axis +Y): a spindle with a bronze collar, a lantern crown carrying the
@@ -52,13 +54,13 @@ function corridorLamps(dir, color, inward, buoys) {
     const s = 24 + i * i * 7.5;                     // closer together near the Harbour
     const ph = (inward ? i : n - i) / n * 1.6;
     for (const side of [-1, 1]) {
-      put(d.clone().multiplyScalar(s).addScaledVector(e1, side * (2.4 + i * 0.25)), 1 + i * 0.9, { color, i: 3.2, breathe: 0.4, phase: ph % 1 });
+      put(d.clone().multiplyScalar(s).addScaledVector(e1, side * (2.4 + i * 0.25)), 1 + i * 0.9, { color, i: 2.4, breathe: 0.3, phase: ph % 1 });
     }
   }
   // the gate ring at the corridor mouth
   for (let k = 0; k < 8; k++) {
     const a = (k / 8) * Math.PI * 2;
-    put(d.clone().multiplyScalar(21).addScaledVector(e1, Math.cos(a) * 3.2).addScaledVector(e2, Math.sin(a) * 3.2), 1.4, { color, i: 3.0, breathe: 0.3, phase: k / 8 });
+    put(d.clone().multiplyScalar(21).addScaledVector(e1, Math.cos(a) * 3.2).addScaledVector(e2, Math.sin(a) * 3.2), 1.4, { color, i: 2.2, breathe: 0.25, phase: k / 8 });
   }
   return out;
 }
@@ -100,12 +102,14 @@ export class Lanes {
       for (const upc of [1, -1]) {
         for (let h = 60; h <= 600; h += 60) {
           const base = dir.clone().multiplyScalar(R_EARTH + h).addScaledVector(east, upc * 12);
-          pl.push({ p: base.clone().addScaledVector(east, 1.6), r: 0.05, color: upc > 0 ? LAMP.BLUE : LAMP.AMBER, i: 2.0, breathe: 0.35, phase: ((upc > 0 ? h : 660 - h) / 600) % 1 });
-          pl.push({ p: base.clone().addScaledVector(east, -1.6), r: 0.05, color: upc > 0 ? LAMP.BLUE : LAMP.AMBER, i: 2.0, breathe: 0.35, phase: ((upc > 0 ? h : 660 - h) / 600) % 1 });
+          pl.push({ p: base.clone().addScaledVector(east, 1.6), r: 0.05, color: upc > 0 ? LAMP.BLUE : LAMP.AMBER, i: 1.5, breathe: 0.3, phase: ((upc > 0 ? h : 660 - h) / 600) % 1 });
+          pl.push({ p: base.clone().addScaledVector(east, -1.6), r: 0.05, color: upc > 0 ? LAMP.BLUE : LAMP.AMBER, i: 1.5, breathe: 0.3, phase: ((upc > 0 ? h : 660 - h) / 600) % 1 });
         }
       }
     }
     this.portLamps = createLamps(pl, { minPx: 1.3 });
+    // column mid-points (body frame, km): the column lamps fade out with distance from the nearest
+    this.portMids = HALO_PORTS.map((p) => bodyDir(0, THREE.MathUtils.degToRad(p.lon)).multiplyScalar(R_EARTH + 330));
     space.earthFixed.add(this.portLamps);
     space.addBody('lanesPorts', [this.portLamps], () => _v.set(0, 0, 0), R_EARTH + 700);
     // the port columns' buoys: one beacon crown per lamp, the same set at every port (port frame,
@@ -130,9 +134,25 @@ export class Lanes {
   }
 
   update(sim, realTime, dt, space) {
+    const cam = space.camera;
+    if (!cam) return;
+    // Lane lights are for the ships using the lanes: seen from the lanes they mark the way, seen
+    // from across the sky they would be dotted lines ruled over the view. Each set fades out
+    // with the camera's distance from its lanes (the Harbour's corridors reach 1,500 km).
+    const hd = this.harbourFrame.getWorldPosition(_v).distanceTo(cam.position);
+    const hg = 1 - smooth(900, 2600, hd);
+    this.harbourLamps.visible = this.outerLamps.visible = hg > 0.002;
+    this.harbourLamps.material.uniforms.uGain.value = this.outerLamps.material.uniforms.uGain.value = hg;
+    _inv.copy(space.earthFixed.matrixWorld).invert();
+    _v.copy(cam.position).applyMatrix4(_inv);
+    let pd = Infinity;
+    for (const m of this.portMids) pd = Math.min(pd, m.distanceTo(_v));
+    const pg = 1 - smooth(500, 1800, pd);
+    this.portLamps.visible = pg > 0.002;
+    this.portLamps.material.uniforms.uGain.value = pg;
     // the buoys only when a column's buoys can cover a pixel (they are 350 m tall)
     if (!this.portColumns) return;
-    const cam = space.camera, k = space.size.y * 0.5 / Math.tan(THREE.MathUtils.degToRad(cam.fov) * 0.5);
+    const k = space.size.y * 0.5 / Math.tan(THREE.MathUtils.degToRad(cam.fov) * 0.5);
     for (const c of this.portColumns) {
       c.group.localToWorld(c.center.set(0, 330, 0));
       const d = Math.max(c.center.distanceTo(cam.position) - 300, 1);

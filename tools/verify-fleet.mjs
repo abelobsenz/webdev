@@ -571,5 +571,147 @@ assert.ok(minClear > 0, `working lanes clear every structure with ${minClear} km
   for (const s of d.seats) assert.ok(dist(T, s, 5) < 0.5, 'every seat on the real surface');
   assert.ok(fleet.tenders.every((t) => t.mesh.children.includes(fleet.tenderDetail.parts[fleet.tenders.indexOf(t)])), 'each tender carries its fittings');
 }
+// ---- 9. the refined craft material: spliced, self-consistent, occlusion envelope set
+{
+  const { craftMesh, createDressedMaterial, REFINE_GLSL } = await import('../src/space/craftMesh.js');
+  const g = new THREE.BoxGeometry(10, 20, 300);
+  g.setAttribute('aFacade', new THREE.Float32BufferAttribute(new Float32Array(g.attributes.position.count * 3), 3));
+  const plain = craftMesh(g, {}).material, dressed = createDressedMaterial({});
+  for (const mat of [plain, dressed]) {
+    const fs = mat.fragmentShader, vs = mat.vertexShader;
+    assert.ok(mat.userData.refined && fs.includes('craftRefine(k, f, fw, px, alb, rough, metal, em, bump, cav);'), 'refinement spliced');
+    assert.equal((fs.match(/void main\(\) \{/g) || []).length, 1, 'one main');
+    assert.equal((fs.match(/gl_FragColor/g) || []).length, 1, 'one output write');
+    for (const u of fs.matchAll(/uniform\s+\w+\s+(\w+)\s*;/g)) assert.ok(u[1] in mat.uniforms, `uniform ${u[1]} supplied`);
+    for (const v of fs.matchAll(/varying\s+(\w+)\s+(\w+)\s*;/g)) assert.ok(vs.includes(`varying ${v[1]} ${v[2]};`), `varying ${v[2]} written`);
+    let depth = 0; for (const ch of fs) { if (ch === '{') depth++; if (ch === '}') depth--; assert.ok(depth >= 0); }
+    assert.equal(depth, 0, 'balanced braces');
+  }
+  assert.ok(dressed.fragmentShader.indexOf('beltKinds(k') < dressed.fragmentShader.indexOf('craftRefine(k, f'), 'dressed kinds before the refinement');
+  // the seam kind solve (craftKind, mirrored): a two-kind triangle resolves to one kind or the
+  // other, never a kind in between, with the switch halfway
+  const kind = (m1, m2, P) => { const d = m1 - P; if (Math.abs(d) < 0.02) return P; const q = (m2 - P * P) / d - P; if (Math.abs(q - P) < 0.5) return Math.floor(m1 + 0.5); const w = d / (q - P); return Math.min(Math.max(Math.floor((w > 0.5 ? q : P) + 0.5), 0), 40); };
+  for (const [P, Q] of [[1, 8], [8, 1], [20, 1], [1, 24], [0, 11], [3, 2]]) for (let w = 0; w <= 1.0001; w += 0.01) {
+    const r = kind(P + w * (Q - P), P * P + w * (Q * Q - P * P), P);
+    assert.equal(r, w < 0.495 ? P : w > 0.505 ? Q : r, `seam kind ${P}/${Q} at ${w.toFixed(2)} -> ${r}`);
+    assert.ok(r === P || r === Q, `seam kind never between (${P}/${Q} -> ${r})`);
+  }
+  assert.ok(plain.fragmentShader.includes('float k = craftKind(vFac.z, vKind2, vKindP);') && plain.vertexShader.includes('flat varying float vKindP;'), 'seam kinds resolved');
+  // the liner's and the tenders' paint: kinds only, on the real skin, a band not the whole hull
+  const { markLiner, markTender } = await import('../src/space/fleet.js');
+  const lg = fleet.linerGeo.geo, pg = markLiner(lg), cnt = {};
+  const kz = pg.attributes.aFacade.array, k0 = lg.attributes.aFacade.array;
+  for (let i = 2; i < kz.length; i += 3) cnt[kz[i]] = (cnt[kz[i]] || 0) + 1;
+  out.linerPaint = { livery: cnt[20] || 0, grime: cnt[24] || 0, pearl: cnt[1] || 0 };
+  assert.ok(out.linerPaint.livery > 150 && out.linerPaint.grime > 300 && out.linerPaint.pearl > out.linerPaint.livery, `liner paint (${JSON.stringify(out.linerPaint)})`);
+  for (let i = 2; i < kz.length; i += 3) if (kz[i] !== k0[i]) assert.ok(k0[i] === 1, 'only pearl skin repainted');
+  assert.ok(pg.attributes.position === lg.attributes.position && pg.index === lg.index, 'paint shares the hull buffers');
+  assert.ok(fleet.docked.geometry.attributes.aFacade.array.some((k, i) => i % 3 === 2 && k === 20), 'the berthed liner wears her livery');
+  const tg = markTender(fleet.tenderData.geo);
+  assert.ok(tg.attributes.aFacade.array.some((k, i) => i % 3 === 2 && k === 24), 'tenders in working plate');
+  // the liner's smooth skin: it replaced the builder's loft (the layout check passed), every
+  // vertex lies on the builder's analytic surface, normals unit and outward
+  {
+    const { smoothLiner, buildLinerSkin, linerProf } = await import('../src/space/linerSkin.js');
+    const sm = smoothLiner(fleet.linerGeo);
+    assert.ok(sm.userData.smoothSkin, 'the liner skin replaced (builder loft layout recognised)');
+    out.linerTriangles = [fleet.linerGeo.geo.index.count / 3, sm.index.count / 3];
+    assert.ok(out.linerTriangles[1] > 90000 && out.linerTriangles[1] < 140000, `liner triangles ${out.linerTriangles}`);
+    const sk = buildLinerSkin(1), P = sk.attributes.position, Nn = sk.attributes.normal;
+    let worst = 0;
+    for (let i = 0; i < P.count; i += 7) {
+      const x = P.getX(i), y = P.getY(i), z = P.getZ(i);
+      if (Math.abs(z) > 1149 && z < 0) continue;
+      const f = Math.max(linerProf((z + 1150) / 2400), 0.02);
+      if (f < 0.05) continue;
+      const rho = Math.pow(Math.pow(Math.abs(x) / (170 * f), 2.3) + Math.pow(Math.abs(y) / (118 * f * (y < 0 ? 0.8 : 1)), 2.3), 1 / 2.3);
+      worst = Math.max(worst, Math.abs(rho - 1));
+      const nl = Math.hypot(Nn.getX(i), Nn.getY(i), Nn.getZ(i));
+      assert.ok(Math.abs(nl - 1) < 1e-3 && Nn.getX(i) * x + Nn.getY(i) * y > -1e-6, 'skin normal unit and outward');
+    }
+    assert.ok(worst < 1e-3, `skin on the builder's surface (${worst})`);
+    let mx = 0; for (const i of sm.index.array) if (i > mx) mx = i;
+    assert.ok(mx < sm.attributes.position.count, 'smoothed liner index in range');
+    assert.ok(fleet.docked.geometry.index.count === sm.index.count, 'the berthed liner draws the smooth skin');
+  }
+  {
+    const { smoothTender } = await import('../src/space/linerSkin.js');
+    const st = smoothTender(fleet.tenderData);
+    assert.ok(st.userData.smoothSkin, 'the tender spine replaced (builder loft layout recognised)');
+    out.tenderTriangles = [fleet.tenderData.geo.index.count / 3, st.index.count / 3];
+    let mx = 0; for (const i of st.index.array) if (i > mx) mx = i;
+    assert.ok(mx < st.attributes.position.count, 'smoothed tender index in range');
+    assert.ok(fleet.tenders[0].mesh.geometry.index.count === st.index.count, 'the tenders draw the smooth spine');
+    // the new spine hugs the builder's: every builder spine vertex within 0.05 m of the new surface's radius
+    const bp = fleet.tenderData.geo.attributes.position, np = st.attributes.position;
+    const s = fleet.tenderData.length / 300;
+    for (let j = 0; j <= 24; j += 6) {
+      const bz = bp.getZ(j * 21), nz = np.getZ(j * 4 * 65);
+      assert.ok(Math.abs(bz - nz) < 1e-3 * s, `spine station ${j} matches (${bz} vs ${nz})`);
+      for (let i = 0; i < 20; i++) {
+        const br = Math.hypot(bp.getX(j * 21 + i), bp.getY(j * 21 + i)), nr = Math.hypot(np.getX(j * 4 * 65 + i * 3.2 | 0), np.getY(j * 4 * 65 + i * 3.2 | 0));
+        if (i % 5 === 0) assert.ok(Math.abs(br - nr) < 0.05 * s, `spine radius at ${j},${i}: ${br} vs ${nr}`);
+      }
+    }
+  }
+  // Selene's foil tank shells: smooth, and their inner chords clear every vertex of the old tank
+  const sg = fleet.refineryMesh.geometry, sp = sg.attributes.position;
+  assert.ok(1.006 * Math.cos(Math.PI / 48) ** 2 > 1.0005, 'tank shell chords clear the builder tank');
+  out.seleneFoilVertices = sg.attributes.aFacade.array.filter((k, i) => i % 3 === 2 && k === 22).length;
+  assert.ok(out.seleneFoilVertices === 8 * 49 * 25, `Selene foil shells (${out.seleneFoilVertices})`);
+  // buffer sanity: indices in range, finite positions, instanced capacity respected
+  for (const g of [sg, fleet.docked.geometry, pg, tg]) {
+    let mx = 0; for (const i of g.index.array) if (i > mx) mx = i;
+    assert.ok(mx < g.attributes.position.count, 'index max below the vertex count');
+    assert.ok(g.attributes.aFacade.count === g.attributes.position.count && g.attributes.normal.count === g.attributes.position.count, 'attributes sized to the vertices');
+    for (let i = 0; i < g.attributes.position.array.length; i += 97) assert.ok(Number.isFinite(g.attributes.position.array[i]), 'finite positions');
+  }
+  for (const st of traffic.stations) for (const s of st.sets) {
+    assert.ok(s.im.count <= s.im.instanceMatrix.count, 'hull instances within capacity');
+    for (const sp2 of s.spins) assert.ok(sp2.im.count <= sp2.im.instanceMatrix.count, 'spin-ring instances within capacity');
+  }
+  const h = plain.uniforms.uAoH.value;
+  assert.ok(h.x > 0 && h.z > 150 && h.z < 200, `occlusion envelope from the box (${h.toArray()})`);
+  assert.equal(dressed.uniforms.uAoH.value.x, 0, 'instanced hulls without an envelope skip the occlusion');
+  const body = REFINE_GLSL.replace(/\/\/.*$/gm, '');
+  assert.ok(!/\b(fwidth|dFdx|dFdy|texture|pow)\s*\(/.test(body), 'no derivatives, texture reads or pow in the refinement');
+  const ints = body.match(/(?<![\w.])\d+(?![\w.])/g) || [];
+  assert.equal(ints.length, 0, `refinement literals all floats (${ints.slice(0, 5)})`);
+  for (const p of plain.fragmentShader.matchAll(/pow\(([^,]+),/g)) assert.ok(/max\(|clamp\(|^\s*nh\s*$|^\s*[0-9.]+\s*$|1\.0 - clamp/.test(p[1]), `pow base guarded: ${p[1]}`);
+}
+
+// ---- 10. the lanes: coasting ships show running lights only, drives are sparks within ~3,500 km
+{
+  const { trafficFade, trafficBurn, TRAFFIC_CULL } = await import('../src/space/traffic.js');
+  assert.ok(trafficFade(900) > 0.2 && trafficFade(4000) < TRAFFIC_CULL, 'drive fade: bright near, gone by 4,000 km');
+  const { Rings } = await import('../src/space/rings.js');
+  const { Traffic } = await import('../src/space/traffic.js');
+  const T = new Traffic({ ...space, scene: new THREE.Scene(), addBody() { return {}; } }, new Rings({}, { ringSegs: 0.5 }), { traffic: 3000 });
+  if (T) {
+    let burning = 0, ring = 0;
+    for (let i = 0; i < T.count; i++) if (T.iA[i * 4] < 0.5) { ring++; if (trafficBurn(T.iA, T.iB, i * 4, 12345) > 0.5) burning++; assert.ok(T.iB[i * 4 + 2] >= 1500, 'ring lane burn period set'); }
+    out.ringBurningFraction = +(burning / Math.max(ring, 1)).toFixed(3);
+    // the port columns: the climbers boost, coast and circularise; over a whole cycle well under half burn
+    let pb = 0, pn = 0;
+    for (let i = 0; i < T.count; i++) if (T.iA[i * 4] > 1.5 && T.iA[i * 4] < 2.5) for (let t = 0; t < 2000; t += 50) { pn++; pb += trafficBurn(T.iA, T.iB, i * 4, t) > 0.5 ? 1 : 0; }
+    out.portBurningFraction = +(pb / Math.max(pn, 1)).toFixed(3);
+    assert.ok(out.portBurningFraction > 0.1 && out.portBurningFraction < 0.4, `port column drives mostly dark (${out.portBurningFraction})`);
+    assert.ok(out.ringBurningFraction < 0.2, `most ring-lane ships coast (${out.ringBurningFraction} burning)`);
+    const g = T.mesh.geometry;
+    for (const n of ['iA', 'iB', 'iC']) assert.ok(g.attributes[n].count >= g.instanceCount, `traffic ${n} covers every instance`);
+    assert.ok(g.index.array.every((i) => i < g.attributes.position.count), 'traffic quad index in range');
+  }
+  const lanes = space.lanes;
+  if (lanes) {
+    const cam = space.camera;
+    cam.position.set(0, 0, 400000); cam.updateMatrixWorld(true);
+    lanes.update(sim, 0, 0.016, space);
+    assert.ok(!lanes.harbourLamps.visible && !lanes.portLamps.visible, 'lane lights hidden from far off');
+    lanes.harbourFrame.getWorldPosition(cam.position).add(V(0, 0, 200)); cam.updateMatrixWorld(true);
+    lanes.update(sim, 0, 0.016, space);
+    assert.ok(lanes.harbourLamps.visible && lanes.harbourLamps.material.uniforms.uGain.value > 0.99, 'lane lights full on the lanes');
+  }
+}
+
 console.log(JSON.stringify(out));
 console.log('FLEET_VERIFIED');
