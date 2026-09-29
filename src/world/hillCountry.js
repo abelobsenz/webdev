@@ -1056,7 +1056,11 @@ export function buildHillCountry(scene, { onComponent = null } = {}) {
     if (detail) detailTris += detail.geometry.index.count / 3;
     if (drape) tris += drape.geometry.attributes.position.count / 3;
     lod.push({ arch, stone, detail, drape, x: C.cx, z: C.cz });
+    // the builders' plain-array vertex streams are copied into the meshes above; the returned
+    // api's closures keep this scope alive, so drop them (they held over a gigabyte of heap)
+    C.arch = C.stone = C.detail = C.drape = null;
   }
+  chunks.clear();
   // warm lamps at the village gates, towers and monasteries (one Points draw)
   const lp = new Float32Array(lamps.length * 3);
   lamps.forEach((p, k) => { lp[k * 3] = p[0]; lp[k * 3 + 1] = p[1]; lp[k * 3 + 2] = p[2]; });

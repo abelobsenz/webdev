@@ -817,6 +817,7 @@ export function buildHedges(world) {
     out.meshes.push(m);
     out.chunks.push({ mesh: m, cx: c.cx, cz: c.cz });
   }
+  chunks.clear();   // their plain-array streams are copied into the meshes; out.update's closure would keep them
   out.samples = total;
   out.update = (camera) => {
     const p = camera.position;

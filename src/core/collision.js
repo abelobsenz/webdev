@@ -46,7 +46,7 @@ export class CollisionModel {
         while (performance.now() - t < 8) if (job.next().done) { this.ready = true; break; }
       } catch (e) { console.error('collision grid', e); return; }
       this.workMs = (this.workMs || 0) + performance.now() - t;
-      if (this.ready) return;
+      if (this.ready) { if (this.onReady) this.onReady(); return; }
       setTimeout(step, 0);
     };
     step();

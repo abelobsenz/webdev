@@ -189,6 +189,7 @@ export function buildHillWoods(scene, trees, occ, planted = [], settings = {}) {
     farMeshes.push(mesh);
     farCount += list.length;
   });
+  farChunks.clear();   // the per-tree records are baked into the instances; the api's closures keep this scope alive
 
   // ---- the mid crowns and the near trees: dynamic instanced meshes round the camera
   const midProtos = midPrototypes(), midMat = crownMaterial('mid', U);

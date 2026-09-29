@@ -584,6 +584,8 @@ function buildTown(m, rnd, lights, audit = false) {
   // Distance tiers for outerLod.js: the stair flights (tens of thousands of treads)
   // and the near set are detail; terraces, houses, walls and towers are the massing.
   const items=[...solidItems(base,MASS_TIER),...solidItems(near,0)];
+  // MASSIF_GARDENS keeps closures over this scope: drop the builders' plain-array streams now they are copied
+  base.pos=[];base.fac=[];near.pos=[];near.fac=[];
   for(const g of lathes)items.push({geo:g,tier:MASS_TIER});
   for(const g of nearLathes)items.push({geo:g,tier:0});
   let tris=0;for(const it of items)tris+=(it.geo.index?it.geo.index.count:it.geo.attributes.position.count)/3;

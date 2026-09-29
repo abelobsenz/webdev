@@ -10,6 +10,7 @@ import { createSkyDome } from './sky/skyDome.js';
 import { Celestial } from './sky/celestial.js';
 import { Pipeline } from './post/pipeline.js';
 import { World } from './world/world.js';
+import { releaseStaticGeometry, releaseHeld, uploadAll } from './core/releaseCpu.js';
 import { UI } from './ui/ui.js';
 import { POIS } from './ui/pois.js';
 import { AmbientAudio } from './ui/audio.js';
@@ -77,6 +78,11 @@ class App {
     await this.world.build(progress);
     // rendering agent: hook volumetric clouds / mid-frame depth capture into the main pass
     this.pipeline.attach(this.world, this.scene, this.camera, this.lighting.sun);
+    // free the CPU copies of the city's large static geometry once uploaded (~4 GB of heap); the
+    // collision grid reads its solids' positions after load, so those keep theirs
+    const solids = (this.world.clearance && this.world.clearance.solids) || [];
+    for (const o of solids) if (o.geometry) o.geometry.userData.cpuHold = true;
+    this.cpuReleased = releaseStaticGeometry(this.scene);
     this.controls = new FlyControls(this.camera, this.canvas, {
       groundHeight: (x, z) => this.world.surfaceHeight(x, z),   // the drawn surface, outer land included
       colliders: this.world.colliders,
@@ -88,6 +94,8 @@ class App {
     this.perf = new PerfManager(this);
     { const frame = this.frame.bind(this); this.frame = (dt) => { this.perf.begin(); frame(dt); this.perf.end(); }; }
     this.ui = new UI(this);
+    // the collision grid is the solids' last CPU reader: release them when it has rasterised them
+    if (this.ui.collision) this.ui.collision.onReady = () => { this.cpuReleased.heldFreed = releaseHeld(solids); };
     // the piloted aerodyne (V): built on first boarding
     this.pilot = new Pilot(this);
     // [space] orbital view (heavy resources are built on first use)
@@ -108,6 +116,8 @@ class App {
     // warm up shader programs to avoid hitches on first view
     progress(0.95, 'Compiling light and materials'); await nextPaint(); // [experience] show the last loader stage
     try { this.renderer.compile(this.scene, this.camera); this.renderer.compile(this.skyScene, this.skyCamera); } catch (e) { /* optional */ }
+    // put every city mesh on the GPU now so the marked geometry drops its CPU copy at load
+    try { uploadAll(this.renderer, this.scene, this.camera); } catch (e) { console.warn('uploadAll', e); }
     if (params.has('capture')) {
       // deterministic stepping for automated captures
       this.step = (n = 1, dt = 1 / 30) => { for (let i = 0; i < n; i++) this.frame(dt); this.renderer.getContext().finish(); };
