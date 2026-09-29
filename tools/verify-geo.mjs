@@ -5,7 +5,7 @@
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import { HarbourStation, HS } from '../src/space/harbour.js';
-import { LIFE, cranePose, podR, PODS_PER_LINE, dronePose, armFrame, ROAD, roadPose } from '../src/space/harbourLife.js';
+import { LIFE, cranePose, podR, PODS_PER_LINE, dronePose, armFrame, ROAD, roadPose, berthDronePose } from '../src/space/harbourLife.js';
 import { buildConcordYard, buildWaterStore, YARD, STORE, sectionPoint, movementPlan, movementPose, MOVEMENTS, routeAround } from '../src/space/geoRoads.js';
 import { approachVoyage, voyage } from '../src/space/fleet.js';
 import { WATER, waterRunPose } from '../src/space/waterRun.js';
@@ -156,6 +156,13 @@ for (const t of [5, 40, 77, 140, 200]) {
   for (const t of [0, 51, 133, 377]) for (const [ai, F] of armF.entries()) for (let j = 0; j < DR.perArm; j++) { dronePose(t, j, ai, P, V()); P.applyMatrix4(F); g = Math.min(g, kc.dist(P, 120) - 5); }
   results.armDroneKitClearM = +g.toFixed(1);
   assert.ok(g > 5, `arm drones clear the gallery town by ${g} m`);
+}
+// berth service drones stay off their ships, the fingers and the gantries
+{
+  let g = Infinity;
+  for (const t of [0, 23, 71, 150, 333, 612]) for (const w of life.berthWork) for (let j = 0; j < 2; j++) { berthDronePose(w.b, j, t, P); g = Math.min(g, hc.dist(P, 150) - 6); }
+  results.berthDroneClearM = +g.toFixed(1);
+  assert.ok(g > 10, `berth drones clear their ships by ${g} m`);
 }
 Object.assign(results, { podClearM: +podGap.toFixed(1), craneLoadClearM: +loadGap.toFixed(1), armDroneClearM: +droneGap.toFixed(1), berthBoxClearM: +boxGap.toFixed(1) });
 assert.ok(podGap > 2, `conveyor pods clear the Harbour by ${podGap} m`);

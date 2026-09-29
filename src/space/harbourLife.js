@@ -112,6 +112,15 @@ export function roadPose(l, k, t, outP, outF) {
   return outP;
 }
 
+/** Service drone j of a berthed ship at time t (drawn metres): tending the ship's outer flank. */
+export function berthDronePose(b, j, t, outP) {
+  const sh = b.ship, sd = b.sd;
+  const out = sh.halfW + 55 + 12 * Math.sin(t * 0.23 + j * 2.1);
+  const along = (j - 0.5) * sh.halfW * 1.6 + 60 * Math.sin(t * 0.07 + j * 1.3 + b.r * 1e-3);
+  const lift = (b.up ? 1 : -1) * (40 * Math.sin(t * 0.11 + j) + 20);
+  return outP.copy(sh.pos).addScaledVector(b.side, sd * out).addScaledVector(b.d, along).setY(sh.pos.y + lift);
+}
+
 /** Arm frame: design-local (x along, y keel-out, z across) to the Harbour's drawn metres. */
 export function armFrame(arm) {
   const s = arm.up ? 1 : -1;
@@ -303,12 +312,15 @@ export class HarbourLife {
     this.stacks = fillInstances(instancedPart(body, containerGeo(24, 8, 8), stack.length), stack);
     this.root.add(this.stacks);
     // ---- drones under the arms, each with its own moving lamp
-    this.drones = instancedPart(body, droneGeo(8), this.arms.length * DR.perArm);
+    this.drones = instancedPart(body, droneGeo(8), this.arms.length * DR.perArm + this.berthWork.length * 2);
     this.root.add(this.drones);
     const dl = [];
     for (let i = 0; i < this.arms.length * DR.perArm; i++) dl.push({ p: V(0, 0, 0), r: 2.5, color: i % 3 ? LAMP.WHITE : LAMP.TEAL, i: 2.4, breathe: 0.5, phase: (i * 0.37) % 1 });
     // crane beacons ride the cranes
     for (let i = 0; i < n; i++) dl.push({ p: V(0, 0, 0), r: 9, color: LAMP.AMBER, i: 2.6, breathe: 0.6, phase: i / n });
+    // service drones tending each berthed ship's outer flank
+    this.iBerthDrone = dl.length;
+    for (let i = 0; i < this.berthWork.length * 2; i++) dl.push({ p: V(0, 0, 0), r: 3, color: i % 2 ? LAMP.TEAL : LAMP.WHITE, i: 2.2, breathe: 0.4, phase: (i * 0.29) % 1 });
     this.dynLamps = new DynLamps(dl, { minPx: 1.1 });
     this.root.add(this.dynLamps.mesh);
     // ---- the Ring Road (its own holder: its lights show from much further out than the rest)
@@ -478,6 +490,15 @@ export class HarbourLife {
       this.drones.setMatrixAt(k, m);
       this._a.addScaledVector(this._b, 3.4);
       this.dynLamps.setV(k, this._a);
+      k++;
+    }
+    for (let q = 0; q < this.berthWork.length; q++) for (let j = 0; j < 2; j++) {
+      const b = this.berthWork[q].b;
+      berthDronePose(b, j, t, p);
+      f.copy(b.side).multiplyScalar(-b.sd);                                  // facing the hull
+      poseMatrix(m, p, f, this._up, 1);
+      this.drones.setMatrixAt(k, m);
+      this.dynLamps.set(this.iBerthDrone + q * 2 + j, p.x, p.y + 4, p.z);
       k++;
     }
     this.drones.instanceMatrix.needsUpdate = true;
