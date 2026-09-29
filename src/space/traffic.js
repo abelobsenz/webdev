@@ -102,6 +102,38 @@ vec3 shipPos(vec4 A, vec4 B, float t, out float vis) {
 }
 `;
 
+/** km: the distance at which a ship's drive has fallen to a quarter of its near brightness. */
+export const TRAFFIC_D0 = 1100;
+/** Fade below which a streak is not drawn at all (beyond ~3,500 km). */
+export const TRAFFIC_CULL = 0.008;
+/** km: a coasting ship's running lights have fallen to half at this range. */
+export const TRAFFIC_NAV_D0 = 140;
+/**
+ * CPU mirror of the shader's distance fade: a drive is a point source, its light falling with the
+ * square of the distance, and the eye's threshold against the starfield steepens that again (a
+ * burn a thousand km off is a spark, three thousand km off it is gone; the far side of a ring
+ * never draws a dotted line across the sky).
+ */
+export const trafficFade = (d) => { const x = Math.max(d, 1) / TRAFFIC_D0; const q = 1 / (1 + x * x); return q * q; };
+
+/**
+ * CPU mirror of the shader's drive schedule (0 coasting .. 1 burning) for ship i at time t. Ships
+ * in orbit coast; drives light only for manoeuvres: the ring lanes' station-keeping and phasing
+ * burns (about an eighth of the time, each ship on its own period), the transfers' and the Moon
+ * run's departure and insertion burns, the port shuttles' climb (the divers coast down and brake
+ * near the ground), the Harbour arrivals' braking burn and the departures' boost.
+ */
+export function trafficBurn(A, B, o, t) {
+  const type = A[o];
+  const sm = (a, b, x) => { const q = Math.min(Math.max((x - a) / (b - a), 0), 1); return q * q * (3 - 2 * q); };
+  if (type < 0.5) { const u = fract(t / B[o + 2] + B[o + 3]); return sm(0, 0.015, u) * (1 - sm(0.1, 0.13, u)); }
+  if (type < 1.5) { const s = fract(t / B[o + 2] + B[o + 3]) / 0.6; return Math.max(1 - sm(0.05, 0.16, s), sm(0.84, 0.95, s)); }
+  if (type < 2.5) { const ph = fract(t / A[o + 3] + B[o]); return B[o + 1] > 0 ? 1 - 0.7 * sm(0.55, 0.9, ph) : sm(0.72, 0.92, ph); }
+  if (type < 3.5) { const ph = fract(t / (3.2 * 86400) + A[o + 1]); return Math.max(1 - sm(0.02, 0.05, ph), sm(0.95, 0.98, ph)); }
+  const ph = fract(t / A[o + 3] + A[o + 2]);
+  return A[o + 1] < 0.5 ? sm(0.35, 0.65, ph) : 1 - sm(0.3, 0.55, ph);
+}
+
 const VERT = /* glsl */ `
 attribute vec4 iA;
 attribute vec4 iB;
@@ -114,11 +146,27 @@ varying float vAcross;
 varying vec3 vCol;
 varying float vFade;
 ${TRAFFIC_GLSL}
+float trafficFade(float d) { float x = max(d, 1.0) / ${TRAFFIC_D0.toFixed(1)}; float q = 1.0 / (1.0 + x * x); return q * q; }
+float navFade(float d) { float x = max(d, 1.0) / ${TRAFFIC_NAV_D0.toFixed(1)}; return 1.0 / (1.0 + x * x); }
+float sstep(float a, float b, float x) { return smoothstep(a, b, x); }
+// the drive schedule (trafficBurn in JS): 0 coasting .. 1 burning
+float shipBurn(vec4 A, vec4 B, float t) {
+  float type = A.x;
+  if (type < 0.5) { float u = fract(t / B.z + B.w); return sstep(0.0, 0.015, u) * (1.0 - sstep(0.1, 0.13, u)); }
+  if (type < 1.5) { float s = fract(t / B.z + B.w) / 0.6; return max(1.0 - sstep(0.05, 0.16, s), sstep(0.84, 0.95, s)); }
+  if (type < 2.5) { float ph = fract(t / A.w + B.x); return B.y > 0.0 ? 1.0 - 0.7 * sstep(0.55, 0.9, ph) : sstep(0.72, 0.92, ph); }
+  if (type < 3.5) { float ph = fract(t / (3.2 * 86400.0) + A.y); return max(1.0 - sstep(0.02, 0.05, ph), sstep(0.95, 0.98, ph)); }
+  float ph = fract(t / A.w + A.z);
+  return A.y < 0.5 ? sstep(0.35, 0.65, ph) : 1.0 - sstep(0.3, 0.55, ph);
+}
 
 void main() {
-  vCol = iC;
   float vis0, vis1;
   vec3 head = shipPos(iA, iB, uT, vis0);
+  float burn = shipBurn(iA, iB, uT);
+  // a coasting ship shows only its running lights (neutral, a few hundred km at most); a burn
+  // shows the drive's colour and a short exhaust trace behind it
+  vCol = mix(vec3(0.9, 0.9, 0.86), iC, burn);
   // the tail follows the ship's instantaneous velocity (a tiny step back, extrapolated),
   // never a second sample a whole streak-time earlier: across a cycle wrap that sample lay
   // on the far side of the planet and the "streak" joined two unrelated points
@@ -126,7 +174,7 @@ void main() {
   vec3 prev = shipPos(iA, iB, uT - hs, vis1);
   vec3 vel = (head - prev) / hs;
   float jump = length(head - prev);
-  vec3 tail = head - vel * uStreak;
+  vec3 tail = head - vel * uStreak * burn;
   if (vis1 < 0.02 || jump > 60.0 * hs + 5.0) tail = head;   // the step itself crossed a wrap
   vec4 ch = projectionMatrix * viewMatrix * vec4(head, 1.0);
   vec4 ct = projectionMatrix * viewMatrix * vec4(tail, 1.0);
@@ -135,9 +183,12 @@ void main() {
   // off-screen heads (a streak never reaches further than 40 px from its head), invisible
   // ships and non-finite positions
   vec2 sh = ch.xy / max(ch.w, 1e-6) * uRes * 0.5;
+  float dist = -(viewMatrix * vec4(head, 1.0)).z;
+  float light = trafficFade(dist) * burn + 0.16 * navFade(dist) * (1.0 - burn);
   bool bad = !(ch.w > 1e-3) || ch.z < -ch.w || ch.z > ch.w || any(isnan(sh)) || any(isinf(sh))
-          || any(greaterThan(abs(sh), uRes * 0.5 + 64.0)) || vis0 < 0.004;
-  if (bad) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
+          || any(greaterThan(abs(sh), uRes * 0.5 + 64.0)) || vis0 < 0.004
+          || light < ${TRAFFIC_CULL.toFixed(4)};   // too faint to add anything: no quad, no fill
+  if (bad) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); vFade = 0.0; vAlong = 0.0; vAcross = 0.0; return; }
   if (!(ct.w > 1e-3)) ct = ch;
   vec2 st = ct.xy / ct.w * uRes * 0.5;
   if (any(isnan(st)) || any(isinf(st))) st = sh;
@@ -146,9 +197,10 @@ void main() {
   // unit direction from the full offset, BEFORE capping the length (dividing the uncapped
   // offset by the capped length produced a giant quad: the tan rectangle seen in orbit)
   vec2 dir = len > 0.5 ? dv / len : vec2(1.0, 0.0);
-  if (len > 40.0) { st = sh - dir * 40.0; len = 40.0; }
+  float cap = mix(2.0, 28.0, burn);
+  if (len > cap) { st = sh - dir * cap; len = cap; }
   vec2 perp = vec2(-dir.y, dir.x);
-  float w = uPx;
+  float w = uPx * mix(0.8, 1.0, burn);
   // quad: x = 0 tail .. 1 head (extended by a pixel for a round head), y = -1..1
   vec2 base = mix(st - dir * w, sh + dir * w, position.x);
   vec2 sp = base + perp * position.y * w;
@@ -156,10 +208,10 @@ void main() {
   gl_Position = vec4(sp / (uRes * 0.5), zw, 1.0);
   vAlong = position.x;
   vAcross = position.y;
-  float dist = -(viewMatrix * vec4(head, 1.0)).z;
-  // distant ships fade (a calm planet, not confetti); long streaks spread their light
-  vFade = vis0 * clamp(1.6e5 / max(dist, 1.0), 0.08, 1.0) * clamp(24.0 / max(len, 1.0) + 0.3, 0.3, 1.0);
-  // ships closer than a few km are real hulls, not specks: fade the streak out
+  // long streaks spread the same light over their length; ships closer than a few km are
+  // real hulls (the streak hands over to them); each ship a little brighter or fainter
+  float own = 0.65 + 0.7 * fract(sin(dot(iA.zw + iB.xy, vec2(12.9898, 78.233))) * 43758.5453);
+  vFade = vis0 * light * own * clamp(18.0 / max(len, 1.0) + 0.3, 0.3, 1.0);
   vFade *= smoothstep(1.5, 6.0, dist);
 }
 `;
@@ -170,8 +222,9 @@ varying float vAcross;
 varying vec3 vCol;
 varying float vFade;
 void main() {
-  float a = exp(-vAcross * vAcross * 3.0) * (0.2 + 0.8 * vAlong * vAlong);
-  gl_FragColor = vec4(vCol * a * vFade * 0.8, 0.0);
+  // a hot point at the head, the streak behind it a thin, quickly fading trace of exhaust
+  float a = exp(-vAcross * vAcross * 3.2) * (0.06 + 0.94 * vAlong * vAlong * vAlong * vAlong);
+  gl_FragColor = vec4(vCol * a * vFade * 0.6, 0.0);
 }
 `;
 
@@ -189,6 +242,25 @@ function ringPoint(u, k, th, dr, ax, v) {
 }
 const endFade = (ph, a, b) => ss(0, a, ph) * (1 - ss(1 - b, 1, ph));
 
+/**
+ * n ships as convoys round a closed path (phases 0..1): groups of one to five a small gap apart,
+ * the groups scattered unevenly (their gaps drawn wide and narrow), the whole spread normalised
+ * so the lane keeps its mean density. Returns [{ at, n, gap }].
+ */
+export function convoys(n, r) {
+  const out = [];
+  let left = n, at = 0;
+  while (left > 0) {
+    const m = Math.min(left, 1 + Math.floor(Math.pow(r(), 1.6) * 5));
+    out.push({ at, n: m, gap: 0 });
+    left -= m;
+    at += m * (0.25 + 1.5 * r() * r() + 0.35 * r());
+  }
+  const span = at, gap = 0.18 / Math.max(n, 1);
+  for (const c of out) { c.at /= span; c.gap = gap; }
+  return out;
+}
+
 function rnd(seed) { let s = seed >>> 0; return () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; }; }
 
 /**
@@ -204,10 +276,10 @@ export function hullClassOf(t, i) {
 }
 
 export const TCOL = {
-  WARM: [1.0, 0.7, 0.42],
-  COOL: [0.52, 0.78, 1.0],
-  WARMW: [1.0, 0.9, 0.76],
-  COOLW: [0.82, 0.9, 1.0],
+  WARM: [1.0, 0.8, 0.6],
+  COOL: [0.66, 0.82, 1.0],
+  WARMW: [1.0, 0.92, 0.82],
+  COOLW: [0.86, 0.92, 1.0],
 };
 
 export class Traffic {
@@ -235,10 +307,14 @@ export class Traffic {
       for (let L = 0; L < 4; L++) {
         const ln = lanes[L];
         const n = Math.floor(nk / 4);
-        for (let i = 0; i < n; i++) {
-          const th0 = ((i + 0.35 * (r() - 0.5)) / n) * Math.PI * 2;
+        // ships run in convoys that keep station (one speed, a shared offset in the lane),
+        // spread unevenly round the ring: a lane reads as scattered groups, never a dotted line
+        for (const cv of convoys(n, r)) {
           const v = ln.dir * (ln.v[0] + (ln.v[1] - ln.v[0]) * r());
-          push([0, k, th0, v], [ln.dr + (r() - 0.5) * 0.8, ln.ax * w + (r() - 0.5) * 0.5, 0, 0], ln.c);
+          const dr = ln.dr + (r() - 0.5) * 0.8, ax = ln.ax * w + (r() - 0.5) * 0.5;
+          // a convoy manoeuvres together: one burn period and phase, a few seconds apart
+          const per = 1500 + 2600 * r(), ph0 = r();
+          for (let j = 0; j < cv.n; j++) push([0, k, (cv.at + j * cv.gap) * Math.PI * 2, v], [dr + (r() - 0.5) * 0.12, ax + (r() - 0.5) * 0.1, per, (ph0 + j * 0.004) % 1], ln.c);
         }
       }
     }
@@ -270,9 +346,12 @@ export class Traffic {
       }
     }
     // ---- the Earth-Moon run: two lanes
-    for (let i = 0; i < nMoon; i++) {
-      const out = i % 2 === 0;
-      push([3, (Math.floor(i / 2) + 0.3 * r()) / Math.ceil(nMoon / 2), (out ? 1500 : -1500) + (r() - 0.5) * 300, out ? 1 : -1], [(r() - 0.5) * 2000, 0, 0, 0], out ? TCOL.COOL : TCOL.WARM);
+    for (const out of [true, false]) {
+      const n = out ? Math.ceil(nMoon / 2) : Math.floor(nMoon / 2);
+      for (const cv of convoys(n, r)) {
+        const lat = (out ? 1500 : -1500) + (r() - 0.5) * 300, up = (r() - 0.5) * 2000;
+        for (let j = 0; j < cv.n; j++) push([3, (cv.at + j * cv.gap * 0.5) % 1, lat + (r() - 0.5) * 20, out ? 1 : -1], [up + (r() - 0.5) * 20, 0, 0, 0], out ? TCOL.COOL : TCOL.WARM);
+      }
     }
     // ---- the Harbour's corridors: three lanes each, some departures bound far out
     const latX = [-1.3, 0, 1.3], latY = [-0.7, 0.7];
@@ -346,6 +425,7 @@ export class Traffic {
     // hull class per ship, from its path type (and a Harbour tug for every corridor ship)
     this.hullClass = new Uint8Array(this.count);
     for (let i = 0; i < this.count; i++) this.hullClass[i] = hullClassOf(this.iA[i * 4], i);
+    this.band = this.radialBands();
     space.scene.add(this.hullGroup);
     // placed while the slices are planned, from the camera as it will render this frame (the
     // rig moves after the modules update: a stale camera missed ships under time warp)
@@ -362,6 +442,34 @@ export class Traffic {
     this._pos = new THREE.Vector3(); this._prev = new THREE.Vector3();
     this._m = new THREE.Matrix4(); this._s = new THREE.Vector3(KM_HULL, KM_HULL, KM_HULL);
     this._x = new THREE.Vector3(); this._y = new THREE.Vector3(); this._z = new THREE.Vector3();
+  }
+
+  /**
+   * Per ship, the band of distances from the Earth's centre its path can reach [lo, hi] (km):
+   * the hull pick rejects every ship whose band the camera's own radius lies well outside,
+   * without evaluating its path (most of the fleet, from anywhere but the lanes themselves).
+   */
+  radialBands() {
+    const A = this.iA, B = this.iB, R = this.uniforms.uRR.value;
+    const band = new Float32Array(this.count * 2);
+    for (let i = 0; i < this.count; i++) {
+      const o = i * 4, t = A[o];
+      let lo = 0, hi = 1e9;
+      if (t < 0.5) {
+        const r0 = R[Math.round(A[o + 1])] + B[o];
+        lo = r0 - 0.5; hi = Math.hypot(r0, B[o + 1]) + 0.5;
+      } else if (t < 1.5) {
+        const ra = R[Math.round(A[o + 1])] + 6, rb = R[Math.round(A[o + 2])] + 6;
+        lo = Math.min(ra, rb) - 1; hi = Math.max(ra, rb) + Math.abs(B[o + 1]) + 1;
+      } else if (t < 2.5) {
+        lo = R_EARTH + 7; hi = Math.hypot(R_EARTH + 611, Math.abs(A[o + 2]) + 1);
+      } else if (t > 3.5) {
+        const reach = B[o + 3] + B[o + 2] + Math.hypot(B[o], B[o + 1]) + 1;
+        lo = R_EARTH + GEO_ALT - reach; hi = R_EARTH + GEO_ALT + reach;
+      }
+      band[i * 2] = lo; band[i * 2 + 1] = hi;
+    }
+    return band;
   }
 
   /** CPU mirror of shipPos (TRAFFIC_GLSL): world km into out, returns the visibility. */
@@ -424,8 +532,9 @@ export class Traffic {
     const near = this._near;
     near.length = 0;
     {
-      const p = this._pos;
+      const p = this._pos, band = this.band, rc = cp.length();
       for (let i = 0; i < this.count; i++) {
+        if (band && (rc < band[i * 2] - HULL_D || rc > band[i * 2 + 1] + HULL_D)) continue;
         const vis = this.shipPosJS(i, t, p);
         if (vis < 0.5) continue;
         const d2 = p.distanceToSquared(cp);
