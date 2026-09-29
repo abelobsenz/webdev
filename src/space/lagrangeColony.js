@@ -396,7 +396,7 @@ export function buildMirror() {
   B.tube([V(0, 40, -W / 2 - 60), V(0, 40, W / 2 + 60)], 50, 12, CK.BRONZE);
   B.pop();
   for (const x of [-W / 2 + 40, 0, W / 2 - 40]) B.tube([V(x, 30, 0), V(x, 24, L * 0.5), V(x, 14, L)], (t) => 34 - 18 * t, 6, CK.DARK);
-  for (let z = 1600; z < L; z += 1600) B.box(0, 14, z, W, 22, 24, DK.HAZARD);
+  for (let z = 1600; z < L; z += 1600) B.box(0, 14, z, W, 22, 24, DK.GRIME);
   B.box(0, 12, L - 10, W + 40, 26, 30, CK.BRONZE);
   return { sheet, back: B.geometry() };
 }

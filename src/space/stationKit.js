@@ -1,6 +1,5 @@
 import * as THREE from 'three';
 import { CK } from '../craft/craftGeometry.js';
-import { LAMP } from './lamps.js';
 import { V, rng, rcsQuad } from './shipKit.js';
 import { DK } from './craftMesh.js';
 
@@ -176,14 +175,6 @@ export function sphereDressing(B, r, { lat0 = -1.2, lat1 = 1.2, rings = 6, ribs 
     }
     B.tube(pts, t * 0.8, 4, k);
   }
-}
-
-/** Nav and hull lamps for a dressed module: a red/green pair at the ends, a white strobe. */
-export function moduleLamps(lamps, r, z0, z1, { M = null } = {}) {
-  const P = (x, y, z) => { const p = V(x, y, z); return M ? p.applyMatrix4(M) : p; };
-  lamps.push({ p: P(r + 1, 0, z0 + 1), r: 0.8, color: LAMP.RED, i: 2.6, breathe: 0.5 });
-  lamps.push({ p: P(-r - 1, 0, z0 + 1), r: 0.8, color: LAMP.GREEN, i: 2.6, breathe: 0.5, phase: 0.5 });
-  lamps.push({ p: P(0, r + 1, z1 - 1), r: 0.9, color: LAMP.WHITE, i: 3.0, breathe: 0.9 });
 }
 
 /**

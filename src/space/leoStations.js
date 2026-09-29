@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { CB, CK } from '../craft/craftGeometry.js';
 import { LAMP } from './lamps.js';
 import { DK } from './craftMesh.js';
-import { moduleDressing, torusKinds, ringModuleKinds } from './stationKit.js';
+import { moduleDressing, sphereDressing, torusKinds, ringModuleKinds } from './stationKit.js';
 import { V, here, atAim, truss, catwalk, radiatorWing, dish, mast, dockingCollar, container, rcsQuad, flood, bell, sphereTank } from './shipKit.js';
 
 // The stations of the low and middle shell, in metres, drawn with the craft builder (facade
@@ -509,7 +509,7 @@ export function buildFarmFrame() {
     const z0 = -L - 90 - i * 84;
     for (const sx of [-1, 1]) {
       B.push(tr(sx * 48, 0, z0).multiply(new THREE.Matrix4().makeRotationX(Math.PI)));
-      habModule(B, 30, 70, { glass: 3, seg: 28 });
+      habModule(B, 30, 70, { glass: 3, seg: 28, seed: 31 + i * 2 + (sx > 0 ? 1 : 0) });
       B.pop();
       B.tube([V(sx * 6, 0, z0 - 35), V(sx * 18, 0, z0 - 35)], 5, 10, DK.LIVERY);
       for (let j = 0; j < 10; j++) {
@@ -552,11 +552,11 @@ export function buildPolar() {
   // crew stack: four modules round the spine, a node on top and a ram-face dock
   for (let k = 0; k < 4; k++) {
     const a = (k / 4) * TAU + TAU / 8, x = Math.cos(a) * 24, z = Math.sin(a) * 24;
-    B.push(tr(x, -150, z).multiply(toY)); habModule(B, 11, 90, { glass: 4 }); B.pop();
+    B.push(tr(x, -150, z).multiply(toY)); habModule(B, 11, 90, { glass: 4, seed: 41 + k }); B.pop();
     B.tube([V(x * 0.25, -110, z * 0.25), V(x * 0.62, -110, z * 0.62)], 3, 8, DK.LIVERY);
     for (let j = 0; j < 4; j++) lamps.push({ p: V(x * 1.48, -140 + j * 20, z * 1.48), r: 0.6, color: WARM, i: 1.6 });
   }
-  B.push(tr(0, -58, 0)); sphereZ(B, 14, (u) => (u > 0.4 && u < 0.6 ? CK.GLASS : DK.LIVERY), 24, 12); B.pop();
+  B.push(tr(0, -58, 0)); sphereZ(B, 14, (u) => (u > 0.4 && u < 0.6 ? CK.GLASS : DK.LIVERY), 24, 12); sphereDressing(B, 14, { lat0: -1.25, lat1: 1.25, rings: 5, ribs: 12, t: 0.35 }); B.pop();
   dockPort(B, lamps, ports, V(0, -58, 13), V(0, 0, 1), 14, 3.6);
   dockPort(B, lamps, ports, V(0, -58, -13), V(0, 0, -1), 14, 3.6);
   // radiators on the spine (along track)
@@ -669,7 +669,7 @@ export function buildPower() {
   }
   // the hub behind the array: crew drum, docks, mast to the emitter gimbal
   B.push(tr(0, 0, -20).multiply(new THREE.Matrix4().makeRotationX(Math.PI)));
-  habModule(B, 26, 80, { glass: 3, seg: 36 });
+  habModule(B, 26, 80, { glass: 3, seg: 36, seed: 51, lamps });
   B.pop();
   B.tube([V(0, -90, -40), V(0, 90, -40)], 3, 10, CK.BRONZE);
   B.tube([V(0, 0, -22), V(0, 0, -5)], 9, 16, DK.GRIME);
@@ -799,7 +799,7 @@ export function buildSweeper() {
     B.box(s * 8.4, 5.3, z, 9, 0.6, 20, CK.DECK);
   }
   // crew module and bridge
-  B.push(tr(0, 9, 30)); habModule(B, 5.5, 30, { glass: 2, seg: 18 }); B.pop();
+  B.push(tr(0, 9, 30)); habModule(B, 5.5, 30, { glass: 2, seg: 18, seed: 61 }); B.pop();
   B.box(0, 9, 62, 8, 5, 6, CK.GLASS);
   // ablation laser turret on the dorsal: a barrel looking forward and out
   B.push(tr(0, 16, 50).multiply(new THREE.Matrix4().makeRotationX(-0.25)));
