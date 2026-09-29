@@ -3,6 +3,7 @@ import { SNOISE_GLSL } from './glsl.js';
 import { NOISE_GLSL } from '../shaders/noise.glsl.js';
 import { SKY_UNIFORMS } from './sky.js';
 import { U } from '../core/uniforms.js';
+import { createSunLoops } from './sunLoops.js';
 
 // The Sun (a real sphere once you are close enough to see its surface) and the Dyson swarm.
 //
@@ -54,6 +55,9 @@ uniform float uDiscL;         // radiance of the disc centre
 uniform float uTime;
 uniform vec4 uSpot[8];        // centre (unit, sun frame) + angular size (rad)
 uniform vec4 uSpotE[8];       // group axis (unit, tangent) + tilt
+uniform vec4 uProm[9];        // prominence sheets: normal + kind (seen on the disc as filaments)
+uniform vec4 uPromA[9];       // first footpoint (unit) + angular length (rad)
+uniform vec4 uPromH[9];       // height (R), seed
 varying vec3 vN;
 varying vec3 vLocal;
 varying vec3 vWorld;
@@ -130,6 +134,26 @@ void main() {
     }
   }
   I += fac * 0.22 * pow(m1, 1.5);
+  // filaments: the prominences seen from above against the disc, dark serpentine threads along
+  // their sheets' feet, a little wider for the taller ones; below a pixel their contrast
+  // spreads out rather than breaking into dashes
+  for (int k = 0; k < 9; k++) {
+    vec3 nW = uProm[k].xyz;
+    float dp = dot(p, nW);
+    if (abs(dp) > 0.03) continue;
+    vec3 e1 = uPromA[k].xyz;
+    vec3 e2 = cross(nW, e1);
+    float th = atan(dot(p, e2), dot(p, e1));
+    float u = th / max(uPromA[k].w, 1e-4);
+    if (u < -0.05 || u > 1.05) continue;
+    float wig = 0.004 * snoise(p * 60.0 + vec3(uPromH[k].y));
+    float wf = 0.0025 + 0.012 * uPromH[k].x * sin(3.14159 * clamp(u, 0.0, 1.0));
+    float w = max(wf, aa);
+    float mask = (1.0 - smoothstep(w * 0.5, w, abs(dp - wig))) * (wf / w);
+    mask *= smoothstep(-0.05, 0.08, u) * (1.0 - smoothstep(0.92, 1.05, u));
+    mask *= 0.75 + 0.25 * snoise(p * 400.0 + vec3(float(k) * 3.1));
+    I *= 1.0 - 0.42 * clamp(mask, 0.0, 1.0);
+  }
   // the disc's own edge, a pixel wide
   vec3 col = vec3(1.0, 0.92, 0.8) * limb * I * uDiscL;
   gl_FragColor = vec4(col, 0.0);   // the Sun never occludes its own glare
@@ -239,6 +263,8 @@ const SWARM_VERT = /* glsl */ `
 attribute vec2 aCorner;   // quad corner, -1..1
 attribute vec4 aS;        // x: ring id (0..3, 4 = statite), y: angle, z: radial jitter, w: axial jitter
 uniform vec4 uRings[4];   // normal + radius
+uniform vec4 uPlanes[6];  // the collector planes: normal + radius
+uniform float uShellR;    // the statite shell's radius (km)
 uniform vec3 uSunPos;
 uniform float uT;         // sim seconds
 uniform float uPixAng;
@@ -257,7 +283,29 @@ ${NOISE_GLSL}
 void main() {
   int k = int(aS.x + 0.5);
   vec3 p;
-  if (k < 4) {
+  float S = 180.0;
+  if (k >= 6) {
+    // the collector planes: narrow sheets on their own Kepler orbits, each a slightly
+    // different radius so the planes shear past one another over the weeks
+    vec4 pl = uPlanes[k - 6];
+    vec3 n = pl.xyz;
+    vec3 e1 = normalize(cross(n, abs(n.y) < 0.9 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0)));
+    vec3 e2 = cross(n, e1);
+    float a = pl.w / ${AU.toFixed(1)};
+    float period = 365.25 * 86400.0 * a * sqrt(a);
+    float th = aS.y + 6.2831853 * fract(uT / period);
+    float R = pl.w * (1.0 + aS.z);
+    p = (e1 * cos(th) + e2 * sin(th)) * R + n * aS.w * pl.w;
+    vCol = vec3(1.0, 0.78, 0.5) * 0.8;
+    S = 120.0;
+  } else if (k == 5) {
+    // the statite shell (the Helianth's own): blocks of collectors in latitude bands and
+    // meridian sectors, held still on the light; aS: lon, sin(lat), block size
+    float cl = sqrt(max(1.0 - aS.z * aS.z, 0.0));
+    p = vec3(cl * cos(aS.y), aS.z, cl * sin(aS.y)) * uShellR * (1.0 + aS.w * 0.002);
+    vCol = vec3(1.0, 0.7, 0.42) * 0.55;
+    S = 40.0 + 30.0 * abs(aS.w);
+  } else if (k < 4) {
     vec4 rg = uRings[k];
     vec3 n = rg.xyz;
     vec3 e1 = normalize(cross(n, abs(n.y) < 0.9 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0)));
@@ -297,7 +345,6 @@ void main() {
   float facing = dot(nrm, toCam);
   vBody = facing > 0.0 ? 1.0 : 0.3;
   // size: 360 km panels, drawn at least 1.4 px across
-  float S = 180.0;
   float minS = uPixAng * dist * 0.7;
   float sz = max(S, minS);
   vUnres = smoothstep(0.7, 1.4, minS / S);
@@ -374,6 +421,41 @@ void main() {
 }
 `;
 
+// The statite shell the Helianth stands in (its offset from the Sun, src/space/workingStations.js)
+// and six narrow collector planes between the rings (normal + radius).
+const HELIO = new THREE.Vector3(0, 0.025, 0.004);
+export const SHELL_R = HELIO.length() * AU;
+export const SHELL_DIR = HELIO.clone().normalize();
+export const SWARM_PLANES = Array.from({ length: 6 }, (_, k) => {
+  const inc = 0.18 + 0.23 * k, psi = 2.2 + 1.05 * k;
+  const nrm = new THREE.Vector3(0, 1, 0).applyAxisAngle(new THREE.Vector3(Math.cos(psi), 0, Math.sin(psi)), inc);
+  return new THREE.Vector4(nrm.x, nrm.y, nrm.z, (0.038 + 0.017 * k + (k % 2) * 0.006) * AU);
+});
+/** Shell blocks: latitude bands 6 degrees apart with 1.2-degree streets, sectors 12 degrees wide with 1.5-degree avenues, the Helianth's cap left to the 3D lattice. */
+export function swarmShell(aS, off, count, rnd) {
+  const D = 180 / Math.PI, v = new THREE.Vector3(), cap = Math.cos(0.012);
+  let i = 0, guard = 0;
+  while (i < count && guard++ < count * 20) {
+    const z = rnd() * 2 - 1, lon = rnd() * Math.PI * 2;
+    const lat = Math.asin(z) * D, lo = lon * D;
+    if (((lat + 90) % 6) < 1.2 || (lo % 12) < 1.5 || Math.abs(lat) > 78) continue;
+    const cl = Math.sqrt(1 - z * z);
+    v.set(cl * Math.cos(lon), z, cl * Math.sin(lon));
+    if (v.dot(SHELL_DIR) > cap) continue;
+    aS.set([5, lon, z, (rnd() - 0.5) * 2], (off + i) * 4);
+    i++;
+  }
+  for (; i < count; i++) aS.set([5, 0, -0.99, 0], (off + i) * 4);   // (never reached in practice)
+}
+/** Plane collectors: angle, a tight radial spread and a thinner axial one (each plane is a sheet a few thousand km thick). */
+export function swarmPlanes(aS, off, count, rnd) {
+  for (let i = 0; i < count; i++) {
+    const k = i % 6;
+    const g = () => (rnd() + rnd() + rnd() - 1.5) / 1.5;
+    aS.set([6 + k, rnd() * Math.PI * 2, g() * 0.012, g() * 0.0015], (off + i) * 4);
+  }
+}
+
 export class SunSwarm {
   constructor(space, q) {
     this.space = space;
@@ -410,19 +492,26 @@ export class SunSwarm {
     }));
     this.corona.renderOrder = 20;
     this.sunGroup = new THREE.Group();
-    this.sunGroup.add(this.sphere, this.corona);
+    // coronal loop arcades over the active regions (src/space/sunLoops.js)
+    this.loops = createSunLoops(spot, spotE, this.uniforms);
+    this.sunGroup.add(this.sphere, this.corona, this.loops);
     this.group.add(this.sunGroup);
     // swarm mirrors: one instanced quad each
-    const n = q.swarm;
+    // (rings and polar statites as before, then the statite shell and the collector planes)
+    const n0 = q.swarm, nShell = Math.round(q.swarm * 1.2), nPlane = Math.round(q.swarm * 0.6);
+    const n = n0 + nShell + nPlane;
     const aS = new Float32Array(n * 4);
     let s = 12345;
     const rnd = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
-    for (let i = 0; i < n; i++) {
-      const stat = i < n * 0.08;
+    for (let i = 0; i < n0; i++) {
+      const stat = i < n0 * 0.08;
       const k = stat ? 4 : Math.floor(rnd() * 4);
       const g = () => (rnd() + rnd() + rnd() - 1.5) / 1.5;
       aS.set([k, rnd() * Math.PI * 2, stat ? Math.sqrt(rnd()) : g() * 0.035, stat ? (rnd() < 0.5 ? -1 : 1) * (0.5 + rnd()) : g() * 0.01], i * 4);
     }
+    swarmShell(aS, n0, nShell, rnd);
+    swarmPlanes(aS, n0 + nShell, nPlane, rnd);
+    this.swarmCounts = { rings: n0, shell: nShell, planes: nPlane };
     const g = new THREE.InstancedBufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(12), 3));
     g.setAttribute('aCorner', new THREE.Float32BufferAttribute([-1, -1, 1, -1, 1, 1, -1, 1], 2));
@@ -430,7 +519,7 @@ export class SunSwarm {
     g.setAttribute('aS', new THREE.InstancedBufferAttribute(aS, 4));
     g.instanceCount = n;
     this.swarmU = {
-      uRings: SKY_UNIFORMS.uSwarmN, uSunPos: { value: new THREE.Vector3() }, uT: { value: 0 }, uPixAng: { value: 0.001 }, uFade: { value: 0 },
+      uRings: SKY_UNIFORMS.uSwarmN, uPlanes: { value: SWARM_PLANES }, uShellR: { value: SHELL_R }, uSunPos: { value: new THREE.Vector3() }, uT: { value: 0 }, uPixAng: { value: 0.001 }, uFade: { value: 0 },
       uTime: this.uniforms.uTime, uSunE: this.uniforms.uSunE, uDiscL: this.uniforms.uDiscL,
     };
     this.swarm = new THREE.Mesh(g, new THREE.ShaderMaterial({
