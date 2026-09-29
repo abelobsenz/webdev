@@ -74,6 +74,15 @@ const _cp = V();
   }
 }
 
+// ---- 1c. the streak traffic's close-up hulls draw on the same designs, one set per class
+{
+  const { hullClassOf } = await import('../src/space/traffic.js');
+  const seen = new Set();
+  for (const t of [0, 1, 2, 3, 4]) for (let i = 0; i < 30; i++) { const c = hullClassOf(t, i); assert.ok(c >= 0 && c <= 6); seen.add(c); }
+  assert.equal(seen.size, 7, 'every close-up hull design is used');
+  assert.equal(hullClassOf(0, 0), 0, 'ring-lane ship 0 keeps the courier hull');
+}
+
 // ---- 2. the real scene (as the space mode assembles it)
 const sim = new SpaceSim();
 sim.syncFromHours(12);

@@ -3,7 +3,7 @@ import { createCraftMaterial, updateCraftMaterial } from '../craft/craftMaterial
 import { CRAFT_FRAME, KM } from './craftMesh.js';
 import { createLamps, LAMP } from './lamps.js';
 import { CORRIDORS } from './stations.js';
-import { DESIGNS } from './shipDesigns.js';
+import { design } from './shipDesigns.js';
 
 // THE WORKING LANES: dense, purposeful ship traffic round the Harbour and Selene Works, every
 // ship a real hull (src/space/shipDesigns.js) flying an analytic route in its station's frame.
@@ -471,7 +471,7 @@ export function buildFamilies() {
   const fam = {};
   const seeds = { hauler: [3, 8, 21], tanker: [5, 12], tug: [2, 7, 11], packet: [4, 9], barge: [6, 14], lighter: [1, 10], clipper: [2, 5] };
   const accents = { hauler: [1.0, 0.72, 0.45], tanker: [1.0, 0.62, 0.35], tug: [1.0, 0.8, 0.35], packet: [0.55, 0.88, 1.0], barge: [1.0, 0.66, 0.4], lighter: [0.5, 1.0, 0.8], clipper: [0.6, 0.9, 1.0] };
-  for (const [k, list] of Object.entries(seeds)) fam[k] = list.map((sd) => ({ ...DESIGNS[k](sd), accent: accents[k], seed: sd }));
+  for (const [k, list] of Object.entries(seeds)) fam[k] = list.map((sd) => ({ ...design(k, sd), accent: accents[k], seed: sd }));
   return fam;
 }
 

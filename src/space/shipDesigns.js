@@ -433,3 +433,11 @@ export function buildClipper(seed = 1) {
 }
 
 export const DESIGNS = { hauler: buildHauler, tanker: buildTanker, tug: buildWorkTug, packet: buildPacket, barge: buildBarge, lighter: buildLighter, clipper: buildClipper };
+
+/** A design by class and seed, built once and shared (the working lanes and the streak traffic's hulls). */
+const _built = new Map();
+export function design(cls, seed) {
+  const key = `${cls}:${seed}`;
+  if (!_built.has(key)) _built.set(key, DESIGNS[cls](seed));
+  return _built.get(key);
+}
