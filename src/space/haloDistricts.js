@@ -465,6 +465,30 @@ function rotors(B, M, lamps, S) {
   }
 }
 
+/**
+ * Service galleries slung under the deck slab (facing the Earth): utility trunks along the
+ * ring with lit crew corridors in their keels, hangers to the slab, and inspection lamps.
+ */
+export const UNDER = { slab: -400, xs: [-11500, -4200, 4200, 11500], half: 60, depth: 48 };
+function underDeck(B, M, lamps, S) {
+  for (const x of UNDER.xs) {
+    // the slab's underside follows the floor's sag, 400 m under it; embed the trunks 12 m
+    const y0 = S.deck(x) + UNDER.slab + 12 + 8;
+    const n = 10, pts = [];
+    for (let i = 0; i <= n; i++) { const a = Math.PI + (i / n) * Math.PI; pts.push([x + Math.cos(a) * UNDER.half, y0 - 8 + Math.sin(a) * UNDER.depth]); }
+    const rings = [];
+    for (let j = 0; j <= 4; j++) rings.push({ z: -TILE_L / 2 + (TILE_L * j) / 4, pts });
+    B.loft(rings, (i) => (i === 4 || i === 5 || i === 6 ? CK.LANTERN : i === 3 || i === 7 ? CK.GLASS : CK.HULL), { capStart: false, capEnd: false });
+    for (let z = -TILE_L / 2 + 125; z < TILE_L / 2; z += 250) {
+      M.push(new THREE.Matrix4().makeTranslation(x, y0 - 8, z).multiply(new THREE.Matrix4().makeRotationZ(Math.PI)));
+      M.torus(UNDER.half + 2, 1.6, 12, 4, CK.BRONZE, Math.PI);
+      M.pop();
+    }
+    for (let z = -TILE_L / 2 + 250; z < TILE_L / 2; z += 500) lamps.push({ p: V3(x, y0 - 8 - UNDER.depth - 4, z), r: 5, color: z % 1000 ? LAMP.WHITE : LAMP.AMBER, i: 2.0, breathe: 0.25, phase: (x / 23000 + 0.5) % 1 });
+    if (FAR) FAR.box(x, y0 - 8 - UNDER.depth / 2, 0, UNDER.half * 2, UNDER.depth, TILE_L, CK.LANTERN);
+  }
+}
+
 function crest(B, M, lamps, S, hubArch) {
   // wall crests: gantry rails, walkway, lamp masts; at a hub a gap under the arch corbel
   const gap = hubArch ? hubArch.gap : 0;
@@ -542,6 +566,7 @@ function buildDistrictBody(B, M, F, lamps, S, bay, r, variant) {
   spine(B, M, lamps, S, true);
   outerWall(B, M, lamps, S, bay);
   rotors(B, M, lamps, S);
+  underDeck(B, M, lamps, S);
   const weights = [
     { town: 0.52, park: 0.18, farm: 0.1, civic: 0.06, lake: 0.08, works: 0, stadium: 0.02, market: 0.04 },
     { town: 0.14, park: 0.2, farm: 0.52, civic: 0.02, lake: 0.08, works: 0.04, stadium: 0, market: 0 },

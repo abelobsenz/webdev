@@ -75,6 +75,15 @@ for (const v of D.variants) for (const g of [v.major, v.minor]) {
   });
 }
 out.vaultClearanceMetres = Math.round(vaultGap);
+// under-deck trunks hang from the slab's underside (embedded, not floating, not through the deck)
+{
+  let top = -Infinity, bottomOK = true;
+  for (const v of D.variants) eachVertex(v.major, (x, y) => {
+    for (const ux of [-11500, -4200, 4200, 11500]) if (Math.abs(x - ux) < 61 && y < S.deck(x) - 300) top = Math.max(top, y - (S.deck(x) - 400));
+  });
+  out.underDeckEmbedMetres = Math.round(top);
+  assert.ok(top > 5 && top < 20, 'Service trunks are seated 5-20 m into the slab underside');
+}
 // aircar lanes: an empty 14 m tube round every lane through every variant
 const lanes = aircarLanes(S);
 let laneHits = 0;
