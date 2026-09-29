@@ -8,7 +8,12 @@
 //   LOD:     fine and minor detail only near, mid silhouettes beyond the full massing range;
 //   shader:  the Halo kinds are woven into the craft shader, with no derivatives inside them,
 //            no pow() of a signed base, and every function they call defined;
-//   budget:  triangle counts per layer, build slices, update time and no per-frame allocation.
+//   budget:  triangle counts per layer, build slices, update time and no per-frame allocation;
+//   plan:    the deck paints each variant's cells exactly as built (textures checked texel by
+//            texel), ports and the foundry keep their ground, the plan and wall shaders stay
+//            free of derivatives and bare integers; Meridian's junction quarter is placed on
+//            the junction, clear of its vault opening; a camera arriving at the band gets its
+//            districts that frame, one on the approach gets them a few milliseconds at a time.
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import { SpaceSim, bodyDir } from '../src/space/sim.js';
