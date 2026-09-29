@@ -291,7 +291,7 @@ void craterOctave(inout Craters C, vec3 p, float cellKm, float fp, float quiet, 
     // complex: flat floor, terraced walls and a central peak for the big ones of coarse octaves
     float big = cplx * smoothstep(0.18, 0.34, rr);
     float fl = mix(0.0, 0.55, big);
-    // bowl h = -depth * (1 - smoothstep(fl, 1, x)): its slope on the walls
+    // the bowl, h = -depth (1.0 - smoothstep(fl, 1.0, x)): its slope on the walls
     float t = clamp((x - fl) / (1.0 - fl), 0.0, 1.0);
     float dhdx = x < 1.0 ? depth * 6.0 * t * (1.0 - t) / (1.0 - fl) : 0.0;
     // slumped terraces: the wall slope broken into steps (steep scarps, level benches)
