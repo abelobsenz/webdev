@@ -5,7 +5,7 @@
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import { HarbourStation, HS } from '../src/space/harbour.js';
-import { LIFE, cranePose, podR, PODS_PER_LINE, dronePose, armFrame } from '../src/space/harbourLife.js';
+import { LIFE, cranePose, podR, PODS_PER_LINE, dronePose, armFrame, ROAD, roadPose } from '../src/space/harbourLife.js';
 import { buildConcordYard, buildWaterStore, YARD, STORE, sectionPoint } from '../src/space/geoRoads.js';
 import { YardWorks, WORKS, craneBay, cranePlate, droneSites, dronePos, crewPodPos, podStops } from '../src/space/yardWorks.js';
 import { StoreWorks, PLUMB, storeDronePos } from '../src/space/storeWorks.js';
@@ -161,6 +161,31 @@ assert.ok(droneGap > 5, `arm drones clear the Harbour by ${droneGap} m`);
 assert.ok(boxGap > 1, `berth boxes clear the ships and fingers by ${boxGap} m`);
 // positive control: a pod line through the gallery's axis must collide
 { P.set(6000, 0, 0).applyMatrix4(armF[0]); assert.ok(hc.dist(P, 200) < 230 * HS, 'positive control: the gallery axis lies inside the gallery'); }
+
+// ---- the Ring Road: clear of the station, its ships and the turning rings; lanes never meet
+{
+  let g = Infinity, sep = Infinity, ringGap = Infinity;
+  const Q = V(), F = V();
+  const rimR = Math.max(...h.rings.map((r) => r.R + (r.R > 4000 ? 560 : 430) * HS + 30 * HS));
+  const rimY = Math.max(...h.rings.map((r) => Math.abs(r.y) + (r.R > 4000 ? 1010 : 750) * HS));
+  for (const t of [0, 17, 60, 145, 233]) {
+    const pts = [];
+    for (let l = 0; l < ROAD.lanes.length; l++) for (let k = 0; k < ROAD.lanes[l].n; k++) {
+      roadPose(l, k, t, Q, F); pts.push(Q.clone());
+      g = Math.min(g, hc.dist(Q, 500) - 25);
+      const rr = Math.hypot(Q.x, Q.z);
+      if (Math.abs(Q.y) < rimY + 30) ringGap = Math.min(ringGap, rr - rimR - 25);
+      assert.ok(Math.abs(F.length() - 1) < 1e-9);
+    }
+    for (let i = 0; i < pts.length; i++) for (let j = i + 1; j < pts.length; j++) sep = Math.min(sep, pts[i].distanceTo(pts[j]));
+  }
+  Object.assign(results, { roadClearM: Number.isFinite(g) ? Math.round(g) : '>500', roadRingClearM: Math.round(ringGap), roadSeparationM: Math.round(sep) });
+  assert.ok(g > 200, `ring road clears the Harbour and its ships (${g} m; Infinity: nothing within 500 m)`);
+  assert.ok(ringGap > 400, `ring road clears the turning rims by ${ringGap} m`);
+  assert.ok(sep > 150, `ring road craft keep ${sep} m apart`);
+  const armLow = Math.min(...h.arms.map((a) => Math.abs(a.y))) - (230 + 440) * HS;      // gallery town's lowest mast
+  assert.ok(armLow - Math.max(...ROAD.lanes.map((l) => Math.abs(l.y))) - 18 > 400, 'ring road passes well below the arms and their towns');
+}
 
 // ===================================================================== the terrace's people
 {

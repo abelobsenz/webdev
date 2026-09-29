@@ -1,12 +1,12 @@
 import * as THREE from 'three';
 import { CB, CK } from '../craft/craftGeometry.js';
-import { lathe } from '../craft/craftClasses.js';
+import { lathe, buildCourier } from '../craft/craftClasses.js';
 import { LAMP } from './lamps.js';
 import { addLamps, pixelRadius, KM } from './craftMesh.js';
 import { HS } from './harbour.js';
 import {
   TAU, V, smooth, lerp, rng, hash1, schedule, instancedPart, fillInstances, DynLamps,
-  capsuleGeo, containerGeo, droneGeo, cableGeo, poseMatrix, spanMatrix,
+  capsuleGeo, containerGeo, droneGeo, crewPodGeo, cableGeo, poseMatrix, spanMatrix,
 } from './lifeKit.js';
 
 // THE HARBOUR AT WORK. The station (harbour.js) is the fabric; this is what moves in it and
@@ -92,6 +92,23 @@ export function dronePose(t, j, armIndex, outP, outF) {
   s -= Ls;
   const a = s / Rt + Math.PI / 2;
   outP.set(DR.r0 + Math.cos(a) * Rt, DR.y + bob, Math.sin(a) * Rt); outF.set(-Math.sin(a), 0, Math.cos(a));
+  return outP;
+}
+
+// ---- the Ring Road: two lanes of small craft circling the Harbour in the middle ring's plane,
+//      outside the ring's rim (4.69 km) and inside the berth fingers' radius, the fingers and
+//      their ships lying 1 km and more above and below the lanes (drawn metres)
+export const ROAD = { R: 5850, weave: 70, speed: 150, lanes: [{ y: 130, dir: 1, n: 64 }, { y: -130, dir: -1, n: 64 }] };
+/** Craft k of lane l at time t (drawn metres, Harbour frame): position and heading. */
+export function roadPose(l, k, t, outP, outF) {
+  const L = ROAD.lanes[l];
+  const a = (k / L.n) * TAU + 0.035 * hash1(k * 1.3 + l) + L.dir * (ROAD.speed / ROAD.R) * t;
+  const r = ROAD.R + ROAD.weave * Math.sin(3 * a + l);
+  const dr = 3 * ROAD.weave * Math.cos(3 * a + l);
+  const c = Math.cos(a), s = Math.sin(a);
+  outP.set(c * r, L.y + 18 * Math.sin(5 * a + k), s * r);
+  // d/da of the path, turned to the lane's direction
+  outF.set((dr * c - r * s) * L.dir, 0, (dr * s + r * c) * L.dir).normalize();
   return outP;
 }
 
@@ -294,6 +311,18 @@ export class HarbourLife {
     for (let i = 0; i < n; i++) dl.push({ p: V(0, 0, 0), r: 9, color: LAMP.AMBER, i: 2.6, breathe: 0.6, phase: i / n });
     this.dynLamps = new DynLamps(dl, { minPx: 1.1 });
     this.root.add(this.dynLamps.mesh);
+    // ---- the Ring Road (its own holder: its lights show from much further out than the rest)
+    this.road = new THREE.Group();
+    this.road.scale.setScalar(KM);
+    station.group.add(this.road);
+    const nRoad = ROAD.lanes.reduce((a, l) => a + l.n, 0);
+    this.roadCouriers = instancedPart(body, buildCourier(44).geo, Math.ceil(nRoad / 2));
+    this.roadPods = instancedPart(body, crewPodGeo(16), Math.ceil(nRoad / 2));
+    this.road.add(this.roadCouriers, this.roadPods);
+    const rl = [];
+    for (let i = 0; i < nRoad; i++) rl.push({ p: V(), r: 5, color: LAMP.WHITE, i: 2.6 }, { p: V(), r: 4, color: LAMP.RED, i: 2.2 });
+    this.roadLamps = new DynLamps(rl, { minPx: 1.2 });
+    this.road.add(this.roadLamps.mesh);
     // ---- the rings: lift cars on the spokes, fins and street bands on the rims (children of the rings)
     this.ringLife = station.rings.map((ring, ri) => {
       const d = h.rings[ri];
@@ -338,8 +367,30 @@ export class HarbourLife {
   /** Count of rendered triangles at full detail (for the budget check). */
   triangles() {
     let t = 0;
-    this.root.traverse((o) => { if (o.isMesh && o.geometry.index) t += (o.geometry.index.count / 3) * (o.isInstancedMesh ? o.count : 1); });
+    for (const g of [this.root, this.road]) g.traverse((o) => { if (o.isMesh && o.geometry.index && !o.geometry.isInstancedBufferGeometry) t += (o.geometry.index.count / 3) * (o.isInstancedMesh ? o.count : 1); });
     return t;
+  }
+
+  /** The Ring Road: lights from 25 px, hulls from 160 px. */
+  updateRoad(t, px) {
+    this.road.visible = px > 25;
+    if (!this.road.visible) return;
+    const hulls = px > 160;
+    this.roadCouriers.visible = hulls; this.roadPods.visible = hulls;
+    const m = this._m, p = this._p, f = this._f;
+    let q = 0, qc = 0, qp = 0;
+    for (let l = 0; l < ROAD.lanes.length; l++) for (let k = 0; k < ROAD.lanes[l].n; k++) {
+      roadPose(l, k, t, p, f);
+      if (hulls) {
+        poseMatrix(m, p, f, this._up, 1);
+        if ((k + l) % 2) this.roadCouriers.setMatrixAt(qc++, m); else this.roadPods.setMatrixAt(qp++, m);
+      }
+      const len = (k + l) % 2 ? 24 : 9;
+      this.roadLamps.set(q++, p.x + f.x * len, p.y + 3, p.z + f.z * len);
+      this.roadLamps.set(q++, p.x - f.x * len, p.y + 3, p.z - f.z * len);
+    }
+    if (hulls) { this.roadCouriers.instanceMatrix.needsUpdate = true; this.roadPods.instanceMatrix.needsUpdate = true; }
+    this.roadLamps.commit();
   }
 
   update(realTime, space) {
@@ -348,6 +399,7 @@ export class HarbourLife {
     if (space && space.camera) px = pixelRadius(space.camera, this.station.group.getWorldPosition(this._w), 13, space.size.y);
     const on = px > 220;
     this.root.visible = on;
+    this.updateRoad(realTime, px);
     if (!on) return;
     for (const rl of this.ringLife) rl.pivot.rotation.y = rl.ring.rotation.y;
     const t = realTime;
