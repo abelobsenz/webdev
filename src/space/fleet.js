@@ -12,7 +12,7 @@ import { FleetTraffic } from './fleetTraffic.js';
 import { buildWorksTender } from './tenderHull.js';
 import { buildConcordLiner } from './linerHull.js';
 import { buildLinerDetail, buildFreighterDetail, buildTenderDetail, buildEvaWorker, evaPose, evaLines, EVA_PARTIES } from './linerDetail.js';
-import { buildWheelDetail, buildLiftCar, buildRingCrane, liftPose, craneAngle, RING } from './seleneDetail.js';
+import { buildWheelDetail, buildLiftCar, buildRingCrane, liftPose, craneAngle, RING, seleneShells, seleneWheelShells } from './seleneDetail.js';
 
 /** km: the liners' near fittings are drawn inside this range (a 2.4 km hull spans ~60 px at 60 km). */
 export const LINER_DETAIL_RANGE = 60;
@@ -305,7 +305,7 @@ export class Fleet {
     this.refineryData = ref;
     this.refinery = new THREE.Group();
     const rm = dressedMesh(dressSelene(ref), { accent: [1.0, 0.7, 0.4], lit: 0.55, livery: LIVERIES[3][0], livery2: LIVERIES[3][1] });
-    const wm = craftPart(rm, ref.wheel);
+    const wm = craftPart(rm, mergeCraft([ref.wheel, seleneWheelShells()]));      // (smooth hub and spokes: seleneDetail.js)
     rm.add(wm);
     this.wheel = wm;
     rm.add(createGlowMesh(ref.glows, { color: [1.0, 0.62, 0.35], strength: 1.0, scale: KM }));
@@ -656,6 +656,20 @@ export function markTender(geo) {
   return repaint(geo, (x, y, z, k) => (Math.abs(k - CK.HULL) > 0.01 ? k : y > 18 ? DK.LIVERY : DK.GRIME));
 }
 
+/** Merge craft geometries on their shared attributes (position, normal, aFacade). */
+export function mergeCraft(list) {
+  const gs = list.map((g) => {
+    const o = new THREE.BufferGeometry();
+    if (!g.attributes.normal) g.computeVertexNormals();
+    for (const k of ['position', 'normal', 'aFacade']) o.setAttribute(k, g.attributes[k]);
+    o.setIndex(g.index);
+    return o;
+  });
+  const g = mergeGeometries(gs, false);
+  g.computeBoundingBox(); g.computeBoundingSphere();
+  return g;
+}
+
 /**
  * Selene Works dressed (the refinery's shape is the builder's), for its 11 km framing:
  *   tanks       the eight cryogenic tanks in smooth insulated shells (the builder's 18-sided
@@ -672,7 +686,7 @@ export function markTender(geo) {
 export const SELENE_FIN = { r0: 650, r1: 2350, y: -1350, h: 620, pitch: 170, spar: [8, 640, 44] };
 export function dressSelene(ref) {
   const angles = ref.radiators.map((r) => r.angle);
-  const painted = repaint(ref.geo, (x, y, z, k) => (Math.abs(k - CK.HULL) < 0.01 && x * x + z * z < 300 * 300 ? DK.GRIME : Math.abs(k - CK.RADIATOR) < 0.01 ? DK.HOTRAD : k));
+  const painted = repaint(mergeCraft([ref.geo, seleneShells()]), (x, y, z, k) => (Math.abs(k - CK.HULL) < 0.01 && x * x + z * z < 300 * 300 ? DK.GRIME : Math.abs(k - CK.RADIATOR) < 0.01 ? DK.HOTRAD : k));
   // the radiator panels' facade: across (height) and out from the root, at quarter scale
   {
     const P = painted.attributes.position, F = painted.attributes.aFacade.array;
@@ -717,14 +731,7 @@ export function dressSelene(ref) {
     B.pop();
   }
   const spars = B.geometry();
-  const plain = new THREE.BufferGeometry();
-  for (const k of ['position', 'aFacade', 'normal']) plain.setAttribute(k, painted.attributes[k]);
-  plain.setIndex(painted.index);
-  const sp2 = new THREE.BufferGeometry();
-  for (const k of ['position', 'aFacade', 'normal']) sp2.setAttribute(k, spars.attributes[k]);
-  sp2.setIndex(spars.index);
-  const g = mergeGeometries([plain, shells, sp2], false);
-  g.computeBoundingSphere(); g.computeBoundingBox();
+  const g = mergeCraft([painted, shells, spars]);
   g.userData.shellVertices = pos.length / 3;
   return g;
 }

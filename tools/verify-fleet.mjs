@@ -730,6 +730,79 @@ assert.ok(minClear > 0, `working lanes clear every structure with ${minClear} km
       }
     }
   }
+  // ---- 9c. the tenders drawn built (src/space/tenderHull.js): smooth pods on the builder's
+  // stations (their crowns where the fittings are seated), hazard ends, finishes, buffers sane
+  {
+    const { buildWorksTender, POD_CENTRES } = await import('../src/space/tenderHull.js');
+    const t0 = performance.now();
+    const g = buildWorksTender(fleet.tenderData);
+    out.tenderHullMs = +(performance.now() - t0).toFixed(1);
+    assert.ok(out.tenderHullMs < 150, `tender hull builds in ${out.tenderHullMs} ms`);
+    assert.ok(fleet.tenders.every((t) => t.mesh.geometry.index.count === g.index.count), 'every tender draws the built hull');
+    const P = g.attributes.position, F = g.attributes.aFacade.array;
+    let mx = 0; for (const i of g.index.array) if (i > mx) mx = i;
+    assert.ok(mx < P.count && g.attributes.normal.count === P.count && g.attributes.aFacade.count === P.count, 'tender hull buffers sized');
+    for (let i = 0; i < P.array.length; i++) assert.ok(Number.isFinite(P.array[i]) && Number.isFinite(F[i]), 'tender hull finite');
+    const cnt = {};
+    for (let i = 2; i < F.length; i += 3) cnt[F[i]] = (cnt[F[i]] || 0) + 1;
+    out.tenderHullKinds = { tank: cnt[38] || 0, hazard: cnt[23] || 0, nozzle: cnt[29] || 0, livery: cnt[20] || 0, grime: cnt[24] || 0 };
+    const K = out.tenderHullKinds;
+    assert.ok(K.tank > 5000 && K.hazard > 1000 && K.nozzle > 500 && K.livery > 500 && K.grime > 500, `tender finishes ${JSON.stringify(K)}`);
+    out.tenderHullTriangles = g.index.count / 3;
+    assert.ok(out.tenderHullTriangles > 30000 && out.tenderHullTriangles < 150000, `tender triangles ${out.tenderHullTriangles}`);
+    // each pod's crown (straight up from its centre) lies where the builder's crown was, within 0.2 m
+    const s = fleet.tenderData.length / 300, mat = new THREE.MeshBasicMaterial({ side: THREE.DoubleSide });
+    const mB = new THREE.Mesh(fleet.tenderData.geo, mat), mN = new THREE.Mesh(g, mat);
+    mB.updateMatrixWorld(true); mN.updateMatrixWorld(true);
+    const ray = new THREE.Raycaster();
+    for (const c of POD_CENTRES) {
+      ray.set(V(c.x * s, 300, (c.z + 4) * s), V(0, -1, 0));
+      const a = ray.intersectObject(mB, false)[0], b = ray.intersectObject(mN, false)[0];
+      assert.ok(a && b && Math.abs(a.point.y - b.point.y) < 0.2 * s, `pod crown at ${c.toArray()} (${a && a.point.y} vs ${b && b.point.y})`);
+    }
+    // the drawn tender inside the builder's envelope, a few metres either way
+    const bb = new THREE.Box3().setFromBufferAttribute(fleet.tenderData.geo.attributes.position);
+    const dev = Math.max(...bb.min.clone().sub(g.boundingBox.min).toArray().map(Math.abs), ...bb.max.clone().sub(g.boundingBox.max).toArray().map(Math.abs));
+    out.tenderEnvelopeDevM = +dev.toFixed(2);
+    assert.ok(dev < 8 * s, `tender envelope kept (${dev})`);
+    mat.dispose();
+  }
+  // ---- 9d. Selene's smooth shells and finned radiators: the shells enclose the builder's
+  // volumes by less than 2 %, the radiator facade runs out from the root, spars inside the fins' envelope
+  {
+    const { seleneShells, seleneWheelShells, RAIL_Y } = await import('../src/space/seleneDetail.js');
+    const { SELENE_FIN } = await import('../src/space/fleet.js');
+    const sh = seleneShells(), ws = seleneWheelShells();
+    for (const g of [sh, ws]) {
+      let mx = 0; for (const i of g.index.array) if (i > mx) mx = i;
+      assert.ok(mx < g.attributes.position.count, 'shell index in range');
+      for (let i = 0; i < g.attributes.position.array.length; i++) assert.ok(Number.isFinite(g.attributes.position.array[i]), 'shell finite');
+    }
+    out.seleneShellTriangles = [sh.index.count / 3, ws.index.count / 3];
+    assert.ok(out.seleneShellTriangles[0] < 120000 && out.seleneShellTriangles[1] < 30000, `Selene shells in budget ${out.seleneShellTriangles}`);
+    // spindle shell vs the builder's spindle radius at sampled heights (radius over 1.0 .. 1.02)
+    const P = sh.attributes.position;
+    let lo = Infinity, hi = 0;
+    for (let i = 0; i < P.count; i++) {
+      const y = P.getY(i), r = Math.hypot(P.getX(i), P.getZ(i));
+      if (y > -400 && y < 1100 && r > 50 && r < 125) { lo = Math.min(lo, r / 110); hi = Math.max(hi, r / 110); }
+    }
+    assert.ok(lo > 1.0 && hi < 1.02 * (120 / 110), `spindle shell hugs the spindle (${lo.toFixed(4)}..${hi.toFixed(4)})`);
+    const wp = ws.attributes.position;
+    let spokeTop = -Infinity;
+    for (let i = 0; i < wp.count; i++) { const r = Math.hypot(wp.getX(i), wp.getZ(i)); if (r > 400 && r < 2100) spokeTop = Math.max(spokeTop, wp.getY(i)); }
+    assert.ok(spokeTop < RAIL_Y - 0.5 && spokeTop > RAIL_Y - 3, `spoke shells stay under the lift rail (${spokeTop} vs ${RAIL_Y})`);
+    // the finned radiators: facade out from the root, never negative, spars inside the fin envelope
+    const sg2 = fleet.refineryMesh.geometry, F2 = sg2.attributes.aFacade.array, P2 = sg2.attributes.position;
+    let hot = 0;
+    for (let i = 0; i < P2.count; i++) if (F2[i * 3 + 2] === 27) {
+      hot++;
+      const r = Math.hypot(P2.getX(i), P2.getZ(i));
+      assert.ok(F2[i * 3 + 1] >= 0 && Math.abs(F2[i * 3 + 1] - Math.max(r - SELENE_FIN.r0, 0) / 4) < 1e-3, 'radiator facade runs out from the root');
+    }
+    assert.ok(hot >= 4 * 24, `Selene radiators finned (${hot} vertices)`);
+    for (const r of fleet.refineryData.radiators) assert.ok(SELENE_FIN.y + SELENE_FIN.spar[1] / 2 <= r.yMax + 1e-6 && SELENE_FIN.y - SELENE_FIN.spar[1] / 2 >= r.yMin - 1e-6, 'spars inside the fin envelope');
+  }
   // Selene's foil tank shells: smooth, and their inner chords clear every vertex of the old tank
   const sg = fleet.refineryMesh.geometry, sp = sg.attributes.position;
   assert.ok(1.006 * Math.cos(Math.PI / 48) ** 2 > 1.0005, 'tank shell chords clear the builder tank');
