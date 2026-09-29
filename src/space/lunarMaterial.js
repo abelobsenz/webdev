@@ -112,6 +112,21 @@ void main() {
     alb *= 1.0 - 0.3 * max(gridLine(f.x, 12.0, 0.08, fw.x), gridLine(f.y, 7.0, 0.08, fw.y)) * detP;
     alb *= 1.0 - 0.14 * max(cLine(f.y, 42.0, 0.5, fw.y), cLine(f.x, 36.0, 0.4, fw.x));
     rough = 0.36 + 0.1 * h * detP;
+    // a working hull: the odd panel replaced in a cooler or warmer alloy, grime streaking
+    // down from the seams, stencilled bands, and portholes lit from within along some rows
+    vec3 alloy = h > 0.86 ? vec3(0.84, 0.89, 1.0) : (h < 0.1 ? vec3(1.0, 0.93, 0.82) : vec3(1.0));
+    alb *= mix(vec3(1.0), alloy, detP);
+    float streak = vnoise(vec2(f.x * 0.45, f.y * 0.03 + h * 7.0));
+    alb *= 1.0 - 0.16 * smoothstep(0.45, 0.95, streak) * detP;
+    float stencil = cLine(f.y + 3.5, 42.0, 0.35, fw.y) * step(0.5, fract(f.x / 9.0)) * step(0.55, hash12(floor(f / vec2(9.0, 42.0)) + 8.0));
+    alb = mix(alb, uAccent * 0.55, stencil * 0.7 * detP);
+    vec2 pr = floor(f / vec2(2.4, 7.0));
+    float rowLit = step(0.72, hash12(vec2(0.0, pr.y) + 21.0));
+    vec2 pl = (fract(f / vec2(2.4, 7.0)) - vec2(0.5, 0.5)) * vec2(2.4, 7.0);
+    float port = (1.0 - smoothstep(0.32, 0.32 + max(fw.x, fw.y), length(pl))) * rowLit;
+    float portV = mix(rowLit * 0.055, port, det);
+    alb = mix(alb, vec3(0.05, 0.06, 0.08), portV * 0.8);
+    em += vec3(1.0, 0.8, 0.55) * portV * (0.25 + 0.75 * night) * 0.6 * step(0.3, hash12(pr + 4.0));
   } else if (k < 2.5) {
     float fin = max(gridLine(f.x, 3.0, 0.12, fw.x), gridLine(f.y, 5.0, 0.15, fw.y)) * det;
     alb = mix(vec3(0.9, 0.85, 0.75), vec3(0.5), fin);
@@ -135,7 +150,12 @@ void main() {
     float pl = max(gridLine(f.x, 2.4, 0.03, fw.x), gridLine(f.y, 2.4, 0.03, fw.y)) * det;
     alb = vec3(0.6, 0.59, 0.56) * (1.0 - 0.3 * pl); rough = 0.6;
   } else if (k < 10.5) {
-    alb = vec3(0.13, 0.13, 0.14); rough = 0.5; metal = 0.5;
+    // dark service metal: a 0.3 m grating or ribbing, access plates, worn bright at the edges
+    float grate = max(gridLine(f.x, 0.3, 0.03, fw.x), gridLine(f.y, 0.3, 0.03, fw.y)) * (1.0 - smoothstep(0.02, 0.08, px));
+    float plate = hash12(floor(f / vec2(3.0, 2.0)) + 17.0);
+    alb = vec3(0.13, 0.13, 0.14) * (0.85 + 0.3 * plate * detP) * (1.0 - 0.35 * grate);
+    alb += vec3(0.1, 0.09, 0.08) * max(gridLine(f.x, 3.0, 0.05, fw.x), gridLine(f.y, 2.0, 0.05, fw.y)) * det;
+    rough = 0.5 - 0.15 * plate; metal = 0.5;
   } else if (k < 11.5) {
     alb = vec3(0.1, 0.09, 0.085); rough = 0.7;
     float ch = mix(0.17, gridLine(f.y, 24.0, 2.0, fw.y), 1.0 - smoothstep(4.0, 9.0, fw.y));
@@ -168,13 +188,26 @@ void main() {
     win *= 1.0 - plinth;
     float meanWin = 0.36 * (1.0 - plinth);
     float wv = mix(meanWin, win, det);
-    alb = vec3(0.62, 0.595, 0.535) * (0.94 + 0.08 * mix(0.5, hash12(floor(f / vec2(16.0, 14.4)) + 2.0), detP));
+    // each 48 m of frontage its own stone: pale limestone, honey sandstone, rose granite,
+    // blue-grey slate render; a darker string course every fourth storey, a cornice line
+    // under the roof of each block, soot under the sills
+    float bh = hash12(floor(f.x / 48.0) + vec2(3.7, floor(f.y / 57.6)));
+    vec3 stoneC = bh < 0.35 ? vec3(0.62, 0.595, 0.535) : (bh < 0.6 ? vec3(0.66, 0.55, 0.38) : (bh < 0.8 ? vec3(0.6, 0.47, 0.43) : vec3(0.5, 0.54, 0.57)));
+    alb = stoneC * (0.94 + 0.08 * mix(0.5, hash12(floor(f / vec2(16.0, 14.4)) + 2.0), detP));
+    float course = cLine(f.y - 0.3, 14.4, 0.28, fw.y) * (1.0 - plinth);
+    alb *= 1.0 - 0.22 * course * detP;
+    float soot = (1.0 - smoothstep(0.0, 0.1, lc.y)) * (1.0 - smoothstep(0.3, 0.34, abs(lc.x - 0.5))) * (1.0 - plinth);
+    alb *= 1.0 - 0.18 * soot * det;
     alb = mix(alb, vec3(0.06, 0.07, 0.08), wv * 0.9);
     alb *= 1.0 - 0.12 * plinth;
     rough = mix(0.7, 0.1, wv); metal = 0.0;
     float lit = mix(uLit, step(1.0 - uLit, h), det);
-    vec3 lamp = mix(vec3(1.0, 0.72, 0.45), vec3(1.0, 0.86, 0.66), step(0.7, fract(h * 5.3)));
-    em = lamp * wv * lit * 0.5 * (0.15 + 0.85 * night);
+    // the rooms behind: warm lamps mostly, some cool, a few coloured by their curtains; a
+    // drawn blind lights only the top of its window
+    float hc = fract(h * 5.3);
+    vec3 lamp = hc < 0.55 ? vec3(1.0, 0.72, 0.45) : (hc < 0.8 ? vec3(1.0, 0.86, 0.66) : (hc < 0.9 ? vec3(0.75, 0.88, 1.0) : vec3(1.0, 0.55, 0.45)));
+    float blind = mix(1.0, step(0.5, lc.y) * 0.7 + 0.3, step(0.8, fract(h * 13.1)) * det);
+    em = lamp * wv * lit * blind * 0.5 * (0.15 + 0.85 * night);
   } else if (k < 21.5) {
     float g = vnoise(f * 0.18) * 0.6 + vnoise(f * 0.9) * 0.4 * det;
     alb = mix(vec3(0.035, 0.085, 0.025), vec3(0.11, 0.17, 0.05), g);
