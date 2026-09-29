@@ -475,3 +475,15 @@ console.log('SUN_LOOPS_VERIFIED');
   console.log(JSON.stringify({ yardTris: out.yardTris, yardBuildMs: out.yardBuildMs, yardStreetGapKm: out.yardStreetGapKm, yardBeamGapKm: out.yardBeamGapKm }));
 }
 console.log('SWARM_YARD_VERIFIED');
+// the photosphere and corona: every declared uniform supplied (the disc now reads the prominences for its filaments)
+{
+  const s = new SunSwarm({}, { swarm: 1000 });
+  for (const mesh of [s.sphere, s.corona, s.swarm]) {
+    const mat = mesh.material;
+    for (const u of [...mat.vertexShader.matchAll(/uniform\s+\w+\s+(\w+)/g), ...mat.fragmentShader.matchAll(/uniform\s+\w+\s+(\w+)/g)].map((x) => x[1])) assert.ok(u in mat.uniforms, `sun uniform ${u} supplied`);
+    const vv = new Set([...mat.vertexShader.matchAll(/varying\s+(\w+)\s+(\w+)/g)].map((x) => x[1] + ' ' + x[2]));
+    for (const x of mat.fragmentShader.matchAll(/varying\s+(\w+)\s+(\w+)/g)) assert.ok(vv.has(x[1] + ' ' + x[2]), `sun varying ${x[2]} matched`);
+  }
+  assert.equal(s.uniforms.uProm.value.length, 9, 'nine prominences for nine filaments');
+}
+console.log('SUN_SHADERS_UNIFORMS_VERIFIED');

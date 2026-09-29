@@ -55,6 +55,9 @@ uniform float uDiscL;         // radiance of the disc centre
 uniform float uTime;
 uniform vec4 uSpot[8];        // centre (unit, sun frame) + angular size (rad)
 uniform vec4 uSpotE[8];       // group axis (unit, tangent) + tilt
+uniform vec4 uProm[9];        // prominence sheets: normal + kind (seen on the disc as filaments)
+uniform vec4 uPromA[9];       // first footpoint (unit) + angular length (rad)
+uniform vec4 uPromH[9];       // height (R), seed
 varying vec3 vN;
 varying vec3 vLocal;
 varying vec3 vWorld;
@@ -131,6 +134,26 @@ void main() {
     }
   }
   I += fac * 0.22 * pow(m1, 1.5);
+  // filaments: the prominences seen from above against the disc, dark serpentine threads along
+  // their sheets' feet, a little wider for the taller ones; below a pixel their contrast
+  // spreads out rather than breaking into dashes
+  for (int k = 0; k < 9; k++) {
+    vec3 nW = uProm[k].xyz;
+    float dp = dot(p, nW);
+    if (abs(dp) > 0.03) continue;
+    vec3 e1 = uPromA[k].xyz;
+    vec3 e2 = cross(nW, e1);
+    float th = atan(dot(p, e2), dot(p, e1));
+    float u = th / max(uPromA[k].w, 1e-4);
+    if (u < -0.05 || u > 1.05) continue;
+    float wig = 0.004 * snoise(p * 60.0 + vec3(uPromH[k].y));
+    float wf = 0.0025 + 0.012 * uPromH[k].x * sin(3.14159 * clamp(u, 0.0, 1.0));
+    float w = max(wf, aa);
+    float mask = (1.0 - smoothstep(w * 0.5, w, abs(dp - wig))) * (wf / w);
+    mask *= smoothstep(-0.05, 0.08, u) * (1.0 - smoothstep(0.92, 1.05, u));
+    mask *= 0.75 + 0.25 * snoise(p * 400.0 + vec3(float(k) * 3.1));
+    I *= 1.0 - 0.42 * clamp(mask, 0.0, 1.0);
+  }
   // the disc's own edge, a pixel wide
   vec3 col = vec3(1.0, 0.92, 0.8) * limb * I * uDiscL;
   gl_FragColor = vec4(col, 0.0);   // the Sun never occludes its own glare
