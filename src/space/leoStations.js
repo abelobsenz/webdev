@@ -299,6 +299,8 @@ export function buildHabitat() {
     W.tube([p0, p1], 13, 16, CK.HULL);
     for (const z of [-17, 17]) W.tube([p0.clone().setZ(z), p1.clone().setZ(z)], 4, 10, CK.GLASS);
     for (let j = 1; j < 8; j++) { atAim(W, p0.clone().lerp(p1, j / 8), V(c, s, 0)); W.lathe([[13, -2, CK.BRONZE], [18, -1, CK.BRONZE], [18, 1, CK.HULL], [13, 2, CK.BRONZE]], 20, 0, { closedProfile: true }); W.pop(); }
+    // the spoke's load-bearing truss round its lift shafts (the pressure tube only carries air)
+    truss(W, V(c * (HAB.hubR + 6), s * (HAB.hubR + 6), 0), V(c * (r0 - 24), s * (r0 - 24), 0), 48, 40, 1.0, CK.DARK);
     wheelLamps.push({ p: V(c * (R + 8), s * (R + 8), 0), r: 4, color: k % 2 ? LAMP.RED : LAMP.GREEN, i: 3.2 });
   }
   W.lathe([[HAB.axle + 8, -60, CK.DARK], [HAB.hubR - 6, -60, CK.HULL], [HAB.hubR, -50, CK.BRONZE], [HAB.hubR, -20, CK.HULL], [HAB.hubR + 2, -10, CK.GLASS],
@@ -699,6 +701,16 @@ export function buildSkyhookHub() {
     solarWing(B, lamps, s, SKYHOOK.hubR + 6, 150, 50, 4, 0);
     radiatorWing(B, V(0, 0, s * SKYHOOK.hubR), V(0, 0, s), V(0, 1, 0), 90, 30, lamps, s > 0 ? LAMP.GREEN : LAMP.RED);
   }
+  // the drum's structure: sixteen longerons carrying the tether load from spool to spool past
+  // the bearing band, hoop frames between them, and a lit tension gauge band at each shoulder
+  for (let k = 0; k < 16; k++) {
+    const a = (k / 16) * TAU, c = Math.cos(a), sn = Math.sin(a), r0 = SKYHOOK.hubR + 1.6;
+    for (const s of [-1, 1]) B.box(c * r0, s * 37, sn * r0, 2.4, 34, 2.4, CK.BRONZE);
+    B.tube([V(c * 30, -66, sn * 30), V(c * r0, -54, sn * r0)], 1.0, 4, CK.BRONZE);
+    B.tube([V(c * 30, 66, sn * 30), V(c * r0, 54, sn * r0)], 1.0, 4, CK.BRONZE);
+  }
+  for (const y of [-46, -30, 30, 46]) { B.push(tr(0, y, 0).multiply(toY)); B.torus(SKYHOOK.hubR + 1.2, 1.1, 64, 4, CK.DARK); B.pop(); }
+  for (const s of [-1, 1]) { B.push(tr(0, s * 56, 0).multiply(toY)); B.torus(SKYHOOK.hubR - 1, 1.4, 64, 6, CK.CONDUIT); B.pop(); }
   B.push(tr(0, 34, 0).multiply(new THREE.Matrix4().makeRotationX(Math.PI / 2)));
   B.torus(SKYHOOK.hubR + 14, 6, 96, 12, CK.GLASS);
   for (let k = 0; k < 6; k++) { const a = (k / 6) * TAU + 0.3; B.tube([V(Math.cos(a) * SKYHOOK.hubR, Math.sin(a) * SKYHOOK.hubR, 0), V(Math.cos(a) * (SKYHOOK.hubR + 8), Math.sin(a) * (SKYHOOK.hubR + 8), 0)], 2, 8, CK.HULL); }
