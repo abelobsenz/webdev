@@ -350,9 +350,14 @@ export function buildWaterStore() {
     const a = (k / 4) * TAU, d = V(Math.cos(a), 0, Math.sin(a));
     const top = d.clone().multiplyScalar(620).setY(yw - 100);
     B.tube([d.clone().multiplyScalar(STORE.wheelR - 20).setY(yw - 6), top.clone().add(V(0, -20, 0))], 8, 8, CK.DARK);
+    // each leaf five ceramic panels hung from a bronze header, coolant risers in the gaps
+    // between them and a tie bar along the foot (one 360 x 600 m slab read as a lit billboard)
     B.at(top.x, yw - 420, top.z, 0, -a, 0);
-    B.box(0, 0, 0, 360, 600, 8, CK.RADIATOR);
-    B.box(0, 304, 0, 368, 8, 16, CK.BRONZE);
+    for (let p = 0; p < 5; p++) B.box(-148 + p * 74, -2, 0, 64, 596, 5, CK.RADIATOR);
+    for (let p = 0; p < 6; p++) B.tube([V(-185 + p * 74, 300, 0), V(-185 + p * 74, -300, 0)], 3.2, 6, p % 5 ? CK.DARK : CK.BRONZE);
+    B.box(0, 304, 0, 380, 8, 16, CK.BRONZE);
+    B.box(0, -303, 0, 380, 6, 10, CK.DARK);
+    lamps.push({ p: V(0, -310, 0).applyMatrix4(B.M), r: 3, color: LAMP.RED, i: 3, breathe: 1, phase: k / 4 });
     B.pop();
   }
   // berths: two collars facing out along x at the top level (the ships lie across the ribbon's
