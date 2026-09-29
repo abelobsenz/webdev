@@ -857,3 +857,66 @@ export function portQuarter(B, S, lamps, seed = 1) {
   return flamps.length;
 }
 const TILE_Q = 12000;
+
+// ------------------------------------------------------------ canal quarters ----
+/**
+ * A canal quarter: six canals along the ring, 22 m wide between stone quays, lined both sides
+ * with narrow gabled houses in terraces (each house its own height and gable, turned to face
+ * the water), humpback footbridges every 200 m, moored boats, quay trees and lamps, and the
+ * people strolling the quays.
+ */
+export function canalCell(C, x0, x1, z0, z1) {
+  const { B, M, N, S, r, F } = C;
+  const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2, sx = x1 - x0, sz = z1 - z0;
+  const yg = standBox(B, S, cx, cz, sx, sz, 1.0, HK.STONE, 10);
+  if (F) standBox(F, S, cx, cz, sx, sz, 1.0, HK.STONE, 10);
+  const n = 4, pitch = sx / n, cw = 22;
+  for (let i = 0; i < n; i++) {
+    const x = x0 + (i + 0.5) * pitch, y = deckHi(S, x, cw) + 1.0;
+    const top = Math.max(yg, y);
+    // the water, its kerbs and the quay walk
+    B.box(x, top + 0.3, cz, cw, 0.6, sz - 16, HK.WATER);
+    if (F) F.box(x, top + 0.3, cz, cw, 0.6, sz - 16, HK.WATER);
+    for (const s of [-1, 1]) M.box(x + s * (cw / 2 + 0.4), top + 0.9, cz, 0.8, 0.8, sz - 16, HK.STONE);
+    walk(C, 0, x, cz, cw / 2 + 3.5, sz / 2 - 14, top + 0.6);
+    // houses both sides, in 40 m terraces of five, gables to the canal
+    for (const s of [-1, 1]) {
+      const hx = x + s * (cw / 2 + 7 + 7), hd = 14;
+      for (let z = z0 + 14; z < z1 - 50; z += 44) {
+        const fk = facadeKind(C.style.pal + (r() < 0.3 ? 1 : 0));
+        let hmax = 0;
+        // one terrace block, then each house's own gable (and a taller house or two standing proud)
+        const base = 10.8 + Math.floor(r() * 2) * 3.6;
+        const t0 = standBox(B, S, hx, z + 20, hd, 39.7, base, fk);
+        hmax = t0;
+        for (let q = 0; q < 5; q++) {
+          const zq = z + 4 + q * 8;
+          let t = t0;
+          if (r() < 0.3) { t = t0 + 3.6; B.box(hx, t0 + 1.8, zq, hd - 0.2, 3.6, 7.6, facadeKind(C.style.pal + 2)); hmax = Math.max(hmax, t); }
+          gableRoof(M, hx, t, zq, 8.2, 4 + r() * 3, hd + 0.6, q % 3 ? HK.TILE : CK.BRONZE, q % 2 ? fk : facadeKind(C.style.pal + 2), true);
+        }
+        M.box(hx - s * (hd / 2 + 0.3), deckHi(S, hx, hd) + 3.2, z + 22, 0.6, 2.4, 36, HK.NEON);     // lit ground-floor fronts
+        if (F && r() < 0.5) F.box(hx, hmax / 2, z + 22, hd, hmax, 40, fk);
+      }
+      // quay trees and lamps
+      for (let z = z0 + 30; z < z1 - 20; z += 36) {
+        tree(N, null, x + s * (cw / 2 + 3), top + 0.6, z, 7 + r() * 3, pickTree(C));
+        if (Math.round((z - z0) / 36) % 2 === 0) C.flamps.push({ p: V3(x + s * (cw / 2 + 1.5), top + 5, z + 18), r: 1.3, color: C.style.street, i: 1.4 });
+      }
+    }
+    // footbridges and moored boats
+    for (let z = z0 + 100; z < z1 - 60; z += 200) {
+      M.box(x, top + 2.2, z, cw + 6, 0.8, 5, HK.STONE);
+      M.box(x, top + 3.2, z + 2.3, cw + 6, 1.1, 0.3, CK.BRONZE);
+      M.box(x, top + 3.2, z - 2.3, cw + 6, 1.1, 0.3, CK.BRONZE);
+      for (const s of [-1, 1]) { M.box(x + s * (cw / 2 + 1.8), top + 1.5, z, 3.4, 1.8, 5.4, HK.STONE); }   // the abutments
+    }
+    for (let z = z0 + 40; z < z1 - 40; z += 50 + r() * 40) {
+      const s = r() < 0.5 ? -1 : 1;
+      if (Math.abs(((z - z0 - 100) % 200 + 200) % 200) < 14 || Math.abs(((z - z0 - 100) % 200 + 200) % 200) > 186) continue;   // not under a bridge
+      M.box(x + s * (cw / 2 - 2.6), top + 0.9, z, 3.2, 1.2, 14, r() < 0.5 ? CK.HULL : HK.AWNING);
+      M.box(x + s * (cw / 2 - 2.6), top + 2.0, z - 1, 2.6, 1.2, 6, CK.GLASS);
+    }
+  }
+  C.lamps.push({ p: V3(cx, yg + 16, cz), r: 3, color: C.style.accent, i: 1.4, breathe: 0.2 });
+}

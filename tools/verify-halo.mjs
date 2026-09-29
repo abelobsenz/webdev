@@ -235,7 +235,7 @@ out.layerTris = layerTris;
   for (const v of D.variants) for (let i = 0; i < v.walks.length; i += 6) {
     loops++;
     const [type, cx, cz, a2, b2, y] = v.walks.subarray(i, i + 6);
-    for (const x of type ? [cx - a2, cx + a2, cx] : [cx - a2, cx + a2]) { const d = y - S.deck(x); if (!(d > 0 && d < 12)) bad++; }
+    for (const x of type ? [cx - a2, cx + a2, cx] : [cx - a2, cx + a2]) { const d = y - S.deck(x); if (!(d > 0 && d < 25)) bad++; /* flat-topped quarters sit up to ~20 m over the sag's low side */ }
     if (Math.abs(cx) + a2 > S.hw - 700 || Math.abs(cz) + (type ? a2 : b2) > TILE_L / 2) bad++;
   }
   out.walkLoops = loops;

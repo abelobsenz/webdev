@@ -6,7 +6,7 @@ import { CRAFT_FRAME } from './craftMesh.js';
 import { createLamps, LAMP } from './lamps.js';
 import { HALO_PORTS } from './earthData.js';
 import { createHaloMaterial } from './haloMaterial.js';
-import { buildCraneJib, CRANE_JIB, buildPerson, buildDrone, DISTRICT_STYLE, standBox, vault, ribArc, cliffs, townCell, parkCell, farmCell, civicCell, worksCell, stadiumCell, marketCell, buildVaultFrame, harbourTown, HARBOUR, buildHarbourBoat } from './haloArchitecture.js';
+import { canalCell, buildCraneJib, CRANE_JIB, buildPerson, buildDrone, DISTRICT_STYLE, standBox, vault, ribArc, cliffs, townCell, parkCell, farmCell, civicCell, worksCell, stadiumCell, marketCell, buildVaultFrame, harbourTown, HARBOUR, buildHarbourBoat } from './haloArchitecture.js';
 import { bodyDir } from './sim.js';
 
 // The Halo, lived in. Seen from orbit the deck shader already paints a continent of towns and
@@ -34,7 +34,7 @@ export const WINDOW = 15;                    // tiles either side of the camera'
 const SLOTS = 2 * WINDOW + 1;
 export const NEAR_RANGE_KM = 150;            // districts drawn within this distance of the band
 export const MINOR_RANGE_KM = 14;            // small detail (trees, balconies, loggias, boats) within this
-export const MAJOR_RANGE_KM = 30;            // full massing within this; out to the window edge the tile's silhouette
+export const MAJOR_RANGE_KM = 26;            // full massing within this; out to the window edge the tile's silhouette
 export const FINE_RANGE_KM = 8;              // finest detail (railings, street trees, pier fins, street lamps)
 export const FRAME_RANGE_KM = 40;            // the vault's ribs and purlins over the tiles within this
 const SEAM_TILES = 8;                        // the last tiles before theta = 0 share the ring's remainder
@@ -324,13 +324,13 @@ function* buildDistrictSteps(C, bay, variant) {
   const harbour = variant === HARBOUR_V ? harbourTown(C) : null;
   yield;
   const weights = [
-    { town: 0.52, park: 0.18, farm: 0.1, civic: 0.06, lake: 0.08, works: 0, stadium: 0.02, market: 0.04 },
+    { town: 0.48, park: 0.18, farm: 0.1, civic: 0.06, lake: 0.08, works: 0, stadium: 0.02, market: 0.08 },
     { town: 0.14, park: 0.2, farm: 0.52, civic: 0.02, lake: 0.08, works: 0.04, stadium: 0, market: 0 },
     { town: 0.36, park: 0.2, farm: 0.04, civic: 0.18, lake: 0.1, works: 0, stadium: 0.04, market: 0.08 },
     { town: 0.28, park: 0.12, farm: 0.18, civic: 0.04, lake: 0.04, works: 0.3, stadium: 0, market: 0.04 },
-    { town: 0.3, park: 0.26, farm: 0.06, civic: 0.04, lake: 0.26, works: 0, stadium: 0.04, market: 0.04 },
+    { town: 0.3, park: 0.2, farm: 0.06, civic: 0.04, lake: 0.24, works: 0, stadium: 0.04, market: 0.04, canal: 0.06 },
     { town: 0.46, park: 0.14, farm: 0.02, civic: 0.1, lake: 0.04, works: 0.06, stadium: 0.06, market: 0.12 },
-    { town: 0.44, park: 0.2, farm: 0, civic: 0.14, lake: 0.06, works: 0, stadium: 0.04, market: 0.12 },
+    { town: 0.4, park: 0.22, farm: 0, civic: 0.14, lake: 0.06, works: 0, stadium: 0.04, market: 0.14 },
   ][variant];
   const kinds = Object.keys(weights);
   const cells = Object.fromEntries(Object.keys(weights).map((k) => [k, 0]));
@@ -352,6 +352,7 @@ function* buildDistrictSteps(C, bay, variant) {
     else if (kind === 'civic') civicCell(C, x0, x1, z0, z1);
     else if (kind === 'stadium') stadiumCell(C, x0, x1, z0, z1);
     else if (kind === 'market') marketCell(C, x0, x1, z0, z1);
+    else if (kind === 'canal') canalCell(C, x0, x1, z0, z1);
     else worksCell(C, x0, x1, z0, z1);
   }
   B.cells = cells;
