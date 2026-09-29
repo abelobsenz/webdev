@@ -7,6 +7,10 @@ import { LAMP } from './lamps.js';
 import { ctube } from './hull.js';
 import { R_EARTH, bodyDir } from './sim.js';
 import { buildCounterweightRock } from './counterweightRock.js';
+import { RINGS } from '../sky/celestial.js';
+import { haloSectionM } from './haloDistricts.js';
+import { portQuarter } from './haloArchitecture.js';
+import { createHaloMaterial } from './haloMaterial.js';
 
 // Station frames and builders shared by the elevator, the rings and the fleet.
 
@@ -190,6 +194,9 @@ export function buildPortStation({ junction = false } = {}) {
       for (let k=0;k<4;k++) B.box(x,pierY+300,s*(19400+k*460),750,420,330,k%2?CK.BRONZE:CK.HULL);
     }
   }
+  // the terminal quarter round the podium (ports only: the junction's deck is the elevator's)
+  const quarterLamps = [];
+  if (!junction) portQuarter(B, haloSectionM(RINGS[0]), quarterLamps, 7);
   const geo = B.geometry();
   // berthed shuttles and tugs at the piers and gate platforms
   const sh = buildShuttle(110), tu = buildTug(80);
@@ -207,6 +214,7 @@ export function buildPortStation({ junction = false } = {}) {
     put(sh, V(s * 12000 + 420, -7000, 0), V(0, 1, 0), V(0, 0, 1));
   }
   const ships = placeMerge(list);
+  lamps.push(...quarterLamps);
   // lamps
   for (let k = 0; k < 16; k++) {
     const a = (k / 16) * TAU;
@@ -372,7 +380,7 @@ export class HaloPorts {
     this.list = [];
     const st = buildPortStation({ junction: false });
     this.station = st;
-    const mat = createCraftMaterial({ accent: [0.55, 0.9, 1.0], lit: 0.6 });
+    const mat = createHaloMaterial({ accent: [0.55, 0.9, 1.0], lit: 0.6 });
     for (const p of ports) {
       if (p.name === 'Meridian') continue;
       const lon = THREE.MathUtils.degToRad(p.lon);

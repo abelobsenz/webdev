@@ -11,11 +11,13 @@
 //   budget:  triangle counts per layer, build slices, update time and no per-frame allocation.
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import { SpaceSim } from '../src/space/sim.js';
+import { SpaceSim, bodyDir } from '../src/space/sim.js';
+import { HALO_PORTS } from '../src/space/earthData.js';
 import { Rings } from '../src/space/rings.js';
 import { TILE_L, WINDOW, GANTRY, MAJOR_RANGE_KM, MINOR_RANGE_KM, FINE_RANGE_KM, FRAME_RANGE_KM } from '../src/space/haloDistricts.js';
 import { VAULT_FRAME, HARBOUR } from '../src/space/haloArchitecture.js';
 import { HARBOUR_V } from '../src/space/haloDistricts.js';
+import { buildPortStation } from '../src/space/stations.js';
 import { createHaloMaterial, HK } from '../src/space/haloMaterial.js';
 
 const out = {};
@@ -137,6 +139,44 @@ const C = 2 * Math.PI * D.Rm;
   eachVertex(hv.major, (x, y) => { if (Math.abs(x - I.x) < 80 && Math.abs(y) < 9000) lightTop = Math.max(lightTop, y - S.roofLow(x)); });
   out.harbourLightUnderGlassMetres = Math.round(-lightTop);
   assert.ok(lightTop < -300, 'The Harbour Light stands well under the glass');
+}
+
+// ------------------------------------------------------------ port quarters ----
+{
+  const a = performance.now();
+  const st = buildPortStation({ junction: false });
+  out.portBuildMs = Math.round(performance.now() - a);
+  const j = buildPortStation({ junction: true });
+  out.portTris = tris(st.geo); out.junctionTris = tris(j.geo);
+  let hi = -Infinity, lo = Infinity, n = 0;
+  eachVertex(st.geo, (x, y, z) => {
+    const rr = Math.hypot(x, z);
+    if (rr < 4500 || rr > 6000 || y < -60) return;
+    n++;
+    hi = Math.max(hi, y - S.roofLow(z));                   // station z runs across the ring
+    lo = Math.min(lo, y - S.deck(z));
+  });
+  out.portQuarterVerts = n;
+  out.portQuarterVaultGap = Math.round(-hi);
+  assert.ok(n > 1000, 'Ports carry their terminal quarter');
+  assert.ok(-hi > 150, 'The port quarter stays under the glass');
+  assert.ok(lo > -40, 'The port quarter is seated on the deck, not sunk through it');
+  assert.ok(out.portTris - out.junctionTris < 150e3, 'The quarter is light');
+  assert.ok(st.lamps.every((l) => Number.isFinite(l.p.x + l.p.y + l.p.z)), 'Port lamps finite');
+  // the districts come up to the ports but stop short of the concourse wings (9.8 km along)
+  let nearest = Infinity;
+  for (const p of HALO_PORTS) {
+    if (p.name === 'Meridian') continue;
+    const dir = bodyDir(0, THREE.MathUtils.degToRad(p.lon));
+    for (let k = 0; k < D.nTiles; k++) {
+      if (D.tileVariant[k] < 0) continue;
+      const th = D.tileAngle(k), c = D.basis.a.clone().multiplyScalar(Math.cos(th)).addScaledVector(D.basis.b, Math.sin(th));
+      const d = Math.acos(THREE.MathUtils.clamp(c.dot(dir), -1, 1)) * D.basis.R - TILE_L * D.tileStretch(k) / 2000;
+      nearest = Math.min(nearest, d);
+    }
+  }
+  out.portToDistrictKm = +nearest.toFixed(2);
+  assert.ok(nearest > 9.9 && nearest < 14, 'Districts reach the ports and stop clear of their wings');
 }
 
 // ------------------------------------------------------------ water and LOD layers ----

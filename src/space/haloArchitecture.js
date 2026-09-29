@@ -177,7 +177,8 @@ function courtBlock(C, cx, cz, sx, sz, hmax, fk) {
   const base = Math.min(hmax, 14 + r() * 26);
   const wings = [
     [cx - sx / 2 + wing / 2, cz, wing, sz, false], [cx + sx / 2 - wing / 2, cz, wing, sz, false],
-    [cx, cz - sz / 2 + wing / 2, sx - 2 * wing, wing, true], [cx, cz + sz / 2 - wing / 2, sx - 2 * wing, wing, true],
+    // (the cross wings stand a hair inside the long ones' ends: no edge is shared between boxes)
+    [cx, cz - sz / 2 + wing / 2 + 0.3, sx - 2 * wing, wing - 0.6, true], [cx, cz + sz / 2 - wing / 2 - 0.3, sx - 2 * wing, wing - 0.6, true],
   ];
   wings.forEach(([x, z, w, d, alongX], q) => {
     const h = base + (q % 2 ? 3.6 : 0) * Math.round(r() * 2);
@@ -223,7 +224,7 @@ function steppedBlock(C, cx, cz, sx, sz, hmax, fk) {
   for (let i = 0; i < steps; i++) {
     const w = L * (1 - i / steps), c = -dir * (L - w) / 2, h = Math.min(hmax, storey * (i + 1));
     const x = alongX ? cx + c : cx, z = alongX ? cz : cz + c;
-    const top = standBox(B, S, x, z, alongX ? w : sx, alongX ? sz : w, h, fk);
+    const top = standBox(B, S, x, z, alongX ? w : sx - 0.5 * i, alongX ? sz - 0.5 * i : w, h, fk);
     if (C.F && i === steps - 1) C.F.box(x, top / 2, z, alongX ? w : sx, top, alongX ? sz : w, fk);
     // the exposed step of this storey band (the part the next one does not cover)
     const ew = L / steps, ec = -dir * (L - w) / 2 + dir * (w / 2 - ew / 2);
@@ -756,3 +757,38 @@ export function harbourTown(C) {
   for (let x = -H.ground; x < H.ground; x += 500) standBox(B, S, x + 250, 0, 500, 3960, 0.4, HK.STREET, 8);
   return { ground: H.ground };
 }
+
+// ------------------------------------------------------------ the port quarters ----
+/**
+ * The terminal quarter round a Halo port's podium (in the station's frame: x along the ring,
+ * z across it, y up from the ring's radius): lots on three rings between the podium and the
+ * wing roots, left open along the concourse wings and at eight avenues, each a tower, a
+ * courtyard block or a stepped terrace in the port palette, beacons on the tall ones. The
+ * builders work across x, so the quarter is built turned a quarter round (their x = -z).
+ */
+export function portQuarter(B, S, lamps, seed = 1) {
+  const r = (() => { let a = (seed * 2654435761) >>> 0; return () => { a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; })();
+  const flamps = [];
+  const C = { B, M: B, N: B, F: null, lamps, flamps, S, r, style: DISTRICT_STYLE[6], tileL: TILE_Q };
+  const l0 = lamps.length;
+  B.push(rotY90);
+  for (const [ring, lot] of [[4700, 170], [5200, 190], [5750, 210]]) {
+    const n = Math.floor((TAU * ring) / (lot + 70));
+    for (let q = 0; q < n; q++) {
+      const a = ((q + 0.5) / n) * TAU, bx = Math.cos(a) * ring, bz = Math.sin(a) * ring;   // builder frame (x across)
+      if (Math.abs(bx) < 700) continue;                                                     // the wings run along the ring (builder z)
+      const aa = ((a % (TAU / 8)) + TAU / 8) % (TAU / 8);
+      if (Math.min(aa, TAU / 8 - aa) * ring < 60) continue;                                 // avenues
+      const hmax = Math.min(S.roofLow(bx - lot), S.roofLow(bx + lot)) - Math.max(S.deck(bx - lot), S.deck(bx + lot)) - 360;
+      standBox(B, S, bx, bz, lot + 12, lot + 12, 0.9, HK.STONE, 6);
+      const fk = facadeKind(r() < 0.6 ? 2 : r() < 0.5 ? 0 : 4), roll = r();
+      if (ring === 4700 && roll < 0.5) setbackTower(C, bx, bz, lot, lot, Math.min(hmax, 900), fk);
+      else if (roll < 0.8) courtBlock(C, bx, bz, lot, lot, hmax, fk);
+      else steppedBlock(C, bx, bz, lot, lot, hmax, fk);
+    }
+  }
+  B.pop();
+  for (let i = l0; i < lamps.length; i++) lamps[i].p.applyMatrix4(rotY90);   // (lamps were placed in the builder's frame)
+  return flamps.length;
+}
+const TILE_Q = 12000;

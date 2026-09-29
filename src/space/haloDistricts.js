@@ -491,7 +491,9 @@ export class HaloDistricts {
     this.seamLen = (TAU * this.Rm - this.seamK * TILE_L) / SEAM_TILES;
     this.archProfile = rings.archData.profile;
     // tiles near the ports, the foundry and Nauru stay bare (their stations own the deck)
-    const exclude = [...HALO_PORTS.map((p) => [bodyDir(0, THREE.MathUtils.degToRad(p.lon)), 18]), [bodyDir(0, THREE.MathUtils.degToRad(166.9) + 0.009), 14]];
+    // (ports keep 10.5 km: their dome, podium quarter and concourse wings reach 9.8 km along the
+    // ring; Meridian's junction keeps 18, its deck and vault opening are the elevator's)
+    const exclude = [...HALO_PORTS.map((p) => [bodyDir(0, THREE.MathUtils.degToRad(p.lon)), p.name === 'Meridian' ? 18 : 10.5]), [bodyDir(0, THREE.MathUtils.degToRad(166.9) + 0.009), 14]];
     const { a, b } = this.basis;
     this.tileVariant = new Int8Array(this.nTiles);
     const dir = new THREE.Vector3();
