@@ -7,6 +7,7 @@ import { LAMP } from './lamps.js';
 import { R_EARTH, GEO_ALT, MERIDIAN_LON, bodyDir } from './sim.js';
 import { stationFrame, CORRIDORS } from './stations.js';
 import { YardWorks } from './yardWorks.js';
+import { StoreWorks } from './storeWorks.js';
 
 // THE GEOSTATIONARY ROADS: the Harbour's neighbourhood along the geostationary arc.
 //
@@ -550,6 +551,8 @@ export class GeoRoads {
     sm.add(craftPart(sm, this.storeData.ships));
     addLamps(sm, this.storeData.lamps, { minPx: 1.2 });
     this.store.add(sm);
+    // its plumbing, plant rooms, tank galleries and inspection drones (storeWorks.js)
+    this.storeWorks = new StoreWorks(sm, this.storeData);
     const _c2 = new THREE.Vector3();
     this.storeBody = space.addBody('waterStore', [this.store], () => this.store.getWorldPosition(_c2), this.storeData.radius, { solid: true, hint: 0.5 });
     // ---- movements through the Harbour
@@ -629,7 +632,9 @@ export class GeoRoads {
     const yardPx = pixelRadius(space.camera, this.yard.getWorldPosition(this._w), this.yardData.radius, space.size.y);
     if (this.yardBody) this.yardBody.visible = yardPx > 0.5;
     this.yardWorks.update(realTime, yardPx);
-    if (this.storeBody) this.storeBody.visible = pixelRadius(space.camera, this.store.getWorldPosition(this._w), this.storeData.radius, space.size.y) > 0.5;
+    const storePx = pixelRadius(space.camera, this.store.getWorldPosition(this._w), this.storeData.radius, space.size.y);
+    if (this.storeBody) this.storeBody.visible = storePx > 0.5;
+    this.storeWorks.update(realTime, storePx);
   }
 }
 
