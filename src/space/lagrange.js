@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { createCraftMaterial } from '../craft/craftMaterial.js';
 import { craftMesh, addLamps, KM } from './craftMesh.js';
-import { LAMP } from './lamps.js';
+import { LAMP, createLamps } from './lamps.js';
 import { DynLamps, smooth } from './lifeKit.js';
 import { R_EARTH, R_MOON, GEO_ALT, MOON_DIST } from './sim.js';
 import { COL, WINDOW_CENTRES, buildRotor, buildWindows, buildMirror, buildStator, buildAgriRing, buildPairFrame } from './lagrangeColony.js';
@@ -81,6 +81,31 @@ function dockRoute(berth, dir, side, far, k) {
   ];
   const T = tIn + 50 + 17 * k + tOut + tRet;
   return makeRoute(legs, { fadeIn: 0.04, fadeOut: (tRet + 12) / T });
+}
+
+/**
+ * Gate rings and corridor buoys (km, station frame): gates [{ c, r, n, from, to }], the ring in
+ * the plane normal to the corridor, alternating port red / starboard green round it, and a
+ * wave of light running down the buoy string toward the station.
+ */
+function approachLamps(gates, color) {
+  const lamps = [];
+  for (const g of gates) {
+    const d = V().subVectors(g.from, g.to).normalize();
+    const e1 = V().crossVectors(d, Math.abs(d.y) < 0.9 ? V(0, 1, 0) : V(1, 0, 0)).normalize(), e2 = V().crossVectors(d, e1);
+    for (let i = 0; i < g.n; i++) {
+      const a = (i / g.n) * TAU;
+      lamps.push({ p: g.c.clone().addScaledVector(e1, Math.cos(a) * g.r).addScaledVector(e2, Math.sin(a) * g.r), r: 0.12, color: Math.cos(a) > 0 ? LAMP.GREEN : LAMP.RED, i: 5, breathe: 0.3, phase: i / g.n });
+    }
+    const L = g.from.distanceTo(g.to), n = Math.max(2, Math.round(L / 12));
+    for (let i = 0; i <= n; i++) {
+      const p = g.to.clone().lerp(g.from, i / n);
+      for (const s of [-1, 1]) lamps.push({ p: p.clone().addScaledVector(e1, s * 1.5), r: 0.06, color: color, i: 4, breathe: 0.9, phase: 1 - i / n });
+    }
+  }
+  const m = createLamps(lamps, { minPx: 1.1 });
+  m.renderOrder = 17;
+  return m;
 }
 
 // long lanes between the bodies: [from, to, colour out, colour back]
@@ -198,8 +223,11 @@ export class LagrangeColonies {
       });
       cyls.push({ s, cyl, rotor, hinges, agri, win });
     }
+    // the approach: a gate ring of beacons 200 km out on the anti-sun side of each twin, and a
+    // string of buoys down the corridor to the port (km, pair frame)
+    const approach = this._approach(group.name, approachLamps([-1, 1].map((s) => ({ c: V(s * COL.PAIR_X * KM, 0, -200), r: 10, n: 18, from: V(s * COL.PAIR_X * KM, 0, -28), to: V(s * COL.PAIR_X * KM, 0, -190) })), name === 'L4' ? LAMP.BLUE : LAMP.TEAL), 215);
     space.scene.add(group);
-    const P = { name, group, m, mat, winMat, cyls, lampSets, dayOffset, day: 1, alpha: COL.MIRROR_MAX, pos: new THREE.Vector3() };
+    const P = { name, group, approach, m, mat, winMat, cyls, lampSets, dayOffset, day: 1, alpha: COL.MIRROR_MAX, pos: new THREE.Vector3() };
     P.body = space.addBody(group.name, [group], (o) => (o || _a).copy(P.pos), 50, { solid: true, minNear: 0.02 });
     return P;
   }
@@ -225,10 +253,20 @@ export class LagrangeColonies {
       m.add(g);
       return { g, spin: w.spin };
     });
+    const approach = this._approach('lagrange-L1', approachLamps([-1, 1].map((s) => ({ c: V(0, 0, s * 150), r: 3, n: 12, from: V(0, 0, s * 12), to: V(0, 0, s * 140) })), LAMP.AMBER), 155);
     space.scene.add(group);
-    const G = { name: 'L1', group, m, mat, wheels, pos: new THREE.Vector3() };
+    const G = { name: 'L1', approach, group, m, mat, wheels, pos: new THREE.Vector3() };
     G.body = space.addBody('lagrange-L1', [group], (o) => (o || _a).copy(G.pos), 1.6, { solid: true, minNear: 0.005 });
     return G;
+  }
+
+  /** The approach beacons as their own top-level body (they reach far beyond the station's bound). */
+  _approach(name, mesh, reach) {
+    const g = new THREE.Group();
+    g.add(mesh);
+    this.space.scene.add(g);
+    this.space.addBody(`${name}-approach`, [g], (o) => (o || _a).copy(g.position), reach, { minNear: 0.02 });
+    return g;
   }
 
   // ----------------------------------------------------------------- lanes --
@@ -281,6 +319,7 @@ export class LagrangeColonies {
       lagrangePoint(sim, P.name, P.pos);
       P.group.position.copy(P.pos);
       lagrangeFrame(sim, P.name, P.group.quaternion);
+      P.approach.position.copy(P.pos); P.approach.quaternion.copy(P.group.quaternion);
       const d = cp.distanceTo(P.pos);
       P.m.visible = d < NEAR_KM;
       // the colony's day: mirrors open wide from dawn to dusk, nearly shut at night
@@ -305,9 +344,11 @@ export class LagrangeColonies {
     lagrangePoint(sim, 'L1', G.pos);
     G.group.position.copy(G.pos);
     lagrangeFrame(sim, 'L1', G.group.quaternion);
+    G.approach.position.copy(G.pos); G.approach.quaternion.copy(G.group.quaternion);
     G.m.visible = cp.distanceTo(G.pos) < NEAR_KM * 0.4;
     for (const w of G.wheels) w.g.rotation.z = (w.spin * t) % TAU;
     this.pairs[0].group.updateMatrixWorld(true); this.pairs[1].group.updateMatrixWorld(true); G.group.updateMatrixWorld(true);
+    this.pairs[0].approach.updateMatrixWorld(true); this.pairs[1].approach.updateMatrixWorld(true); G.approach.updateMatrixWorld(true);
     // near detail: built on the first close approach, shown while close
     this._near[0] = cp.distanceTo(this.pairs[0].pos) < LIFE_KM; this._near[1] = cp.distanceTo(this.pairs[1].pos) < LIFE_KM;
     if (!this.life.built && (this._near[0] || this._near[1])) this.life.build(this.families);

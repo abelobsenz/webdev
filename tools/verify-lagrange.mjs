@@ -179,7 +179,7 @@ ok(lag.life.buildMs < 400, `near detail built in ${lag.life.buildMs.toFixed(0)} 
 }
 
 // ---- animate, then buffer sanity over everything the module draws
-const roots = [...lag.pairs.map((q) => q.group), lag.gateway.group, lag.laneGroup, ...lag.traffic.map((s) => s.group)];
+const roots = [...lag.pairs.map((q) => q.group), ...lag.pairs.map((q) => q.approach), lag.gateway.group, lag.gateway.approach, lag.laneGroup, ...lag.traffic.map((s) => s.group)];
 const cams = [L4.clone().add(new THREE.Vector3(0, 30, 90)), L5.clone().add(new THREE.Vector3(60, 0, -60)), L1.clone().add(new THREE.Vector3(0, 2, 3)), new THREE.Vector3(0, 0, 40000)];
 let upd = 0, frames = 0;
 for (let k = 0; k < 240; k++) {
@@ -215,6 +215,21 @@ ok(bad === 0, `buffers sane over ${meshes} meshes (${inst} instanced): counts wi
   const L = lag.lanes.L.array; let far = 0;
   for (let i = 0; i < lag.nLaneLamps; i++) far = Math.max(far, Math.hypot(L[i * 4], L[i * 4 + 1], L[i * 4 + 2]));
   ok(far > 300000 && far < 450000 && lag.laneRange[1] > lag.laneRange[0], `lane lamps span the Earth-Moon system (to ${(far / 1000).toFixed(0)}k km), depth interval valid`);
+}
+
+{
+  // every drawable the module owns is under a registered body (the depth slices toggle bodies)
+  const bodyObjs = new Set(space.bodies.flatMap((b) => b.objects));
+  let orphan = 0;
+  for (const r of roots) if (!bodyObjs.has(r) || r.parent !== space.scene) orphan++;
+  ok(orphan === 0, `all ${roots.length} root groups are top-level registered bodies`);
+  // and each body's bound holds its content: the pair groups' children within their radius
+  let out = 0;
+  for (const q of lag.pairs) {
+    const b = space.bodies.find((x) => x.objects[0] === q.group), c = b.center(new THREE.Vector3()), v = new THREE.Vector3();
+    q.group.traverse((o) => { if (o.isMesh && !o.isInstancedMesh && o.geometry.boundingSphere) { o.geometry.computeBoundingSphere(); v.copy(o.geometry.boundingSphere.center).applyMatrix4(o.matrixWorld); const rad = o.geometry.boundingSphere.radius * o.matrixWorld.getMaxScaleOnAxis(); if (v.distanceTo(c) + rad > b.radius + 1e-6) out++; } });
+  }
+  ok(out === 0, `pair meshes lie inside their bodies' bounds (${out} outside)`);
 }
 
 // ---- budgets
