@@ -29,6 +29,17 @@ export const TENDER_DETAIL_RANGE = 25;
 //  Moon        Selene Works above the near side, tankers berthed at its docking ring and
 //              one on the Earth run
 //
+//  Working lanes  (src/space/fleetTraffic.js, designs in src/space/shipDesigns.js) seventy
+//              more ships: two outer roads round the Harbour (tail-first braking arrivals, a
+//              flip and hold at the outer gate, a wide swing round the tether, departures
+//              under power; convoys with tug escorts, a packet train, spin-ring clippers),
+//              holding stacks off the arrival side, Selene's ore barges, patrol and convoys,
+//              and two crews of work drones over the tenders; instanced hulls, nav lamps,
+//              drive plumes and RCS puffs from each design's real nozzles
+//  Close to     built on first approach, hidden beyond range: the Concord liners' fittings
+//              (src/space/linerDetail.js), Selene's wheel walks, spoke lifts and ring cranes
+//              (src/space/seleneDetail.js), the tankers' and the tenders' deck fittings
+//
 // Everything decorative moves in real time (warped sim time made ships strobe). Each ship
 // that can wander far from its station is its own depth-sliced body; targets read the
 // analytic pose() (the rig samples targets before the modules update).

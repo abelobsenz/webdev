@@ -26,6 +26,8 @@ space.moon = new Moon(space);
 space.scene.add(space.moon.group);
 const mods = [];
 for (const [k, C] of [['fleet', Fleet], ['works', WorkingStations], ['geoRoads', GeoRoads], ['lanes', Lanes], ['releaseYard', ReleaseYard]]) { space[k] = new C(space); mods.push(space[k]); }
+// the fleet's lazily built near detail (liners, Selene, tenders), forced so it is exercised too
+space.fleet._linerDetail(null, true); space.fleet._seleneDetail(null, 0, true); space.fleet._tenderDetail(null, true);
 let tri = 0;
 space.scene.traverse((o) => { if (o.isMesh && o.geometry?.index && !o.geometry.isInstancedBufferGeometry) tri += o.geometry.index.count / 3; });
 for (const t of [0, 60, 400, 900, 1500]) {

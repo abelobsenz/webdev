@@ -317,8 +317,9 @@ export class Traffic {
   }
 
   // ---- hull LOD: the streaks fade out inside ~6 km, so the nearest ships become real closed
-  // hulls there (couriers on the ring lanes, shuttles on the port columns, transfers and the
-  // Moon run, tugs in the Harbour corridors), placed from shipPosJS, the CPU mirror of the
+  // hulls there (couriers, packets and lighters on the ring lanes, packets on the transfers,
+  // shuttles on the port columns, haulers and tankers on the Moon run, haulers and tugs in the
+  // Harbour corridors: hullClassOf), placed from shipPosJS, the CPU mirror of the
   // shader paths. One instanced mesh per class, instance matrices relative to a local origin
   // at the nearest hull so they stay exact in float32; nothing is drawn when none are near.
   buildHulls(space) {
