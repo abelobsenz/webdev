@@ -14,6 +14,7 @@ export const WATER = {
   T: 1100, len: 360, halfW: 0.062,
   path: [V(0, -12.5, 1.3), V(-0.4, -12.5, 1.8), V(-1.2, -13.2, 2.5), V(-5, -13.9, 2.6), V(-10.5, -12.2, 1.6), V(-14.2, -9.0, -0.4), V(-15.2, -8.0, -1.3), V(-16, -8, -1.3)],
 };
+const _frac = [0];
 const STEPS = schedule([['fillA', 18], ['toYard', 30], ['discharge', 22], ['toStore', 30]]);
 
 function catmull(pts, s, out) {
@@ -35,7 +36,7 @@ const _tA = V(0, 0, 0), _tB = V(0, 0, 0);
 
 /** Pose at time t (Harbour frame, km): writes position and forward; returns the drive throttle. */
 export function waterRunPose(t, outP, outF) {
-  const f = [0], i = STEPS.at(t / WATER.T, f), s = f[0];
+  const f = _frac, i = STEPS.at(t / WATER.T, f), s = f[0];
   const name = STEPS.names[i];
   if (name === 'toYard' || name === 'toStore') {
     const e = smooth(0, 1, s), u = name === 'toYard' ? e : 1 - e;

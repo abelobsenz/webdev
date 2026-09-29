@@ -39,12 +39,12 @@ const LA = 170, LB = 118;
 const linerProf = (u) => (u < 0.4 ? 0.62 + 0.38 * Math.sin((Math.PI / 2) * (u / 0.4)) : Math.pow(Math.max(Math.cos((Math.PI / 2) * ((u - 0.4) / 0.6)), 0), 0.8));
 const linerF = (z) => Math.max(linerProf((z + 1150) / 2400), 0.02);
 /** A point of the hull section at angle t (the superellipse of the liner's loft). */
-export function sectionPoint(z, t) {
+export function sectionPoint(z, t, out) {
   const f = linerF(z), c = Math.cos(t), s = Math.sin(t);
   const x = Math.sign(c) * Math.pow(Math.abs(c), 2 / 2.3) * LA * f;
   let y = Math.sign(s) * Math.pow(Math.abs(s), 2 / 2.3) * LB * f;
   if (y < 0) y *= 0.8;
-  return V(x, y, z);
+  return out ? out.set(x, y, z) : V(x, y, z);
 }
 
 export const YARD = {

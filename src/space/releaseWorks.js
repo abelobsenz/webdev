@@ -27,14 +27,15 @@ export const RW = {
 
 const octR = (ap) => ap / Math.cos(Math.PI / 8);
 
+let _legs = null;
+const LEG_W = [0.2, 0.06, 0.12, 0.06, 0.12, 0.06, 0.2, 0.18];
 /** Crawler k at time t: arc length s along the spar (runs out, dwells at the cradles and the head, returns). */
 export function crawlerS(k, t) {
   const C = RW.crawler;
   const u = ((t / C.T + k / C.n) % 1 + 1) % 1;
-  const sc = YARD.cradleAt;
   // out: s0 -> cradle (dwell) -> head (dwell) -> cradle (dwell) -> s0 (dwell)
-  const legs = [[C.s0, sc], [sc, sc], [sc, C.s1], [C.s1, C.s1], [C.s1, sc], [sc, sc], [sc, C.s0], [C.s0, C.s0]];
-  const w = [0.2, 0.06, 0.12, 0.06, 0.12, 0.06, 0.2, 0.18];
+  const legs = _legs || (_legs = ((sc) => [[C.s0, sc], [sc, sc], [sc, C.s1], [C.s1, C.s1], [C.s1, sc], [sc, sc], [sc, C.s0], [C.s0, C.s0]])(YARD.cradleAt));
+  const w = LEG_W;
   let a = 0;
   for (let i = 0; i < legs.length; i++) {
     if (u < a + w[i] || i === legs.length - 1) { const e = smooth(0, 1, (u - a) / w[i]); return lerp(legs[i][0], legs[i][1], e); }

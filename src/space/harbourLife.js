@@ -46,9 +46,10 @@ const CR = LIFE.crane, CV = LIFE.conveyor, DR = LIFE.drone;
 // crane cycle: at pad A lower, lift, carry to B, lower, rise; wait; at B lower, lift, carry back, lower, rise; wait
 const CRANE_STEPS = schedule([['downA', 5], ['upA', 6], ['toB', 30], ['downB', 6], ['upB', 5], ['waitB', 12], ['downB2', 5], ['upB2', 6], ['toA', 30], ['downA2', 6], ['upA2', 5], ['waitA', 12]]);
 
+const _frac = [0];
 /** Crane state at cycle fraction u: { r, z, hook (capsule centre height), carrying, at: 'A'|'B' where the capsule rests if not carried }. */
 export function cranePose(u, out = {}) {
-  const f = [0];
+  const f = _frac;
   const i = CRANE_STEPS.at(u, f), s = f[0], e = smooth(0, 1, s);
   const A = CR.padA, B = CR.padB, H = CR.travel, P = CR.pad;
   const name = CRANE_STEPS.names[i];

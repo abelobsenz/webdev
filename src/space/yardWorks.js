@@ -46,27 +46,34 @@ export const WORKS = {
 };
 
 /** Outward unit normal of the hull section at (z, t) in the x-y plane. */
+const _sp = V(0, 0, 0);
 function sectionOut(z, t, out = V(0, 0, 0)) {
-  const p = sectionPoint(z, t);
+  const p = sectionPoint(z, t, _sp);
   return out.set(p.x, p.y, 0).normalize();
 }
 
 /** The crane's bay z range for its frame index i: travel keeps clear of both frames and the next frame's walkway. */
 export function craneBay(c) {
+  if (c._bay) return c._bay;
   const z0 = YARD.frames[c.bay], z1 = YARD.frames[c.bay + 1];
-  return { z0, z1, pick: z0 + 60, lo: z0 + 30, hi: z1 - 60 };
+  return (c._bay = { z0, z1, pick: z0 + 60, lo: z0 + 30, hi: z1 - 60 });
 }
+const _frac = [0];
 
 const CRANE_STEPS = schedule([['grab', 6], ['lift', 6], ['travel', 22], ['lower', 10], ['hold', 40], ['release', 6], ['return', 22], ['reload', 12]]);
 /** Crane state at fraction u: z of the bridge, y of the carried plate (top-crane sense), plate states. */
 export function cranePlate(c, u, out = {}) {
-  const f = [0], i = CRANE_STEPS.at(u, f), s = f[0], e = smooth(0, 1, s);
+  const f = _frac, i = CRANE_STEPS.at(u, f), s = f[0], e = smooth(0, 1, s);
   const bay = craneBay(c);
   const sgn = c.top ? 1 : -1;
   // plate centre over its gap: 5 m off the highest crown under its length (the hull swells
   // toward the stern across the plate's 42 m), which clears the crown stringer (2.2 m)
-  let hullY = 0;
-  for (let k = 0; k <= 4; k++) { const y = hullCrown(c.target + (k / 4 - 0.5) * WORKS.plate[2], c.top); if (Math.abs(y) > Math.abs(hullY)) hullY = y; }
+  let hullY = c._crown;
+  if (hullY === undefined) {
+    hullY = 0;
+    for (let k = 0; k <= 4; k++) { const y = hullCrown(c.target + (k / 4 - 0.5) * WORKS.plate[2], c.top); if (Math.abs(y) > Math.abs(hullY)) hullY = y; }
+    c._crown = hullY;
+  }
   const yT = hullY + sgn * 5;
   const P = WORKS.platformY * sgn + sgn * 2, Tr = WORKS.travelY * sgn;
   let z = bay.pick, hook = P, carried = true, fitted = false, onPad = false;
@@ -114,12 +121,12 @@ export function dronePos(dr, t, outP, outSite) {
   const s = hold ? 0 : smooth(0.65, 1, u);
   const z = lerp(A.z, B.z, s), tt = lerp(A.t, B.t, s);
   const off = WORKS.droneOff + WORKS.droneHop * Math.sin(Math.PI * s);
-  const p = sectionPoint(z, tt), o = sectionOut(z, tt, _o);
+  const p = sectionPoint(z, tt, _q1), o = sectionOut(z, tt, _o);
   outP.set(p.x + o.x * off, p.y + o.y * off, z);
   if (outSite) outSite.set(p.x + o.x * 6, p.y + o.y * 6, z);
   return hold;
 }
-const _o = V(0, 0, 0);
+const _o = V(0, 0, 0), _q1 = V(0, 0, 0);
 
 /** Crew pod on its lane: runs from the house to the front, stopping at each frame's hatch. */
 // ---- hanging stages: painters' and fitters' cradles along the finished hull's flanks, each
@@ -141,7 +148,7 @@ export function stageDef(k) {
 export function stagePos(d, time, outP, outN) {
   const u = ((time / d.T + d.ph) % 1 + 1) % 1;
   const z = lerp(d.z0, d.z1, 0.5 - 0.5 * Math.cos(u * TAU));
-  const q = sectionPoint(z, d.t), o = sectionOut(z, d.t, outN);
+  const q = sectionPoint(z, d.t, _q1), o = sectionOut(z, d.t, outN);
   return outP.set(q.x + o.x * STAGES.off, q.y + o.y * STAGES.off, z);
 }
 function stageGeo() {
