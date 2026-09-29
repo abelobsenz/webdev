@@ -37,7 +37,29 @@ export const DISTRICT_STYLE = [
   { pal: 3, pitched: 0.35, trees: [0, 4, 0, 1], street: LAMPC.SODIUM, accent: LAMPC.AMBER },      // works: brick
   { pal: 4, pitched: 0.5, trees: [1, 3, 1, 0], street: LAMPC.LEAF, accent: LAMPC.TEAL },          // lakeland: ceramic
   { pal: 5, pitched: 0.4, trees: [3, 2, 0, 1], street: LAMPC.ROSE, accent: LAMPC.VIOLET },        // markets: rose
+  { pal: 2, pitched: 0.3, trees: [0, 3, 1, 2], street: LAMPC.WARM, accent: LAMPC.TEAL },          // harbour towns under the arches
 ];
+
+/** A harbour ferry (fleet 0) or a sailing boat (fleet 1), +z forward, waterline at y = 0. */
+export function buildHarbourBoat(fleet) {
+  const B = new CB();
+  if (fleet === 0) {
+    B.loft([{ z: -11, pts: [[-2.6, 0.2], [2.6, 0.2], [3.2, 2.6], [-3.2, 2.6]] }, { z: 8, pts: [[-2.6, 0.2], [2.6, 0.2], [3.2, 2.6], [-3.2, 2.6]] }, { z: 12, pts: [[-0.4, 0.6], [0.4, 0.6], [0.8, 2.8], [-0.8, 2.8]] }], CK.HULL, { capStart: CK.DARK, capEnd: CK.HULL });
+    B.box(0, 4.2, -1.5, 5.4, 3.2, 14, CK.GLASS);
+    B.box(0, 5.9, -1.5, 5.8, 0.4, 15, CK.BRONZE);
+    B.box(0, 2.9, -1.5, 6.5, 0.5, 18, CK.LANTERN);
+    B.box(0, 7.4, -5, 1.2, 2.6, 1.2, CK.DARK);
+  } else {
+    B.loft([{ z: -4.5, pts: [[-1.1, 0.1], [1.1, 0.1], [1.4, 1.2], [-1.4, 1.2]] }, { z: 3, pts: [[-1.1, 0.1], [1.1, 0.1], [1.4, 1.2], [-1.4, 1.2]] }, { z: 5, pts: [[-0.1, 0.4], [0.1, 0.4], [0.2, 1.3], [-0.2, 1.3]] }], CK.HULL, { capStart: CK.DECK, capEnd: CK.HULL });
+    B.box(0, 7, 0.4, 0.2, 12, 0.2, CK.BRONZE);
+    // the mainsail: a thin triangle between the mast and the boom's end (lofted across x)
+    B.push(rotY90);
+    const sail = [[-0.4, 1.6], [-0.4, 12.6], [4.2, 1.6]];
+    B.loft([{ z: -0.04, pts: sail }, { z: 0.04, pts: sail }], HK.AWNING, { capStart: HK.AWNING, capEnd: HK.AWNING });
+    B.pop();
+  }
+  return B.geometry();
+}
 
 // ------------------------------------------------------------ kit ----
 export function latheAt(B, x, y, z, prof, seg = 16, closed = false, phase = 0) {
@@ -99,7 +121,7 @@ function setbackTower(C, cx, cz, sx, sz, hmax, fk) {
   // shopfronts: a band of light along both street faces, and awnings over the pavement
   for (const s of [-1, 1]) {
     M.box(cx, y0 + 4.2, cz + s * (sz / 2 + 0.4), sx * 0.86, 2.0, 0.6, HK.NEON);
-    N.box(cx, y0 + 6.2, cz + s * (sz / 2 + 2.2), sx * 0.7, 0.4, 4.0, HK.AWNING);
+    if (s > 0) N.box(cx, y0 + 6.2, cz + s * (sz / 2 + 2.2), sx * 0.7, 0.4, 4.0, HK.AWNING);
   }
   const th = Math.min(hmax - (pod - y0), 70 + r() * r() * 440);
   let tw = Math.min(sx - 24, 40 + r() * 60), td = Math.min(sz - 24, 40 + r() * 60);
@@ -125,8 +147,6 @@ function setbackTower(C, cx, cz, sx, sz, hmax, fk) {
       M.box(tx, y + 0.6, tz, tw - 2, 1.2, td - 2, HK.ROOFGARDEN);
       railing(N, tx, y + 1.2, tz + td / 2 - 1, tw - 2, 0.1);
       railing(N, tx, y + 1.2, tz - td / 2 + 1, tw - 2, 0.1);
-      railing(N, tx + tw / 2 - 1, y + 1.2, tz, 0.1, td - 2);
-      railing(N, tx - tw / 2 + 1, y + 1.2, tz, 0.1, td - 2);
       tx += (r() - 0.5) * (tw - nw) * 0.5; tz += (r() - 0.5) * (td - nd) * 0.5;
       tw = nw; td = nd;
     }
@@ -142,7 +162,7 @@ function setbackTower(C, cx, cz, sx, sz, hmax, fk) {
     latheAt(B, tx, y - 0.5, tz, [[0.1, 0, CK.BRONZE], [Math.min(tw, td) * 0.5, 0, CK.BRONZE], [Math.min(tw, td) * 0.12, Math.min(40, th * 0.12), CK.BRONZE], [0.1, Math.min(60, th * 0.18), CK.BRONZE]], 4);
   }
   // rooftop plant and a maintenance hoist
-  for (let q = 0; q < 2; q++) N.box(tx + (q ? 1 : -1) * tw * 0.25, y + 3, tz + (r() - 0.5) * td * 0.4, tw * 0.18, 6, td * 0.2, q ? CK.HULL : CK.DARK);
+  for (let q = 0; q < 1; q++) N.box(tx + (q ? 1 : -1) * tw * 0.25, y + 3, tz + (r() - 0.5) * td * 0.4, tw * 0.18, 6, td * 0.2, q ? CK.HULL : CK.DARK);
   if (th > 200) {
     M.box(tx + tw / 2 - 4, y + 18, tz + td / 2 - 4, 1.6, 36, 1.6, CK.DARK);
     C.lamps.push({ p: V3(tx + tw / 2 - 4, y + 38, tz + td / 2 - 4), r: 4, color: LAMPC.RED, i: 2.8, breathe: 0.5, phase: r() });
@@ -168,7 +188,7 @@ function courtBlock(C, cx, cz, sx, sz, hmax, fk) {
       gableRoof(B, x, top, z, (alongX ? d : w) + 1.2, 5 + (alongX ? d : w) * 0.22, (alongX ? w : d) + (alongX ? 0 : 1.2), HK.TILE, k, alongX);
       // dormers and chimneys on the long slopes
       const L = alongX ? w : d;
-      if (q < 2) for (let t = -L / 2 + 14; t < L / 2 - 10; t += 30 + r() * 12) {
+      if (q < 2) for (let t = -L / 2 + 14; t < L / 2 - 10; t += 40 + r() * 16) {
         const px = alongX ? x + t : x + (r() < 0.5 ? -1 : 1) * w * 0.18, pz = alongX ? z + (r() < 0.5 ? -1 : 1) * d * 0.18 : z + t;
         N.box(px, top + 2.4, pz, 2.4, 3.2, 2.4, k);
       }
@@ -184,7 +204,7 @@ function courtBlock(C, cx, cz, sx, sz, hmax, fk) {
   const nt = 2 + Math.floor(r() * 3);
   for (let t = 0; t < nt; t++) {
     const x = cx + (r() - 0.5) * (sx - 2 * wing - 20), z = cz + (r() - 0.5) * (sz - 2 * wing - 20);
-    tree(M, N, x, deckHi(S, x, 1) + 0.9, z, 9 + r() * 7, pickTree(C));
+    tree(M, null, x, deckHi(S, x, 1) + 0.9, z, 9 + r() * 7, pickTree(C));
   }
   C.flamps.push({ p: V3(cx, deckHi(S, cx, 1) + 5, cz), r: 1.6, color: LAMPC.WARM, i: 1.6 });
   // a corner turret with a pyramid cap on some blocks
@@ -249,10 +269,10 @@ export function townCell(C, x0, x1, z0, z1) {
     // street lamps at the corners and a row of street trees on every other block
     for (const [s, t] of [[-1, -1], [1, 1]]) {
       const lx = cx + s * (sx / 2 + 11), lz = cz + t * (sz / 2 + 11), ly = S.deck(lx);
-      N.box(lx, ly + 4.5, lz, 0.35, 9, 0.35, CK.DARK);
+      if (s > 0) N.box(lx, ly + 4.5, lz, 0.35, 9, 0.35, CK.DARK);
       C.flamps.push({ p: V3(lx, ly + 9.4, lz), r: 1.3, color: C.style.street, i: 1.5 });
     }
-    if ((i + j) % 2 === 0) for (let t = -sx / 2 + 14; t < sx / 2 - 10; t += 26) {
+    if ((i + 2 * j) % 4 === 0) for (let t = -sx / 2 + 14; t < sx / 2 - 10; t += 30) {
       const tx = cx + t, tz = cz - sz / 2 - 8;
       tree(N, null, tx, S.deck(tx) + 0.9, tz, 7 + r() * 3, pickTree(C));
     }
@@ -334,7 +354,7 @@ export function farmCell(C, x0, x1, z0, z1) {
   standBox(B, S, (x0 + x1) / 2, (z0 + z1) / 2, x1 - x0, z1 - z0, 1.0, HK.CROPS, 10);
   for (let i = 0; i < n; i++) {
     const x = x0 + (i + 0.5) * pitch, y = Math.max(S.deck(x - half), S.deck(x + half)) + 1;
-    if (i === 1) {
+    if (i === 1 && r() < 0.6) {
       // an orchard in rows instead of a glasshouse
       for (let ox = -half + 10; ox < half - 6; ox += 24) for (let oz = len0 + 12; oz < len1 - 6; oz += 30) tree(M, null, x + ox, y, oz, 8 + r() * 2, C.style.trees[1]);
       if (F) F.box(x, y + 4, (len0 + len1) / 2, half * 2, 8, len1 - len0, treeKind(C.style.trees[1]));
@@ -494,8 +514,8 @@ export function marketCell(C, x0, x1, z0, z1) {
       B.box(x + sd * (half - 1), y + 6, (z0 + z1) / 2, 2, 16, z1 - z0 - 80, facadeKind(C.style.pal));
       M.box(x + sd * (half - 2.4), y + 11, (z0 + z1) / 2, 0.6, 2, z1 - z0 - 90, HK.NEON);
     }
-    for (let z = z0 + 70; z < z1 - 60; z += 24) for (const sd of [-1, 1]) {
-      M.box(x + sd * half * 0.55, y + 2, z, 10, 4, 14, (z / 24) % 3 < 1 ? CK.BRONZE : facadeKind(C.style.pal + 1));
+    for (let z = z0 + 70; z < z1 - 60; z += 32) for (const sd of [-1, 1]) {
+      M.box(x + sd * half * 0.55, y + 2, z, 10, 4, 14, (z / 32) % 3 < 1 ? CK.BRONZE : facadeKind(C.style.pal + 1));
       M.at(x + sd * (half * 0.55 - 6), y + 5, z, 0, 0, sd * 0.35); M.box(0, 0, 0, 6, 0.3, 15, HK.AWNING); M.pop();
     }
     C.lamps.push({ p: V3(x, y + 42, z0 + 40), r: 3.5, color: C.style.accent, i: 2.0 }, { p: V3(x, y + 42, z1 - 40), r: 3.5, color: LAMPC.TEAL, i: 1.8 });
@@ -535,15 +555,15 @@ export function cliffs(C) {
           B.box((gx0 + gx1) / 2, y1 + 13.5, zc, Math.abs(gx1 - gx0), 3, zl - 8, HK.ROOFGARDEN);
           M.box(sg * (X0 - depth + 1.5), y1 + 12.6, zc, 0.35, 1.3, zl - 4, CK.BRONZE);
           // garden trees along the step (minor) and pergola lamps (fine)
-          for (let t = 0; t < 4; t++) {
-            const tz = z0 + ((t + 0.3 + r() * 0.4) / 4) * zl;
+          for (let t = 0; t < 3; t++) {
+            const tz = z0 + ((t + 0.3 + r() * 0.4) / 3) * zl;
             if (cascade && Math.abs(tz - zc) < 20) continue;
             tree(M, null, (gx0 + gx1) / 2, y1 + 15, tz, 7 + r() * 5, pickTree(C));
           }
           C.flamps.push({ p: V3((gx0 + gx1) / 2, y1 + 19, zc + (r() - 0.5) * zl * 0.6), r: 1.4, color: C.style.street, i: 1.3 });
         }
         // pier fins on stone blocks (fine): the storeys read as a carved face close up
-        if (k !== CK.GLASS) for (let zz = z0 + 12; zz < z1 - 6; zz += 24) N.box(xin - sg * 0.9, (y0 + y1) / 2, zz, 1.8, y1 - y0 - 2, 1.4, HK.STONE);
+        if (k !== CK.GLASS && i % 2 === 0) for (let zz = z0 + 20; zz < z1 - 10; zz += 40) N.box(xin - sg * 0.9, (y0 + y1) / 2, zz, 1.8, y1 - y0 - 2, 1.4, HK.STONE);
         // loggias: framed balconies standing proud of the glazing
         const nl = 3 + Math.floor(r() * 4);
         for (let q = 0; q < nl; q++) {
@@ -551,7 +571,7 @@ export function cliffs(C) {
           if (cascade && Math.abs(zq - zc) < lw / 2 + 10) continue;
           M.box(sg * (X0 - depth - 4), (y0 + y1) / 2 - 20, zq, 8, 3, lw, CK.DECK);
           M.box(sg * (X0 - depth - 7.8), (y0 + y1) / 2 - 18, zq, 0.3, 1.2, lw, CK.BRONZE);
-          if (q % 2 === 0) M.box(sg * (X0 - depth - 4), (y0 + y1) / 2 - 17.6, zq, 6, 1.8, lw * 0.5, HK.ROOFGARDEN);
+          if (q === 0) M.box(sg * (X0 - depth - 4), (y0 + y1) / 2 - 17.6, zq, 6, 1.8, lw * 0.5, HK.ROOFGARDEN);
         }
         // the cascade: a sheet of water down this deck's face into the garden below, and a basin
         if (cascade) {
@@ -614,4 +634,125 @@ export function buildVaultFrame(S, tileL) {
     B.box(x, y, 0, VAULT_FRAME.purlinR * 2, VAULT_FRAME.purlinR * 2, tileL, CK.BRONZE);
   }
   return { geo: B.geometry(), lamps };
+}
+
+// ------------------------------------------------------------ the harbour towns ----
+/**
+ * Under every hub arch the river widens into a round harbour: a basin 3 km across with stone
+ * quays, a lit island carrying the Harbour Light (a lantern tower on the arch's axis line, off
+ * the spine), a ring quarter of towers and terraces round the quay broken by eight radial
+ * avenues, marinas, ferry piers and quay cranes. The maglev crosses the basin on its viaduct.
+ * Boats and ferries (HaloDistricts life) work the water. Returns the footprint the regular
+ * cells must leave clear.
+ */
+export const HARBOUR = {
+  R: 1500, quay: 60, island: { x: 720, z: 0, r: 300 }, lanes: [520, 880, 1240], ground: 3000,
+  // boat routes round the basin (m radius, m/s, count, fleet 0 ferries / 1 sail), threading the
+  // viaduct's piers (every 200 m at z = 100 + 200 k) and clear of the island and the piers
+  routes: [{ r: 1250, v: 6, n: 5, fleet: 0 }, { r: 1180, v: -3.5, n: 7, fleet: 1 }, { r: 1215, v: 2.5, n: 6, fleet: 1 }],
+};
+export function harbourTown(C) {
+  const { B, M, N, S, r, F } = C;
+  const H = HARBOUR, R = H.R;
+  const y = Math.max(S.deck(-R - 250), S.deck(R + 250), S.deck(0)) + 1.0;
+  // the basin and its quay wall (a stepped stone rim, bollards and lamps along the edge)
+  latheAt(B, 0, y, 0, [[0.1, 0, HK.WATER], [R, 0, HK.WATER], [R, 1.2, HK.WATER], [0.1, 1.2, HK.WATER]], 48);
+  latheAt(B, 0, y - 3, 0, [[R - 2, 0, HK.STONE], [R + H.quay, 0, HK.STONE], [R + H.quay, 5.5, HK.STONE], [R + 8, 5.5, HK.STONE], [R + 8, 3.5, HK.STONE], [R - 2, 3.5, HK.STONE]], 64, true);
+  if (F) {
+    latheAt(F, 0, y, 0, [[0.1, 0, HK.WATER], [R, 0, HK.WATER], [R, 1.2, HK.WATER], [0.1, 1.2, HK.WATER]], 16);
+    latheAt(F, 0, y - 3, 0, [[R, 0, HK.STONE], [R + H.quay, 0, HK.STONE], [R + H.quay, 5.5, HK.STONE], [R, 5.5, HK.STONE]], 16, true);
+  }
+  M.push(new THREE.Matrix4().makeTranslation(0, y + 3.2, 0).multiply(new THREE.Matrix4().makeRotationX(Math.PI / 2)));
+  M.torus(R + 9, 0.6, 128, 4, CK.BRONZE);                       // the quay rail
+  M.pop();
+  for (let k = 0; k < 96; k++) {
+    const a = (k / 96) * TAU, cx = Math.cos(a), sz = Math.sin(a);
+    if (Math.abs(cx * (R + 30)) < 40) continue;                 // (the viaduct's crossing)
+    C.flamps.push({ p: V3(cx * (R + 14), y + 10, sz * (R + 14)), r: 1.6, color: k % 8 ? LAMPC.WARM : C.style.accent, i: 1.6 });
+    N.box(cx * (R + 14), y + 5.5, sz * (R + 14), 0.4, 9, 0.4, CK.DARK);
+    if (k % 3 === 0) N.box(cx * (R + 5), y + 3.2, sz * (R + 5), 0.8, 1.2, 0.8, CK.DARK);   // bollards
+  }
+  // the island: a planted mound, a stone apron, the Harbour Light
+  const I = H.island;
+  latheAt(B, I.x, y - 1, I.z, [[0.1, 0, HK.STONE], [I.r, 0, HK.STONE], [I.r, 4, HK.STONE], [I.r - 20, 4, CK.GARDEN], [I.r * 0.5, 16, CK.GARDEN], [0.1, 22, CK.GARDEN]], 32);
+  if (F) latheAt(F, I.x, y - 1, I.z, [[0.1, 0, CK.GARDEN], [I.r, 0, CK.GARDEN], [0.1, 22, CK.GARDEN]], 10);
+  const hmax = Math.min(S.roofLow(I.x - 60), S.roofLow(I.x + 60)) - y - 360;
+  const top = Math.min(760, hmax);
+  const light = [[0.1, 0, HK.STONE], [70, 0, HK.STONE], [64, 40, facadeKind(C.style.pal + 2)], [48, top * 0.45, facadeKind(C.style.pal + 2)], [50, top * 0.45 + 4, CK.BRONZE], [44, top * 0.45 + 8, CK.GLASS], [34, top * 0.82, CK.GLASS], [40, top * 0.82 + 4, CK.BRONZE], [40, top * 0.82 + 10, CK.LANTERN], [36, top * 0.92, CK.LANTERN], [40, top * 0.92 + 4, CK.BRONZE], [14, top * 0.97, CK.BRONZE], [3, top, CK.DARK], [0.1, top + 2, CK.DARK]];
+  latheAt(B, I.x, y + 18, I.z, light, 20);
+  if (F) latheAt(F, I.x, y + 18, I.z, [[0.1, 0, HK.STONE], [64, 0, HK.STONE], [40, top * 0.82, CK.GLASS], [40, top * 0.92, CK.LANTERN], [0.1, top + 2, CK.DARK]], 8);
+  C.lamps.push({ p: V3(I.x, y + 18 + top * 0.88, I.z), r: 14, color: LAMPC.WHITE, i: 3.2, breathe: 0.6 });
+  C.lamps.push({ p: V3(I.x, y + 20 + top, I.z), r: 6, color: LAMPC.RED, i: 3.0, breathe: 0.5, phase: 0.5 });
+  for (let t = 0; t < 14; t++) { const a = (t / 14) * TAU, d = I.r * (0.45 + r() * 0.3); tree(M, N, I.x + Math.cos(a) * d, y + 6, I.z + Math.sin(a) * d, 10 + r() * 6, pickTree(C)); }
+  // marinas: finger piers off the quay at four points, moored boats along them
+  for (let q = 0; q < 4; q++) {
+    const a = (q / 4) * TAU + Math.PI / 4, cx = Math.cos(a), sz = Math.sin(a), tx = -sz, tz = cx;
+    const px = cx * (R - 60), pz = sz * (R - 60);
+    M.at(px, y + 2.2, pz, 0, -a, 0);
+    M.box(-60, 0, 0, 120, 1, 6, CK.DECK);                                                    // the spine pier, radial
+    for (let f = -2; f <= 2; f++) M.box(-60 + f * 22, 0, 0, 3, 1, 70, CK.DECK);            // fingers
+    for (let f = -2; f <= 2; f++) for (const s of [-1, 1]) {
+      const bx = -60 + f * 22 + s * 5, bz = (r() - 0.5) * 50;
+      M.box(bx, 0.8, bz, 3, 1.4, 10, f % 2 ? CK.HULL : HK.AWNING);
+      N.box(bx, 6, bz + 1, 0.2, 10, 0.2, CK.BRONZE);
+    }
+    M.pop();
+    C.flamps.push({ p: V3(px - cx * 60 + tx * 0, y + 8, pz - sz * 60), r: 1.8, color: LAMPC.TEAL, i: 1.6, breathe: 0.3, phase: q / 4 });
+  }
+  // ferry piers where the avenues meet the water, each with a lit shelter
+  for (let q = 0; q < 8; q++) {
+    const a = (q / 8) * TAU, cx = Math.cos(a), sz = Math.sin(a);
+    if (Math.abs(cx) > 0.99) continue;
+    M.at(cx * (R - 40), y + 2.4, sz * (R - 40), 0, -a, 0);
+    M.box(0, 0, 0, 80, 1.2, 12, CK.DECK);
+    M.box(-30, 4, 0, 14, 6, 10, CK.GLASS);
+    M.box(-30, 7.4, 0, 16, 0.6, 12, HK.AWNING);
+    M.pop();
+    C.flamps.push({ p: V3(cx * (R - 70), y + 10, sz * (R - 70)), r: 2, color: LAMPC.WARM, i: 1.8 });
+  }
+  // quay cranes on the eastern quays (the working side), jibs over the water
+  for (const a of [-0.35, 0, 0.35]) {
+    const cx = Math.cos(a + Math.PI), sz = Math.sin(a + Math.PI), qx = cx * (R + 30), qz = sz * (R + 30);
+    B.box(qx, y + 30, qz, 6, 60, 6, CK.BRONZE);
+    B.at(qx, y + 62, qz, 0, -(a + Math.PI), 0);
+    B.box(-30, 0, 0, 90, 4, 4, CK.BRONZE);
+    B.box(16, -6, 0, 10, 10, 10, CK.DARK);
+    B.pop();
+    C.lamps.push({ p: V3(qx, y + 68, qz), r: 3, color: LAMPC.RED, i: 2.2, breathe: 0.4 });
+  }
+  // the ring quarter: blocks on three rings of lots round the quay, eight avenues left open
+  const fkA = facadeKind(C.style.pal), fkB = facadeKind(C.style.pal + 4);
+  const hm = (x) => Math.min(S.roofLow(x - 150), S.roofLow(x + 150)) - Math.max(S.deck(x - 150), S.deck(x + 150)) - 350;
+  H.lanes.forEach((ringR, li) => {
+    const lots = Math.floor((TAU * (R + ringR)) / 230);
+    for (let q = 0; q < lots; q++) {
+      const a = ((q + 0.5) / lots) * TAU;
+      const aa = ((a % (TAU / 8)) + TAU / 8) % (TAU / 8);
+      if (Math.min(aa, TAU / 8 - aa) * (R + ringR) < 70) continue;            // radial avenues
+      const cx = Math.cos(a) * (R + ringR), cz = Math.sin(a) * (R + ringR);
+      if (Math.abs(cx) < 120) continue;                                         // the viaduct and its aircar lanes
+      if (Math.abs(cz) > 1930) continue;                                        // stay in the tile
+      const sx = 150, sz = 150;
+      standBox(B, S, cx, cz, sx + 12, sz + 12, 0.9, HK.STONE, 6);
+      const fk = r() < 0.7 ? fkA : fkB;
+      const roll = r();
+      if (li === 0 && roll < 0.6) setbackTower(C, cx, cz, sx, sz, hm(cx), fk);
+      else if (roll < 0.75) courtBlock(C, cx, cz, sx, sz, hm(cx), fk);
+      else if (roll < 0.9) steppedBlock(C, cx, cz, sx, sz, hm(cx), fk);
+      else pocketSquare(C, cx, cz, sx, sz);
+    }
+  });
+  // avenue lamps and trees along the eight radials
+  for (let q = 0; q < 8; q++) {
+    const a = (q / 8) * TAU, cx = Math.cos(a), sz = Math.sin(a);
+    for (let d = R + 90; d < R + H.lanes[2] + 100; d += 45) {
+      const x = cx * d, z = sz * d;
+      if (Math.abs(z) > 1960 || Math.abs(x) < 60) continue;
+      C.flamps.push({ p: V3(x - sz * 18, S.deck(x) + 8, z + cx * 18), r: 1.4, color: C.style.street, i: 1.4 });
+      tree(M, N, x + sz * 18, S.deck(x) + 1, z - cx * 18, 9 + r() * 3, pickTree(C));
+    }
+  }
+  // the ground of the quarter in 500 m strips (each seated on its own stretch of the deck's sag)
+  for (let x = -H.ground; x < H.ground; x += 500) standBox(B, S, x + 250, 0, 500, 3960, 0.4, HK.STREET, 8);
+  return { ground: H.ground };
 }

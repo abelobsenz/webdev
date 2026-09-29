@@ -6,7 +6,7 @@ import { CRAFT_FRAME } from './craftMesh.js';
 import { createLamps, LAMP } from './lamps.js';
 import { HALO_PORTS } from './earthData.js';
 import { createHaloMaterial } from './haloMaterial.js';
-import { DISTRICT_STYLE, standBox, vault, ribArc, cliffs, townCell, parkCell, farmCell, civicCell, worksCell, stadiumCell, marketCell, buildVaultFrame } from './haloArchitecture.js';
+import { DISTRICT_STYLE, standBox, vault, ribArc, cliffs, townCell, parkCell, farmCell, civicCell, worksCell, stadiumCell, marketCell, buildVaultFrame, harbourTown, HARBOUR, buildHarbourBoat } from './haloArchitecture.js';
 import { bodyDir } from './sim.js';
 
 // The Halo, lived in. Seen from orbit the deck shader already paints a continent of towns and
@@ -41,6 +41,7 @@ const SEAM_TILES = 8;                        // the last tiles before theta = 0 
 export const FAR_TILES = 45;                 // silhouette tiles either side beyond the near window (180 km)
 export const FAR_RANGE_KM = 420;             // silhouettes drawn within this distance of the band
 export const VARIANTS = ['residential', 'agrarian', 'civic', 'works', 'lakeland', 'markets'];
+export const HARBOUR_V = VARIANTS.length;        // the harbour town under each hub arch (tile variant 6)
 const MOVER_RANGE = (WINDOW + 0.5) * TILE_L; // m either side of the anchor
 
 export function mulberry(seed) {
@@ -317,6 +318,7 @@ function* buildDistrictSteps(C, bay, variant) {
   outerWall(B, M, lamps, S, bay);
   rotors(B, M, lamps, S);
   underDeck(B, M, lamps, S);
+  const harbour = variant === HARBOUR_V ? harbourTown(C) : null;
   yield;
   const weights = [
     { town: 0.52, park: 0.18, farm: 0.1, civic: 0.06, lake: 0.08, works: 0, stadium: 0.02, market: 0.04 },
@@ -325,6 +327,7 @@ function* buildDistrictSteps(C, bay, variant) {
     { town: 0.28, park: 0.12, farm: 0.18, civic: 0.04, lake: 0.04, works: 0.3, stadium: 0, market: 0.04 },
     { town: 0.3, park: 0.26, farm: 0.06, civic: 0.04, lake: 0.26, works: 0, stadium: 0.04, market: 0.04 },
     { town: 0.46, park: 0.14, farm: 0.02, civic: 0.1, lake: 0.04, works: 0.06, stadium: 0.06, market: 0.12 },
+    { town: 0.44, park: 0.2, farm: 0, civic: 0.14, lake: 0.06, works: 0, stadium: 0.04, market: 0.12 },
   ][variant];
   const kinds = Object.keys(weights);
   const cells = Object.fromEntries(Object.keys(weights).map((k) => [k, 0]));
@@ -333,6 +336,7 @@ function* buildDistrictSteps(C, bay, variant) {
     const edge = (x) => (x === 0 || Math.abs(x) === 7000 ? 90 : 30);
     const x0 = cx + edge(cx), x1 = cx + 1000 - edge(cx + 1000);
     const z0 = cz + 30, z1 = cz + 1000 - 30;
+    if (harbour && cx >= -harbour.ground && cx < harbour.ground) continue;   // the harbour quarter
     let u = r(), kind = kinds[kinds.length - 1];
     for (const k of kinds) { if (u < weights[k]) { kind = k; break; } u -= weights[k]; }
     // civic towers only where the vault is high (away from the walls)
@@ -466,7 +470,7 @@ function buildPod() {
 }
 
 // ------------------------------------------------------------ the module ----
-const _m = new THREE.Matrix4(), _c = new THREE.Vector3(), _q = new THREE.Quaternion(), _x = new THREE.Vector3(), _z = new THREE.Vector3();
+const _m = new THREE.Matrix4(), _r = new THREE.Matrix4(), _c = new THREE.Vector3(), _q = new THREE.Quaternion(), _x = new THREE.Vector3(), _z = new THREE.Vector3();
 
 export class HaloDistricts {
   /**
@@ -504,6 +508,8 @@ export class HaloDistricts {
       const k = Math.round((th * this.Rm) / TILE_L - 0.5);
       if (k >= 0 && k < this.seamK && Math.abs(this.tileAngle(k) - th) * this.Rm < 1) this.hubTiles.set(k, true);
     }
+    // under each arch the district is the harbour town (where the tile is dressed at all)
+    for (const k of this.hubTiles.keys()) if (this.tileVariant[k] >= 0) this.tileVariant[k] = HARBOUR_V;
     // gantries: one per bay between arches whose whole travel stays on dressed tiles
     this.gantryBays = [];
     const nBays = Math.floor((TAU * this.basis.R) / this.def.hub);
@@ -560,7 +566,7 @@ export class HaloDistricts {
       for (const c of this.shipClasses) { c.y = floor + this.bay.clear + 2 - c.box.min.y; c.zc = (c.box.min.z + c.box.max.z) / 2; }
     });
     // each variant a slice per frame (tens of milliseconds each), not one long stall
-    VARIANTS.forEach((_, v) => {
+    [...VARIANTS.keys(), HARBOUR_V].forEach((v) => {
       let gen = null;
       const piece = () => {
         gen = gen || buildDistrictTileSteps(v, S, this.bay, 1);
@@ -654,12 +660,16 @@ export class HaloDistricts {
       return im;
     };
     this.pods = inst(buildPod(), GANTRY.pods * 2);
+    // harbour boats: ferries and sailing boats on their rounds of the basin (a hub tile or two
+    // is ever inside the window; capacity for four)
+    this.boats = [0, 1].map((fleet) => inst(buildHarbourBoat(fleet), 4 * HARBOUR.routes.reduce((n, rt) => n + (rt.fleet === fleet ? rt.n : 0), 0)));
     this.trains = inst(buildTrainCar(), 8 * 24);
     this.trams = inst(buildTram(), 320);
     this.ships = this.shipClasses.map((c) => inst(c.geo, SLOTS * 4));
     const G = rotorGeometry(S);
     this.rotorCrawlers = [-1, 1].map((sg) => inst(buildCrawler(sg, G), 64));
     this.aircars = inst(buildAircar(), 1400);
+    this.harbourWaterY = Math.max(S.deck(-HARBOUR.R - 250), S.deck(HARBOUR.R + 250), S.deck(0)) + 1.0 + 1.2;   // the basin's surface
     this.lineMeshes = [this.trains, this.trams, this.aircars, ...this.rotorCrawlers];
     // services: [x (m), y above radius (m), speed (m/s), spacing (m), cars, car pitch (m), seed]
     const yT = S.deck(0) + 34 + 1.6 + 0.1;
@@ -824,6 +834,30 @@ export class HaloDistricts {
       }
     }
     for (const im of this.ships) im.instanceMatrix.needsUpdate = true;
+    this._harbourBoats(t);
+  }
+
+  /** Ferries and sailing boats round each harbour basin in the window (tile-local circles). */
+  _harbourBoats(t) {
+    const [ferries, sails] = this.boats;
+    ferries.count = 0; sails.count = 0;
+    const R = this.Rm;
+    for (const s of this.slots) {
+      if (!s.g.visible || this.tileVariant[s.k] !== HARBOUR_V || !s.minor.visible) continue;
+      const uk = this.tileAngle(s.k) * R, yw = this.harbourWaterY;
+      for (const rt of HARBOUR.routes) {
+        const im = rt.fleet ? sails : ferries;
+        for (let i = 0; i < rt.n && im.count < im.instanceMatrix.count; i++) {
+          const phi = (rt.v * t) / rt.r + (i / rt.n) * TAU + s.k * 0.37;
+          const x = rt.r * Math.cos(phi), z = rt.r * Math.sin(phi);
+          this._place(_m, uk + z, x, yw, 1);
+          _r.makeRotationY(rt.v > 0 ? -phi : Math.PI - phi);
+          _m.multiply(_r);
+          im.setMatrixAt(im.count++, _m);
+        }
+      }
+    }
+    ferries.instanceMatrix.needsUpdate = true; sails.instanceMatrix.needsUpdate = true;
   }
 
   tileOk(u, C) { const k = this.tileAt(((u % C) + C) % C); return k < this.nTiles && this.tileVariant[k] >= 0; }

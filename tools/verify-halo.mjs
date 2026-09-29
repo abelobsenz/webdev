@@ -14,7 +14,8 @@ import * as THREE from 'three';
 import { SpaceSim } from '../src/space/sim.js';
 import { Rings } from '../src/space/rings.js';
 import { TILE_L, WINDOW, GANTRY, MAJOR_RANGE_KM, MINOR_RANGE_KM, FINE_RANGE_KM, FRAME_RANGE_KM } from '../src/space/haloDistricts.js';
-import { VAULT_FRAME } from '../src/space/haloArchitecture.js';
+import { VAULT_FRAME, HARBOUR } from '../src/space/haloArchitecture.js';
+import { HARBOUR_V } from '../src/space/haloDistricts.js';
 import { createHaloMaterial, HK } from '../src/space/haloMaterial.js';
 
 const out = {};
@@ -109,6 +110,35 @@ const C = 2 * Math.PI * D.Rm;
   assert.ok(D.vaultFrame.lampCount > 0);
 }
 
+// ------------------------------------------------------------ harbours ----
+{
+  const hubs = [...D.hubTiles.keys()];
+  const harbours = hubs.filter((k) => D.tileVariant[k] === HARBOUR_V);
+  out.harbourTowns = harbours.length;
+  assert.ok(harbours.length > 10, 'Harbour towns stand under the arches');
+  assert.equal(harbours.length, hubs.filter((k) => D.tileVariant[k] >= 0).length, 'Every dressed hub tile is a harbour');
+  // boat routes: clear of the viaduct piers (x = 0, every 200 m from z = -1900), the island,
+  // the marina and ferry piers (radii R - 180 .. R), and inside the basin
+  const I = HARBOUR.island;
+  let minPier = Infinity, minIsland = Infinity;
+  for (const rt of HARBOUR.routes) {
+    assert.ok(rt.r + 12 < HARBOUR.R - 180 || rt.r - 12 > HARBOUR.R, 'Routes clear of the piers');
+    assert.ok(rt.r + 12 < HARBOUR.R, 'Routes stay in the basin');
+    for (let a = 0; a < Math.PI * 2; a += 0.0005) {
+      const x = rt.r * Math.cos(a), z = rt.r * Math.sin(a);
+      if (Math.abs(x) < 20) for (let pz = -1900; pz <= 1900; pz += 200) minPier = Math.min(minPier, Math.abs(z - pz) - 7 - 12);
+      minIsland = Math.min(minIsland, Math.hypot(x - I.x, z - I.z) - I.r - 12);
+    }
+  }
+  out.boatPierClearance = +minPier.toFixed(1); out.boatIslandClearance = +minIsland.toFixed(1);
+  assert.ok(minPier > 5 && minIsland > 20, 'Boats thread the viaduct piers and keep off the island');
+  const hv = D.variants[HARBOUR_V];
+  let lightTop = -Infinity;
+  eachVertex(hv.major, (x, y) => { if (Math.abs(x - I.x) < 80 && Math.abs(y) < 9000) lightTop = Math.max(lightTop, y - S.roofLow(x)); });
+  out.harbourLightUnderGlassMetres = Math.round(-lightTop);
+  assert.ok(lightTop < -300, 'The Harbour Light stands well under the glass');
+}
+
 // ------------------------------------------------------------ water and LOD layers ----
 const kindOf = (g, i) => Math.round(g.attributes.aFacade.getZ(i));
 let waterUnder = 0, waterHigh = -Infinity, waterV = 0;
@@ -184,6 +214,17 @@ assert.ok(out.closestApproachTris < 12e6, 'District tiles within 12M rendered tr
   assert.ok(minor <= minorSlots && major <= majorSlots && mid > 0, 'Minor and major in range, silhouettes beyond');
   for (const s of D.slots) if (s.g.visible) assert.ok(!(s.major.visible && s.mid.visible), 'Massing and silhouette never drawn together');
   out.meshesChecked = checkBuffers(space.scene, 'scene');
+  // over a harbour: its boats at work, within their buffers
+  {
+    const k = [...D.hubTiles.keys()].find((kk) => D.tileVariant[kk] === HARBOUR_V);
+    const thh = D.tileAngle(k);
+    up.copy(a).multiplyScalar(Math.cos(thh)).addScaledVector(b, Math.sin(thh));
+    place(4);
+    rings.update(sim, 30, 0.016, space);
+    out.harbourBoats = D.boats.map((im) => im.count);
+    assert.ok(D.boats.every((im) => im.count > 0 && im.count <= im.instanceMatrix.count), 'Ferries and sailing boats on the basin');
+    checkBuffers(space.scene, 'harbour');
+  }
   // the seam: fly to theta ~ 0 and see the tiles either side dressed and abutting
   const th0 = 0.2 / D.basis.R;
   up.copy(a).multiplyScalar(Math.cos(th0)).addScaledVector(b, Math.sin(th0));
