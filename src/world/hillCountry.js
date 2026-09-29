@@ -793,7 +793,10 @@ export function buildHillCountry(scene, { onComponent = null } = {}) {
     const junctionNodes=new Set([...roots,...doorLinks.map(({e})=>e.node),...(publicCenter?[publicCenter.selected.n]:[])]);
     const done=new Set(),edgeKey=(a,b)=>a<b?`${a}:${b}`:`${b}:${a}`;
     const draw=path=>{const p=[],h=[],main=path.every(n=>spine.has(n)&&clear(X(n),Z(n),1.4));
-      for(let k=0;k<path.length;k++){const n=path[k];p.push([X(n),Z(n)]);h.push(height[n]);if(k===0||k===path.length-2){const m=path[k+1],dx=X(m)-X(n),dz=Z(m)-Z(n),len=Math.hypot(dx,dz),landing=Math.min(2.3,len*.46);if(k===0){p.push([X(n)+dx/len*landing,Z(n)+dz/len*landing]);h.push(height[n]);}if(k===path.length-2){p.push([X(m)-dx/len*landing,Z(m)-dz/len*landing]);h.push(height[m]);}}}
+      // a root within 5 cm of its anchor on the host road takes the anchor's exact position (no stub is
+      // drawn that close, and a lane ending 2 cm off the host's centreline did not meet it)
+      const at=n=>{const a=roots.has(n)?anchor.get(n):null;return a&&Math.hypot(X(n)-a.x,Z(n)-a.z)<=.05?[a.x,a.z]:[X(n),Z(n)];};
+      for(let k=0;k<path.length;k++){const n=path[k];p.push(at(n));h.push(height[n]);if(k===0||k===path.length-2){const m=path[k+1],dx=X(m)-X(n),dz=Z(m)-Z(n),len=Math.hypot(dx,dz),landing=Math.min(2.3,len*.46);if(k===0){p.push([X(n)+dx/len*landing,Z(n)+dz/len*landing]);h.push(height[n]);}if(k===path.length-2){p.push([X(m)-dx/len*landing,Z(m)-dz/len*landing]);h.push(height[m]);}}}
       road(p,main?1.18:hw,0,{heights:h,kerbs:false,kind:main?'village-lane':'local-lane',lamps:false});};
     for(const [n,nb]of used){if(nb.size===2&&!junctionNodes.has(n))continue;for(const m of nb){if(done.has(edgeKey(n,m)))continue;const path=[n];let a=n,b=m;for(;;){path.push(b);done.add(edgeKey(a,b));const next=used.get(b);if(next.size!==2||junctionNodes.has(b))break;const c=[...next].find(q=>q!==a);if(done.has(edgeKey(b,c)))break;a=b;b=c;}draw(path);}}
     for(const n of roots){const p=anchor.get(n);if(p&&Math.hypot(X(n)-p.x,Z(n)-p.z)>.05)road([[p.x,p.z],[X(n),Z(n)]],hw,0,{heights:[p.y,height[n]],kerbs:false,kind:'road-junction',lamps:false});}
