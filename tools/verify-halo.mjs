@@ -44,7 +44,6 @@ while (D.buildQueue.length) { const a = performance.now(); D._step(); slices.pus
 out.buildSlices = slices.length;
 out.buildMs = Math.round(slices.reduce((s, x) => s + x, 0));
 out.maxSliceMs = Math.round(Math.max(...slices));
-console.log('build', out.buildMs, out.maxSliceMs, slices.map(Math.round).join(','));
 assert.ok(out.maxSliceMs < 100 && out.buildMs < 1500, 'District build lazily, in slices under 100 ms');
 assert.ok(out.ringsCtorMs < 400, 'The rings constructor stays light (districts wait for the approach)');
 
@@ -251,7 +250,7 @@ out.waterVertices = waterV;
 assert.ok(waterV > 0, 'Districts carry water');
 assert.equal(waterUnder, 0, 'No water sunk more than 30 m under the deck');
 assert.ok(waterHigh < -150, 'Water (cascades included) stays under the glass');
-assert.ok(layerTris.major < 360e3 && layerTris.minor < 400e3 && layerTris.fine < 480e3 && layerTris.far < 32e3, 'Per-layer budgets');
+assert.ok(layerTris.major < 260e3 && layerTris.minor < 400e3 && layerTris.fine < 400e3 && layerTris.far < 20e3, 'Per-layer budgets');
 const majorSlots = 2 * Math.ceil(MAJOR_RANGE_KM / 4) + 1, minorSlots = 2 * Math.ceil(MINOR_RANGE_KM / 4) + 1, fineSlots = 2 * Math.ceil(FINE_RANGE_KM / 4) + 1;
 const frameSlots = Math.min(2 * WINDOW + 1, 2 * Math.ceil(FRAME_RANGE_KM / 4) + 1);
 out.closestApproachTris = majorSlots * layerTris.major + (2 * WINDOW + 1 - majorSlots) * layerTris.far + minorSlots * layerTris.minor + fineSlots * layerTris.fine + frameSlots * out.frameTris;

@@ -6,8 +6,7 @@ import { CRAFT_FRAME } from './craftMesh.js';
 import { createLamps, LAMP } from './lamps.js';
 import { HALO_PORTS } from './earthData.js';
 import { createHaloMaterial } from './haloMaterial.js';
-import { HB } from './haloBuilder.js';
-import { canalCell, boulevards, tree, buildCraneJib, CRANE_JIB, buildPerson, buildDrone, DISTRICT_STYLE, standBox, vault, ribArc, cliffs, townCell, parkCell, farmCell, civicCell, worksCell, stadiumCell, marketCell, buildVaultFrame, harbourTown, HARBOUR, buildHarbourBoat, portQuarter } from './haloArchitecture.js';
+import { canalCell, buildCraneJib, CRANE_JIB, buildPerson, buildDrone, DISTRICT_STYLE, standBox, vault, ribArc, cliffs, townCell, parkCell, farmCell, civicCell, worksCell, stadiumCell, marketCell, buildVaultFrame, harbourTown, HARBOUR, buildHarbourBoat, portQuarter } from './haloArchitecture.js';
 import { bodyDir, MERIDIAN_LON } from './sim.js';
 
 // The Halo, lived in. Seen from orbit the deck shader already paints a continent of towns and
@@ -34,8 +33,8 @@ export const TILE_L = 4000;                  // m of ring per district tile
 export const WINDOW = 15;                    // tiles either side of the camera's tile
 const SLOTS = 2 * WINDOW + 1;
 export const NEAR_RANGE_KM = 150;            // districts drawn within this distance of the band
-export const MINOR_RANGE_KM = 12;            // small detail (trees, balconies, loggias, boats) within this
-export const MAJOR_RANGE_KM = 20;            // full massing within this; out to the window edge the tile's silhouette
+export const MINOR_RANGE_KM = 14;            // small detail (trees, balconies, loggias, boats) within this
+export const MAJOR_RANGE_KM = 26;            // full massing within this; out to the window edge the tile's silhouette
 export const FINE_RANGE_KM = 8;              // finest detail (railings, street trees, pier fins, street lamps)
 export const FRAME_RANGE_KM = 40;            // the vault's ribs and purlins over the tiles within this
 const SEAM_TILES = 8;                        // the last tiles before theta = 0 share the ring's remainder
@@ -129,7 +128,7 @@ function spine(B, M, lamps, S, withStation) {
     standBox(B, S, bx, 0, 60, TILE_L, 0.8, CK.DECK, 8);
     for (const x of [-10.7, -5.3, 5.3, 10.7]) M.box(bx + x, yb + 1.0, 0, 0.8, 0.4, TILE_L, CK.BRONZE);
     M.box(bx, yb + 1.1, 0, 4, 0.6, TILE_L, CK.GARDEN);
-    for (let z = -TILE_L / 2 + 25; z < TILE_L / 2; z += 50) tree(M, null, bx + (z % 100 ? 22 : -22), yb + 0.8, z, 11 + (z % 150) * 0.01, 1);
+    for (let z = -TILE_L / 2 + 25; z < TILE_L / 2; z += 50) M.box(bx + (z % 100 ? 22 : -22), yb + 7, z, 7, 10, 7, CK.GARDEN);
     for (const z of [-1000, 1000]) for (const sd of [-1, 1]) {
       M.box(bx + sd * 17, yb + 4, z, 4, 6, 40, CK.GLASS);
       lamps.push({ p: V3(bx + sd * 17, yb + 8, z), r: 1.6, color: LAMP.AMBER, i: 1.8 });
@@ -289,20 +288,10 @@ const RAIL_X = [16100, 16290];
 const MAST_X = 16340;                        // crest lamp masts, outboard of the gantry bogies
 
 /** One district variant (metres, x across the ring, y up from its radius, z along it). */
-/**
- * Each variant's downtown: centre (x across, z along; m) and radii. The towers gather there
- * and the city thins away from it (haloArchitecture densityAt); a variant's is fixed, so the
- * plan painted on the deck and every copy of the tile agree.
- */
-export function districtCore(variant) {
-  const r = mulberry(variant * 7331 + 101);
-  const side = r() < 0.5 ? -1 : 1;
-  return [side * (1800 + r() * 7200), (r() - 0.5) * 2200, 3200 + r() * 2600, 1700 + r() * 1300];
-}
 export function buildDistrictTile(variant, S, bay, seed = 1) {
-  const B = new HB(), M = new HB(), N = new HB(), F = new HB(), lamps = [], flamps = [];
+  const B = new CB(), M = new CB(), N = new CB(), F = new CB(), lamps = [], flamps = [];
   const r = mulberry(seed * 7919 + variant * 104729 + 17);
-  const C = { B, M, N, F, lamps, flamps, S, r, style: DISTRICT_STYLE[variant], tileL: TILE_L, walks: [], cranes: [], core: districtCore(variant) };
+  const C = { B, M, N, F, lamps, flamps, S, r, style: DISTRICT_STYLE[variant], tileL: TILE_L, walks: [], cranes: [] };
   const steps = buildDistrictSteps(C, bay, variant);
   FAR = F;
   try { while (!steps.next().done); } finally { FAR = null; }
@@ -310,9 +299,9 @@ export function buildDistrictTile(variant, S, bay, seed = 1) {
 }
 /** The same tile built a slice per call (the terraces and services, then six columns of cells at a time). */
 export function* buildDistrictTileSteps(variant, S, bay, seed = 1) {
-  const B = new HB(), M = new HB(), N = new HB(), F = new HB(), lamps = [], flamps = [];
+  const B = new CB(), M = new CB(), N = new CB(), F = new CB(), lamps = [], flamps = [];
   const r = mulberry(seed * 7919 + variant * 104729 + 17);
-  const C = { B, M, N, F, lamps, flamps, S, r, style: DISTRICT_STYLE[variant], tileL: TILE_L, walks: [], cranes: [], core: districtCore(variant) };
+  const C = { B, M, N, F, lamps, flamps, S, r, style: DISTRICT_STYLE[variant], tileL: TILE_L, walks: [], cranes: [] };
   const steps = buildDistrictSteps(C, bay, variant);
   for (;;) {
     FAR = F;
@@ -321,14 +310,7 @@ export function* buildDistrictTileSteps(variant, S, bay, seed = 1) {
     if (done) break;
     yield null;
   }
-  // the buffers a layer or two per slice (a tile's run to tens of megabytes)
-  const out = { lamps, flamps, cells: B.cells, walks: new Float32Array(C.walks), cranes: new Float32Array(C.cranes) };
-  out.major = B.geometry();
-  yield null;
-  out.minor = M.geometry();
-  yield null;
-  out.fine = N.geometry(); out.far = F.geometry();
-  return out;
+  return { major: B.geometry(), minor: M.geometry(), fine: N.geometry(), far: F.geometry(), lamps, flamps, cells: B.cells, walks: new Float32Array(C.walks), cranes: new Float32Array(C.cranes) };
 }
 function* buildDistrictSteps(C, bay, variant) {
   const { B, M, F, lamps, S, r } = C;
@@ -349,7 +331,7 @@ function* buildDistrictSteps(C, bay, variant) {
   const cells = Object.fromEntries(CELL_NAMES.slice(1).map((k) => [k, 0]));
   for (let ix = 0; ix < CELLS_X; ix++) for (let iz = 0; iz < CELLS_Z; iz++) {
     const cx = -15000 + ix * 1000, cz = -TILE_L / 2 + iz * 1000;
-    if (iz === 0 && ix > 0 && ix % 4 === 0) yield;
+    if (iz === 0 && ix > 0 && ix % 5 === 0) yield;
     const edge = (x) => (x === 0 || Math.abs(x) === 7000 ? 90 : 30);
     const x0 = cx + edge(cx), x1 = cx + 1000 - edge(cx + 1000);
     const z0 = cz + 30, z1 = cz + 1000 - 30;
@@ -367,8 +349,6 @@ function* buildDistrictSteps(C, bay, variant) {
     else if (kind === 'canal') canalCell(C, x0, x1, z0, z1);
     else worksCell(C, x0, x1, z0, z1);
   }
-  yield;
-  boulevards(C, (ix, iz) => codes[iz * CELLS_X + ix], CELLS_X, CELLS_Z);
   B.cells = cells;
 }
 
@@ -431,7 +411,7 @@ export function cellPlanTextures(tileVariant, tileGround = null) {
 
 /** Crest furniture for a tile: plain, or dressed for an arch foot at the tile's centre. */
 export function buildCrest(S, hubArch) {
-  const B = new HB(), M = new HB(), lamps = [];
+  const B = new CB(), M = new CB(), lamps = [];
   crest(B, M, lamps, S, hubArch);
   return { major: B.geometry(), minor: M.geometry(), lamps };
 }
@@ -611,7 +591,7 @@ export class HaloDistricts {
     space.earthFixed.add(this.anchor);
     this.anchorTile = -1e9;
     this.body = space.addBody('halo-districts', [this.anchor], () => this.anchor.getWorldPosition(_c), (MOVER_RANGE + 20000) / 1000, { solid: true });
-    this.mat = createHaloMaterial({ accent: [1.0, 0.76, 0.48], lit: 0.66, deck: { sag: -this.S.deck(0), half: this.S.outer } });
+    this.mat = createHaloMaterial({ accent: [1.0, 0.76, 0.48], lit: 0.66 });
     this.moverMat = createHaloMaterial({ accent: [0.6, 0.88, 1.0], lit: 0.7 });
     const anchorWorld = this.anchor.userData.world;
     this._before = (mat) => (r, s, cam) => {
@@ -717,7 +697,7 @@ export class HaloDistricts {
    * material, which knows none of the Halo's facade kinds).
    */
   _buildJunction() {
-    const B = new HB(), lamps = [];
+    const B = new CB(), lamps = [];
     B.push(ROT_YM90);                           // portQuarter turns its builder frame into a station's
     portQuarter(B, this.S, lamps, 157);
     B.pop();
