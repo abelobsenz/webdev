@@ -310,6 +310,21 @@ check(maxShipDist < 40, 'belt traffic strays too far from its station');
   check(mono && Math.abs(courierLeg(1)[0] - 1) < 1e-6 && Math.abs(courierLeg(0)[0]) < 1e-9, 'courier leg profile');
 }
 
+{
+  // lane buoys and courier lamps: finite, on their lanes
+  const L = belt.lights.L.array;
+  let off = 0;
+  for (let i = 0; i < belt.nBuoys; i++) { const k = (belt.buoy0 + i) * 4; off = Math.max(off, Math.abs(Math.abs(Math.hypot(L[k], L[k + 1], L[k + 2]) - (R_EARTH + GEO_ALT)) - 32)); }
+  out.buoys = belt.nBuoys;
+  check(belt.nBuoys > 600 && off < 0.01, 'lane buoys');
+  let worst = 0;
+  for (let t = 0; t < 3000; t += 7) {
+    belt._couriers(t);
+    for (let i = 0; i < belt.couriers.length; i++) { const k = (belt.courier0 + i * 2) * 4; const rr = Math.hypot(L[k], L[k + 1], L[k + 2]); check(Number.isFinite(rr), 'courier non-finite'); worst = Math.max(worst, Math.abs(rr - (R_EARTH + GEO_ALT))); }
+  }
+  out.courierMaxRadialKm = +worst.toFixed(1);
+  check(worst < 40, 'couriers off their lanes');
+}
 // ------------------------------------------------- updates and buffers ----
 const st0 = belt.stations.find((s) => s.desc.kind === 'habitat');
 const camAt = (st, dKm) => { belt._place(st, sim.earthQuat); space.camera.position.copy(st.world).add(new THREE.Vector3(dKm, dKm * 0.3, dKm * 0.5)); space.camera.updateMatrixWorld(true); };

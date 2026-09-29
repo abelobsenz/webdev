@@ -25,6 +25,9 @@ import { design } from './shipDesigns.js';
 //               mirrors at its ends, heat radiators
 //   science     observatory: a telescope tube behind layered gold sunshields, an instrument
 //               ring, a crew can and dishes
+//   anchorage   mooring tower with booms: ships lying bow-on at the boom heads, waiting their turn
+//               for a Harbour berth; one boom kept free for the tenders
+//   drydock     a cradle frame sized round a ship in for refit, padded keel blocks, flank gantries
 //
 // Each builder returns { geo, parts: [{ geo, pivot, q, rate, mode, lamps }], lamps, docks:
 // [{ p, d }], radius, tris }. parts spin (mode 'spin', rate rad/s about the pivot's +z), slew

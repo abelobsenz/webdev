@@ -21,6 +21,8 @@ const _mx = new THREE.Vector3(), _mm = new THREE.Matrix4();
 //               relay blankets turn to the Sun; ships berth at its docks all the time
 //               (StationTraffic: in tail first under a braking burn, flip at the gate, glide
 //               to the berth, lie alongside, back off, turn and leave under power)
+//   lanes       buoys every degree round the arc, the eastbound lane 32 km inside the belt and
+//               the westbound 32 km outside (lower orbits drift east, higher ones west)
 //   far         every station a coloured beacon in its kind's colour, and between them the
 //               belt's couriers: torch ships running from site to site along the arc (drive
 //               lit while they accelerate and brake, coasting between), so the ring reads as
@@ -34,6 +36,7 @@ const R_GEO = R_EARTH + GEO_ALT;
 export const BUILD_RANGE = 5000;       // km: stations are built inside this
 export const DROP_RANGE = 40000;       // km: and let go beyond this
 export const TRAFFIC_RANGE = 3500;     // km: their berthing traffic runs inside this
+export const BUOY_LANE = 32;           // km inside / outside the belt: the courier lanes' buoys
 export const FIT_PX = 30;              // px (station radius): its fittings are scattered beyond this
 const KIND_COLOR = {
   comms: LAMP.RED, habitat: [1.0, 0.8, 0.5], depot: LAMP.AMBER, shipyard: LAMP.WHITE,
@@ -164,7 +167,7 @@ export class GeoBelt {
       dl = ((dl % TAU) + TAU) % TAU;
       for (let n = 0; n < 2; n++) {
         const legT = 520 + (dl * R_GEO) / 14;          // ~14 km/s along the arc
-        this.couriers.push({ a, b, dl, legT, wait: 150 + 40 * n, off: (k * 0.37 + n * 0.5) % 1, lane: (n ? 1 : -1) * (6 + (k % 3) * 3), dip: 30 + (k % 4) * 8 });
+        this.couriers.push({ a, b, dl, legT, wait: 150 + 40 * n, off: (k * 0.37 + n * 0.5) % 1, lane: (n ? 1 : -1) * (6 + (k % 3) * 3), dip: BUOY_LANE });
       }
     });
     const lamps = [];
@@ -177,6 +180,19 @@ export class GeoBelt {
       lamps.push({ p: V(0, 0, 0), r: 0.12, color: [0.6, 0.85, 1.0], i: 6 });       // drive
       lamps.push({ p: V(0, 0, 0), r: 0.04, color: LAMP.WHITE, i: 3, breathe: 1, phase: (i * 0.31) % 1 });   // running light
     }
+    // the belt's lanes: buoys every degree round the whole arc, the eastbound lane 32 km inside
+    // the belt (amber), the westbound 32 km outside (teal), their breathing running along the ring
+    this.buoy0 = lamps.length;
+    for (let k = 0; k < 360; k++) {
+      const lon = MERIDIAN_LON + ((k + 0.5) / 360) * TAU;
+      const off = Math.abs(((lon - MERIDIAN_LON) % TAU + TAU) % TAU - Math.PI);
+      if (off > Math.PI - 0.06) continue;                 // the Harbour's own corridors take over there
+      for (const lane of [-1, 1]) {
+        const R = R_GEO + lane * BUOY_LANE;
+        lamps.push({ p: V(Math.cos(lon) * R, 0, -Math.sin(lon) * R), r: 0.06, color: lane < 0 ? LAMP.AMBER : LAMP.TEAL, i: 1.4, breathe: 0.85, phase: ((k * (lane < 0 ? 1 : -1)) / 30 % 1 + 1) % 1 });
+      }
+    }
+    this.nBuoys = lamps.length - this.buoy0;
     this.lights = new DynLamps(lamps, { minPx: 1.6 });
     space.earthFixed.add(this.lights.mesh);
     this.lightsBody = space.addBody('beltLights', [this.lights.mesh], null, 0, {
