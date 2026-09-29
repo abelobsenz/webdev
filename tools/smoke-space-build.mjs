@@ -9,6 +9,7 @@ import { WorkingStations } from '../src/space/workingStations.js';
 import { GeoRoads } from '../src/space/geoRoads.js';
 import { Lanes } from '../src/space/lanes.js';
 import { ReleaseYard } from '../src/space/releaseYard.js';
+import { GeoBelt } from '../src/space/geoBelt.js';
 import { Moon } from '../src/space/moon.js';
 import { Rings } from '../src/space/rings.js';
 import { HaloPorts } from '../src/space/stations.js';
@@ -44,11 +45,12 @@ const mods = [];
 space.aurora = new Aurora(space, { earthQ: 2 }); mods.push(space.aurora);
 space.skyLife = new SkyLife(space, SKY_UNIFORMS); mods.push(space.skyLife);
 space.meteors = new Meteors(space); mods.push(space.meteors);
-for (const [k, C] of [['fleet', Fleet], ['works', WorkingStations], ['geoRoads', GeoRoads], ['lanes', Lanes], ['releaseYard', ReleaseYard]]) { space[k] = new C(space); mods.push(space[k]); }
+for (const [k, C] of [['fleet', Fleet], ['works', WorkingStations], ['geoRoads', GeoRoads], ['lanes', Lanes], ['releaseYard', ReleaseYard], ['geoBelt', GeoBelt]]) { space[k] = new C(space); mods.push(space[k]); }
 // the fleet's lazily built near detail (liners, Selene, tenders), forced so it is exercised too
 space.fleet._linerDetail(null, true); space.fleet._seleneDetail(null, 0, true); space.fleet._tenderDetail(null, true);
 // the lazily built near detail (Helianth district and flotilla, foundry yard): force it, then animate it below
 space.works.district.build(); space.works.yard.build();
+space.geoBelt.buildAll();     // the belt's stations (built on approach in the app)
 let tri = 0;
 space.scene.traverse((o) => { if (o.isMesh && o.geometry?.index && !o.geometry.isInstancedBufferGeometry) tri += o.geometry.index.count / 3; });
 for (const t of [0, 60, 400, 900, 1500]) {

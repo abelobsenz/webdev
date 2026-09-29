@@ -27,6 +27,7 @@ import { Lanes } from './lanes.js';
 import { WorkingStations } from './workingStations.js';
 import { GeoRoads, geoRoadTargets } from './geoRoads.js';
 import { ReleaseYard, releaseYardTarget } from './releaseYard.js';
+import { GeoBelt, geoBeltTargets } from './geoBelt.js';
 import { computeSky } from '../core/sun.js';
 import { ShipPilot } from './shipPilot.js';
 
@@ -115,6 +116,7 @@ export class SpaceMode {
     for (const [k, o] of Object.entries(fleetTargets(this))) T(k, o);
     for (const [k, o] of Object.entries(geoRoadTargets(this))) T(k, o);
     T('releaseYard', releaseYardTarget(this));
+    for (const [k, o] of Object.entries(geoBeltTargets(this))) T(k, o);
     // unlisted targets (no key): the junction on the Halo and the counterweight
     const meridQ = stationFrame(merid);
     T('junction', {
@@ -267,6 +269,9 @@ export class SpaceMode {
     // the counterweight's release yard: cradles, a held liner, one let go, its lit lane
     this.releaseYard = new ReleaseYard(this);
     this.modules.push(this.releaseYard);
+    // the rest of the geostationary belt: thirty sites of working stations and their traffic
+    this.geoBelt = new GeoBelt(this);
+    this.modules.push(this.geoBelt);
     // the Lodestar, flown by the visitor (V): built on first boarding
     this.ship = new ShipPilot(this);
     this.modules.push(this.ship);

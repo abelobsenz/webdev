@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { CB, CK, TAU, V, lerp, rng, here, hereDir, atAim, tank, sphereTank, rcsQuad, dockingCollar, truss, catwalk, radiatorWing, dish, mast, container, bridge, bell, flood, navSet, hull, sectionAt } from './shipKit.js';
 import { LAMP } from './lamps.js';
+import { DK } from './craftMesh.js';
+import { hullDressing } from './shipKit.js';
 
 // THE WORKING FLEET: individually designed ships for the lanes round the Harbour and Selene
 // (metres, +Z forward, +Y up, port +X). Every design is seeded, so a class is a family of
@@ -56,7 +58,7 @@ export function buildHauler(seed = 1) {
   }
   // ---- spine truss and cargo bays
   truss(B, V(0, 0, -26), V(0, 0, zBow), spineW, 6.5, 0.22);
-  const kinds = [CK.HULL, CK.BRONZE, CK.DECK, CK.DARK, CK.HULL, CK.PANEL];
+  const kinds = [DK.LIVERY, CK.BRONZE, DK.GRIME, CK.DARK, CK.HULL, DK.LIVERY, DK.GRIME];
   const [nx, ny] = stack;
   // container slots: a grid round the spine (an even count opens a gap for the truss)
   const slots = (n, pitch) => Array.from({ length: n }, (_, i) => { const c = i - (n - 1) / 2; return c * pitch + (n % 2 === 0 ? Math.sign(c) * (spineW / 2 + 0.3) : 0); });
@@ -86,7 +88,7 @@ export function buildHauler(seed = 1) {
   // ---- bow: crew section (two decks of cabins), bridge, collar
   B.at(0, 0, zBow);
   hull(B, 0, 30, (u) => [8.5 * (1 - 0.55 * u * u), 7 * (1 - 0.5 * u * u)], {
-    K: 24, N: 10, kind: (i, j, u, a) => (j === 1 ? CK.BRONZE : Math.abs(Math.sin(a)) < 0.35 && j > 1 && j < 9 ? CK.GLASS : CK.HULL), capStart: CK.HULL,
+    K: 24, N: 10, kind: (i, j, u, a) => (j === 1 ? CK.BRONZE : Math.abs(Math.sin(a)) < 0.35 && j > 1 && j < 9 ? DK.PORTS : j === 5 ? CK.BRONZE : DK.LIVERY), capStart: CK.HULL,
   });
   B.at(0, 7.4, 12);
   bridge(B, 8, 3.2, 10, lamps);
@@ -104,6 +106,7 @@ export function buildHauler(seed = 1) {
   for (const s of [-1, 1]) for (const t of [-1, 1]) rcs.push(...rcsQuad(B, V(s * 7.5, t * 7.5, -44), V(s, t, 0), V(0, 0, 1), 1.2));
   navSet(lamps, { hw: 9.2, y: 0, z: zBow + 10, stern: V(0, 9.5, -58), mastTip: tip, r: 0.7 });
   lamps.push({ p: V(0, 0, zBow + 31.5), r: 0.7, color: LAMP.AMBER, i: 2.4, breathe: 0.4 });
+  hullDressing(B, r, { z0: zBow + 2, z1: zBow + 13, w: 7.4, h: 5.9, n: 10, lamps });
   return finish(B, glows, lamps, rcs, 'hauler', zBow + 31 + 70);
 }
 
@@ -124,7 +127,7 @@ export function buildTanker(seed = 1) {
   B.tube([V(0, 0, -14), V(0, 0, z1 + 8)], 2.2, 12, CK.DARK);
   catwalk(B, V(0, 2.25, -10), V(0, 2.25, z1 + 4), V(0, 1, 0), 1.4, 1.1);
   // the tank string, each lug on bronze saddles, manifold pipes running alongside
-  const tk = r.pick([CK.HULL, CK.HULL, CK.BRONZE]);
+  const tk = r.pick([DK.FOIL, DK.LIVERY, CK.HULL, DK.FOIL]);
   for (let i = 0; i < n; i++) {
     const zc = z0 + pitch * (i + 0.5);
     for (const s of [-1, 1]) {
@@ -173,7 +176,7 @@ export function buildWorkTug(seed = 1) {
   const L = r.range(34, 46), W = r.range(6.5, 8), H = r.range(5, 6.2);
   // body: a stubby armoured hull, flat-sided, a bronze bumper belt
   hull(B, -L / 2, L / 2, (u) => [W * (u < 0.15 ? 0.85 + u : u > 0.8 ? 1 - 1.2 * (u - 0.8) : 1), H * (u > 0.85 ? 1 - 1.4 * (u - 0.85) : 1)], {
-    K: 24, N: 12, n: 4, belly: 0.9, kind: (i, j, u, a) => (Math.abs(Math.sin(a)) < 0.12 ? CK.BRONZE : j === 2 || j === 9 ? CK.DARK : CK.HULL),
+    K: 24, N: 12, n: 4, belly: 0.9, kind: (i, j, u, a) => (Math.abs(Math.sin(a)) < 0.12 ? CK.BRONZE : j === 2 || j === 9 ? DK.HAZARD : j > 9 ? DK.LIVERY : DK.GRIME),
   });
   // pusher cone and docking probe forward: soft bronze rim for shoving hulls into line
   B.at(0, 0, L / 2 - 0.5);
@@ -208,6 +211,7 @@ export function buildWorkTug(seed = 1) {
   const tip = mast(B, V(0, H + 3, L * 0.02), V(0, 1, 0), 3.5, 0.1);
   lamps.push({ p: tip, r: 0.5, color: LAMP.AMBER, i: 3.0, breathe: 0.6 });
   navSet(lamps, { hw: W + 0.3, y: H * 0.5, z: 0, stern: V(0, H * 0.8, -L / 2 - 1), r: 0.45 });
+  hullDressing(B, r, { z0: -L * 0.3, z1: L * 0.25, w: W, h: H, n: 12, lamps });
   return finish(B, glows, lamps, rcs, 'tug', L + 12);
 }
 
@@ -228,9 +232,9 @@ export function buildPacket(seed = 1) {
     kind: (i, j, u, a) => {
       const sn = Math.sin(a), cs = Math.abs(Math.cos(a));
       if (j % 9 === 0 && j > 0 && j < 36) return CK.BRONZE;
-      if (j > 3 && j < 30 && cs > 0.55 && ((sn > -0.35 && sn < -0.15) || (sn > 0.0 && sn < 0.2) || (sn > 0.32 && sn < 0.5))) return CK.GLASS;
+      if (j > 3 && j < 30 && cs > 0.55 && ((sn > -0.35 && sn < -0.15) || (sn > 0.0 && sn < 0.2) || (sn > 0.32 && sn < 0.5))) return j % 3 === 0 ? CK.GLASS : DK.PORTS;
       if (sn > 0.93 && j > 8 && j < 24) return CK.CONSERVATORY;
-      return CK.HULL;
+      return sn < -0.5 ? CK.HULL : DK.LIVERY;
     },
   });
   // the lantern lounge: a glazed ring round the waist, with a bronze sill
@@ -267,6 +271,7 @@ export function buildPacket(seed = 1) {
   const tip = mast(B, V(0, H + 0.4, L * 0.15), V(0, 1, 0), 5, 0.12);
   dish(B, V(W * 0.4, H * 0.9, -L * 0.2), V(0.3, 1, -0.2), 2);
   navSet(lamps, { hw: W + 0.4, y: 0, z: L * 0.05, stern: V(0, H * 0.6, -L / 2 - 0.5), mastTip: tip, r: 0.65 });
+  hullDressing(B, r, { z0: -L * 0.3, z1: L * 0.05, w: W * 0.99 + 0.2, h: H * 0.985 + 0.2, n: 16, lamps });
   return finish(B, glows, lamps, rcs, 'packet', L + 20);
 }
 
@@ -325,7 +330,7 @@ export function buildLighter(seed = 1) {
   const pal = r.int(3, 6);
   for (let i = 0; i < pal; i++) {
     const zc = -L / 2 + 3 + (i * (L - 8)) / Math.max(pal - 1, 1);
-    for (const s of [-1, 1]) if (r() < 0.85) container(B, s * W * 0.24, 1.6, zc, W * 0.4, 2.2, 3, r.pick([CK.BRONZE, CK.HULL, CK.DARK, CK.PANEL]));
+    for (const s of [-1, 1]) if (r() < 0.85) container(B, s * W * 0.24, 1.6, zc, W * 0.4, 2.2, 3, r.pick([CK.BRONZE, DK.LIVERY, DK.GRIME, CK.HULL, DK.FOIL]));
   }
   // cab forward, raised on a pillar
   B.at(0, 2.8, L / 2 + 1);
@@ -369,7 +374,7 @@ export function buildClipper(seed = 1) {
     for (let k = 0; k < 5; k++) {
       const a = (k / 5) * TAU + i * 0.3;
       B.at(Math.cos(a) * 17, Math.sin(a) * 17, zc);
-      tank(B, 10, 38, i % 2 ? CK.BRONZE : CK.HULL, CK.BRONZE, 14);
+      tank(B, 10, 38, i % 2 ? DK.FOIL : DK.LIVERY, CK.BRONZE, 14);
       B.pop();
     }
     B.box(0, 0, zc, 20, 20, 3, CK.BRONZE);
@@ -443,7 +448,7 @@ export function buildDrone(seed = 1) {
   const B = new CB();
   const glows = [], lamps = [], rcs = [];
   const L = r.range(4.2, 5.6);
-  hull(B, -L / 2, L / 2, (u) => [1.3 * (1 - 0.3 * u * u), 0.9 * (1 - 0.35 * u * u)], { K: 20, N: 8, n: 3, kind: (i, j) => (j === 4 ? CK.BRONZE : CK.HULL) });
+  hull(B, -L / 2, L / 2, (u) => [1.3 * (1 - 0.3 * u * u), 0.9 * (1 - 0.35 * u * u)], { K: 20, N: 8, n: 3, kind: (i, j) => (j === 4 ? CK.BRONZE : j < 3 ? DK.GRIME : DK.LIVERY) });
   B.at(0, 0.1, L / 2);
   B.lathe([[0.7, 0, CK.BRONZE], [0.62, 0.3, CK.GLASS], [0.3, 0.55, CK.GLASS], [0.02, 0.6, CK.GLASS]], 16);
   B.pop();

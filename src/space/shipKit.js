@@ -306,4 +306,51 @@ export function sectionAt(w, h, a, n = 2.6, belly = 0.85) {
   return V(x, y, 0);
 }
 
+/**
+ * People-scale dressing on a hull's back and flanks between z0 and z1 (half-width w, half-height
+ * h, the current frame): framed hatches with grab rails, access ladders, stencilled service
+ * panels, small antennas and a work light or two - the cues that give a hull its size.
+ */
+export function hullDressing(B, r, { z0, z1, w, h, n = 10, lamps = null, kinds = [DK_GRIME, CK.DARK, DK_LIVERY] } = {}) {
+  const put = (side, x, z, fn) => {
+    // side 0: the back (y = h, facing +y); 1 / -1: a flank (x = +-w, facing +-x)
+    const m = new THREE.Matrix4();
+    if (side === 0) m.makeBasis(V(1, 0, 0), V(0, 1, 0), V(0, 0, 1)).setPosition(x, h, z);
+    else m.makeBasis(V(0, -side, 0), V(side, 0, 0), V(0, 0, 1)).setPosition(side * w, x, z);
+    B.push(m); fn(); B.pop();
+  };
+  for (let i = 0; i < n; i++) {
+    const side = r() < 0.5 ? 0 : r() < 0.5 ? 1 : -1;
+    const x = (r() * 2 - 1) * (side === 0 ? w * 0.3 : h * 0.3);
+    const z = lerp(z0, z1, r());
+    const t = r();
+    put(side, x, z, () => {
+      if (t < 0.3) {
+        // hatch: a raised frame, a dark door, a grab rail each side
+        B.box(0, 0.06, 0, 1.6, 0.12, 1.2, CK.BRONZE);
+        B.box(0, 0.1, 0, 1.3, 0.1, 0.9, CK.DARK);
+        for (const s of [-1, 1]) B.tube([V(s * 1.0, 0.05, -0.4), V(s * 1.0, 0.25, -0.35), V(s * 1.0, 0.25, 0.35), V(s * 1.0, 0.05, 0.4)], 0.03, 4, CK.BRONZE);
+      } else if (t < 0.5) {
+        // ladder: two rails and rungs along the hull
+        const L = 2 + r() * 3;
+        for (const s of [-1, 1]) B.box(s * 0.22, 0.12, 0, 0.05, 0.05, L, CK.BRONZE);
+        for (let k = 0; k <= Math.round(L / 0.3); k++) B.box(0, 0.12, -L / 2 + k * 0.3, 0.44, 0.03, 0.03, CK.BRONZE);
+      } else if (t < 0.72) {
+        // stencilled service panel, a shade proud of the plate
+        B.box(0, 0.04, 0, 1.8 + r() * 2, 0.08, 1.2 + r() * 2, kinds[Math.floor(r() * kinds.length) % kinds.length]);
+      } else if (t < 0.88) {
+        // stub antenna on a base plate
+        B.box(0, 0.05, 0, 0.5, 0.1, 0.5, CK.DARK);
+        B.tube([V(0, 0.1, 0), V(0, 1.4 + r() * 1.6, 0)], 0.03, 4, CK.DARK);
+      } else {
+        // work light on a bracket
+        B.box(0, 0.2, 0, 0.3, 0.4, 0.3, CK.DARK);
+        B.box(0, 0.45, 0.1, 0.4, 0.25, 0.2, CK.LANTERN);
+        if (lamps) lamps.push({ p: here(B, 0, 0.5, 0.25), r: 0.25, color: [1.0, 0.86, 0.66], i: 1.6 });
+      }
+    });
+  }
+}
+const DK_GRIME = 24, DK_LIVERY = 20;     // (craftMesh.js DK kinds, kept literal: no import cycle)
+
 export { CB, CK, TAU };

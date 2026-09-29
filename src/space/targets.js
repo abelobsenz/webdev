@@ -144,3 +144,21 @@ TARGET_INFO.lunarFields = {
   facts:[['Pads','3 x 496 m'],['Propellant farm','9 spheres'],['Turnaround','about 3 minutes']],
 };
 TARGET_ORDER.push('mediiWorks', 'lunarFields');
+
+// The geostationary belt beyond the Harbour (src/space/geoBelt.js, beltStations.js).
+TARGET_INFO.beltWheel = {
+  key:'',name:'Kalani Wheel',district:'Geostationary belt · a wheel town',
+  lore:'One of the belt\'s wheel towns: a rim of homes turning at a little under one gravity round a hub that does not turn at all. The floor faces outward; the streets look inward through the concourse glazing, lit day and night. Packets berth at both poles of the hub, and the lift cars climb the spokes to meet them.',
+  facts:[['Rim','0.5 - 1 km across'],['Spin','about 1.5 rpm'],['Berths','10']],
+};
+TARGET_INFO.beltYard = {
+  key:'',name:'Ironwood Slip',district:'Geostationary belt · a slipway',
+  lore:'A working slip on the belt: a hull being plated inside an open box of portal frames, floodlit from every corner. Crane bridges run the rails overhead with the next plate, the welders\' lights crawl along the bare ribs forward, and the stock waits on the yard deck below. The crews live in the lit block beside the frames.',
+  facts:[['Frames','5 - 8'],['Crane bridges','1 - 2'],['Shifts','three a day']],
+};
+TARGET_INFO.beltRelay = {
+  key:'',name:'Helion Relay 4',district:'Geostationary belt · a power relay',
+  lore:'A cross of photovoltaic blankets on a mast, turning once a day to keep its face to the Sun, and beneath it a phased-array emitter facing the Earth. The array beams the power down to the rectennas of the equatorial cities; the ring of red lamps round its rim marks the beam\'s keep-out for every pilot on the belt.',
+  facts:[['Blankets','0.5 - 1 km span'],['Emitter','up to 320 m'],['Tracking','one turn a day']],
+};
+TARGET_ORDER.push('beltWheel', 'beltYard', 'beltRelay');
