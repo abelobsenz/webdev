@@ -9,9 +9,12 @@ import { stationFrame, CORRIDORS } from './stations.js';
 import { HS } from './harbour.js';
 import { FleetTraffic } from './fleetTraffic.js';
 import { buildLinerDetail } from './linerDetail.js';
+import { buildWheelDetail, buildLiftCar, buildRingCrane, liftPose, craneAngle, RING } from './seleneDetail.js';
 
 /** km: the liners' near fittings are drawn inside this range (a 2.4 km hull spans ~60 px at 60 km). */
 export const LINER_DETAIL_RANGE = 60;
+/** km: Selene's wheel walks, lifts and cranes are drawn inside this range. */
+export const SELENE_DETAIL_RANGE = 45;
 
 // MERIDIAN's ships in the orbital view (km units; the craft are built in metres).
 //
@@ -457,6 +460,45 @@ export class Fleet {
     this.traffic.update(sim, realTime, dt, space);
     // the Concord liners' fittings, built the first time a camera comes near either of them
     this._linerDetail(space.camera);
+    // Selene's wheel walks, spoke lifts and ring cranes, likewise
+    this._seleneDetail(space.camera, realTime);
+  }
+
+  /** Selene Works' near detail (src/space/seleneDetail.js): built on first approach, animated only while near. */
+  _seleneDetail(cam, t, force = false) {
+    if (!cam && !force) return;
+    let near = force;
+    if (!near) { this.refinery.getWorldPosition(_v); near = _v.distanceTo(cam.position) < SELENE_DETAIL_RANGE; }
+    if (near && !this.seleneDetail) {
+      const rm = this.refineryMesh, wd = buildWheelDetail(), car = buildLiftCar(), crane = buildRingCrane();
+      const wheelPart = craftPart(rm, wd.geo);
+      addLamps(wheelPart, wd.lamps, { minPx: 1.1 });
+      this.wheel.add(wheelPart);
+      const cars = [];
+      for (let k = 0; k < 6; k++) for (let j = 0; j < 1; j++) {   // one car to a spoke: they share its rail
+        const m = craftPart(rm, car.geo);
+        addLamps(m, car.lamps, { minPx: 1.0 });
+        this.wheel.add(m);
+        cars.push({ mesh: m, k, j });
+      }
+      const cranes = [];
+      for (let k = 0; k < 3; k++) {
+        const pivot = new THREE.Group();
+        const m = craftPart(rm, crane.geo);
+        m.position.set(RING.R, RING.y + RING.tube, 0);
+        addLamps(m, crane.lamps, { minPx: 1.0 });
+        pivot.add(m);
+        rm.add(pivot);
+        cranes.push({ pivot, mesh: m, k });
+      }
+      this.seleneDetail = { wheelPart, cars, cranes, parts: [wheelPart, ...cars.map((c) => c.mesh), ...cranes.map((c) => c.pivot)], data: { wd, car, crane } };
+    }
+    const D = this.seleneDetail;
+    if (!D) return;
+    for (const p of D.parts) p.visible = near;
+    if (!near) return;
+    for (const c of D.cars) { const a = liftPose(c.k, c.j, t, c.mesh.position); c.mesh.rotation.y = -a; }
+    for (const c of D.cranes) c.pivot.rotation.y = -craneAngle(c.k, t);
   }
 
   /** Near detail for the berthed and the visiting liner (src/space/linerDetail.js): lazy, hidden beyond range. */

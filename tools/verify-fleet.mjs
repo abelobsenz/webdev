@@ -351,5 +351,66 @@ assert.ok(minClear > 0.4, `working lanes clear every structure by ${minClear} km
   out.linerDetailHarbourClearanceM = Number.isFinite(mH) ? +mH.toFixed(1) : 'none-near';
   assert.ok(mH > 4, `fittings clear the Harbour's pier and structure (${mH} m, ${near.length} triangles near)`);
 }
+// ---- 8. Selene close to: the wheel's fittings inside its swept envelope, lifts on their spokes,
+// the ring cranes clear of the works and the berthed tankers through their whole swing
+{
+  const { WHEEL, RING, RAIL_Y, liftPose, craneAngle } = await import('../src/space/seleneDetail.js');
+  assert.ok(!fleet.seleneDetail, 'Selene detail is not built while the camera is far');
+  const t3 = performance.now();
+  fleet._seleneDetail(null, 0, true);
+  out.seleneDetailMs = +(performance.now() - t3).toFixed(1);
+  assert.ok(out.seleneDetailMs < 300, 'Selene detail builds quickly');
+  const D = fleet.seleneDetail, wg = D.data.wd.geo, wp = wg.attributes.position, w = V();
+  out.seleneDetailTriangles = wg.index.count / 3 + (D.data.car.geo.index.count / 3) * D.cars.length + (D.data.crane.geo.index.count / 3) * D.cranes.length;
+  let outside = 0;
+  for (let i = 0; i < wp.count; i++) {
+    w.fromBufferAttribute(wp, i);
+    const r = Math.hypot(w.x, w.z);
+    if (r > 2020) { if (r > 2410 || w.y < -770 || w.y > -370) outside++; }
+    else if (r < WHEEL.spokeIn - 1 || w.y < WHEEL.y - WHEEL.spokeR - 1 || w.y > RAIL_Y + 5) outside++;
+  }
+  assert.equal(outside, 0, 'wheel fittings stay inside the wheel\'s swept envelope');
+  // lift cars: on their rails, inside the spoke run, never past the rim's inner wall
+  const cb = new THREE.Box3().setFromBufferAttribute(D.data.car.geo.attributes.position);
+  for (let t = 0; t < 480; t += 3) for (let k = 0; k < 6; k++) {
+    const p = V(), a = liftPose(k, 0, t, p);
+    const r = Math.hypot(p.x, p.z);
+    assert.ok(r - 16 > WHEEL.spokeIn && r + 16 < WHEEL.rim - WHEEL.rimHalfW, 'lift inside its spoke run');
+    assert.ok(Math.abs(p.y + cb.min.y - (RAIL_Y + 2.2) + 2.2) < 0.01 || p.y + cb.min.y >= RAIL_Y - 0.01, 'bogies on the rail');
+    assert.ok(Math.abs(Math.atan2(p.z, p.x) - Math.atan2(Math.sin(a), Math.cos(a))) < 1e-9, 'car on its spoke');
+  }
+  // cranes: every vertex, at every sampled angle, clear of the refinery's own hull and berthed tankers
+  const rm = fleet.refineryMesh;
+  const cg = D.data.crane.geo, cp = cg.attributes.position;
+  const cbox = new THREE.Box3().setFromBufferAttribute(cp);
+  const reach = Math.max(cbox.max.x, -cbox.min.x) + RING.R + 10;
+  const near = [];
+  for (const child of [rm, ...rm.children.filter((c) => c.isMesh && c !== fleet.wheel && c.geometry.index && !c.material.transparent)]) {
+    const P = child.geometry.attributes.position, ix = child.geometry.index;
+    const M = child === rm ? new THREE.Matrix4() : child.matrix.clone();
+    for (let i = 0; i < ix.count; i += 3) {
+      const tr = new THREE.Triangle(...[0, 1, 2].map((j) => V().fromBufferAttribute(P, ix.getX(i + j)).applyMatrix4(M)));
+      const c = tr.getMidpoint(V());
+      if (Math.hypot(c.x, c.z) < reach + 300 && c.y > RING.y - 200 && c.y < RING.y + 400) near.push(tr);
+    }
+  }
+  const T = tree(near);
+  let minCrane = Infinity;
+  const m = new THREE.Matrix4(), q = new THREE.Matrix4();
+  for (let k = 0; k < 3; k++) for (let t = 0; t < 1200; t += 20) {
+    m.makeRotationY(-craneAngle(k, t)).multiply(q.makeTranslation(RING.R, RING.y + RING.tube, 0));
+    for (let i = 0; i < cp.count; i += 3) minCrane = Math.min(minCrane, dist(T, w.fromBufferAttribute(cp, i).applyMatrix4(m), 30));
+  }
+  out.craneClearanceM = +minCrane.toFixed(2);
+  assert.ok(minCrane > 0.8, `ring cranes clear the works and the berthed tankers (${minCrane} m)`);
+  // the cranes keep to their sectors, apart from each other
+  for (let t = 0; t < 3000; t += 7) {
+    const a = [0, 1, 2].map((k) => craneAngle(k, t));
+    for (let i = 0; i < 3; i++) for (let j = i + 1; j < 3; j++) { let d = Math.abs(a[i] - a[j]) % (Math.PI * 2); d = Math.min(d, Math.PI * 2 - d); assert.ok(d > 0.8, 'cranes apart'); }
+  }
+  // animated while near, hidden beyond range
+  fleet._seleneDetail({ position: V(1e9, 0, 0) }, 10);
+  assert.ok(D.parts.every((p) => !p.visible), 'Selene detail hidden far off');
+}
 console.log(JSON.stringify(out));
 console.log('FLEET_VERIFIED');
