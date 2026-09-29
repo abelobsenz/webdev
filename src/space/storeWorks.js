@@ -4,7 +4,7 @@ import { lathe } from '../craft/craftClasses.js';
 import { LAMP } from './lamps.js';
 import { addLamps } from './craftMesh.js';
 import { STORE } from './geoRoads.js';
-import { TAU, V, smooth, hash1, instancedPart, DynLamps, droneGeo, poseMatrix } from './lifeKit.js';
+import { TAU, V, smooth, lerp, hash1, instancedPart, DynLamps, droneGeo, poseMatrix } from './lifeKit.js';
 
 // THE WATER STORE'S PLUMBING AND CREW (metres, the store's frame: +y up the tether).
 // buildWaterStore (geoRoads.js) hangs the tanks in their cage; this is what makes it a store:
@@ -133,7 +133,23 @@ export class StoreWorks {
     this.tanks = storeData.tanks.filter((_, i) => i % 2 === 0);
     this.drones = instancedPart(storeMesh, droneGeo(7), this.tanks.length);
     this.root.add(this.drones);
-    this.dyn = new DynLamps(this.tanks.map((_, i) => ({ p: V(), r: 1.6, color: i % 2 ? LAMP.WHITE : LAMP.TEAL, i: 2.2, breathe: 0.4, phase: i / 7 })), { minPx: 1.0 });
+    const dl = this.tanks.map((_, i) => ({ p: V(), r: 1.6, color: i % 2 ? LAMP.WHITE : LAMP.TEAL, i: 2.2, breathe: 0.4, phase: i / 7 }));
+    // flow markers: pulses of light climbing the risers to the berths and running round the
+    // mains while the tankers take on water (a chase of fixed lamps, brightened in turn)
+    this.iFlow = dl.length;
+    this.flow = [];
+    const yLo = STORE.rings[0] + PLUMB.mainLift;
+    for (const sd of [-1, 1]) for (let k = 0; k < 16; k++) {
+      const y = lerp(yLo + 20, PLUMB.riserTop - 30, k / 15);
+      this.flow.push({ s: k / 15, riser: true });
+      dl.push({ p: V(sd * (PLUMB.riserX + sd * 6), y, 0), r: 2.2, color: LAMP.TEAL, i: 2.4 });
+    }
+    for (const [ri, y] of STORE.rings.entries()) for (let k = 0; k < 24; k++) {
+      const a = (k / 24) * TAU + ri * 0.1;
+      this.flow.push({ s: k / 24, riser: false });
+      dl.push({ p: V(Math.cos(a) * (PLUMB.mainR + 7), y + PLUMB.mainLift, Math.sin(a) * (PLUMB.mainR + 7)), r: 1.8, color: LAMP.TEAL, i: 1.8 });
+    }
+    this.dyn = new DynLamps(dl, { minPx: 1.0 });
     this.root.add(this.dyn.mesh);
     this.root.traverse((o) => { o.frustumCulled = false; });
     this._m = new THREE.Matrix4(); this._p = V(); this._f = V(); this._up = V(0, 1, 0);
@@ -159,6 +175,12 @@ export class StoreWorks {
       this.dyn.gain(i, 0.6 + 0.4 * smooth(-1, 1, Math.sin(t * 0.8 + i)));
     }
     this.drones.instanceMatrix.needsUpdate = true;
+    for (let i = 0; i < this.flow.length; i++) {
+      const fl = this.flow[i];
+      const ph = ((fl.s - t * (fl.riser ? 0.12 : 0.05)) % 1 + 1) % 1;               // pulses move up / round
+      const pulse = Math.max(0, 1 - Math.abs(ph - 0.5) * (fl.riser ? 8 : 6));
+      this.dyn.gain(this.iFlow + i, 0.15 + 1.1 * pulse * pulse);
+    }
     this.dyn.commit();
   }
 }
