@@ -288,6 +288,21 @@ assert.ok(minClear > 0.4, `working lanes clear every structure by ${minClear} km
   assert.ok(minT > 1, `Selene's lanes keep clear of her tankers (${minT} km)`);
 }
 
+// ---- 5b. the outer roads' buoys: every working ship passes them with room to spare
+{
+  const B = space.lanes.outerBuoyData;
+  assert.ok(B.length >= 80, 'outer roads and stacks are buoyed');
+  let m = Infinity;
+  const f = V(), p = V();
+  for (const sh of traffic.harbour.ships) for (let t = 0; t < sh.route.T; t += 2) {
+    shipPose(sh, t, p, f);
+    if (sh.vis < 0.01) continue;
+    for (const b of B) m = Math.min(m, p.distanceTo(b.p) - sh.design.radius * sh.scale * KM - 0.03 * b.size);
+  }
+  out.buoyClearanceKm = +m.toFixed(2);
+  assert.ok(m > 0.8, `working ships pass the buoys by ${m} km`);
+}
+
 // ---- 6. the runtime: lamps follow the hulls, puffs fire, LOD, budget, per-frame cost
 {
   const H = traffic.harbour;
