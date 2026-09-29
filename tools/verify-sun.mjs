@@ -14,7 +14,7 @@ import {
 import { FoundryYard, buildWheelCar, wheelCar, WHEEL, buildCraneWorks, cranePose, cartPose, droneOrbits, dronePos, crewPos, COURT, CRANE, CART, QUEUE } from '../src/space/foundryYard.js';
 import { buildTender } from '../src/craft/craftGeometry.js';
 import { Hearth, buildCollector } from '../src/space/hearth.js';
-import { buildStationFittings, dishDrone, dishSag, DISH, buildDishDrone, tramArc, tramAngle, RING, TRAM, tankerSlots, tankerPose, TANKER, MODULE, HearthDistrict } from '../src/space/hearthDistrict.js';
+import { HAMLET, hamletMatrix, hamletAngle, buildHamletFixed, buildHamletWheel, buildStationFittings, dishDrone, dishSag, DISH, buildDishDrone, tramArc, tramAngle, RING, TRAM, tankerSlots, tankerPose, TANKER, MODULE, HearthDistrict } from '../src/space/hearthDistrict.js';
 import { buildFeeder } from '../src/space/hearthWorks.js';
 import { SunSwarm } from '../src/space/sun.js';
 import { SpaceSim } from '../src/space/sim.js';
@@ -361,6 +361,39 @@ const stT = tree(tris(sc.geo));
     assert.ok(DISH.radii.every((r) => r < DISH.rim - ext - 0.3 && dishSag(r) < DISH.stand + 3.2), 'drone circles lie within the dish rim');
     results.dishDroneClearanceMetres = +(dc * 1000).toFixed(0);
   }
+  // hamlets: hung from the ring tube, the wheel turning clear of its spindle, stator and radiators,
+  // spun for a full gravity on its floor, midway between the platforms, below the trams
+  {
+    const hf = buildHamletFixed(), wheel = buildHamletWheel();
+    closed('hamletFixed', hf.geo); closed('hamletWheel', wheel);
+    assert.ok(Math.hypot(0.16, HAMLET.hangTop) < 0.45 - 0.05, 'the head of the hanger lies inside the ring tube');
+    const fixT = tree([...tris(hf.geo), ...tris(hf.courier.geo, hf.courier.m, 0.001)]);
+    const wv = verts(wheel, I, 2);
+    let spin = Infinity;
+    for (let k = 0; k < 12; k++) {
+      const R = new THREE.Matrix4().makeRotationY((k / 12) * Math.PI / 3).setPosition(0, HAMLET.wheelY, 0);
+      for (const p of wv) spin = Math.min(spin, dist(fixT, p.clone().applyMatrix4(R), spin + 1));
+    }
+    assert.ok(spin > 0.02, `hamlet wheels turn ${(spin * 1000).toFixed(0)} m clear of their fixed parts`);
+    results.hamletBearingGapMetres = +(spin * 1000).toFixed(0);
+    const g = HAMLET.omega * HAMLET.omega * (HAMLET.wheelR + HAMLET.tube) * 1000;
+    assert.ok(Math.abs(g - 9.81) < 1e-6, `hamlet floors at ${g.toFixed(2)} m/s^2`);
+    results.hamletPeriodSeconds = +(2 * Math.PI / HAMLET.omega).toFixed(1);
+    // the courier's bow meets the port
+    const cv = verts(hf.courier.geo, hf.courier.m).map((p) => p.multiplyScalar(0.001));
+    assert.ok(Math.abs(Math.max(...cv.map((p) => p.y)) - HAMLET.port) < 1e-6, 'hamlet courier berthed bow-on at the port');
+    for (let i = 0; i < RING.count; i++) {
+      const a = hamletAngle(i), { a0, a1 } = tramArc(i);
+      assert.ok(a > a0 + 0.05 && a < a1 - 0.05, 'hamlets hang midway between the platforms');
+      assert.ok(Math.abs(hamletMatrix(i).determinant() - 1) < 1e-9, 'hamlet frames are proper rotations');
+    }
+    // everything a hamlet has lies below the tram rail and inside the collector line's shadow of the ring
+    const hv = [...verts(hf.geo), ...wv.map((p) => p.clone().setY(p.y + HAMLET.wheelY))];
+    assert.ok(Math.max(...hv.map((p) => p.y)) < RING.rail - 0.5, 'hamlets hang below the trams');
+  }
+  // placements are proper rotations (a mirrored placement would turn a hull inside out)
+  for (const c of buildBerths().cradles) assert.ok(Math.abs(c.ship.determinant() - 1) < 1e-6, 'berthed shuttle placement is proper');
+  assert.ok(f.ferry.m.determinant() > 0, 'ferry placement is proper');
   // trams: their arcs stop short of every station's dish and braces; platforms beside the rail
   for (let i = 0; i < RING.count; i++) {
     const { a0, a1 } = tramArc(i);

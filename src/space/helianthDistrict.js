@@ -280,7 +280,7 @@ export function buildBerths() {
     B.box(0, -27, 0, 50, 3, 46, CK.BRONZE);
     B.pop();
     // the shuttle lies tangentially on the cradle, its lowest point on the deck
-    const sm = new THREE.Matrix4().makeBasis(d.clone().negate(), V(0, 1, 0), t).setPosition(end.clone().setY(top - bb.min.y));
+    const sm = new THREE.Matrix4().makeBasis(d.clone(), V(0, 1, 0), t).setPosition(end.clone().setY(top - bb.min.y));
     ships.push({ geo: sh.geo, m: sm });
     cradles.push({ deck: top, center: end.clone().setY(top), ship: sm });
     lamps.push(...placeLamps(sh.lamps || [], sm), { p: end.clone().setY(top + 2).addScaledVector(t, 100), r: 5, color: LAMP.GREEN, i: 2 }, { p: end.clone().setY(top + 2).addScaledVector(t, -100), r: 5, color: LAMP.RED, i: 2 });

@@ -20,6 +20,9 @@ import { RS } from './hearthLens.js';
 //             a queue astern of the feeder and a fourth works the transfer berth above it
 //   drones    three cleaning drones sweep circles in front of every dish, standing off its
 //             mirror, between the spokes that cross it and the receiver's struts
+//   hamlets   a crew hamlet hangs under the ring midway along every arc: a spindle on a hanger
+//             from the ring tube, a habitat wheel spun for a full gravity at its floor turning on
+//             a bearing collar, radiators below it and a courier berthed at its foot
 //   refuge    the wheels' rim lamps and garden lights turn with them
 //
 // Everything draws with the Hearth's hull material, so it shares the disc's light and the
@@ -109,6 +112,55 @@ export function buildDishDrone() {
   for (let k = 0; k < 4; k++) { const a = (k / 4) * TAU + Math.PI / 4; B.tube([V(0, Math.cos(a) * 36, Math.sin(a) * 36), V(-4, Math.cos(a) * 56, Math.sin(a) * 56)], 3, 6, CK.BRONZE); B.box(-4, Math.cos(a) * 60, Math.sin(a) * 60, 12, 10, 10, CK.DARK); }
   B.tube([V(6, 0, 0), V(40, 0, 0)], 2, 6, CK.HULL);
   return toHullKinds(B.geometry());
+}
+
+// ----------------------------------------------------------------- hamlets ----
+// Hamlet frame (km): origin on the ring's centre line, +x radially outward, +y up, +z along the ring.
+export const HAMLET = { hangTop: -0.3, spindleR: 0.5, y0: -1.4, y1: -5.2, wheelY: -3.3, wheelR: 1.6, tube: 0.22, hubIn: 0.535, hubOut: 0.64, hubH: 0.13, port: -5.45 };
+HAMLET.omega = Math.sqrt(0.00981 / (HAMLET.wheelR + HAMLET.tube));        // 1 g on the wheel's floor (rad/s)
+export const hamletAngle = (i) => ((i + 0.5) / RING.count) * TAU;
+export function hamletMatrix(i, out = new THREE.Matrix4()) {
+  const a = hamletAngle(i), d = V(Math.cos(a), 0, Math.sin(a));
+  return out.makeBasis(d, V(0, 1, 0), V(-d.z, 0, d.x)).setPosition(d.multiplyScalar(RING.R));
+}
+/** The fixed parts: hanger, spindle and its stator collar, radiators, port and a berthed courier. */
+export function buildHamletFixed() {
+  const B = new CB(), lamps = [], H = HAMLET;
+  B.tube([V(0, H.hangTop, 0), V(0, H.y0 + 0.1, 0)], 0.16, 16, CK.HULL);
+  for (const sd of [-1, 1]) B.tube([V(sd * 0.3, -0.25, 0), V(sd * 0.12, H.y0 + 0.4, 0)], 0.05, 8, CK.DARK);
+  B.push(new THREE.Matrix4().makeRotationX(Math.PI / 2));   // lathe z -> -y
+  lathe(B, [[0.12, -H.y0 - 0.05, CK.HULL], [0.42, -H.y0 + 0.1, CK.BRONZE], [H.spindleR, -H.y0 + 0.3, CK.HULL], [H.spindleR, -H.wheelY - 0.5, CK.GLASS], [H.spindleR, -H.wheelY + 0.5, CK.HULL],
+    [H.spindleR, -H.y1 - 0.3, CK.GLASS], [0.44, -H.y1, CK.BRONZE], [0.2, -H.port + 0.05, CK.HULL], [0.12, -H.port, CK.DARK]], 48);
+  B.pop();
+  // stator: field rings seated on the spindle, facing the rotor's hub across the bearing gap
+  for (const dy of [-0.1, 0.1]) { B.at(0, H.wheelY + dy, 0, Math.PI / 2, 0, 0); B.torus(H.spindleR + 0.005, 0.012, 64, 6, CK.CONDUIT); B.pop(); }
+  // radiators: two edge-on leaves under the wheel
+  for (const sd of [-1, 1]) {
+    B.tube([V(sd * 0.45, -4.6, 0), V(sd * 2.5, -4.6, 0)], 0.035, 8, CK.DARK);
+    B.box(sd * 1.5, -4.6, 0, 1.9, 0.75, 0.025, CK.RADIATOR);
+    B.box(sd * 1.5, -4.6, 0, 1.95, 0.03, 0.05, CK.BRONZE);
+  }
+  // the courier: bow up against the port, its hull hanging clear below
+  const sh = buildShuttle(110), bb = new THREE.Box3().setFromBufferAttribute(sh.geo.attributes.position);
+  const S = 3.2, cm = new THREE.Matrix4().makeBasis(V(-1, 0, 0), V(0, 0, 1), V(0, 1, 0)).scale(V(S, S, S)).setPosition(0, (H.port - bb.max.z * S * 0.001) * 1000, 0);
+  lamps.push({ p: V(0, H.hangTop - 0.15, 0.2), r: 0.02, color: LAMP.AMBER, i: 2.4, breathe: 0.4 }, { p: V(2.55, -4.6, 0), r: 0.03, color: LAMP.RED, i: 2.6 }, { p: V(-2.55, -4.6, 0), r: 0.03, color: LAMP.GREEN, i: 2.6 });
+  return { geo: B.geometry(), courier: { geo: sh.geo, m: cm, bb, S } , lamps };
+}
+/** The rotor: wheel, spokes and hub sleeve (about the hamlet's y axis, at the origin). */
+export function buildHamletWheel() {
+  const B = new CB(), H = HAMLET;
+  B.at(0, 0, 0, Math.PI / 2, 0, 0); B.torus(H.wheelR, H.tube, 128, 16, CK.GLASS); B.pop();
+  for (const dy of [-H.tube * 0.75, H.tube * 0.75]) { B.at(0, dy, 0, Math.PI / 2, 0, 0); B.torus(H.wheelR, 0.03, 128, 6, CK.BRONZE); B.pop(); }
+  B.push(new THREE.Matrix4().makeRotationX(-Math.PI / 2));
+  lathe(B, [[H.hubIn, -H.hubH, CK.BRONZE], [H.hubOut, -H.hubH, CK.HULL], [H.hubOut, H.hubH, CK.HULL], [H.hubIn, H.hubH, CK.BRONZE]], 64, 0, { closedProfile: true });
+  B.pop();
+  for (let k = 0; k < 6; k++) {
+    const a = (k / 6) * TAU, d = V(Math.cos(a), 0, Math.sin(a));
+    B.tube([d.clone().multiplyScalar(H.hubOut - 0.02), d.clone().multiplyScalar(H.wheelR - H.tube + 0.03)], 0.05, 10, CK.HULL);
+    // a lift car parked at mid-spoke (the crews ride them out to the wheel)
+    B.box(d.x * 1.05, 0.07, d.z * 1.05, 0.09, 0.05, 0.09, CK.GLASS);
+  }
+  return B.geometry();
 }
 
 // -------------------------------------------------------------------- trams ----
@@ -208,6 +260,23 @@ export class HearthDistrict {
     this.droneLamps = createLamps(Array.from({ length: mats.length * DISH.radii.length }, (_, k) => ({ p: V(0, 0, 0), r: 0.012, color: k % 3 ? LAMP.TEAL : LAMP.AMBER, i: 3, breathe: 0.5, phase: (k * 0.37) % 1 })), { minPx: 1.1, mask });
     this.droneAttr = this.droneLamps.geometry.getAttribute('iLamp');
     hearth.stations.add(this.droneLamps);
+    // ---- the ring hamlets: fixed parts instanced, wheels turned each frame
+    const hf = buildHamletFixed();
+    this.hamletMats = Array.from({ length: RING.count }, (_, i) => hamletMatrix(i));
+    const hfGeo = merge([toHullKinds(hf.geo, null, 1), toHullKinds(hf.courier.geo, hf.courier.m)]);
+    this.hamlets = new THREE.InstancedMesh(hfGeo, mat, RING.count);
+    this.hamletMats.forEach((m, i) => this.hamlets.setMatrixAt(i, m));
+    const HL = [];
+    for (const m of this.hamletMats) HL.push(...placeLamps(hf.lamps, m));
+    this.hamlets.add(createLamps(HL, { minPx: 1.1, mask }));
+    hearth.stations.add(this.hamlets);
+    this.wheels = new THREE.InstancedMesh(toHullKinds(buildHamletWheel(), null, 1), mat, RING.count);
+    hearth.stations.add(this.wheels);
+    // window lamps riding the wheels: eight round each
+    this.wheelLamps = createLamps(Array.from({ length: RING.count * 8 }, (_, k) => ({ p: V(0, 0, 0), r: 0.03, color: k % 4 ? [1.0, 0.82, 0.6] : LAMP.WHITE, i: 1.6 })), { minPx: 1.1, mask });
+    this.wheelAttr = this.wheelLamps.geometry.getAttribute('iLamp');
+    hearth.stations.add(this.wheelLamps);
+    this._rot = new THREE.Matrix4(); this._wl = V(0, 0, 0);
     // ---- ring platforms and trams
     const pl = buildPlatforms();
     this.platforms = new THREE.Mesh(toHullKinds(pl.geo, null, 1), mat);
@@ -248,7 +317,7 @@ export class HearthDistrict {
       for (let k = 0; k < 6; k++) { const a = (k / 6) * TAU; R.push({ p: V(Math.cos(a) * 6.8, 0.85, Math.sin(a) * 6.8), r: 0.18, color: [1.0, 0.78, 0.5], i: 1.4, breathe: 0.2, phase: (k + w) / 6 }); }
       rotor.add(createLamps(R, { minPx: 1.1, mask }));
     });
-    for (const o of [this.fittings, this.drones, this.platforms, this.trams, this.coils, ...this.tankers.map((t) => t.mesh)]) { o.frustumCulled = false; o.renderOrder = 3; }
+    for (const o of [this.fittings, this.drones, this.hamlets, this.wheels, this.platforms, this.trams, this.coils, ...this.tankers.map((t) => t.mesh)]) { o.frustumCulled = false; o.renderOrder = 3; }
     this._m = new THREE.Matrix4(); this._q = new THREE.Quaternion(); this._p = V(0, 0, 0); this._s = V(1, 1, 1); this._t = V(0, 0, 0); this._y = V(0, 1, 0); this._z = V(0, 0, 0);
     this.update(0);
   }
@@ -279,6 +348,21 @@ export class HearthDistrict {
     }
     this.drones.instanceMatrix.needsUpdate = true;
     this.droneAttr.needsUpdate = true;
+    const wa = this.wheelAttr.array, th = (t * HAMLET.omega) % TAU;
+    for (let i = 0; i < RING.count; i++) {
+      const dir = i % 2 ? 1 : -1;
+      this._rot.makeRotationY(th * dir).setPosition(0, HAMLET.wheelY, 0);
+      m.multiplyMatrices(this.hamletMats[i], this._rot);
+      this.wheels.setMatrixAt(i, m);
+      for (let k = 0; k < 8; k++) {
+        const a = (k / 8) * TAU;
+        this._wl.set(Math.cos(a) * (HAMLET.wheelR + HAMLET.tube + 0.01), 0, Math.sin(a) * (HAMLET.wheelR + HAMLET.tube + 0.01)).applyMatrix4(m);
+        const q = (i * 8 + k) * 4;
+        wa[q] = this._wl.x; wa[q + 1] = this._wl.y; wa[q + 2] = this._wl.z;
+      }
+    }
+    this.wheels.instanceMatrix.needsUpdate = true;
+    this.wheelAttr.needsUpdate = true;
     const w = this.tankers[3];
     tankerPose(t, w.mesh.position);
     const u = (((t / TANKER.T) % 1) + 1) % 1, moving = (u < 0.25) || (u > 0.6 && u < 0.85);
