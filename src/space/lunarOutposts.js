@@ -34,6 +34,14 @@ export function townDir(lat, lon, out = new THREE.Vector3()) {
   return out.set(Math.cos(a) * Math.cos(o), Math.sin(a), -Math.cos(a) * Math.sin(o));
 }
 
+/** The hop pad of an outpost (its own site metres): fixed by seed, claimed before the rest. */
+export function hopPad(seed, weight) {
+  const r = mulberry(seed * 104729 + 7);
+  const a = r() * TAU, d = 520 * (0.7 + weight);
+  const x = Math.cos(a) * d, z = Math.sin(a) * d;
+  return { x, z, spots: [0, 1, 2].map((k) => [x + Math.cos(k * TAU / 3) * 25, z + Math.sin(k * TAU / 3) * 25]) };
+}
+
 /**
  * Lay out one outpost (pure data + geometry, no renderer): returns { geo, lamps, inst, plan,
  * loops, radius }. weight (0.3..0.6) scales it; seed makes it its own.
@@ -84,6 +92,14 @@ export function buildOutpost(seed, weight = 0.5, lat = 0) {
   const nDomes = 1 + Math.round(weight * 4 * rnd() + weight * 2);
   apron(0, 0, 60 * sz, 0.35, LK.PAVE);
   claim('square', 0, 0, 60 * sz);
+  // the hop pad, where the hoppers from Medii come down (three spots), and its lamps
+  {
+    const hp = hopPad(seed, weight);
+    claim('hop', hp.x, hp.z, 58);
+    apron(hp.x, hp.z, 46, 0.9, LK.PAD);
+    for (const [x, z] of hp.spots) lamps.push({ p: new THREE.Vector3(x, gy(x, z) + 1.2, z), r: 0.9, color: LAMP.GREEN, i: 0.9 });
+    for (let k = 0; k < 10; k++) { const a = k / 10 * TAU, x = hp.x + Math.cos(a) * 44, z = hp.z + Math.sin(a) * 44; lamps.push({ p: new THREE.Vector3(x, gy(x, z) + 1.3, z), r: 1.0, color: LAMP.AMBER, i: 1.0 }); }
+  }
   for (let i = 0; i < nDomes; i++) {
     const a = i / nDomes * TAU + rnd() * 0.3, d = 60 * sz + 50;
     const x = Math.cos(a) * d, z = Math.sin(a) * d;

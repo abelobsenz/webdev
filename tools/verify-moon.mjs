@@ -4,7 +4,7 @@
 // Run from the repo root: node tools/verify-moon.mjs
 import * as THREE from 'three';
 import { buildMediiLanding, shoreV } from '../src/space/lunarLanding.js';
-import { buildMediiWorks, RAIL_H, TRACK_X, ARRAY, TOWER_D, PAD_STACKS, YARD } from '../src/space/lunarWorks.js';
+import { buildMediiWorks, RAIL_H, TRACK_X, ARRAY, TOWER_D, PAD_STACKS, YARD, HOP_SPOTS } from '../src/space/lunarWorks.js';
 import { LunarTraffic } from '../src/space/lunarTraffic.js';
 import { LunarOutposts, buildOutpost, townDir } from '../src/space/lunarOutposts.js';
 import { kit, KIT_PARTS, KIT_R, TRACKER_AXLE } from '../src/space/lunarKit.js';
@@ -12,6 +12,8 @@ import { createLunarMaterial } from '../src/space/lunarMaterial.js';
 import { surfaceY } from '../src/space/lunarSite.js';
 import { TOWNS } from '../src/space/moonBake.js';
 import { R_MOON } from '../src/space/sim.js';
+import { LunarHops } from '../src/space/lunarHops.js';
+import { stationFrame } from '../src/space/stations.js';
 
 let fails = 0;
 const ok = (cond, msg) => { if (!cond) { fails++; console.log('FAIL', msg); } };
@@ -295,6 +297,35 @@ report.landingTris = tris(L.geo); report.worksTris = tris(W.geo);
   report.outpostUpdateMs = +((performance.now() - t0) / 200).toFixed(4);
   ok(report.outpostUpdateMs < 0.1, `outposts update ${report.outpostUpdateMs} ms`);
   report.outpostUniqueTris = uniq; report.outpostInstancedTris = inst;
+}
+
+// ------------------------------------------------------------------ hoppers --
+{
+  const g = new THREE.Group();
+  const H = new LunarHops(g);
+  const p = new THREE.Vector3(), n = new THREE.Vector3();
+  const q = stationFrame(new THREE.Vector3(1, 0, 0)).invert();
+  for (const R of H.routes) for (const l of R.legs) {
+    // ends on their spots, on the ground; the arc above the sphere between them
+    for (const f of [0, 1]) {
+      H.arc(l, f, p, n);
+      ok(Math.abs(p.length() - R_MOON - 0.0009) < 1e-6, 'hop ends on its pad');
+      const site = f ? l.to : l.from;
+      if (site === 0) {
+        const loc = p.clone().sub(new THREE.Vector3(R_MOON, 0, 0)).applyQuaternion(q).multiplyScalar(1000);
+        const [u, v] = toUV(loc.x, loc.z);
+        ok(HOP_SPOTS.some(([su, sv]) => Math.hypot(su - u, sv - v) < 1.0), `hop lands on Medii's hop field (${u.toFixed(0)}, ${v.toFixed(0)})`);
+      }
+    }
+    for (let f = 0.02; f < 1; f += 0.07) { H.arc(l, f, p, n); ok(p.length() > R_MOON + 0.0009 && Number.isFinite(p.x + p.y + p.z), 'hop above the ground'); }
+    ok(l.T > 60 && l.T < 4000, `hop time ${l.T.toFixed(0)} s`);
+  }
+  for (let i = 0; i < HOP_SPOTS.length; i++) for (let j = i + 1; j < HOP_SPOTS.length; j++) ok(Math.hypot(HOP_SPOTS[i][0] - HOP_SPOTS[j][0], HOP_SPOTS[i][1] - HOP_SPOTS[j][1]) > 26 + 4, 'hop spots apart');
+  t0 = performance.now();
+  for (let i = 0; i < 300; i++) H.update(i * 3.7);
+  report.hopsUpdateMs = +((performance.now() - t0) / 300).toFixed(4);
+  ok(H.craft.instanceMatrix.array.every(Number.isFinite) && H.iLamp.array.every(Number.isFinite), 'hoppers finite');
+  ok(report.hopsUpdateMs < 0.05, `hops update ${report.hopsUpdateMs} ms`);
 }
 
 // ------------------------------------------------------------------ budgets --

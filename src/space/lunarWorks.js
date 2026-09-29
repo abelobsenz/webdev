@@ -43,6 +43,9 @@ export const MINE = { u0: 3500, u1: 5100, v0: -6300, v1: -5200 };
 export const PLANT = { u0: 3350, u1: 4300, v0: -4950, v1: -3900 };
 export const QUARTER = { u0: 3300, u1: 4350, v0: -3780, v1: -3050 };
 export const RADS = { u0: 4420, u1: 4940, v0: -4900, v1: -3950 };
+// the hop field: where the hoppers (lunarHops.js) from the outposts come down, ten spots on a ring
+export const HOP_FIELD = { u: 5600, v: -3450, r: 104, ring: 70, n: 10 };
+export const HOP_SPOTS = Array.from({ length: HOP_FIELD.n }, (_, i) => { const a = i / HOP_FIELD.n * Math.PI * 2; return [HOP_FIELD.u + Math.cos(a) * HOP_FIELD.ring, HOP_FIELD.v + Math.sin(a) * HOP_FIELD.ring]; });
 export const YARD = { u0: 3170, u1: 3320, v0: -4400, v1: -3950, gantryU: 3245 };
 // Craft on the landing fields: [pad, du, dv (metres from the pad's centre), part, cycling].
 // Parked craft face their service tower, which stands outboard of them.
@@ -466,6 +469,28 @@ export function buildMediiWorks(landingPlan = [], driver = null, PADS = null) {
       stacks.push([gantryU + du, v, hgt]);
     }
     for (const v of [v0 + 10, v1 - 10]) for (const u of [u0 + 8, u1 - 8]) { placeAt('mast', u, v, 0); lamp(u, v, 17.6, LAMP.WHITE, 1.2, 1.6); }
+  }
+
+  // ------------------------------------------------------------ the hop field --
+  {
+    const { u, v, r } = HOP_FIELD;
+    const [x, z] = UV(u, v);
+    B.push(seat(_m, x, z, 0, 0));
+    B.push(new THREE.Matrix4().makeRotationX(-Math.PI / 2));
+    B.lathe([[0, -1.2, LK.WALL], [r, -1.2, LK.WALL], [r, 0.9, LK.WALL], [0, 0.9, LK.PAD]], 64);
+    // a low berm of bagged regolith round it, open toward the plant (-u)
+    for (let k = 0; k < 28; k++) {
+      const a0 = k / 28 * Math.PI * 2, a1 = (k + 1) / 28 * Math.PI * 2, am = (a0 + a1) / 2;
+      if (S2 * (Math.sin(am) - Math.cos(am)) > 0.93) continue;     // (this ring's plane: x, -z of the site)
+      B.push(new THREE.Matrix4().makeRotationZ(am));
+      B.box(r + 14, 0, 2.5, 12, (a1 - a0) * (r + 14) + 0.3, 5, LK.REGOLITH);
+      B.pop();
+    }
+    B.pop(); B.pop();
+    foot('hopfield', u - r - 22, u + r + 22, v - r - 22, v + r + 22);
+    for (const [su, sv] of HOP_SPOTS) lamp(su, sv, 1.3, LAMP.GREEN, 0.9, 0.9);
+    for (let k = 0; k < 16; k++) { const a = k / 16 * Math.PI * 2; lamp(u + Math.cos(a) * (r - 3), v + Math.sin(a) * (r - 3), 1.4, LAMP.AMBER, 1.0, 1.1); }
+    placeAt('mast', u - r - 10, v, 0); lamp(u - r - 10, v, 17.6, LAMP.WHITE, 1.2, 1.6);
   }
 
   // ------------------------------------------------------------ the fields' furniture --
