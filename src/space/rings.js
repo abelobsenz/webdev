@@ -255,10 +255,24 @@ void main() {
       alb = mix(alb, mix(park, vec3(0.38, 0.36, 0.32), aaDisc(rH, 0.3, aa)), island);
       alb = mix(alb, vec3(0.36, 0.34, 0.3), bridge * step(abs(dr), rw + 0.12));
       vec3 diff = alb / 3.14159 * sunL * ndl;
-      // water: a bounded glint (the glass roof carries its own)
-      float spec = pow(max(dot(N, H), 0.0), 80.0) * 0.45 + pow(max(dot(N, H), 0.0), 20.0) * 0.06;
+      // water: wind-rippled, so the Sun's reflection breaks into a moving scatter of glints while
+      // the ripples are resolved (tens of metres), a steady lobe once they are not
+      float dRip = RDET(0.06) * water;
+      float uw = mod(u, 6.2831853);                          // (integer wavenumbers per 2 pi km: seamless, and exact in float32)
+      vec3 rip = vec3(sin(uw * 61.0 + vk * 23.0 + uTime * 1.3), sin(vk * 57.0 - uw * 19.0 - uTime * 1.1), sin((uw - vk) * 41.0 + uTime * 0.7));
+      vec3 Nw = normalize(N + rip * 0.035 * dRip);
+      float nhw = max(dot(Nw, H), 0.0);
+      float spec = mix(pow(max(dot(N, H), 0.0), 80.0) * 0.45, pow(nhw, 600.0) * 3.0, dRip) + pow(max(dot(N, H), 0.0), 20.0) * 0.06;
       float F = 0.04 + 0.96 * pow(clamp(1.0 - dot(N, V), 0.0, 1.0), 5.0);
       col = diff + min(sunL * spec * F * (0.1 + 0.9 * water), sunL * 0.6);
+      // the lights of the banks and quays trembling on the water at night
+      float nearBank = 1.0 - smoothstep(0.0, 0.35, abs(abs(dr) - rw));
+      float shimmer = 0.5 + 0.5 * sin(uw * 90.0 + uTime * 2.1) * sin(vk * 70.0 - uTime * 1.7);
+      em += uHabitatColor * water * (max(nearBank, quay + isHub * (1.0 - aaDisc(rH, 2.2, aa))) * mix(0.5, shimmer, RDET(0.05))) * (0.04 + 0.35 * nightSide);
+      // farm lanes lit with a lamp every 400 m, and the hedgerow villages' windows
+      float laneL = aaBand(mod(abs(vk), 4.3) - 2.15, 0.02, aa) * (1.0 - fPulse(u, 0.4, 0.0, 0.36, aa)) * (1.0 - max(max(town, wallT), ringQ));
+      float hamlet = step(0.93, hash12(floor(vec2(u / 1.7, vk / 1.7)) + 91.0)) * aaDisc(length(fract(vec2(u, vk) / 1.7) - 0.5) * 1.7, 0.12, aa) * (1.0 - wallT) * (1.0 - water);
+      em += uHabitatColor * (laneL * 0.5 + hamlet * 0.35) * (0.03 + 0.5 * nightSide);
       col += vec3(0.02, 0.03, 0.05) * F * uSunE * 0.05;
       // lights: lit rooms in the towns, lamps along the boulevards, the quays and both river banks
       float urban = max(max(town, wallT), ringQ);
@@ -319,7 +333,15 @@ void main() {
     float hood = hash12(floor(vec2(u / 4.0, hk / 1.2)) + uSeed * 3.1);
     float rl = 1.0 - smoothstep(0.03, 0.09, fwk);
     float lit = mix(0.42, step(0.52, room) * (0.6 + 0.8 * hood), rl);
-    em += uHabitatColor * glaze * lit * (0.05 + 0.3 * nightSide);
+    // households differ: warm lamps, cool screens, the odd rose or green room (mean colour kept
+    // once the rooms are under a pixel)
+    vec3 roomC = mix(vec3(1.0), mix(vec3(1.05, 0.9, 0.75), vec3(0.75, 0.88, 1.2), step(0.8, fract(room * 7.7))), rl);
+    roomC = mix(roomC, vec3(1.2, 0.7, 0.85), step(0.96, fract(room * 3.3)) * rl);
+    em += uHabitatColor * roomC * glaze * lit * (0.05 + 0.3 * nightSide);
+    // glass lift shafts in the light wells every 500 m (the terraces' wells), cars rising in them
+    float shaftL = aaBand(mod(u, 0.5) - 0.25, 0.011, fu) * vert * step(0.05, hk) * (1.0 - crest);
+    float car = mix(0.25, smoothstep(0.9, 1.0, fract(hk / 0.6 - uTime * 0.05 + hash12(vec2(floor(u / 0.5), uSeed)))), 1.0 - smoothstep(0.02, 0.06, fh));
+    em += vec3(0.85, 0.93, 1.0) * shaftL * (0.12 + 0.6 * car) * (0.3 + 0.7 * nightSide);
     float stripe = 1.0 - smoothstep(0.0, 0.06, abs(v - 0.9));
     em += uHabitatColor * stripe * 0.2;
     // small marker lamps every 25 km, filtered so they never shrink below their energy
