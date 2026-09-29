@@ -233,6 +233,64 @@ export function buildLinerDetail(seed = 2400) {
 }
 
 /**
+ * Fittings for a reclamation tender (src/craft/craftGeometry.js buildTender; tender-local metres),
+ * seated by casting onto the real hull: a catwalk along the spine's back (broken wherever the
+ * back steps up to a module), walkway lamps, floodlights over the cargo pods, RCS quads on the
+ * flanks at bow and stern, and two whip masts aft. Nothing forward of z = 200 m, where the
+ * capture cradle's arms swing. Returns { geo, lamps, rcs, seats }.
+ */
+export function buildTenderDetail(tenderGeo) {
+  const B = new CB();
+  const lamps = [], rcs = [], seats = [];
+  const mesh = new THREE.Mesh(tenderGeo, new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }));
+  mesh.updateMatrixWorld(true);
+  const ray = new THREE.Raycaster();
+  const cast = (from, dir) => { ray.set(from, dir); const h = ray.intersectObject(mesh, false)[0]; return h ? { p: h.point.clone(), n: h.face.normal.clone() } : null; };
+  // the spine's back: sampled every 10 m, a catwalk run wherever the back is smooth
+  let run = [];
+  const flush = () => {
+    for (let i = 1; i < run.length; i++) catwalk(B, run[i - 1], run[i], V(0, 1, 0), 3.2, 1.1);
+    for (let i = 0; i < run.length; i += 4) lamps.push({ p: run[i].clone().add(V(1.2, 1.5, 0)), r: 0.7, color: LAMP.AMBER, i: 1.6, breathe: 0.2, phase: i / 20 });
+    run = [];
+  };
+  for (let z = -250; z <= 200; z += 10) {
+    const h = cast(V(0, 300, z), V(0, -1, 0));
+    if (!h || h.n.y < 0.9) { flush(); continue; }
+    const p = h.p.add(V(0, 0.15, 0));
+    if (run.length && Math.abs(p.y - run[run.length - 1].y) > 1.2) flush();
+    run.push(p);
+    seats.push(p.clone());
+  }
+  flush();
+  // floods over the cargo pods: seated on each pod's crown, looking out and down over it
+  for (const x of [-52, 52]) for (let z = -150; z <= 120; z += 45) {
+    const h = cast(V(x, 300, z), V(0, -1, 0));
+    if (!h || h.n.y < 0.5) continue;
+    lamps.push(flood(B, h.p.clone().add(V(0, 0.8, 0)), V(Math.sign(x) * 0.7, -0.6, 0.3), 1.2, LAMP.WHITE, 1.8));
+    seats.push(h.p.clone());
+  }
+  // RCS quads on the flanks, bow and stern, seated on the surface the side ray meets
+  for (const z of [-230, 170]) for (const s of [-1, 1]) {
+    const h = cast(V(s * 400, 0, z), V(-s, 0, 0));
+    if (!h) continue;
+    const n = h.n.lengthSq() > 0.5 ? h.n.clone().normalize() : V(s, 0, 0);
+    if (n.x * s < 0) n.negate();
+    rcs.push(...rcsQuad(B, h.p.clone().addScaledVector(n, -0.1), n, V(0, 0, 1), 2.2));
+    seats.push(h.p.clone());
+  }
+  // two masts aft on the spine's back
+  for (const z of [-210, -180]) {
+    const h = cast(V(0, 300, z), V(0, -1, 0));
+    if (!h) continue;
+    const tip = mast(B, h.p.clone(), V(0, 1, 0), 26, 0.45);
+    lamps.push({ p: tip, r: 1.2, color: z < -200 ? LAMP.RED : LAMP.WHITE, i: 2.0, breathe: 0.3, phase: z / 50 });
+    seats.push(h.p.clone());
+  }
+  mesh.material.dispose();
+  return { geo: B.geometry(), lamps, rcs, seats };
+}
+
+/**
  * Fittings for the outer-system freighter hull (src/craft/craftClasses.js buildFreighter, drawn
  * at `len` m; Selene's tankers): a catwalk with railings along the spine's back, walkway lamps,
  * floodlights on every tank-ring bulkhead looking at the tanks, RCS quads at the drive and the

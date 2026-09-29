@@ -8,13 +8,15 @@ import { R_EARTH, R_MOON, MERIDIAN_LON, bodyDir } from './sim.js';
 import { stationFrame, CORRIDORS } from './stations.js';
 import { HS } from './harbour.js';
 import { FleetTraffic } from './fleetTraffic.js';
-import { buildLinerDetail, buildFreighterDetail } from './linerDetail.js';
+import { buildLinerDetail, buildFreighterDetail, buildTenderDetail } from './linerDetail.js';
 import { buildWheelDetail, buildLiftCar, buildRingCrane, liftPose, craneAngle, RING } from './seleneDetail.js';
 
 /** km: the liners' near fittings are drawn inside this range (a 2.4 km hull spans ~60 px at 60 km). */
 export const LINER_DETAIL_RANGE = 60;
 /** km: Selene's wheel walks, lifts and cranes are drawn inside this range. */
 export const SELENE_DETAIL_RANGE = 45;
+/** km: the tenders' deck fittings are drawn inside this range. */
+export const TENDER_DETAIL_RANGE = 25;
 
 // MERIDIAN's ships in the orbital view (km units; the craft are built in metres).
 //
@@ -240,6 +242,7 @@ export class Fleet {
     });
     // ---- reclamation tenders above the Halo near the Nauru port
     const tender = buildTender(620);
+    this.tenderData = tender;
     const relic = buildRelic();
     this.tenders = [];
     this.tenderGroup = new THREE.Group();
@@ -463,6 +466,26 @@ export class Fleet {
     this._linerDetail(space.camera);
     // Selene's wheel walks, spoke lifts and ring cranes, likewise
     this._seleneDetail(space.camera, realTime);
+    // and the tenders' deck fittings
+    this._tenderDetail(space.camera);
+  }
+
+  /** The tenders' deck fittings (catwalks, floods, RCS, masts), seated on their hulls; lazy. */
+  _tenderDetail(cam, force = false) {
+    if (!cam && !force) return;
+    let near = force;
+    if (!near) { this.tenderGroup.getWorldPosition(_v); near = _v.distanceTo(cam.position) < TENDER_DETAIL_RANGE; }
+    if (near && !this.tenderDetail) {
+      const d = buildTenderDetail(this.tenderData.geo);
+      const parts = this.tenders.map((t) => {
+        const p = craftPart(t.mesh, d.geo);
+        addLamps(p, d.lamps, { minPx: 1.0 });
+        t.mesh.add(p);
+        return p;
+      });
+      this.tenderDetail = { data: d, parts };
+    }
+    if (this.tenderDetail) for (const p of this.tenderDetail.parts) p.visible = near;
   }
 
   /** Selene Works' near detail (src/space/seleneDetail.js): built on first approach, animated only while near. */

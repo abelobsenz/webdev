@@ -528,5 +528,20 @@ assert.ok(minClear > 0, `working lanes clear every structure with ${minClear} km
   fleet._seleneDetail({ position: V(1e9, 0, 0) }, 10);
   assert.ok(D.parts.every((p) => !p.visible), 'Selene detail hidden far off');
 }
+// ---- 9. the tenders' fittings: seated on the hull, clear of the cradle
+{
+  assert.ok(!fleet.tenderDetail, 'tender fittings not built while the camera is far');
+  fleet._tenderDetail(null, true);
+  const d = fleet.tenderDetail.data, p = d.geo.attributes.position, w = V();
+  out.tenderFittingTriangles = d.geo.index.count / 3;
+  assert.ok(d.seats.length > 25 && d.rcs.length >= 16 && d.lamps.length > 10, 'tenders fitted out');
+  const T = tree(tris(new THREE.Mesh(fleet.tenderData.geo)));
+  let far = 0, fwd = 0;
+  for (let i = 0; i < p.count; i += 2) { w.fromBufferAttribute(p, i); if (dist(T, w, 40) > 30) far++; if (w.z > 215) fwd++; }
+  assert.equal(far, 0, 'tender fittings seated on the hull');
+  assert.equal(fwd, 0, 'tender fittings clear of the cradle arms');
+  for (const s of d.seats) assert.ok(dist(T, s, 5) < 0.5, 'every seat on the real surface');
+  assert.ok(fleet.tenders.every((t) => t.mesh.children.includes(fleet.tenderDetail.parts[fleet.tenders.indexOf(t)])), 'each tender carries its fittings');
+}
 console.log(JSON.stringify(out));
 console.log('FLEET_VERIFIED');
