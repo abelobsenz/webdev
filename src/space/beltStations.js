@@ -105,6 +105,10 @@ function berth(c, p, dir, r = 2.6, neck = 6) {
   c.lamps.push({ p: here(B, r * 3.3, 0, neck + 0.2), r: r * 0.35, color: LAMP.RED, i: 3.2, dir: hereDir(B, 0, 0, 1), breathe: 0.2 });
   c.lamps.push({ p: here(B, -r * 3.3, 0, neck + 0.2), r: r * 0.35, color: LAMP.GREEN, i: 3.2, dir: hereDir(B, 0, 0, 1), breathe: 0.2 });
   c.lamps.push({ p: here(B, 0, r * 3.3, neck + 0.2), r: r * 0.3, color: LAMP.WHITE, i: 3, dir: hereDir(B, 0, 0, 1), breathe: 1, phase: c.docks.length * 0.23 });
+  // the berth board: a lit number panel in a dark frame under the apron, read by the pilots on approach
+  B.box(r * 3.6, 0, neck - 1.2, 0.3, r * 0.9, 2.2, CK.DARK);
+  B.box(r * 3.6 + 0.2, 0, neck - 1.2, 0.12, r * 0.7, 1.8, CK.LANTERN);
+  B.box(r * 3.3, 0, neck - 1.2, r * 0.6, 0.3, 0.3, CK.BRONZE);
   c.docks.push({ p: here(B, 0, 0, neck + r * 0.95), d: d.clone() });
   B.pop();
 }
