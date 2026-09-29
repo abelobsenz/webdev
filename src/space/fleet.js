@@ -7,6 +7,7 @@ import { LAMP, createLamps } from './lamps.js';
 import { R_EARTH, R_MOON, MERIDIAN_LON, bodyDir } from './sim.js';
 import { stationFrame, CORRIDORS } from './stations.js';
 import { HS } from './harbour.js';
+import { FleetTraffic } from './fleetTraffic.js';
 
 // MERIDIAN's ships in the orbital view (km units; the craft are built in metres).
 //
@@ -313,6 +314,8 @@ export class Fleet {
     // a second tanker on the same run, half a day behind: in from the Harbour down the amber
     // lane and holding off the docking ring for a berth (the same corridors, the same beacons)
     this._addVoyager('tankerInbound', tanker, this.refinery, { ...this.movers[this.movers.length - 1].c, offset: SELENE_RUN.offsets[1] });
+    // ---- the working lanes round the Harbour and Selene (src/space/fleetTraffic.js)
+    this.traffic = new FleetTraffic(space, this);
   }
 
   /** A ship on a voyage cycle: a top-level group (its own depth-sliced body) placed from a station frame. */
@@ -446,6 +449,8 @@ export class Fleet {
       this.seleneLanes.quaternion.copy(this.refinery.quaternion);
       this.wheel.rotation.y = realTime * 0.04;
     }
+    // the working lanes: outer roads, holding stacks, Selene's ore run, patrol and convoys
+    this.traffic.update(sim, realTime, dt, space);
   }
 }
 
