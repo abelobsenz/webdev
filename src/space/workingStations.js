@@ -202,7 +202,11 @@ function solarService() {
     const x=sd*850;
     part(`service-wing-${sd}`,b=>{
       b.at(x,3480,0);
-      b.loft([[-650,120],[-550,300],[-300,410],[300,410],[600,200],[680,60]].map(([z,w])=>({z,pts:[[-w*.9,-50],[w*.9,-50],[w,15],[w*.95,50],[-w*.95,50],[-w,15]]})),CK.HULL);b.pop();
+      const plan=[[-650,120],[-550,300],[-300,410],[300,410],[600,200],[680,60]];
+      b.loft(plan.map(([z,w])=>({z,pts:[[-w*.9,-50],[w*.9,-50],[w,15],[w*.95,50],[-w*.95,50],[-w,15]]})),CK.HULL);
+      // the workshop decks' glazing: a band seated in each upper flank, lit along the wing
+      for(const side of [-1,1])b.loft(plan.slice(1,5).map(([z,w])=>({z,pts:[[w*1.0-3,17],[w*1.0+2,19],[w*.95+2,46],[w*.95-3,48]].map(([x,y])=>[side*x,y])})),CK.GLASS);
+      b.pop();
     });
     for(const z of [-300,300])part(`wing-brace-${sd}-${z}`,b=>b.tube([V(sd*250,3200,z*.65),V(sd*900,3450,z)],55,10,CK.BRONZE));
     part(`wing-edging-${sd}`,b=>{
