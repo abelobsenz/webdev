@@ -528,6 +528,34 @@ assert.ok(minClear > 0, `working lanes clear every structure with ${minClear} km
   fleet._seleneDetail({ position: V(1e9, 0, 0) }, 10);
   assert.ok(D.parts.every((p) => !p.visible), 'Selene detail hidden far off');
 }
+// ---- 8b. the EVA parties: on the berthed liner's port flank, standing off the plating, moving
+// at a walking pace, clear of the pier (which meets the starboard flank)
+{
+  const { evaPose, EVA_PARTIES, hullPoint } = await import('../src/space/linerDetail.js');
+  assert.ok(fleet.eva && fleet.eva.length === 9, 'three parties of three');
+  const liner = tree(tris(new THREE.Mesh(fleet.linerGeo.geo)));
+  const P = { pos: V(), up: V(), fwd: V() }, prev = V();
+  let minOff = Infinity, maxOff = 0, vmax = 0;
+  for (let k = 0; k < EVA_PARTIES.length; k++) for (let j = 0; j < 3; j++) for (let t = 0; t < 400; t += 1) {
+    evaPose(k, j, t, P);
+    const d = dist(liner, P.pos, 20);
+    minOff = Math.min(minOff, d); maxOff = Math.max(maxOff, d);
+    assert.ok(P.pos.x > 0, 'EVA on the port flank, away from the pier');
+    assert.ok(Math.abs(P.fwd.dot(P.up)) < 1e-6 && Math.abs(P.fwd.length() - 1) < 1e-9, 'walking along the plating');
+    if (t) vmax = Math.max(vmax, P.pos.distanceTo(prev));
+    prev.copy(P.pos);
+  }
+  out.evaStandOffM = [+minOff.toFixed(2), +maxOff.toFixed(2)];
+  out.evaMaxSpeedMs = +vmax.toFixed(2);
+  assert.ok(minOff > 0.6 && maxOff < 3, 'boots on the plating (magnets), not adrift');
+  assert.ok(vmax < 1.0, 'a walking pace in magnetic boots');
+  // the moving workers ride the detail part and are posed each near frame
+  fleet._linerDetail({ position: fleet.docked.getWorldPosition(V()).add(V(0, 5, 0)) }, false, 123);
+  const w0 = fleet.eva[0], e = evaPose(0, 0, 123, { pos: V(), up: V(), fwd: V() });
+  assert.ok(w0.mesh.position.distanceTo(e.pos) < 1e-9 && w0.mesh.parent === fleet.docked.userData.detail, 'workers posed on the liner');
+  void hullPoint;
+}
+
 // ---- 9. the tenders' fittings: seated on the hull, clear of the cradle
 {
   assert.ok(!fleet.tenderDetail, 'tender fittings not built while the camera is far');

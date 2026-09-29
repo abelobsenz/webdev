@@ -8,7 +8,7 @@ import { R_EARTH, R_MOON, MERIDIAN_LON, bodyDir } from './sim.js';
 import { stationFrame, CORRIDORS } from './stations.js';
 import { HS } from './harbour.js';
 import { FleetTraffic } from './fleetTraffic.js';
-import { buildLinerDetail, buildFreighterDetail, buildTenderDetail } from './linerDetail.js';
+import { buildLinerDetail, buildFreighterDetail, buildTenderDetail, buildEvaWorker, evaPose, evaLines, EVA_PARTIES } from './linerDetail.js';
 import { buildWheelDetail, buildLiftCar, buildRingCrane, liftPose, craneAngle, RING } from './seleneDetail.js';
 
 /** km: the liners' near fittings are drawn inside this range (a 2.4 km hull spans ~60 px at 60 km). */
@@ -474,7 +474,7 @@ export class Fleet {
     // the working lanes: outer roads, holding stacks, Selene's ore run, patrol and convoys
     this.traffic.update(sim, realTime, dt, space);
     // the Concord liners' fittings, built the first time a camera comes near either of them
-    this._linerDetail(space.camera);
+    this._linerDetail(space.camera, false, realTime);
     // Selene's wheel walks, spoke lifts and ring cranes, likewise
     this._seleneDetail(space.camera, realTime);
     // and the tenders' deck fittings
@@ -548,7 +548,7 @@ export class Fleet {
   }
 
   /** Near detail for the berthed and the visiting liner (src/space/linerDetail.js): lazy, hidden beyond range. */
-  _linerDetail(cam, force = false) {
+  _linerDetail(cam, force = false, t = 0) {
     if (!cam && !force) return;
     const hulls = [this.docked, this.movers.find((m) => m.name === 'approach')?.mesh].filter(Boolean);
     let near = force;
@@ -565,8 +565,27 @@ export class Fleet {
         h.add(part);
         h.userData.detail = part;
       }
+      // the EVA work parties on the berthed liner's port flank, on their safety lines
+      const dp = this.docked.userData.detail, wk = buildEvaWorker();
+      dp.add(craftPart(this.docked, evaLines()));
+      this.eva = [];
+      for (let k = 0; k < EVA_PARTIES.length; k++) for (let j = 0; j < 3; j++) {
+        const m = craftPart(this.docked, wk.geo);
+        addLamps(m, wk.lamps, { minPx: 0.9 });
+        dp.add(m);
+        this.eva.push({ mesh: m, k, j, pose: { pos: new THREE.Vector3(), up: new THREE.Vector3(), fwd: new THREE.Vector3() } });
+      }
     }
     if (this.linerDetail) for (const h of hulls) h.userData.detail.visible = !!h.userData.detailNear;
+    if (this.eva && this.docked.userData.detailNear) {
+      for (const w of this.eva) {
+        const P = evaPose(w.k, w.j, t, w.pose);
+        _v.crossVectors(P.up, P.fwd).normalize();
+        _m.makeBasis(_v, P.up, _v2.crossVectors(_v, P.up)).setPosition(P.pos);
+        w.mesh.position.copy(P.pos);
+        w.mesh.quaternion.setFromRotationMatrix(_m);
+      }
+    }
   }
 }
 

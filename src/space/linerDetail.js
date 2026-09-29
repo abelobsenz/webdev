@@ -233,6 +233,68 @@ export function buildLinerDetail(seed = 2400) {
 }
 
 /**
+ * An EVA worker in a hard suit (metres, standing along +Y, facing +Z): boots, legs, torso with a
+ * life-support pack, arms, a glazed helmet. ~2 m tall. Returns { geo, lamps } (helmet lamp,
+ * shoulder beacon).
+ */
+export function buildEvaWorker() {
+  const B = new CB();
+  for (const s of [-1, 1]) {
+    B.tube([V(s * 0.17, 0.08, 0), V(s * 0.19, 0.5, 0.04), V(s * 0.16, 0.95, 0)], 0.1, 6, CK.HULL);        // legs
+    B.box(s * 0.17, 0.05, 0.05, 0.16, 0.1, 0.3, CK.DARK);                                                  // boots
+    B.tube([V(s * 0.3, 1.45, 0), V(s * 0.38, 1.15, 0.12), V(s * 0.3, 0.95, 0.3)], 0.075, 6, CK.HULL);     // arms
+    B.box(s * 0.3, 0.92, 0.33, 0.1, 0.12, 0.1, CK.DARK);                                                   // gloves
+  }
+  B.box(0, 1.22, 0, 0.5, 0.6, 0.32, CK.HULL);                                  // torso
+  B.box(0, 1.28, -0.26, 0.44, 0.56, 0.22, CK.BRONZE);                          // life-support pack
+  B.box(0, 1.2, 0.17, 0.3, 0.2, 0.03, CK.DARK);                                // chest panel
+  B.at(0, 1.68, 0.02);
+  B.lathe([[0.02, -0.16, CK.HULL], [0.15, -0.14, CK.HULL], [0.17, 0, CK.GLASS], [0.14, 0.12, CK.GLASS], [0.02, 0.17, CK.HULL]], 12);
+  B.pop();
+  const lamps = [
+    { p: V(0.12, 1.78, 0.14), r: 0.08, color: LAMP.WHITE, i: 2.4, dir: V(0, -0.2, 1) },
+    { p: V(-0.2, 1.55, -0.3), r: 0.07, color: LAMP.AMBER, i: 2.2, breathe: 0.5 },
+  ];
+  return { geo: B.geometry(), lamps };
+}
+
+/**
+ * The EVA work parties on the berthed liner: three at the port-side cargo locks (+x, away from
+ * the pier), each of three workers on a safety line from the lock 60 m along the hull, moving to
+ * and fro at a walking pace, standing off the plating on their boots' magnets (1.2 m out).
+ * Pose of worker (party k, worker j) at time t in liner metres: position, up (the hull normal)
+ * and facing (along the line). Returns the three vectors written into out.
+ */
+export const EVA_PARTIES = [-40, 220, 480];
+export function evaPose(k, j, t, out) {
+  const t0 = -0.5, z0 = EVA_PARTIES[k] + 12, len = 60;
+  const u = 0.5 - 0.5 * Math.cos((t / (240 + 30 * j) + k * 0.37 + j * 0.29) * TAU);
+  const z = z0 + len * u;
+  hullPoint(z, t0 + 0.06 * (j - 1), out.pos);
+  hullNormal(z, t0 + 0.06 * (j - 1), out.up);
+  out.pos.addScaledVector(out.up, 1.2);
+  const dir = Math.sin((t / (240 + 30 * j) + k * 0.37 + j * 0.29) * TAU) >= 0 ? 1 : -1;
+  out.fwd.set(0, 0, dir).addScaledVector(out.up, -dir * out.up.z).normalize();
+  return out;
+}
+
+/** The party's safety lines (liner metres): one per worker, from the lock along the hull. */
+export function evaLines() {
+  const B = new CB();
+  const P = V(), N = V();
+  for (let k = 0; k < EVA_PARTIES.length; k++) for (let j = 0; j < 3; j++) {
+    const pts = [];
+    for (let i = 0; i <= 8; i++) {
+      const z = EVA_PARTIES[k] + 8 + (68 * i) / 8, t = -0.5 + 0.06 * (j - 1);
+      hullPoint(z, t, P); hullNormal(z, t, N);
+      pts.push(P.clone().addScaledVector(N, 0.5));
+    }
+    B.tube(pts, 0.05, 4, CK.BRONZE);
+  }
+  return B.geometry();
+}
+
+/**
  * Fittings for a reclamation tender (src/craft/craftGeometry.js buildTender; tender-local metres),
  * seated by casting onto the real hull: a catwalk along the spine's back (broken wherever the
  * back steps up to a module), walkway lamps, floodlights over the cargo pods, RCS quads on the
