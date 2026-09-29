@@ -178,15 +178,65 @@ sane('tram', buildTram());
     const bound = st.radius * 1.15 + 0.05;
     ok(T.defaultDist > bound * 1.3 && T.defaultDist < bound * 4.5, `${name} framed at ${T.defaultDist} km (bound ${bound.toFixed(2)} km): fills the view without clipping`);
   }
-  // camera parked at Halcyon's default view: every orbit trace is hidden (they are a map)
+  // no orbit traces at all (they read as a plotter's overlay across every low-orbit view)
+  let ribbons = 0;
+  lo.group.traverse((o) => { if (o.material && o.material.uniforms && o.material.uniforms.uHead) ribbons++; });
+  ok(ribbons === 0 && !lo.trails, 'no orbit-trace ribbons in the shell');
+  // Halcyon framed in its own attitude: the camera on the sunward side, 55-75 deg off the spin
+  // axis (an open ellipse of the wheel), outside the collector's lip
+  targets.halcyon.position(p); targets.halcyon.frame(q);
+  const hv = targets.halcyon.view, ce = Math.cos(hv.el);
+  const dir = new THREE.Vector3(ce * Math.sin(hv.az), Math.sin(hv.el), ce * Math.cos(hv.az));
+  const offAxis = Math.acos(dir.z) * 180 / Math.PI;
+  ok(dir.z > 0 && offAxis > 55 && offAxis < 75, `halcyon viewed ${offAxis.toFixed(0)} deg off its spin axis, sunward side`);
+  const hq = new THREE.Quaternion(); lo.byName.halcyon.frameAt(sim.t, new THREE.Vector3(), hq);
+  ok(Math.abs(q.dot(hq)) > 0.9999, 'halcyon target frame is the station attitude (spin axis on the Sun)');
+  // the satellites: sparse, sunlit, gone in the shadow, never a ring (CPU mirror of the shader)
+  {
+    const C = lo.constellations, cp = new THREE.Vector3(), sun = sim.sunDir.clone().normalize();
+    const cams = { halcyon: 2.6, aurelia: 0.82, demeter: 2.05, boreal: 0.72, dawnline: 2.4, anansi: 0.55 };
+    let worst = 0, worstName = '', shadowLit = 0, far = 0, bad = 0;
+    for (const T of [0, 1800, 3600, 20000, 86400 * 2.5]) {
+      sim.t = T; sim.update && sim.update();
+      C.update(sim.t, 0, sun, null, 540);
+      for (const [name, d] of Object.entries(cams)) {
+        lo.pose(name, sim, cp, null);
+        cp.add(new THREE.Vector3(d * 0.6, d * 0.5, d * 0.62));
+        let vis = 0;
+        for (let i = 0; i < C.count; i++) {
+          const b = C.apparent(i, cp, sun);
+          if (!Number.isFinite(b)) bad++;
+          if (b > 0.02) vis++;
+          if (b > 0) { const sp = C.position(i, new THREE.Vector3()); const al = sp.dot(sun); if (al < 0 && Math.sqrt(sp.lengthSq() - al * al) < R_EARTH - 9) shadowLit++; }
+        }
+        if (vis > worst) { worst = vis; worstName = `${name} t=${T}`; }
+      }
+      cp.set(R_EARTH + 30000, 2000, 1000);
+      for (let i = 0; i < C.count; i++) if (C.apparent(i, cp, sun) > 0.02) far++;
+    }
+    ok(bad === 0, 'satellite brightness finite everywhere');
+    ok(worst <= 24, `at most ${worst} of ${C.count} satellites visible from a station view (${worstName}): glints, not rings`);
+    ok(shadowLit === 0, 'no satellite shines inside the Earth\'s umbra');
+    ok(far <= 6, `from 30,000 km out only ${far} flaring satellites show over five epochs (no shells traced)`);
+    // a flare: somewhere near its specular geometry a satellite outshines its diffuse self many times
+    let peak = 0;
+    for (let i = 0; i < 400; i++) { const sp = C.position(i, new THREE.Vector3()); const b = C.apparent(i, sp.clone().multiplyScalar(1 - 150 / sp.length()), sun); peak = Math.max(peak, b); }
+    ok(peak > 0.05, `a satellite 150 km overhead reads as a faint star or a flare (peak ${peak.toFixed(2)})`);
+    sim.t = 0; sim.update && sim.update();
+  }
   targets.halcyon.position(p); targets.halcyon.frame(q);
   cam.position.copy(p).add(new THREE.Vector3(0, 0, targets.halcyon.defaultDist).applyQuaternion(q));
   cam.updateMatrixWorld();
   lo.update(sim, 10, 0.016, space);
-  ok(lo.trails.every((t) => !t.mesh.visible), 'orbit traces hidden while the camera is inside the shell');
-  cam.position.set(R_EARTH + 30000, 0, 0); cam.updateMatrixWorld();
-  lo.update(sim, 11, 0.016, space);
-  ok(lo.trails.some((t) => t.mesh.visible), 'orbit traces drawn from 30,000 km out');
+  {
+    const mats = new Set();
+    for (const s of [...lo.stations, lo.skyhook]) mats.add(s.mat);
+    let dressed = 0, env = 0;
+    for (const m of mats) { if (m.userData.dressed && m.userData.refined) dressed++; if (m.uniforms.uAoH && m.uniforms.uAoH.value.x > 0) env++; }
+    ok(dressed === mats.size && env === mats.size, `station materials dressed and refined (${dressed}/${mats.size}), with occlusion envelopes (${env}/${mats.size})`);
+    const dk = (g) => { const f = g.attributes.aFacade.array; let n = 0; for (let i = 2; i < f.length; i += 3) if (f[i] > 19.5 && f[i] < 26.5) n++; return n / (f.length / 3); };
+    for (const s of lo.stations.filter((x) => !x.name.startsWith('gleaner'))) ok(dk(s.fixed.geometry) > 0.03 || (s.wheel && dk(s.wheel.geometry) > 0.03) || (s.drums && dk(s.drums[0].geometry) > 0.03), `${s.name}: hull carries the dressed finishes (ports, livery, foil, worn plate)`);
+  }
   // approach strobes: dark between runs (no permanent bead string)
   const hal = lo.byName.halcyon;
   if (hal.approach) {

@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import { createCraftMaterial } from '../craft/craftMaterial.js';
 import { buildShuttle, buildCourier } from '../craft/craftClasses.js';
-import { craftMesh, craftPart, addLamps, pixelRadius, KM } from './craftMesh.js';
+import { craftMesh, craftPart, addLamps, pixelRadius, KM, createDressedMaterial, setCraftEnvelope } from './craftMesh.js';
+import { STATION_LIVERY } from './leoStations.js';
 import { createLamps, LAMP } from './lamps.js';
 import { createRibbonMaterial, buildRibbonGeometry } from './lines.js';
 import { R_EARTH, MERIDIAN_LON, bodyDir } from './sim.js';
@@ -31,7 +31,7 @@ const FARM_LAND_X = new THREE.Vector3(0, 1, 0);   // Demeter drums: a land strip
 //
 // Nothing orbits between 600 and 640 km: that is the Halo's altitude, and every orbit crosses
 // the equator twice a lap. Far off, each station is a glint (sunlit) or a warm point (its
-// windows, on the night side) and a faint trace of its orbit; closer, its lamps; closer
+// windows, on the night side); closer, its lamps; closer
 // still the full model with its wheels, drums, wings and emitters turning.
 
 const TAU = Math.PI * 2;
@@ -121,35 +121,6 @@ class Glints {
   commit() { this.P.needsUpdate = true; this.G.needsUpdate = true; }
 }
 
-// ---------------------------------------------------------------- trails --
-const TRAIL_FRAG = /* glsl */ `
-uniform float uHead;
-uniform vec3 uColor;
-uniform float uGainT;
-void main() {
-  // the orbit as a faint thread, brighter for a stretch behind the station (its recent wake)
-  float behind = fract(uHead - vData.x);
-  float wake = exp(-behind * 14.0);
-  float c = (0.05 + 0.5 * wake) * uGainT;
-  gl_FragColor = vec4(uColor * c * vCoverage, 0.0);
-}
-`;
-
-function trailFor(orbit, color, gain = 1) {
-  // perifocal circle/ellipse; the mesh's matrix carries it to the precessing plane
-  const pts = [], along = [], n = 360, e = orbit.e, pp = orbit.a * (1 - e * e);
-  for (let k = 0; k <= n; k++) {
-    const nu = (k / n) * TAU, r = pp / (1 + e * Math.cos(nu));
-    pts.push(new THREE.Vector3(r * Math.cos(nu), r * Math.sin(nu), 0)); along.push(k / n);
-  }
-  const mat = createRibbonMaterial({ widthKm: 0.02, minPx: 1.0, frag: TRAIL_FRAG, uniforms: { uHead: { value: 0 }, uColor: { value: new THREE.Color(...color) }, uGainT: { value: gain } } });
-  const mesh = new THREE.Mesh(buildRibbonGeometry([{ pts, along, id: 0 }]), mat);
-  mesh.frustumCulled = false;
-  mesh.renderOrder = 11;
-  mesh.matrixAutoUpdate = false;
-  return { mesh, mat, orbit };
-}
-
 // -------------------------------------------------------------- stations --
 function lampSet(mesh, lamps, minPx = 1.2) { return lamps && lamps.length ? addLamps(mesh, lamps, { minPx }) : null; }
 
@@ -158,7 +129,8 @@ class Station {
     this.name = name; this.orbit = orbit; this.radius = radiusKm; this.glintSize = glintSize;
     this.root = new THREE.Group();
     this.root.name = name;
-    this.mat = createCraftMaterial({ accent, lit });
+    const lv = STATION_LIVERY[name.replace(/[0-9]+$/, '')] || STATION_LIVERY.gleaner;
+    this.mat = createDressedMaterial({ accent, lit, livery: lv[0], livery2: lv[1] });
     this.ports = [];
     this.px = 0;
     this.lit = 1;
@@ -315,7 +287,7 @@ export class LowOrbit {
     }
     // ---- Gleaner sweepers
     const sw = buildSweeper(), chunk = buildDebrisChunk();
-    const swMat = createCraftMaterial({ accent: [1.0, 0.7, 0.35], lit: 0.5 });
+    const swMat = setCraftEnvelope(createDressedMaterial({ accent: [1.0, 0.7, 0.35], lit: 0.5, livery: STATION_LIVERY.gleaner[0], livery2: STATION_LIVERY.gleaner[1] }), sw.geo);
     [[1380, 74, 0.2, 0.0], [760, 65, 3.9, 2.5], [1120, 35, 5.1, 4.4]].forEach(([alt, inc, node, M0], i) => {
       const o = new Orbit({ alt, inc: inc * DEG, node, M0 });
       const s = new Station(`gleaner${i}`, o, 0.12, 90, [1.0, 0.7, 0.35], 0.5);
@@ -353,6 +325,7 @@ export class LowOrbit {
       s.meshes = [s.fixed];
       this.stations.push(s);
     });
+    for (const s of this.stations) if (s.mat !== swMat) setCraftEnvelope(s.mat, s.fixed.geometry);
     // ---- work drones on their inspection circuits round the big stations
     const dg = droneGeo(7);
     const lanes = {
@@ -376,20 +349,10 @@ export class LowOrbit {
     // ---- constellations
     this.constellations = new Constellations(buildSatellites());
     this.group.add(this.constellations.group);
-    // ---- glints and trails
+    // ---- glints (no orbit traces: from inside the shell they crossed every view like a plotter's
+    // overlay, and nothing real draws them; far off, a station is a glint or a warm point)
     this.glints = new Glints(this.stations.length + 3 + this.shuttles.length + this.hoppers.length);
     this.group.add(this.glints.points);
-    this.trails = [];
-    const tc = { halcyon: [1.0, 0.9, 0.7], aurelia: [1.0, 0.8, 0.5], demeter: [0.6, 1.0, 0.5], boreal: [0.5, 0.85, 1.0], dawnline: [1.0, 0.55, 0.35] };
-    for (const s of this.stations) {
-      const tr = trailFor(s.orbit, tc[s.name] || [0.7, 0.7, 0.75], tc[s.name] ? 1 : 0.5);
-      tr.station = s;
-      this.trails.push(tr);
-      this.group.add(tr.mesh);
-    }
-    const st = trailFor(this.skyhook.orbit, [0.95, 0.9, 0.6], 1);
-    st.station = this.skyhook;
-    this.trails.push(st); this.group.add(st.mesh);
     this.group.traverse((o) => { o.frustumCulled = false; });
     this.buildMs = performance.now() - t0;
     if (space && space.addBody) this._bodies(space);
@@ -431,7 +394,7 @@ void main() {
     s.tether.renderOrder = 12;
     s.root.add(s.tether);
     const hub = buildSkyhookHub(), gr = buildGrapple();
-    s.fixed = craftMesh(hub.geo, {}, s.mat);
+    s.fixed = craftMesh(hub.geo, {}, setCraftEnvelope(s.mat, hub.geo));
     lampSet(s.fixed, hub.lamps);
     s.root.add(s.fixed);
     s.tips = [1, -1].map((sy) => {
@@ -545,8 +508,8 @@ void main() {
   // ------------------------------------------------------------ traffic --
   _buildTraffic() {
     const sh = buildShuttle(64), hp = buildCourier(52);
-    this.shuttleMat = createCraftMaterial({ accent: [0.6, 0.85, 1.0], lit: 0.7 });
-    this.hopperMat = createCraftMaterial({ accent: [1.0, 0.72, 0.45], lit: 0.7 });
+    this.shuttleMat = setCraftEnvelope(createDressedMaterial({ accent: [0.6, 0.85, 1.0], lit: 0.7, livery: STATION_LIVERY.shuttle[0], livery2: STATION_LIVERY.shuttle[1] }), sh.geo);
+    this.hopperMat = setCraftEnvelope(createDressedMaterial({ accent: [1.0, 0.72, 0.45], lit: 0.7, livery: STATION_LIVERY.hopper[0], livery2: STATION_LIVERY.hopper[1] }), hp.geo);
     const mk = (d, mat) => {
       const m = craftMesh(d.geo, {}, mat);
       lampSet(m, d.lamps, 1.0);
@@ -721,24 +684,6 @@ void main() {
     }
     gl.mat.uniforms.uSun.value.copy(sun);
     gl.commit();
-    // trails follow their precessing planes and mark where each station is on its lap. They
-    // are a map, not a thing: drawn only once the camera has left the shell (from a few
-    // thousand km up, where the shell reads as a whole), never across a station's close view
-    const mapGain = cam ? smooth(R_EARTH + 4000, R_EARTH + 14000, cam.position.length()) : 1;
-    for (const tr of this.trails) {
-      const o = tr.orbit;
-      o._solve(t);
-      _m.makeBasis(o._N, o._M, o._h);
-      tr.mesh.matrix.copy(_m);
-      tr.mesh.matrixWorldNeedsUpdate = true;
-      tr.mat.uniforms.uHead.value = (((o._nu / TAU) % 1) + 1) % 1;
-      tr.mat.uniforms.uSunDir.value.copy(sun);
-      // the trace fades out as you close on the station (it is a map, not a thing)
-      const d = cam ? cam.position.distanceTo(tr.station.root.position) : 1e4;
-      const gain = (tr.station.name.startsWith('gleaner') ? 0.45 : 1) * smooth(80, 2500, d) * mapGain;
-      tr.mat.uniforms.uGainT.value = gain;
-      tr.mesh.visible = gain > 0.002;
-    }
     this.constellations.update(t, realTime, sun, cam, H);
   }
 
@@ -799,17 +744,17 @@ void main() {
   }
 
   setSize(w, h) {
-    for (const tr of this.trails) tr.mat.uniforms.uResolution.value.set(w, h);
     this.skyhook.tetherMat.uniforms.uResolution.value.set(w, h);
     this.glints.mat.uniforms.uPx.value = Math.max(2, h / 400);
     this.constellations.setSize(w, h);
   }
 
   /** Target pose: station centre and a local-vertical frame (the Earth below). */
-  pose(name, sim, outPos, outQuat) {
+  pose(name, sim, outPos, outQuat, attitude = false) {
     const s = this.byName[name];
     if (!s) return outPos || outQuat;
     if (outPos) { s.frameAt(sim.t, outPos); return outPos; }
+    if (attitude) { s.frameAt(sim.t, _w, outQuat); return outQuat; }
     return s.orbit.lvlh(sim.t, outQuat);
   }
 
@@ -829,7 +774,7 @@ void main() {
       solid: false, hint: 0.3,
     });
     const reach = R_EARTH + 20200 + 200;
-    space.addBody('leo-shell', [this.constellations.group, this.glints.points, ...this.trails.map((t) => t.mesh), ...this.shuttles.map((s) => s.root), ...this.hoppers.map((h) => h.root)], null, 0, {
+    space.addBody('leo-shell', [this.constellations.group, this.glints.points, ...this.shuttles.map((s) => s.root), ...this.hoppers.map((h) => h.root)], null, 0, {
       interval: (camPos) => { const d = camPos.length(); return [Math.max(d - reach, 0.002), d + reach]; },
     });
   }
@@ -857,12 +802,14 @@ function hermiteLocal(p0, v0, p1, v1, D, u, out, outV) {
 
 /** Focus targets for the shell's stations (the Earth below, the station's lap ahead). */
 export function leoTargets(space) {
-  const P = (name) => ({
+  const P = (name, attitude = false) => ({
     position: (o) => (space.lowOrbit ? space.lowOrbit.pose(name, space.sim, o, null) : o.set(R_EARTH + 1000, 0, 0)),
-    frame: (q) => (space.lowOrbit ? space.lowOrbit.pose(name, space.sim, null, q) : q.identity()),
+    frame: (q) => (space.lowOrbit ? space.lowOrbit.pose(name, space.sim, null, q, attitude) : q.identity()),
   });
   return {
-    halcyon: { ...P('halcyon'), minDist: 1.4, maxDist: 40000, defaultDist: 2.9, view: { az: 0.55, el: 0.38 } },
+    // (station frame: +z on the Sun) 66 deg off the spin axis on the sunward side: the wheel an
+    // open ellipse, its sunlit terraces seen through the parted collector petals
+    halcyon: { ...P('halcyon', true), minDist: 1.4, maxDist: 40000, defaultDist: 2.6, view: { az: 1.1, el: 0.5 } },
     aurelia: { ...P('aurelia'), minDist: 0.45, maxDist: 40000, defaultDist: 0.82, view: { az: 0.8, el: 0.3 } },
     demeter: { ...P('demeter'), minDist: 1.0, maxDist: 40000, defaultDist: 2.05, view: { az: 2.2, el: 0.32 } },
     boreal: { ...P('boreal'), minDist: 0.35, maxDist: 40000, defaultDist: 0.72, view: { az: 0.6, el: 0.18 } },
