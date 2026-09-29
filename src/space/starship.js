@@ -1,9 +1,9 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { CK } from '../craft/craftGeometry.js';
-import { craftMesh, craftPart, addLamps, KM } from './craftMesh.js';
+import { craftMesh, craftPart, addLamps } from './craftMesh.js';
 import { createEngine, ENGINE_FRAME } from './exhaust.js';
-import { createGlowMesh } from '../craft/craftMaterial.js';
+import { createRcsJet } from './plume.js';
 
 // The Concord starcourier "Lodestar": the ship the visitor flies in the orbital view. A 36 m
 // lifting-body cutter drawn in metres with the craft material (view-space sunlight, the Earth's
@@ -326,13 +326,20 @@ export class Starship {
     // ---- engines (metres, in the hull's frame: their axis +Z, exhaust aft)
     this.engines = [];
     for (const e of this.engineMounts) {
-      const eng = createEngine({ rt: e.rt, re: e.re, len: e.len, plumeAngle: 0.55 });
+      const eng = createEngine({ rt: e.rt, re: e.re, len: e.len, plumeLen: e.re * (e.main ? 19 : 16) });
       eng.position.set(e.p.x, e.p.y, zs + 1.45);
       hull.add(eng);
       this.engines.push({ g: eng, main: !!e.main });
     }
-    this.rcsGlow = createGlowMesh(this.rcs, { color: [0.85, 0.92, 1.0], strength: 0, scale: KM });
-    hull.add(this.rcsGlow);
+    // RCS: a cold-gas jet at every nozzle, with the force and torque it gives the ship (for thruster
+    // selection: each manoeuvre fires the nozzles that push the right way)
+    this.jets = this.rcs.map((n) => {
+      const jet = createRcsJet(n.p, n.dir);
+      hull.add(jet);
+      const F = n.dir.clone().negate();                                   // the push on the ship
+      const tau = new THREE.Vector3().crossVectors(n.p, F);
+      return { jet, F, tau: tau.lengthSq() > 1e-8 ? tau.normalize() : tau };
+    });
     const lamps = [
       { p: this.navTips[1], r: 0.3, color: [1.0, 0.12, 0.08], i: 2.2 },                                          // port
       { p: this.navTips[0], r: 0.3, color: [0.12, 1.0, 0.35], i: 2.2 },                                          // starboard
@@ -344,7 +351,11 @@ export class Starship {
     addLamps(hull, lamps, { minPx: 1.2, gain: 1 });
   }
 
-  /** Animate: throttle 0..1 (main), aux 0..1 (small engines), boost 0/1, legs 0..1, rcs 0..1. */
+  /**
+   * Animate: throttle 0..1 (main), aux 0..1 (small engines), boost 0/1, legs 0..1; ang / lin: the
+   * angular and linear acceleration the thrusters are asked for (ship frame, in units of their
+   * capacity); sunlit 0..1 (the cold-gas puffs only show in sunlight); time (s).
+   */
   update(dt, s) {
     const st = this.state, k = (r) => 1 - Math.exp(-dt * r);
     st.throttle += (s.throttle - st.throttle) * k(6);
@@ -354,7 +365,13 @@ export class Starship {
     st.rcs += (s.rcs - st.rcs) * k(12);
     for (const l of this.movers.legs) l.g.rotation.x = lerp(-1.52, l.out, st.legs);
     for (const e of this.engines) e.g.setThrust(e.main ? Math.min(1.5, st.throttle * (1 + 0.8 * st.boost)) : st.aux, dt);
-    this.rcsGlow.material.uniforms.uStrength.value = st.rcs * 4;
+    const ang = s.ang, lin = s.lin, sun = s.sunlit ?? 1, time = s.time ?? 0;
+    for (const j of this.jets) {
+      let d = 0;
+      if (ang) d += Math.max(0, j.tau.dot(ang));
+      if (lin) d += Math.max(0, j.F.dot(lin));
+      j.jet.setDemand(d, dt, sun, time);
+    }
   }
 }
 

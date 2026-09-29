@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { U } from '../core/uniforms.js';
+import { createPlume } from './plume.js';
 
 // A physically grounded vacuum engine: nozzle, throat and plume. In metres (the parent mesh
 // carries the km scale); the engine's axis is local +Z, the exhaust leaving through the exit
@@ -12,9 +13,9 @@ import { U } from '../core/uniforms.js';
 //          dull red. The metal takes a couple of seconds to come up to temperature and keeps its
 //          glow a while after cut-off.
 // Throat   the chamber seen up the bell: a small, very bright disc, visible only from behind.
-// Plume    in vacuum the jet is under-expanded: it fans out into a wide cone and its brightness
-//          falls with the spreading column (~1/width), faint blue-violet from the hot, excited
-//          gas. No shock diamonds (those need an atmosphere to push back), no flicker.
+// Plume    a volumetric, ray-marched Gaussian jet (space/plume.js): under-expanded in vacuum it
+//          fans out and thins as it spreads, white-blue at the exit cooling to violet, its
+//          turbulence streaming downstream. No shock diamonds (those need an atmosphere).
 
 const BLACKBODY = /* glsl */ `
 // black-body colour of temperature T (kelvin), linear RGB, normalised to its brightest channel
@@ -77,39 +78,6 @@ function bellGeometry(rt, re, len, wall = 0.05, seg = 48, rings = 18) {
   return g;
 }
 
-// ------------------------------------------------------------------ plume --
-const PLUME_VERT = /* glsl */ `
-attribute vec2 aQ;              // x: 0..1 along the plume, y: -1..1 across
-uniform float uLen; uniform float uR0; uniform float uTan;
-varying vec2 vQ; varying float vW; varying float vFace;
-void main() {
-  float s = aQ.x * uLen;
-  float w = uR0 + s * uTan;                                          // half-width of the jet at s
-  vec3 o = (modelViewMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;          // the exit centre, view space
-  vec3 ax = normalize(mat3(modelViewMatrix) * vec3(0.0, 0.0, 1.0));   // the jet axis, view space
-  vec3 p = o + ax * s * length(mat3(modelViewMatrix) * vec3(0.0, 0.0, 1.0));
-  float k = length(mat3(modelViewMatrix) * vec3(1.0, 0.0, 0.0));      // object -> view units
-  vec3 side = cross(ax, normalize(-p));
-  float sl = length(side);
-  side = sl > 1e-4 ? side / sl : vec3(1.0, 0.0, 0.0);
-  p += side * aQ.y * w * 1.8 * k;
-  vFace = abs(dot(ax, normalize(-o)));                                 // looking along the jet
-  vQ = aQ; vW = w / uR0;
-  gl_Position = projectionMatrix * vec4(p, 1.0);
-}`;
-const PLUME_FRAG = /* glsl */ `
-uniform float uThrust; uniform float uSunE; uniform vec3 uColor;
-varying vec2 vQ; varying float vW; varying float vFace;
-void main() {
-  float across = vQ.y * 1.8;                                           // in units of the local half-width
-  float prof = exp(-across * across * 1.6);                            // a soft Gaussian jet
-  // column brightness falls as the jet spreads (1/width), and the gas fades as it cools and thins
-  float col = prof / vW * exp(-vQ.x * 2.2);
-  col *= smoothstep(0.0, 0.03, vQ.x);                                   // starts at the exit plane
-  col *= 1.0 - 0.6 * vFace;                                              // end-on, the throat disc takes over
-  gl_FragColor = vec4(uColor * col * uThrust * uSunE * 0.35, 0.0);
-}`;
-
 const THROAT_FRAG = /* glsl */ `
 uniform float uThrust; uniform float uSunE;
 varying vec2 vUv;
@@ -126,7 +94,7 @@ const _m = new THREE.Matrix4();
  * One engine. rt/re throat and exit radii, len bell length (metres). Returns a group with
  * setThrust(t, dt) - the skirt temperature lags the throttle as real metal does.
  */
-export function createEngine({ rt, re, len, plumeLen = 18 * re, plumeAngle = 0.42, color = [0.52, 0.6, 1.0] }) {
+export function createEngine({ rt, re, len, plumeLen = 18 * re, plumeAngle = 0.26, color = [0.42, 0.46, 1.0] }) {
   const g = new THREE.Group();
   const nozU = { uSunView: { value: new THREE.Vector3(1, 0, 0) }, uSunE: U.uSunIlluminance, uHeat: { value: 0 }, uTInner: { value: 2100 }, uTLip: { value: 950 } };
   const noz = new THREE.Mesh(bellGeometry(rt, re, len), new THREE.ShaderMaterial({ vertexShader: NOZ_VERT, fragmentShader: NOZ_FRAG, uniforms: nozU, side: THREE.DoubleSide }));
@@ -143,18 +111,9 @@ export function createEngine({ rt, re, len, plumeLen = 18 * re, plumeAngle = 0.4
   th.position.z = 0.02; th.rotation.y = Math.PI;                         // faces aft, out of the bell
   th.frustumCulled = false; th.renderOrder = 17;
   g.add(th);
-  // the plume: a jet-aligned billboard
-  const pg = new THREE.BufferGeometry();
-  const q = [], idx = [];
-  const N = 24;
-  for (let j = 0; j <= N; j++) for (const y of [-1, 1]) q.push(j / N, y);
-  for (let j = 0; j < N; j++) { const a = j * 2; idx.push(a, a + 1, a + 3, a, a + 3, a + 2); }
-  pg.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(q.length / 2 * 3), 3));
-  pg.setAttribute('aQ', new THREE.Float32BufferAttribute(q, 2));
-  pg.setIndex(idx);
-  const plU = { uThrust: { value: 0 }, uSunE: U.uSunIlluminance, uLen: { value: plumeLen }, uR0: { value: re * 0.92 }, uTan: { value: Math.tan(plumeAngle) }, uColor: { value: new THREE.Color(...color) } };
-  const plume = new THREE.Mesh(pg, new THREE.ShaderMaterial({ vertexShader: PLUME_VERT, fragmentShader: PLUME_FRAG, uniforms: plU, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, premultipliedAlpha: true, side: THREE.DoubleSide }));
-  plume.position.z = len; plume.frustumCulled = false; plume.renderOrder = 18;
+  // the plume: a volumetric Gaussian jet from the exit plane (space/plume.js)
+  const plume = createPlume({ r0: re * 0.95, len: plumeLen, angle: plumeAngle, halo: Math.min(plumeAngle * 2.3, 0.9), core: [0.85, 0.9, 1.0], far: color, haloCol: [color[0] * 0.95, color[1] * 0.75, color[2]] });
+  plume.position.z = len;
   g.add(plume);
   let heat = 0;
   g.setThrust = (t, dt = 0.016) => {
@@ -163,8 +122,8 @@ export function createEngine({ rt, re, len, plumeLen = 18 * re, plumeAngle = 0.4
     heat += (t - heat) * k;
     nozU.uHeat.value = Math.pow(Math.max(heat, 0), 0.25);                // radiance ~ T^4: temperature ~ power^(1/4)
     thU.uThrust.value = t;
-    plU.uThrust.value = t;
-    plume.visible = t > 0.01; th.visible = t > 0.01;
+    plume.setThrust(t, dt);
+    th.visible = t > 0.01;
   };
   return g;
 }

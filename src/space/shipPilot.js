@@ -49,6 +49,7 @@ export class ShipPilot {
     space.scene.add(this.moonAnchor);
     this.pos = V(); this.vel = V(); this.quat = new THREE.Quaternion();   // in the current frame
     this.rates = V();                       // x pitch (nose up), y yaw (right), z roll (right wing down)
+    this.cmdAng = V(); this.cmdLin = V();
     this.burn = 0; this.accel = 0; this.assist = true; this.brake = false; this.legs = 0; this.boost = false;
     this.nearest = { name: '', d: 0 };
     this.jump = null; this._msg = ''; this._msgT = 0;
@@ -252,6 +253,7 @@ export class ShipPilot {
     const i = this.input, q = this.quat;
     // ---- attitude: RCS torques build the rates at a finite angular acceleration; with assist the
     // rates are driven back to zero when the stick is released, without it they persist
+    const prev = V().copy(this.rates);
     const tgt = V().set(i.pitch * RATE.pitch, i.yaw * RATE.yaw, i.roll * RATE.roll);
     for (const k of ['x', 'y', 'z']) {
       const want = tgt[k], cmd = Math.abs(want) > 1e-4 || this.assist ? want : this.rates[k];
@@ -260,6 +262,9 @@ export class ShipPilot {
     }
     _q.setFromEuler(_e.set(this.rates.x * h, -this.rates.y * h, -this.rates.z * h, 'XYZ'));
     q.multiply(_q).normalize();
+    // the angular acceleration the RCS delivered this step (ship frame, units of its capacity)
+    const dw = V().copy(this.rates).sub(prev).divideScalar(h * ANG_ACC);
+    this.cmdAng.lerp(V().set(dw.x, -dw.y, -dw.z), 1 - Math.exp(-h * 30));
     // ---- forces
     const f = V().set(0, 0, -1).applyQuaternion(q), up = V().set(0, 1, 0).applyQuaternion(q);
     const burnWant = i.fwd > 0 ? (this.boost ? A_BOOST : A_MAIN) : 0;
@@ -285,6 +290,12 @@ export class ShipPilot {
       if (this.brake && this.vel.length() < 0.0004) { this.brake = false; this.vel.set(0, 0, 0); this._flash('at rest'); }
     }
     this.assistA = assistA;
+    // the thrusters' share of the linear push (retro, translation, assist), ship frame, units of A_RCS
+    {
+      const rcsA = V().copy(a).addScaledVector(f, -this.burn);      // everything but the main drive
+      const inv = this.quat.clone().invert();
+      this.cmdLin.lerp(rcsA.applyQuaternion(inv).divideScalar(A_RCS), 1 - Math.exp(-h * 30));
+    }
     this.accel = a.length();                  // what the crew feels
     this.vel.addScaledVector(a.add(g), h);
     this.pos.addScaledVector(this.vel, h);
@@ -451,14 +462,19 @@ export class ShipPilot {
       this.rates.multiplyScalar(Math.exp(-dt * 3));
       this._pose();
     }
-    if (this.body) this.body.radius = this.jump ? 6 : 0.06;
+    if (this.body) this.body.radius = 0.26;                 // the hull, and the warp sheet round it
     const i = this.input, j = this.jump;
     if (this.warp) this.warp.update(dt, j ? j.bubble : 0, j ? j.flow : 0, j ? j.flash : 0);
     const burn = this.burn / A_MAIN;
     if (!this.voice && this.space.app.audio) this.voice = new EngineVoice(this.space.app.audio, 'drive');
     const rcs = this.active ? Math.min(1, Math.abs(i.roll) + Math.abs(i.pitch) + Math.abs(i.yaw) + Math.abs(i.lift) + (i.fwd < 0 ? 1 : 0) + (this.assistA || 0) / A_ASSIST) : 0;
     if (this.voice) this.voice.set(this.active && this.space.mode === 'space', 0.5 + 0.5 * Math.min(burn, 1), Math.min(burn, 1.5) + (j ? j.bubble * 0.6 : 0), this.boost && burn > 1.1 ? 1 : 0, rcs);
-    this.ship.update(dt, { throttle: this.active ? Math.min(burn, 1) : 0, aux: this.active ? Math.min(1, burn) * 0.7 : 0, boost: burn > 1.1 ? 1 : 0, legs: this.legs, rcs });
+    // the Earth's shadow (a cylinder behind the planet): cold-gas puffs only show in sunlight
+    const Pw = this.worldPos(V()), sd = sim.sunDir, along = Pw.dot(sd);
+    const sunlit = along > 0 ? 1 : smooth(R_EARTH * 0.98, R_EARTH * 1.02, V().copy(Pw).addScaledVector(sd, -along).length());
+    if (!this.active) { this.cmdAng.multiplyScalar(Math.exp(-dt * 8)); this.cmdLin.multiplyScalar(Math.exp(-dt * 8)); }
+    this.ship.update(dt, { throttle: this.active ? Math.min(burn, 1) : 0, aux: this.active ? Math.min(1, burn) * 0.7 : 0, boost: burn > 1.1 ? 1 : 0, legs: this.legs, rcs,
+      ang: this.cmdAng, lin: this.cmdLin, sunlit, time: realTime });
   }
 
   _pose() {
@@ -477,7 +493,11 @@ export class ShipPilot {
     c.q.slerp(want, 1 - Math.exp(-dt * (c.bridge ? 14 : 5)));
     let eye;
     if (c.bridge) eye = V().set(0, 4.3, -1.5).multiplyScalar(0.001).applyQuaternion(Qs).add(P);
-    else eye = V().set(0, Math.sin(0.14) * c.dist + 0.003, Math.cos(0.14) * c.dist).applyQuaternion(c.q).add(P);
+    else {
+      // during a jump the camera rises to look down on the warped sheet
+      const el = 0.14 + 0.36 * (this.jump ? this.jump.bubble || 0 : 0);
+      eye = V().set(0, Math.sin(el) * c.dist + 0.003, Math.cos(el) * c.dist).applyQuaternion(c.q).add(P);
+    }
     cam.position.copy(eye);
     if (c.bridge) cam.quaternion.copy(c.q);
     else {
