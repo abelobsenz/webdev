@@ -9,7 +9,7 @@ import { EngineVoice } from '../core/engineAudio.js';
 // Flying the Lodestar in the orbital view (km, seconds). Newtonian: the drive and thrusters push
 // with realistic accelerations, gravity pulls, and nothing slows the ship but its own thrust.
 //
-//   W            main drive (1.2 g; with Shift, 3 g)      S           retro thrusters (0.3 g)
+//   W            main drive (12 g; with Shift, 30 g)     S           retro thrusters (3 g)
 //   A / D        roll       Up / Down  pitch    Q / E  yaw (RCS: rates build and stop gradually)
 //   Space / C    thrusters up / down (0.1 g)             B           brake to rest (flight computer)
 //   Z            flight assist on / off                  G           landing legs
@@ -20,7 +20,7 @@ import { EngineVoice } from '../core/engineAudio.js';
 // centrifugal and Coriolis terms, so at geostationary altitude a ship at rest stays at rest over
 // the Harbour); near the Moon, in the Moon's frame with lunar gravity; elsewhere (the solar
 // stations, the Hearth) in the local free-fall frame they share. Time runs at 1x while flying.
-// Flight assist spends up to 1.6 g of thrust to hold the ship against gravity, damp its sideslip
+// Flight assist spends up to 16 g of thrust to hold the ship against gravity, damp its sideslip
 // and stop its rotation when the stick is released; switched off, the ship is purely ballistic.
 //
 // The jump drive is an Alcubierre bubble: it spools up round the ship, runs a smooth path round
@@ -29,7 +29,8 @@ import { EngineVoice } from '../core/engineAudio.js';
 
 const G0 = 0.00981;                    // km/s^2
 const GM_EARTH = 398600.4, GM_MOON = 4902.8;
-const A_MAIN = 1.2 * G0, A_BOOST = 3.0 * G0, A_RETRO = 0.3 * G0, A_RCS = 0.1 * G0, A_ASSIST = 1.6 * G0;
+const DRIVE = 10;                       // a torch drive: ten times a chemical ship's push
+const A_MAIN = 1.2 * G0 * DRIVE, A_BOOST = 3.0 * G0 * DRIVE, A_RETRO = 0.3 * G0 * DRIVE, A_RCS = 0.1 * G0 * DRIVE, A_ASSIST = 1.6 * G0 * DRIVE;
 const RATE = { pitch: 0.4, yaw: 0.32, roll: 0.7 }, ANG_ACC = 0.45;
 const C_LIGHT = 299792.458;
 const V = () => new THREE.Vector3();

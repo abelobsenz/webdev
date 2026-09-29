@@ -120,8 +120,8 @@ TARGET_ORDER.push('concordYard', 'waterStore');
 // the visitor's own ship (src/space/starship.js); not in the list, it appears once flown
 TARGET_INFO.lodestar = {
   key:'',name:'Lodestar',district:'Concord starcourier · the helm is yours (V)',
-  lore:'A 36 m cutter of the Concord fleet, lent to visitors: a flat lifting-body hull with bronze-trimmed chines and a glazed crew deck, swept radiator wings to shed her drive heat, one main engine and two smaller ones whose skirts glow from their own heat when they burn. She flies as ships really do - 1.2 g on the main drive, momentum kept until thrust takes it away - and for the long reaches carries a jump drive that folds space round her in a bubble.',
-  facts:[['Length','36 m'],['Main drive','1.2 g (3 g boost)'],['Jump','bubble drive, many c']],
+  lore:'A 36 m cutter of the Concord fleet, lent to visitors: a flat lifting-body hull with bronze-trimmed chines and a glazed crew deck, swept radiator wings to shed her drive heat, one main engine and two smaller ones whose skirts glow from their own heat when they burn. She flies as ships really do - 12 g on her torch drive, momentum kept until thrust takes it away - and for the long reaches carries a jump drive that folds space round her in a bubble.',
+  facts:[['Length','36 m'],['Main drive','12 g (30 g boost)'],['Jump','bubble drive, many c']],
 };
 
 // The counterweight's release yard (src/space/releaseYard.js).
