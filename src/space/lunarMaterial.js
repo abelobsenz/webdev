@@ -107,6 +107,8 @@ void main() {
     vec3 lamp = mix(vec3(1.0, 0.74, 0.48), vec3(0.9, 0.92, 1.0), step(0.85, fract(h * 7.3)));
     em = lamp * mix(uLit * 0.8, lit, det) * (1.0 - frame) * 0.55 * (0.35 + 0.65 * night);
   } else if (k < 1.5) {
+    // (a pearl-grey hull, not paper white: 0.72 read as blank white boxes against the deck)
+    alb = vec3(0.6, 0.595, 0.575);
     vec2 pc = floor(f / vec2(12.0, 7.0));
     float h = hash12(pc + 3.0);
     alb *= mix(1.0, 0.93 + 0.1 * h, detP);
@@ -148,8 +150,20 @@ void main() {
     float br = vnoise(vec2(f.x * 0.2, f.y * 30.0));
     alb = vec3(0.72, 0.52, 0.3) * (0.9 + 0.2 * br * det); rough = 0.28; metal = 1.0;
   } else if (k < 9.5) {
+    // deck plating: 2.4 m plates each a shade apart, tie-down points on a 3.6 m grid, painted
+    // walkway margins every 24 m, and the traffic's scuffing worn darker down the middle of
+    // each lane, all settling to their mean as they shrink below a pixel
     float pl = max(gridLine(f.x, 2.4, 0.03, fw.x), gridLine(f.y, 2.4, 0.03, fw.y)) * det;
-    alb = vec3(0.6, 0.59, 0.56) * (1.0 - 0.3 * pl); rough = 0.6;
+    float ph = hash12(floor(f / 2.4) + 41.0);
+    alb = vec3(0.5, 0.495, 0.47) * (1.0 - 0.3 * pl) * mix(1.0, 0.92 + 0.14 * ph, detP);
+    vec2 td = (fract(f / 3.6) - 0.5) * 3.6;
+    float tie = (1.0 - smoothstep(0.12, 0.12 + px, length(td))) * det;
+    alb *= 1.0 - 0.45 * tie;
+    float lane = cLine(f.x, 24.0, 0.18, fw.x);
+    alb = mix(alb, vec3(0.78, 0.6, 0.12), lane * 0.75);
+    float scuff = 1.0 - smoothstep(2.0, 7.0, abs(fract(f.x / 24.0) - 0.5) * 24.0);
+    alb *= 1.0 - 0.12 * scuff * mix(0.6, vnoise(f * vec2(0.8, 0.12)), detP);
+    rough = 0.62;
   } else if (k < 10.5) {
     // dark service metal: a 0.3 m grating or ribbing, access plates, worn bright at the edges
     float grate = max(gridLine(f.x, 0.3, 0.03, fw.x), gridLine(f.y, 0.3, 0.03, fw.y)) * (1.0 - smoothstep(0.02, 0.08, px));
