@@ -32,7 +32,7 @@ export const WINDOW = 15;                    // tiles either side of the camera'
 const SLOTS = 2 * WINDOW + 1;
 export const NEAR_RANGE_KM = 150;            // districts drawn within this distance of the band
 export const MINOR_RANGE_KM = 30;            // small detail (railings, trees, loggias) within this
-export const VARIANTS = ['residential', 'agrarian', 'civic', 'works'];
+export const VARIANTS = ['residential', 'agrarian', 'civic', 'works', 'lakeland', 'markets'];
 const MOVER_RANGE = (WINDOW + 0.5) * TILE_L; // m either side of the anchor
 
 export function mulberry(seed) {
@@ -307,6 +307,41 @@ function worksCell(B, M, lamps, S, r, x0, x1, z0, z1) {
   for (const p of tanks) lamps.push({ p: p.clone().add(V3(0, 50, 0)), r: 3, color: LAMP.AMBER, i: 1.6, breathe: 0.3 });
 }
 
+function stadiumCell(B, M, lamps, S, r, x0, x1, z0, z1) {
+  // a sports ground: raked stands in a bowl round a planted pitch, floodlight masts, a plaza
+  const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2, sx = x1 - x0, sz = z1 - z0;
+  standBox(B, S, cx, cz, sx, sz, 1.2, CK.DECK, 10);
+  const y = Math.max(S.deck(cx - 300), S.deck(cx + 300)) + 1.2;
+  latheAt(B, cx, y - 6, cz, [[150, 0, CK.GARDEN], [150, 7, CK.HULL], [170, 10, CK.DECK], [250, 52, CK.DECK], [262, 56, CK.GLASS], [262, 76, CK.BRONZE], [290, 76, CK.HULL], [300, 0, CK.HULL]], 48, true);
+  latheAt(B, cx, y - 6, cz, [[0.1, 0, CK.GARDEN], [150, 0, CK.GARDEN], [150, 7.4, CK.GARDEN], [0.1, 7.4, CK.GARDEN]], 48);
+  for (let k = 0; k < 6; k++) {
+    const a = (k / 6) * TAU + 0.26, mx = cx + Math.cos(a) * 320, mz = cz + Math.sin(a) * 320;
+    B.box(mx, y + 60, mz, 6, 120, 6, CK.BRONZE);
+    M.box(mx, y + 121, mz, 18, 4, 8, CK.LANTERN);
+    lamps.push({ p: V3(mx, y + 126, mz), r: 5, color: LAMP.WHITE, i: 2.4 });
+  }
+  // rows of seats as ribs on the rake (minor)
+  for (let q = 0; q < 8; q++) {
+    const rr = 178 + q * 9.5, yy = y - 6 + 10 + (q + 0.5) * 5.25;
+    M.push(new THREE.Matrix4().makeTranslation(cx, yy, cz).multiply(new THREE.Matrix4().makeRotationX(Math.PI / 2)));
+    M.torus(rr, 0.8, 64, 4, q % 2 ? CK.BRONZE : CK.GLASS);
+    M.pop();
+  }
+}
+
+function marketCell(B, M, lamps, S, r, x0, x1, z0, z1) {
+  // covered markets: three long arcades with lantern roofs, stalls down both aisles
+  const pitch = (x1 - x0) / 3;
+  standBox(B, S, (x0 + x1) / 2, (z0 + z1) / 2, x1 - x0, z1 - z0, 1.0, CK.DECK, 10);
+  for (let i = 0; i < 3; i++) {
+    const x = x0 + (i + 0.5) * pitch, half = pitch * 0.3, y = Math.max(S.deck(x - half), S.deck(x + half)) + 1;
+    vault(B, x, y + 14, z0 + 40, z1 - 40, half, 22, CK.LANTERN, CK.GLASS, 10, 4);
+    for (const sd of [-1, 1]) B.box(x + sd * (half - 1), y + 6, (z0 + z1) / 2, 2, 16, z1 - z0 - 80, CK.GLASS);
+    for (let z = z0 + 70; z < z1 - 60; z += 24) for (const sd of [-1, 1]) M.box(x + sd * half * 0.55, y + 3, z, 10, 4, 14, (z / 24) % 3 < 1 ? CK.BRONZE : CK.ROOF);
+    lamps.push({ p: V3(x, y + 42, z0 + 40), r: 3.5, color: LAMP.AMBER, i: 2.0 }, { p: V3(x, y + 42, z1 - 40), r: 3.5, color: LAMP.AMBER, i: 2.0 });
+  }
+}
+
 function spine(B, M, lamps, S, withStation) {
   // the maglev spine on its viaduct over the ring's centre line
   const y0 = S.deck(0), yT = y0 + 34;
@@ -479,13 +514,15 @@ export function buildDistrictTile(variant, S, bay, seed = 1) {
   outerWall(B, M, lamps, S, bay);
   rotors(B, M, lamps, S);
   const weights = [
-    { town: 0.56, park: 0.18, farm: 0.1, civic: 0.08, lake: 0.08, works: 0 },
-    { town: 0.14, park: 0.2, farm: 0.52, civic: 0.02, lake: 0.08, works: 0.04 },
-    { town: 0.42, park: 0.22, farm: 0.04, civic: 0.2, lake: 0.12, works: 0 },
-    { town: 0.3, park: 0.12, farm: 0.18, civic: 0.04, lake: 0.04, works: 0.32 },
+    { town: 0.52, park: 0.18, farm: 0.1, civic: 0.06, lake: 0.08, works: 0, stadium: 0.02, market: 0.04 },
+    { town: 0.14, park: 0.2, farm: 0.52, civic: 0.02, lake: 0.08, works: 0.04, stadium: 0, market: 0 },
+    { town: 0.36, park: 0.2, farm: 0.04, civic: 0.18, lake: 0.1, works: 0, stadium: 0.04, market: 0.08 },
+    { town: 0.28, park: 0.12, farm: 0.18, civic: 0.04, lake: 0.04, works: 0.3, stadium: 0, market: 0.04 },
+    { town: 0.3, park: 0.26, farm: 0.06, civic: 0.04, lake: 0.26, works: 0, stadium: 0.04, market: 0.04 },
+    { town: 0.46, park: 0.14, farm: 0.02, civic: 0.1, lake: 0.04, works: 0.06, stadium: 0.06, market: 0.12 },
   ][variant];
   const kinds = Object.keys(weights);
-  const cells = { town: 0, park: 0, farm: 0, civic: 0, lake: 0, works: 0 };
+  const cells = Object.fromEntries(Object.keys(weights).map((k) => [k, 0]));
   for (let cx = -15000; cx < 15000; cx += 1000) for (let cz = -TILE_L / 2; cz < TILE_L / 2; cz += 1000) {
     const edge = (x) => (x === 0 || Math.abs(x) === 7000 ? 90 : 30);
     const x0 = cx + edge(cx), x1 = cx + 1000 - edge(cx + 1000);
@@ -500,6 +537,8 @@ export function buildDistrictTile(variant, S, bay, seed = 1) {
     else if (kind === 'lake') parkCell(B, M, lamps, S, r, x0, x1, z0, z1, 0.62);
     else if (kind === 'farm') farmCell(B, M, lamps, S, r, x0, x1, z0, z1);
     else if (kind === 'civic') civicCell(B, M, lamps, S, r, x0, x1, z0, z1);
+    else if (kind === 'stadium') stadiumCell(B, M, lamps, S, r, x0, x1, z0, z1);
+    else if (kind === 'market') marketCell(B, M, lamps, S, r, x0, x1, z0, z1);
     else worksCell(B, M, lamps, S, r, x0, x1, z0, z1);
   }
   return { major: B.geometry(), minor: M.geometry(), lamps, cells };
