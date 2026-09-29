@@ -373,6 +373,10 @@ export function buildHillCountry(scene, { onComponent = null } = {}) {
       for(let k=1;k<S.length;k++){const a=S[k-1],b=S[k],steps=Math.max(1,Math.ceil(Math.hypot(b.x-a.x,b.z-a.z)/3));for(let j=0;j<steps;j++){const u=j/steps,p={};for(const key of ['x','z','sx','sz','g0','gl','gr','y'])p[key]=a[key]+(b[key]-a[key])*u;fine.push(p);}}
       fine.push({...S.at(-1)});S=fine;n=S.length;
       S.forEach((p,k)=>{if((k===0||k===n-1)&&options.ends)return;for(const lateral of [-1,0,1])p.y=Math.max(p.y,renderedHeight(p.x+p.sx*(hw+.1)*lateral,p.z+p.sz*(hw+.1)*lateral)+.2);});
+      // trunks meeting at a junction overlap for ~6.8 m (2.6 m half-widths 45 degrees apart): each stays
+      // level at the junction's height that far, blending back to its own grade by 10 m
+      if(options.landing&&options.ends){const L=options.landing,dist=[0];for(let k=1;k<n;k++)dist.push(dist[k-1]+Math.hypot(S[k].x-S[k-1].x,S[k].z-S[k-1].z));
+        S.forEach((p,k)=>{for(const [d,y]of [[dist[k],options.ends[0]],[dist[n-1]-dist[k],options.ends[1]]]){if(!Number.isFinite(y)||d>L+3.5)continue;const w=d<=L?1:1-(d-L)/3.5;p.y=Math.max(y*w+p.y*(1-w),renderedHeight(p.x,p.z)+.2);}});}
     }
     const record={id:allRoads.length,points:S,halfWidth:hw,settlement,kind:options.kind||'trunk'},previousRoute=activeRoute;
     activeRoute=record;
@@ -439,12 +443,13 @@ export function buildHillCountry(scene, { onComponent = null } = {}) {
   const junctionY=new Map();
   for(const c of chains)for(const p of [c[0],c[c.length-1]]){
     const id=p.join(',');let y=renderedHeight(...p);
-    for(let k=0;k<16;k++){const a=k*Math.PI/8;y=Math.max(y,renderedHeight(p[0]+Math.cos(a)*3.2,p[1]+Math.sin(a)*3.2));}
+    // (surveyed to 7.5 m: the trunks meeting here stay level that far - see the landing below)
+    for(const R of [3.2,5.4,7.5])for(let k=0;k<16;k++){const a=k*Math.PI/8;y=Math.max(y,renderedHeight(p[0]+Math.cos(a)*R,p[1]+Math.sin(a)*R));}
     junctionY.set(id,y+.34);
   }
   chains.forEach((c, ci) => {
     const pts = resample(smooth(c, 3), 15);
-    const S = road(pts, 2.6, .06,{ends:[junctionY.get(c[0].join(',')),junctionY.get(c[c.length-1].join(','))]});
+    const S = road(pts, 2.6, .06,{ends:[junctionY.get(c[0].join(',')),junctionY.get(c[c.length-1].join(','))],landing:6.5});
     if (S) roadSamples.push(S);
   });
 
