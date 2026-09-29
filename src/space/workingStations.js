@@ -11,6 +11,7 @@ import { addFoundryUnload } from './foundryUnload.js';
 import { HelianthDistrict } from './helianthDistrict.js';
 import { FoundryYard } from './foundryYard.js';
 import { HelianthSwarm } from './helianthSwarm.js';
+import { FoundryCommons } from './foundryCommons.js';
 
 const V=(x,y,z)=>new THREE.Vector3(x,y,z), TAU=Math.PI*2;
 const TO_Y=new THREE.Matrix4().makeRotationX(-Math.PI/2);
@@ -374,6 +375,8 @@ export class WorkingStations {
     this.swarm=new HelianthSwarm(this.solar,this.solarOffset.length(),s.userData.sunDir,space);
     // gantry cranes, stock traffic, furnace light and crews at the foundry (src/space/foundryYard.js)
     this.yard=new FoundryYard(this.foundry,this.foundryData);
+    // the town its people live in, north of the garden wheel (src/space/foundryCommons.js)
+    this.commons=new FoundryCommons(this.foundry);
     this._cam=new THREE.Vector3();this._fw=new THREE.Vector3();
   }
   update(sim,realTime=0,dt=0,space=this.space) {
@@ -381,6 +384,7 @@ export class WorkingStations {
     const cam=space?.camera?this._cam.copy(space.camera.position):null;
     this.district.update(realTime,cam);
     if(cam)this.swarm.update(realTime,cam,sim);
-    this.yard.update(realTime,cam?this.foundry.getWorldPosition(this._fw).distanceTo(cam):Infinity);
+    const fd=cam?this.foundry.getWorldPosition(this._fw).distanceTo(cam):Infinity;
+    this.yard.update(realTime,fd);this.commons.update(realTime,fd);
   }
 }
