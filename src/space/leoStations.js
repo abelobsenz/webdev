@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { CB, CK } from '../craft/craftGeometry.js';
 import { LAMP } from './lamps.js';
 import { DK } from './craftMesh.js';
+import { moduleDressing, torusKinds, ringModuleKinds } from './stationKit.js';
 import { V, here, atAim, truss, catwalk, radiatorWing, dish, mast, dockingCollar, container, rcsQuad, flood, bell, sphereTank } from './shipKit.js';
 
 // The stations of the low and middle shell, in metres, drawn with the craft builder (facade
@@ -74,7 +75,7 @@ function hoopGirder(B, r, z, d, w, n, rad, k = CK.DARK) {
 }
 
 /** A pressurised module along +z from the current frame: windowed bands between bronze frames. */
-function habModule(B, r, len, { glass = 3, seg = 20 } = {}) {
+function habModule(B, r, len, { glass = 3, seg = 20, dress = true, seed = 1, lamps = null } = {}) {
   const prof = [[0.02, 0, CK.DARK], [r * 0.72, len * 0.02, DK.LIVERY], [r, len * 0.08, DK.LIVERY]];
   const n = glass;
   for (let i = 0; i < n; i++) {
@@ -83,6 +84,11 @@ function habModule(B, r, len, { glass = 3, seg = 20 } = {}) {
   }
   prof.push([r * 1.03, len * 0.9, CK.BRONZE], [r, len * 0.92, DK.LIVERY], [r * 0.72, len * 0.98, DK.LIVERY], [0.02, len, CK.DARK]);
   B.lathe(prof, seg);
+  // the plating's frames, shield panels and kit, clear of the window bands
+  if (dress) {
+    const inGlass = (a, z) => { const u = ((z / len - 0.12) / 0.76) * n, f = u - Math.floor(u); return u > 0 && u < n && f > 0.02 && f < 0.98; };
+    moduleDressing(B, r, len * 0.1, len * 0.9, { skip: inGlass, windows: 0, kit: 4, seed, lamps, pitch: len * 0.76 / n, stringers: Math.max(8, Math.round(r * 0.9)) });
+  }
 }
 
 /** Photovoltaic wing in the builder's xz plane (normal +y), from x0 outward along +x (sign s). */
@@ -213,6 +219,8 @@ export function buildHotel() {
     const a = (k / 4) * TAU + TAU / 8, d = V(Math.cos(a), Math.sin(a), 0);
     dockPort(F, lamps, ports, d.clone().multiplyScalar(27).setZ(-94), d, 18, 4.2);
   }
+  moduleDressing(F, sp, 44, 94, { seed: 11, windows: 0.2, kit: 6, pitch: 8, lamps });
+  moduleDressing(F, 28, -117, -71, { seed: 12, windows: 0, kit: 3, pitch: 9, skip: (a, z) => z < -81 && z > -107, lamps });
   for (let k = 0; k < 8; k++) { const a = (k / 8) * TAU; lamps.push({ p: V(Math.cos(a) * 29.2, Math.sin(a) * 29.2, -70), r: 0.6, color: WARM, i: 1.4 }); }
   // power mast aft, wings in x (normal y: the whole fixed frame rolls about z to face the Sun)
   truss(F, V(0, 0, -130), V(0, 0, -300), 9, 10, 0.35, CK.DARK);
@@ -327,6 +335,9 @@ export function buildHabitat() {
     const a = (k / 6) * TAU, d = V(Math.cos(a), Math.sin(a), 0);
     dockPort(F, lamps, ports, d.clone().multiplyScalar(62).setZ(-195), d, 26, 6);
   }
+  moduleDressing(F, ax, 74, 282, { seed: 21, windows: 0.15, kit: 4, pitch: 14, lamps });
+  moduleDressing(F, ax, -148, -74, { seed: 22, windows: 0.1, kit: 4, pitch: 12, lamps });
+  for (const s of [-1, 1]) moduleDressing(W, HAB.hubR, s > 0 ? 27 : -48, s > 0 ? 48 : -27, { seed: 23 + s, windows: 0.3, kit: 2, pitch: 10.5, stringers: 48, lamps: wheelLamps });
   // the collector, sunward: forty petals of reflective film on a shallow cone, parted so the
   // wheel and the stars show between them, each on its own spar from a hub girder ring, the
   // lip held by stays from a guyed mast on the axis (an umbrella, not a plate)
@@ -573,7 +584,8 @@ export function buildPolar() {
   for (let k = 0; k < 8; k++) { const a = (k / 8) * TAU; B.tube([V(Math.cos(a) * 40, -228, Math.sin(a) * 40), V(Math.cos(a) * 60, -221.6, Math.sin(a) * 60)], 0.6, 4, CK.DARK); }
   // the centrifuge (spins about y): a glazed torus on four spokes
   Rg.push(tr(0, POLAR.ringY, 0).multiply(new THREE.Matrix4().makeRotationX(Math.PI / 2)));
-  Rg.torus(POLAR.ringR, POLAR.ringTube, 96, 14, CK.GLASS);
+  // twelve modules: plated decks with a glazed band on the trailing face, bronze frames between
+  torusKinds(Rg, POLAR.ringR, POLAR.ringTube, 96, 14, ringModuleKinds(12, { glassAt: Math.PI / 2, glassW: 0.7 }));
   for (let k = 0; k < 12; k++) {
     const a = (k / 12) * TAU;
     atAim(Rg, V(Math.cos(a) * POLAR.ringR, Math.sin(a) * POLAR.ringR, 0), V(-Math.sin(a), Math.cos(a), 0));
@@ -725,7 +737,7 @@ export function buildSkyhookHub() {
   for (const y of [-46, -30, 30, 46]) { B.push(tr(0, y, 0).multiply(toY)); B.torus(SKYHOOK.hubR + 1.2, 1.1, 64, 4, CK.DARK); B.pop(); }
   for (const s of [-1, 1]) { B.push(tr(0, s * 56, 0).multiply(toY)); B.torus(SKYHOOK.hubR - 1, 1.4, 64, 6, CK.CONDUIT); B.pop(); }
   B.push(tr(0, 34, 0).multiply(new THREE.Matrix4().makeRotationX(Math.PI / 2)));
-  B.torus(SKYHOOK.hubR + 14, 6, 96, 12, CK.GLASS);
+  torusKinds(B, SKYHOOK.hubR + 14, 6, 96, 12, ringModuleKinds(16, { glassAt: 0, glassW: 0.8 }));
   for (let k = 0; k < 6; k++) { const a = (k / 6) * TAU + 0.3; B.tube([V(Math.cos(a) * SKYHOOK.hubR, Math.sin(a) * SKYHOOK.hubR, 0), V(Math.cos(a) * (SKYHOOK.hubR + 8), Math.sin(a) * (SKYHOOK.hubR + 8), 0)], 2, 8, CK.HULL); }
   B.pop();
   for (let k = 0; k < 16; k++) { const a = (k / 16) * TAU; lamps.push({ p: V(Math.cos(a) * (SKYHOOK.hubR + 20.6), 34, Math.sin(a) * (SKYHOOK.hubR + 20.6)), r: 0.9, color: WARM, i: 1.8 }); }

@@ -9,6 +9,8 @@ import {
   buildSkyhookHub, buildGrapple, buildTram, EMITTER_HEX,
 } from '../src/space/leoStations.js';
 import { LowOrbit, leoTargets } from '../src/space/lowOrbit.js';
+import { moduleDressing, torusKinds, ringModuleKinds } from '../src/space/stationKit.js';
+import { CB } from '../src/craft/craftGeometry.js';
 import { SpaceSim, R_EARTH } from '../src/space/sim.js';
 
 let fails = 0;
@@ -156,6 +158,29 @@ ok(tri < 500000, `dawnline ${Math.round(tri)} triangles (< 500k)`);
 }
 sane("anansi hub", buildSkyhookHub().geo); sane("anansi grapple", buildGrapple().geo);
 sane('tram', buildTram());
+
+// ---- the station kit: dressing stays on its module (radially and along it), finite, sane
+{
+  for (const [r, z0, z1, seed, pitch] of [[12, 44, 94, 11, 8], [30, 74, 282, 21, 14], [90, 27, 48, 24, 10.5], [5.5, 3, 27, 5, undefined]]) {
+    const B = new CB();
+    const lamps = [];
+    moduleDressing(B, r, z0, z1, { seed, kit: 6, windows: 0.2, lamps, pitch });
+    const g = B.geometry();
+    sane(`dressing r=${r}`, g);
+    const p = g.attributes.position.array;
+    let rIn = Infinity, rOut = 0, zLo = Infinity, zHi = -Infinity;
+    for (let i = 0; i < p.length; i += 3) { const rr = Math.hypot(p[i], p[i + 1]); rIn = Math.min(rIn, rr); rOut = Math.max(rOut, rr); zLo = Math.min(zLo, p[i + 2]); zHi = Math.max(zHi, p[i + 2]); }
+    const reach = Math.max(8, r * 0.4);
+    ok(rIn > r * 0.6 && rOut < r + reach && zLo > z0 - 12 && zHi < z1 + 12, `dressing r=${r}: hugs its module (radius ${rIn.toFixed(1)}..${rOut.toFixed(1)} m, z ${zLo.toFixed(0)}..${zHi.toFixed(0)})`);
+    ok(lamps.every((l) => Number.isFinite(l.p.x + l.p.y + l.p.z)), `dressing r=${r}: ${lamps.length} floodlights, finite`);
+  }
+  const B = new CB();
+  torusKinds(B, 64, 7, 96, 14, ringModuleKinds(12, { glassAt: Math.PI / 2 }));
+  const g = B.geometry(), f = g.attributes.aFacade.array, kinds = new Set();
+  for (let i = 2; i < f.length; i += 3) kinds.add(Math.round(f[i]));
+  sane('segmented ring', g);
+  ok(kinds.has(0) && kinds.has(8) && kinds.has(21), `segmented habitat ring: glazing, frames and plated decks (${[...kinds].join(', ')})`);
+}
 
 // ---- the shell at run time: trails, approach strobes, the Demeter film, framing, buffers, cost
 {
