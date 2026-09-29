@@ -438,7 +438,7 @@ void main() {
     // fires on the savannas at night: prescribed burns keeping the grasslands open, strings of
     // orange points along the fire fronts, in the dry season (June: the southern tropics)
     {
-      float savZone = land * smoothstep(0.08, 0.2, arid) * (1.0 - smoothstep(0.45, 0.6, arid)) * smoothstep(-2.0, -8.0, latD) * (1.0 - smoothstep(-20.0, -26.0, latD));
+      float savZone = land * smoothstep(0.08, 0.2, arid) * (1.0 - smoothstep(0.45, 0.6, arid)) * (1.0 - smoothstep(-8.0, -2.0, latD)) * smoothstep(-26.0, -20.0, latD);
       if (savZone > 0.0) {
         vec3 fq = d * 420.0;
         vec3 fc = floor(fq);
@@ -716,7 +716,7 @@ void main() {
   // icebergs: tabular bergs calved from the Antarctic shelves drifting in the Southern Ocean,
   // and the Greenland bergs down Baffin Bay: white specks over the dark sea
   {
-    float bergZone = smoothstep(-52.0, -58.0, latD) * (1.0 - smoothstep(-66.0, -70.0, latD))
+    float bergZone = (1.0 - smoothstep(-58.0, -52.0, latD)) * smoothstep(-70.0, -66.0, latD)
                    + boxMask(latD, lonD, vec4(60.0, 75.0, -70.0, -48.0), 2.0) * 0.8;
     if (bergZone > 0.0) {
       vec3 iq = d * 900.0;

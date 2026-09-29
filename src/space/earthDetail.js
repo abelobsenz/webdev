@@ -405,10 +405,10 @@ vec3 od_psc(vec3 ro, vec3 rd, vec3 sun, float tMax) {
   vec3 p = ro + rd * t;
   vec3 n = normalize(p);
   vec3 bb = uToBody * n;
-  float band = smoothstep(-0.84, -0.9, bb.y);                     // poleward of ~60 S
+  float band = 1.0 - smoothstep(-0.9, -0.84, bb.y);                     // poleward of ~60 S
   if (band <= 0.0) return vec3(0.0);
   float muS = dot(n, sun);
-  float dark = smoothstep(0.1, -0.02, muS) * smoothstep(-0.2, -0.06, muS);   // twilight only
+  float dark = (1.0 - smoothstep(-0.02, 0.1, muS)) * smoothstep(-0.2, -0.06, muS);   // twilight only
   float lit = earthShadow(p, sun);
   if (lit * dark <= 0.0) return vec3(0.0);
   // lenticular sheets drawn out along the circumpolar wind (zonal: east-west)

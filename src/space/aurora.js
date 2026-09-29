@@ -148,7 +148,7 @@ void main() {
   float decay = exp(-v * mix(4.2, 1.2, ray));
   float I = border * decay * (0.25 + 1.3 * ray) * patchI * act;
   // the ends of the arc fade out
-  I *= smoothstep(1.0, 0.7, abs(s));
+  I *= 1.0 - smoothstep(0.7, 1.0, abs(s));
   // a thin emitting sheet: bright edge-on, faint face-on
   vec3 V = normalize(cameraPosition - vPosW);
   float path = 1.0 / max(abs(dot(vNormW, V)), 0.14);
@@ -160,7 +160,7 @@ void main() {
     float fence = pow(0.5 + 0.5 * cos(vU * 0.42 + 2.0 * au_noise(vU * 0.05 + 3.0)), 6.0) * smoothstep(0.0, 0.03, v) * (1.0 - smoothstep(0.1, 0.22, v));
     float rib = smoothstep(0.1, 0.24, v) * (1.0 - smoothstep(0.75, 1.0, v)) * (0.75 + 0.25 * au_noise(vU * 0.3 - t * 2.0));
     vec3 cs = vec3(0.72, 0.28, 0.86) * rib * 0.7 + vec3(0.2, 1.0, 0.42) * fence * 1.3;
-    gl_FragColor = vec4(cs * on * min(path, 7.0) * night * uGain * 0.05 * smoothstep(1.0, 0.75, abs(s)), 0.0);
+    gl_FragColor = vec4(cs * on * min(path, 7.0) * night * uGain * 0.05 * (1.0 - smoothstep(0.75, 1.0, abs(s))), 0.0);
     return;
   }
   vec3 col = au_colour(vH, 0.3 + 0.7 * uActivity) * I * min(path, 7.0);

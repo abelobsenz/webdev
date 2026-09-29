@@ -79,7 +79,7 @@ vec3 sk_starLayer(vec3 d, float scale, float density, float m0, float m1, float 
   float m = 0.602060 * log2(a0 + h.y * (a1 - a0));
   float amp = 0.35 * exp2(-1.328771 * (m - 1.0));
   float core = exp(-ang2 / (2.0 * sigma * sigma)) * (px * px) / (sigma * sigma) * 1.3;
-  vec3 col = sk_starColor(h.z, smoothstep(5.8, 3.5, m));
+  vec3 col = sk_starColor(h.z, 1.0 - smoothstep(3.5, 5.8, m));
   return col * core * amp;
 }
 

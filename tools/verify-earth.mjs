@@ -295,6 +295,7 @@ function lint(name, mat) {
     for (const m of src.matchAll(/for\s*\(\s*int\s+\w+\s*=\s*[^;]+;\s*\w+\s*(<=|<)\s*([^;]+);/g)) ok(/^[\w.\s+*-]+$/.test(m[2]) && !/\bu[A-Z]/.test(m[2]), `${name}/${stage}: loop bound ${m[2]}`);
   }
   // pow() of a base that can go negative (a bare difference) is undefined in GLSL: new modules must not
+  if (STRICT_POW.has(name)) for (const src of [vs, fs]) for (const m of src.matchAll(/smoothstep\(\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)\s*,/g)) ok(+m[1] < +m[2], `${name}: smoothstep with edge0 >= edge1 (${m[1]}, ${m[2]})`);
   if (STRICT_POW.has(name)) for (const src of [vs, fs]) for (const m of src.matchAll(/\bpow\(\s*\(([^()]*)\)/g)) ok(!/[-+]/.test(m[1]), `${name}: pow of a possibly negative base (${m[1]})`);
   // varyings read by the fragment stage are written by the vertex stage
   const vv = new Set([...vs.matchAll(/\bvarying\s+\w+\s+(\w+)/g)].map((m) => m[1]));
@@ -342,6 +343,7 @@ lint('meteors', metMat);
     const a = shipAt(t, 3), b = shipAt(t + 1, 3);
     ok(Math.abs(b - a - D.SHIP_V) < 1e-6 || Math.abs(b - a - D.SHIP_V - D.SHIP_SPACING) < 1e-6 && false, `ship clock continuous at ${t}`);
   }
+  for (const src of [D.EARTH_DETAIL_GLSL, D.LANE_BAKE_GLSL]) for (const m of stripComments(src).matchAll(/smoothstep\(\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)\s*,/g)) ok(+m[1] < +m[2], `earth detail: smoothstep with edge0 >= edge1 (${m[1]}, ${m[2]})`);
   for (const src of [D.EARTH_DETAIL_GLSL, D.LANE_BAKE_GLSL]) for (const m of stripComments(src).matchAll(/\bpow\(\s*\(([^()]*)\)/g)) ok(!/[-+]/.test(m[1]), `earth detail: pow of a possibly negative base (${m[1]})`);
   const au = D.arcologyUniforms();
   ok(au.pos.every((v) => v.w >= 3 && v.w <= 8 && Math.abs(Math.hypot(v.x, v.y, v.z) - 1) < 1e-6), 'arcology centres and radii');
