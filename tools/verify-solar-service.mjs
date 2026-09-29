@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import { auditGeometry, solidComponents, materialContact } from './geometry-audit.mjs';
 import { buildSolarCollector, WorkingStations } from '../src/space/workingStations.js';
+import { CK } from '../src/craft/craftGeometry.js';
 import { buildTug } from '../src/craft/craftClasses.js';
 import { SpaceMode } from '../src/space/index.js';
 import { SpaceSim } from '../src/space/sim.js';
@@ -279,6 +280,24 @@ for(const time of [0,10000,1000000]) {
   assert.ok(actualSun.distanceTo(shaderSun)<1e-10,'Helianth lighting uses its local world-space direction to the Sun');
   assert.ok(actualSun.distanceTo(sim.sunDir)>1,'The inherited Earth reference is an effective wrong-direction control');
   const frame=harness.targets.solarService.frame(new THREE.Quaternion());assert.ok(Math.abs(frame.length()-1)<1e-12);
+}
+// ---- wave 3 refinements: cladding courses, glazing and beacons (by kind and placement)
+{
+  const kindArea=(geo,strict=true)=>{const p=geo.attributes.position,f=geo.attributes.aFacade,ix=geo.index,out={},A=V(),B=V(),C=V();
+    for(let i=0;i<ix.count;i+=3){const a=ix.getX(i),b=ix.getX(i+1),c=ix.getX(i+2);A.fromBufferAttribute(p,a);B.fromBufferAttribute(p,b);C.fromBufferAttribute(p,c);
+      const k=Math.round(f.getZ(a));if(strict)assert.ok(Math.round(f.getZ(b))===k&&Math.round(f.getZ(c))===k,'one kind per face (no interpolated kind bands)');
+      out[k]=(out[k]||0)+B.clone().sub(A).cross(C.clone().sub(A)).length()/2;}return out;};
+  let maxI=0;const ix=solar.geo.index;for(let i=0;i<ix.count;i++)maxI=Math.max(maxI,ix.getX(i));assert.ok(maxI<solar.geo.attributes.position.count,'index in range');
+  const sh=kindArea(shield);
+  assert.ok(sh[CK.BRONZE]>1e7&&sh[CK.DARK]>1e6,'shield top clad in blanket courses with dark joints');
+  for(const name of ['habitat-belt-4480-2200','habitat-belt-3720-2200','habitat-belt-4100-2580','habitat-belt-4100-1820'])assert.ok(kindArea(solar.service.parts.find(p=>p.name===name).geo)[CK.GLASS]>1e5,`${name} glazed`);
+  for(const sd of [-1,1])assert.ok(kindArea(solar.service.parts.find(p=>p.name===`service-wing-${sd}`).geo)[CK.GLASS]>1e4,'wing glazing');
+  const base=kindArea(solar.baseGeo,false);assert.ok(base[CK.GLASS]>1e6&&base[CK.CONDUIT]>1e5,'hub glazed decks and spoke conduits');
+  // beacons sit on the shield's outer wall and the wheel's crown belt
+  const rim=solar.lamps.filter(l=>Math.abs(Math.hypot(l.p.x,l.p.z)-5112)<1&&Math.abs(l.p.y-1086)<1),crown=solar.lamps.filter(l=>Math.abs(Math.hypot(l.p.x,l.p.z)-4100)<1&&Math.abs(l.p.y-2596)<1);
+  assert.equal(rim.length,16);assert.equal(crown.length,12);
+  for(const l of [...rim,...crown])assert.ok(Number.isFinite(l.p.x+l.p.y+l.p.z)&&l.i>0&&l.r>0);
+  metrics.refinement={shieldBlanketM2:Math.round(sh[CK.BRONZE]),glazedHubM2:Math.round(base[CK.GLASS]),conduitM2:Math.round(base[CK.CONDUIT]),beacons:rim.length+crown.length};
 }
 console.log(JSON.stringify(metrics,null,2));
 console.log('SOLAR_SERVICE_VERIFIED');

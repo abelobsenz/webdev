@@ -171,14 +171,15 @@ export class Hearth {
       uniforms: {
         tDisc: { value: this.bhRT.textures[0] }, tLens: { value: this.bhRT.textures[1] }, uInvProj: u.uInvProj, uCamRot: u.uCamRot,
         uCamW: { value: new THREE.Vector3() }, uSunDir: { value: new THREE.Vector3(1, 0, 0) }, uSunE: U.uSunIlluminance,
-        uEarthPos: { value: new THREE.Vector3() }, uMoonPos: { value: new THREE.Vector3() }, ...SKY_UNIFORMS,
+        uEarthPos: { value: new THREE.Vector3() }, uMoonPos: { value: new THREE.Vector3() }, uDiscRes: { value: new THREE.Vector2(1, 1) }, ...SKY_UNIFORMS,
       },
       depthTest: false, depthWrite: false, transparent: true, blending: THREE.CustomBlending, blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor,
     });
     this.composite = new THREE.Mesh(cgeo, this.compMat);
     this.composite.frustumCulled = false;
     this.composite.renderOrder = -900;
-    // collector ring: 14 mirror stations and a thin structural ring at 30 horizon radii
+    // collector ring: 14 mirror stations and a thin structural ring at 30 horizon radii. Its power
+    // bus is gold-foiled, not lit: a glowing 5,600 km hoop read edge-on as a drawn guide line
     this.hullMat = createHullMaterial({ pattern: 0.08, accent: [1.0, 0.7, 0.4], behindMask: true });
     this.hullMat.uniforms.uHearthTex.value = this.bhRT.texture;
     this.stations = new THREE.Group();
@@ -204,7 +205,7 @@ export class Hearth {
       this.collectorMounts.push({ root, mount, collector:m });
       this.stations.add(m);
     }
-    const ring = [tag(new THREE.TorusGeometry(Rc, 0.45, 6, 720).rotateX(Math.PI / 2), KIND.TRUSS), tag(new THREE.TorusGeometry(Rc, 0.15, 4, 720).rotateX(Math.PI / 2).translate(0, 0.7, 0), KIND.GLOW)];
+    const ring = [tag(new THREE.TorusGeometry(Rc, 0.45, 6, 720).rotateX(Math.PI / 2), KIND.TRUSS), tag(new THREE.TorusGeometry(Rc, 0.15, 4, 720).rotateX(Math.PI / 2).translate(0, 0.7, 0), KIND.GOLD)];
     this.stations.add(new THREE.Mesh(merge([...ring,...supports]), this.hullMat));
     // A maintenance refuge outside the energy collector line: two inhabited rings,
     // spare mirror racks and a shaded service spine. The disc's great void stays clear.
@@ -240,6 +241,7 @@ export class Hearth {
   _resize() {
     const w = Math.max(1, Math.round(this.size.x * this.scale)), h = Math.max(1, Math.round(this.size.y * this.scale));
     if (this.bhRT.width !== w || this.bhRT.height !== h) this.bhRT.setSize(w, h);
+    this.compMat.uniforms.uDiscRes.value.set(w, h);
     this.hullMat.uniforms.uHearthRes.value.set(this.size.x, this.size.y);
   }
 

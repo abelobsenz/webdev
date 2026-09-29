@@ -274,11 +274,15 @@ void main() {
   float fa = max(fwidth(ft * 16.0), 1e-4);
   float pp = fract(q) - 0.5;
   float pulse = mix(0.55, 0.25 + 1.5 * exp(-pp * pp * 18.0), 1.0 - smoothstep(0.12, 0.45, fa));
+  // the injector does not run steadily: it pays the gas out in three long surges per fall, so
+  // even from far off the stream reads as released matter in flight, never a drawn line
+  float sg = fract(ft * 3.0 - uTime / uFall * 3.0);
+  pulse *= 0.2 + 0.8 * smoothstep(0.0, 0.12, sg) * (1.0 - smoothstep(0.45, 0.95, sg));
   // gas heated as it falls: an incandescent orange at the nozzle, white-gold at the rim
   vec3 col = blackbody(mix(2100.0, 6200.0, ft * ft)) * (0.35 + 2.6 * ft * ft) * (core * pulse + halo);
   col *= smoothstep(0.0, 1.5, s) * (1.0 - smoothstep(uLen - 1.5, uLen, s) * 0.5);
   float m = 1.0;
-  if (uBehindMask > 0.5 && length(vWorld - cameraPosition) > uHearthDepth) m = 1.0 - texture(uHearthTex, gl_FragCoord.xy / uHearthRes).a;
+  if (uBehindMask > 0.5 && length(vWorld - cameraPosition) > uHearthDepth) m = 1.0 - textureLod(uHearthTex, gl_FragCoord.xy / uHearthRes, 0.0).a;   // (explicit LOD: non-uniform branch)
   gl_FragColor = vec4(col * vCoverage * m, 0.0);
 }
 `;
@@ -319,7 +323,7 @@ export class HearthWorks {
     this.frame.rotation.z = -hearth.stations.rotation.z;
     hearth.stations.add(this.frame);
     this.frame.add(this.feeder);
-    this.streamMat = createRibbonMaterial({ widthKm: 3.2, minPx: 2.0, frag: STREAM_FRAG, uniforms: {
+    this.streamMat = createRibbonMaterial({ widthKm: 3.2, minPx: 1.3, frag: STREAM_FRAG, uniforms: {
       uLen: { value: fd.stream.length }, uFall: { value: feederFallSeconds(fd.stream) }, uBehindMask: mask.uBehindMask, uHearthTex: mask.uHearthTex, uHearthRes: mask.uHearthRes, uHearthDepth: mask.uHearthDepth,
     } });
     this.stream = new THREE.Mesh(streamRibbon(fd.stream), this.streamMat);

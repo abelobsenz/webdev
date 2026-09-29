@@ -148,9 +148,14 @@ function solarService() {
   const part=(name,draw)=>{const b=new CB();draw(b);const geo=b.geometry();parts.push({name,geo});return geo;};
   // The shield lies behind the collectors, toward the inhabited ring. Its closed
   // annulus covers the Sun's 21-degree apparent disc without blanking the petals.
+  // The shield's sunward face is pearl ceramic; its shaded top, facing the habitat, is clad in
+  // five concentric courses of gold multilayer blanket (low emissivity: it must not radiate
+  // its heat up into the wheel), each course closed by a dark graphite expansion joint. The
+  // courses give the 3.8 km annulus a readable order from any distance.
   part('habitat-shield',b=>{
-    b.push(TO_Y);
-    b.lathe([[3200,1120,CK.HULL],[5100,1030,CK.HULL],[5100,1140,CK.BRONZE],[3200,1230,CK.HULL]],192,0,{closedProfile:true});b.pop();
+    const prof=[[3200,1120,CK.HULL],[5100,1030,CK.HULL],[5100,1140,CK.BRONZE]],topY=r=>1140+(5100-r)/1900*90;
+    for(let c=0;c<5;c++){const r0=5100-c*380;prof.push([r0-70,topY(r0-70),CK.DARK],[r0-380,topY(r0-380),CK.BRONZE]);}
+    b.push(TO_Y);b.lathe(prof,192,0,{closedProfile:true});b.pop();
   });
   for(let k=0;k<12;k++) {
     const a=k/12*TAU,d=V(Math.cos(a),0,Math.sin(a));
@@ -179,9 +184,15 @@ function solarService() {
       b.torus(380,7,48,8,CK.BRONZE);b.pop();
     });
   }
+  // The wheel's four deck belts are glazed: rows of lit rooms (and the dark ones between) run
+  // round the whole 26 km wheel, the station's life readable from its shaded side.
   for(const [r,y]of[[4480,2200],[3720,2200],[4100,2580],[4100,1820]])part(`habitat-belt-${r}-${y}`,b=>{
-    b.at(0,y,0,Math.PI/2);b.torus(r,9,144,8,CK.HULL);b.pop();
+    b.at(0,y,0,Math.PI/2);b.torus(r,16,192,8,CK.GLASS);b.pop();
   });
+  // Rim beacons on the shield and the wheel: slow amber pulses marking the station's extent
+  // for traffic, and the wheel's crown lights.
+  for(let k=0;k<16;k++){const a=(k+.5)/16*TAU;lamps.push({p:V(Math.cos(a)*5112,1086,Math.sin(a)*5112),r:9,color:LAMP.AMBER,i:2.2,breathe:.6,phase:k/16});}
+  for(let k=0;k<12;k++){const a=k/12*TAU;lamps.push({p:V(Math.cos(a)*4100,2596,Math.sin(a)*4100),r:6,color:k%3?LAMP.WHITE:LAMP.TEAL,i:1.6});}
 
   part('transfer-core',b=>{
     b.push(TO_Y);
@@ -191,7 +202,11 @@ function solarService() {
     const x=sd*850;
     part(`service-wing-${sd}`,b=>{
       b.at(x,3480,0);
-      b.loft([[-650,120],[-550,300],[-300,410],[300,410],[600,200],[680,60]].map(([z,w])=>({z,pts:[[-w*.9,-50],[w*.9,-50],[w,15],[w*.95,50],[-w*.95,50],[-w,15]]})),CK.HULL);b.pop();
+      const plan=[[-650,120],[-550,300],[-300,410],[300,410],[600,200],[680,60]];
+      b.loft(plan.map(([z,w])=>({z,pts:[[-w*.9,-50],[w*.9,-50],[w,15],[w*.95,50],[-w*.95,50],[-w,15]]})),CK.HULL);
+      // the workshop decks' glazing: a band seated in each upper flank, lit along the wing
+      for(const side of [-1,1])b.loft(plan.slice(1,5).map(([z,w])=>({z,pts:[[w*1.0-3,17],[w*1.0+2,19],[w*.95+2,46],[w*.95-3,48]].map(([x,y])=>[side*x,y])})),CK.GLASS);
+      b.pop();
     });
     for(const z of [-300,300])part(`wing-brace-${sd}-${z}`,b=>b.tube([V(sd*250,3200,z*.65),V(sd*900,3450,z)],55,10,CK.BRONZE));
     part(`wing-edging-${sd}`,b=>{
@@ -303,7 +318,11 @@ function solarService() {
 export function buildSolarCollector({service=true}={}) {
   const B=new CB(),lamps=[],petals=[],radiators=[];
   B.push(TO_Y);
-  B.lathe([[1700,-320,CK.BRONZE],[1800,-120,CK.PANEL],[1650,160,CK.HULL],[1300,1400,CK.HULL],[1400,1550,CK.BRONZE],[1150,2250,CK.GLASS],[700,2900,CK.ROOF],[0,3200,CK.BRONZE]],48);B.pop();
+  // The hub's cone carries three glazed decks (the receiver control floors) between plating.
+  const cone=y=>1650-350*(y-160)/1240, hub=[[1700,-320,CK.BRONZE],[1800,-120,CK.PANEL],[1650,160,CK.HULL]];
+  for(const y of [460,760,1060])hub.push([cone(y),y,CK.HULL],[cone(y+60),y+60,CK.GLASS]);
+  hub.push([1300,1400,CK.HULL],[1400,1550,CK.BRONZE],[1150,2250,CK.GLASS],[700,2900,CK.ROOF],[0,3200,CK.BRONZE]);
+  B.lathe(hub,96);B.pop();
   for(let k=0;k<12;k++) {
     const a=k/12*TAU, rings=[];
     for(let j=0;j<=24;j++) {
@@ -331,6 +350,9 @@ export function buildSolarCollector({service=true}={}) {
   for(let k=0;k<6;k++) {
     const a=k/6*TAU,d=V(Math.cos(a),0,Math.sin(a));
     B.tube([d.clone().multiplyScalar(1200).setY(2200),d.clone().multiplyScalar(4000).setY(2200)],120,12,CK.HULL);
+    // the spoke's two power conduits, seated along its flanks (the crown is the lift-car
+    // track): pulses run out to the wheel
+    for(const sd of [-1,1]){const o=V(-d.z,0,d.x).multiplyScalar(sd*112);B.tube([d.clone().multiplyScalar(1300).add(o).setY(2200),d.clone().multiplyScalar(3900).add(o).setY(2200)],16,8,CK.CONDUIT);}
     B.tube([d.clone().multiplyScalar(4100).setY(2200),d.clone().multiplyScalar(7600).setY(3800)],80,8,CK.DARK);
     B.at(d.x*7900,3800,d.z*7900,0,-a,0);
     const start=B.idx.length;

@@ -199,10 +199,12 @@ void main() {
   vec3 col = vec3(0.0);
   // corona: streamers fixed on the Sun, falling off steeply; polar plumes
   float st = sfbm(dirW * 2.5 + vec3(0.0, uTime * 0.002, 0.0), 3) * 0.5 + 0.5;
-  float helmet = exp(-pow(dirW.y / 0.45, 2.0));
+  float hy = dirW.y / 0.45;
+  float helmet = exp(-hy * hy);   // (squared by hand: pow() of a negative base is undefined)
   // (the plumes are broad soft rays over the poles: a low azimuthal frequency, so they never
   // turn to a fur of fine radial hairs)
-  float plume = pow(0.5 + 0.5 * snoise(vec3(dirW.xz * 7.0, 3.0)), 2.0) * smoothstep(0.7, 0.95, abs(dirW.y));
+  float pl = clamp(0.5 + 0.5 * snoise(vec3(dirW.xz * 7.0, 3.0)), 0.0, 1.0);
+  float plume = pl * pl * smoothstep(0.7, 0.95, abs(dirW.y));
   float cor = pow(max(b, 1.0), -3.3) * (0.35 + 0.9 * st * (0.5 + helmet)) + 0.4 * plume * pow(max(b, 1.0), -2.5);
   cor += 0.02 * pow(max(b, 1.0), -1.6);
   col += vec3(1.0, 0.94, 0.86) * cor * 0.07 * smoothstep(5.0, 3.0, b);
@@ -232,7 +234,7 @@ void main() {
     float H = uPromH[k].x;
     float seed = uPromH[k].y;
     float uc = clamp(u, 0.0, 1.0);
-    float arch = H * pow(sin(3.14159 * uc), 0.7);
+    float arch = H * pow(max(sin(3.14159 * uc), 0.0), 0.7);
     float ends = smoothstep(-0.05, 0.05, u) * (1.0 - smoothstep(0.95, 1.05, u));
     float dens;
     if (uProm[k].w < 0.5) {
@@ -252,7 +254,9 @@ void main() {
     }
     // a thin sheet: brighter seen edge-on (longer path), capped
     float path = min(1.0 / max(abs(dn), 0.2), 3.0);
-    col += vec3(1.0, 0.38, 0.32) * dens * ends * path * 0.42;
+    // H-alpha red, and fainter than the chromosphere they rise from: seen against black sky,
+    // not painted blobs; their threads carry the structure
+    col += vec3(1.0, 0.32, 0.25) * dens * ends * path * 0.26;
   }
   gl_FragColor = vec4(col * uDiscL, 0.0);
 }
@@ -278,6 +282,7 @@ varying float vBody;
 varying float vUnres;
 varying float vFade;
 varying float vPx;
+varying float vCover;
 varying vec3 vFacet;
 ${NOISE_GLSL}
 void main() {
@@ -349,6 +354,7 @@ void main() {
   float sz = max(S, minS);
   vUnres = smoothstep(0.7, 1.4, minS / S);
   vPx = S / max(uPixAng * dist, 1e-9);           // half-width, pixels
+  vCover = clamp(vPx * 1.4, 0.0, 1.0);
   vec3 bt1 = normalize(cross(nrm, abs(nrm.y) < 0.9 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0)));
   vec3 bt2 = cross(nrm, bt1);
   // per-mirror seed and the direction of its reflected Sun across the face (for the facets)
@@ -374,6 +380,7 @@ varying float vBody;
 varying float vUnres;
 varying float vFade;
 varying float vPx;
+varying float vCover;
 varying vec3 vFacet;
 float hexDist(vec2 p) { p = abs(p); return max(dot(p, vec2(0.5, 0.8660254)), p.x); }
 float hash21(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
@@ -413,13 +420,112 @@ void main() {
   float rec = exp(-dot(vUv, vUv) * 900.0) * detail;
   vec3 res = vCol * vGlint * uDiscL * 0.9 * facetG * (1.0 - 0.85 * seam) * (1.0 - 0.8 * strut) + vec3(0.5, 0.52, 0.55) * uSunE * 0.012 * vBody * (1.0 + 0.6 * seam);
   res += vec3(1.0, 0.62, 0.3) * rec * uSunE * 0.4;
-  vec3 pt = vCol * (0.2 + 1.3 * vSheen + 6.0 * vGlint) * 6.0;
+  // an unresolved mirror is a fraction of a pixel: its steady light scales with that coverage
+  // (the haze below carries the rest of the swarm), only the Sun's glint stays a sharp spark
+  vec3 pt = vCol * ((0.2 + 1.3 * vSheen) * mix(0.3, 1.0, vCover) + 6.0 * vGlint) * 6.0;
   vec3 col = mix(res * mask, pt * g, vUnres) * vFade;
   float a = (1.0 - vUnres) * mask * 0.95 * vFade;
   if (max(max(col.r, col.g), a) < 1e-4) discard;
   gl_FragColor = vec4(col, a);
 }
 `;
+
+// THE SWARM HAZE: every sprite above stands for thousands of mirrors. From far out the rings,
+// planes and shell are drawn again as what those thousands add up to: a gossamer sheet whose
+// brightness follows the mirrors' phase (they face the Sun, so the arcs beyond it glow and
+// the near arcs show dark backs), with the shell's latitude bands, streets and sector
+// avenues (the same lattice swarmShell() fills) etched in. Static geometry, sun-centred.
+const HAZE_VERT = /* glsl */ `
+attribute vec2 aH;        // x: band profile -1..1 across the sheet, y: kind (0 ring/plane, 1 shell)
+varying vec3 vP;          // sun-centred position (km)
+varying vec2 vH;
+void main() {
+  vP = position;
+  vH = aH;
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+}
+`;
+const HAZE_FRAG = /* glsl */ `
+uniform float uFade;
+uniform vec3 uCamRel;     // camera relative to the Sun (km)
+uniform vec3 uShellDir;
+uniform float uGain;
+varying vec3 vP;
+varying vec2 vH;
+float band(float x, float period, float gap, float w) {
+  // 1 inside a block, 0 in the street (gap wide at the start of each period), anti-aliased
+  float f = mod(x, period);
+  return smoothstep(gap - w, gap + w, f) * (1.0 - smoothstep(period - w, period, f));
+}
+void main() {
+  float r = length(vP);
+  vec3 toSun = -vP / max(r, 1.0);
+  vec3 toCam = uCamRel - vP;
+  float dc = length(toCam);
+  toCam /= max(dc, 1.0);
+  // mirrors face the Sun: their fronts shine toward the camera where it sits sunward of them,
+  // with a broad lobe from their wandering tilts; the backs are dim radiators
+  float ph = dot(toSun, toCam);
+  float lobe = 0.035 + 0.5 * max(ph, 0.0) * max(ph, 0.0) + 0.9 * pow(max(ph, 0.0), 12.0);
+  // the shell's lattice in latitude and longitude (degrees), as swarmShell() lays it out;
+  // evaluated for every fragment, outside any branch, so its filter widths are well defined
+  vec3 n = vP / max(r, 1.0);
+  float lat = degrees(asin(clamp(n.y, -1.0, 1.0)));
+  float lon = degrees(atan(n.z, n.x));
+  lon = lon < 0.0 ? lon + 360.0 : lon;
+  float wLat = clamp(fwidth(lat), 0.02, 1.0), wLon = clamp(fwidth(lon), 0.02, 1.0);
+  float lattice = band(lat + 90.0, 6.0, 1.2, wLat) * band(lon, 12.0, 1.5, wLon) * (1.0 - smoothstep(76.0, 78.0, abs(lat)));
+  lattice *= 1.0 - smoothstep(0.99985, 0.99993, dot(n, uShellDir));
+  float ring = exp(-vH.x * vH.x * 4.5) * (1.0 - vH.x * vH.x);
+  float shell = step(0.5, vH.y);
+  float dens = mix(ring, 0.55 * lattice, shell);
+  vec3 col = mix(vec3(1.0, 0.84, 0.58), vec3(1.0, 0.72, 0.44), shell);
+  // no haze in the camera's own neighbourhood: there the drawn mirrors (and the Helianth's
+  // local lattice) are the swarm
+  float nearF = smoothstep(4.0e5, 3.0e6, dc);
+  vec3 c = col * dens * lobe * nearF * uFade * uGain;
+  if (c.r + c.g + c.b < 1e-6) discard;
+  gl_FragColor = vec4(c, 0.0);
+}
+`;
+/**
+ * The haze's static geometry (km, sun-centred): an annulus in each ring's and plane's plane,
+ * as wide as its mirrors' radial spread, and the statite shell as a sphere.
+ */
+export function buildSwarmHaze(rings, planes, shellR, segs = 256) {
+  const pos = [], aH = [], idx = [];
+  const e1 = new THREE.Vector3(), e2 = new THREE.Vector3(), n = new THREE.Vector3(), up = new THREE.Vector3();
+  const annulus = (v4, spread) => {
+    n.set(v4.x, v4.y, v4.z).normalize();
+    up.set(Math.abs(n.y) < 0.9 ? 0 : 1, Math.abs(n.y) < 0.9 ? 1 : 0, 0);
+    e1.crossVectors(n, up).normalize(); e2.crossVectors(n, e1);
+    const base = pos.length / 3, rows = [-1, -0.5, 0, 0.5, 1];
+    for (let i = 0; i <= segs; i++) {
+      const a = (i / segs) * Math.PI * 2, c = Math.cos(a), sn = Math.sin(a);
+      for (const t of rows) {
+        const R = v4.w * (1 + t * spread);
+        pos.push((e1.x * c + e2.x * sn) * R, (e1.y * c + e2.y * sn) * R, (e1.z * c + e2.z * sn) * R);
+        aH.push(t, 0);
+      }
+    }
+    for (let i = 0; i < segs; i++) for (let j = 0; j < rows.length - 1; j++) {
+      const a = base + i * rows.length + j, b = a + rows.length;
+      idx.push(a, b, a + 1, a + 1, b, b + 1);
+    }
+  };
+  for (const r of rings) annulus(r, 0.035);
+  for (const p of planes) annulus(p, 0.012);
+  const sph = new THREE.SphereGeometry(shellR, 192, 96), sp = sph.attributes.position, base = pos.length / 3;
+  for (let i = 0; i < sp.count; i++) { pos.push(sp.getX(i), sp.getY(i), sp.getZ(i)); aH.push(0, 1); }
+  for (let i = 0; i < sph.index.count; i++) idx.push(base + sph.index.getX(i));
+  sph.dispose();
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('aH', new THREE.Float32BufferAttribute(aH, 2));
+  g.setIndex(idx);
+  g.computeBoundingSphere();
+  return g;
+}
 
 // The statite shell the Helianth stands in (its offset from the Sun, src/space/workingStations.js)
 // and six narrow collector planes between the rings (normal + radius).
@@ -528,6 +634,13 @@ export class SunSwarm {
     }));
     this.swarm.renderOrder = 21;
     this.group.add(this.swarm);
+    this.hazeU = { uFade: this.swarmU.uFade, uCamRel: { value: new THREE.Vector3() }, uShellDir: { value: SHELL_DIR.clone() }, uGain: { value: 0.22 } };
+    this.haze = new THREE.Mesh(buildSwarmHaze(SKY_UNIFORMS.uSwarmN.value, SWARM_PLANES, SHELL_R), new THREE.ShaderMaterial({
+      vertexShader: HAZE_VERT, fragmentShader: HAZE_FRAG, uniforms: this.hazeU, transparent: true, depthWrite: false, depthTest: true,
+      blending: THREE.AdditiveBlending, premultipliedAlpha: true, side: THREE.DoubleSide,
+    }));
+    this.haze.renderOrder = 19;
+    this.sunGroup.add(this.haze);
     this.group.traverse((o) => { o.frustumCulled = false; });
     this.near = 0;
   }
@@ -557,6 +670,8 @@ export class SunSwarm {
     this.swarmU.uT.value = sim.t % (365.25 * 86400 * 4);
     this.swarmU.uFade.value = this.near;
     this.swarm.visible = this.near > 0.001;
+    this.haze.visible = this.swarm.visible;
+    this.hazeU.uCamRel.value.copy(cam.position).sub(sim.sunPos);
     SKY_UNIFORMS.uSwarmT.value = realTime;
   }
 

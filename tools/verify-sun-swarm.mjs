@@ -531,3 +531,49 @@ console.log('SHUTTLES_VERIFIED');
   console.log(JSON.stringify({ foundryLights: L.length, foundryLightWorstMetres: Math.round(worst) }));
 }
 console.log('FOUNDRY_LIGHTS_VERIFIED');
+
+// ---- the swarm haze (wave 3): geometry sanity, the shell lattice matches the drawn blocks,
+// uniforms supplied, additive with alpha 0, and the sprites' coverage term declared end to end
+{
+  const s = new SunSwarm({}, { swarm: 6000 });
+  const g = s.haze.geometry, pos = g.getAttribute('position'), aH = g.getAttribute('aH'), ix = g.index;
+  let maxI = 0; for (let i = 0; i < ix.count; i++) maxI = Math.max(maxI, ix.getX(i));
+  assert.ok(maxI < pos.count && aH.count === pos.count, 'haze index/attributes in range');
+  for (let i = 0; i < pos.array.length; i++) assert.ok(Number.isFinite(pos.array[i]), 'haze positions finite');
+  let shellV = 0;
+  for (let i = 0; i < pos.count; i++) {
+    const r = Math.hypot(pos.getX(i), pos.getY(i), pos.getZ(i));
+    if (aH.getY(i) > 0.5) { shellV++; assert.ok(Math.abs(r - SHELL_R) < SHELL_R * 1e-4, 'shell haze on the shell'); }
+    else assert.ok(r > 0.9 * 0.038 * 1.496e8 && r < 1.1 * 0.13 * 1.496e8 * 1.05, `ring haze radius ${r}`);
+  }
+  assert.ok(shellV > 1000 && ix.count / 3 < 80000, `haze triangles ${ix.count / 3}`);
+  // the lattice the haze etches (GLSL band()) and the blocks swarmShell() fills agree
+  const band = (x, P, gap) => { const f = ((x % P) + P) % P; return f >= gap ? 1 : 0; };
+  const aS = s.swarm.geometry.getAttribute('aS');
+  let inBlock = 0, shellN = 0;
+  for (let i = 0; i < aS.count; i++) {
+    if (Math.round(aS.getX(i)) !== 5) continue;
+    shellN++;
+    const lon = aS.getY(i), z = aS.getZ(i), cl = Math.sqrt(1 - z * z), n = [cl * Math.cos(lon), z, cl * Math.sin(lon)];
+    const lat = Math.asin(n[1]) * 180 / Math.PI; let lo = Math.atan2(n[2], n[0]) * 180 / Math.PI; if (lo < 0) lo += 360;
+    inBlock += band(lat + 90, 6, 1.2) * band(lo, 12, 1.5);
+  }
+  assert.ok(inBlock / shellN > 0.99, `shell mirrors inside the haze's blocks (${inBlock}/${shellN})`);
+  const m = s.haze.material;
+  const decl = [...m.fragmentShader.matchAll(/uniform\s+\w+\s+(\w+)/g), ...m.vertexShader.matchAll(/uniform\s+\w+\s+(\w+)/g)].map((x) => x[1]);
+  for (const u of decl) assert.ok(u in m.uniforms, `haze uniform ${u} supplied`);
+  assert.ok(m.premultipliedAlpha && m.blending === THREE.AdditiveBlending && /gl_FragColor = vec4\(c, 0\.0\)/.test(m.fragmentShader), 'haze additive, alpha 0');
+  assert.ok(!/if \(vH\.y[^]*fwidth/.test(m.fragmentShader), 'no derivatives inside the kind branch');
+  const sv = s.swarm.material.vertexShader, sf = s.swarm.material.fragmentShader;
+  assert.ok(/varying float vCover;/.test(sv) && /varying float vCover;/.test(sf) && /vCover = /.test(sv), 'coverage varying matches');
+  // per-frame update: no allocation, finite uniforms
+  const sim = new SpaceSim(); sim.update?.(0);
+  const cam = new THREE.PerspectiveCamera(50, 16 / 9, 1, 1e10); cam.position.set(0, 5e7, 0).add(sim.sunPos ?? new THREE.Vector3());
+  const space = { camera: cam, size: new THREE.Vector2(960, 540), exposure: 1 };
+  const t0 = performance.now(); for (let i = 0; i < 200; i++) s.update(sim, i * 0.016, 0.016, space);
+  const per = (performance.now() - t0) / 200;
+  assert.ok(per < 0.3, `SunSwarm.update ${per.toFixed(3)} ms`);
+  assert.ok(s.haze.visible && Number.isFinite(s.hazeU.uCamRel.value.length()));
+  console.log(JSON.stringify({ hazeTriangles: ix.count / 3, shellMirrorsInBlocks: `${inBlock}/${shellN}`, updateMs: +per.toFixed(4) }));
+}
+console.log('SWARM_HAZE_VERIFIED');
