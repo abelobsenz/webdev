@@ -209,6 +209,17 @@ export function buildLinerDetail(seed = 2400) {
     lamps.push(flood(B, P.clone().addScaledVector(N, 2).add(V(0, 11, 0)), N.clone().add(V(0, -1.2, 0)).normalize(), 1.0, LAMP.WHITE, 1.8));
   }
   // ---- RCS clusters: four quadrants at the bow and the stern
+  // ---- cabin lights: warm lamps along the flank window bands (the band of glazing at
+  // |cos| 0.55..0.8 on the hull), a few rooms brighter than others, the pier side included
+  mark('cabinLamps');
+  for (const side of [1, -1]) for (const tb of [0.72, -0.62]) {
+    const t = side > 0 ? tb : Math.PI - tb;
+    for (let z = -900; z <= 1000; z += 24) {
+      hullPoint(z, t, P); hullNormal(z, t, N);
+      const warm = 0.8 + 0.6 * r();
+      lamps.push({ p: P.clone().addScaledVector(N, 1.2), r: 1.6, color: r() < 0.12 ? [0.85, 0.9, 1.0] : [1.0, 0.78, 0.52], i: warm, dir: N.clone(), breathe: r() < 0.1 ? 0.15 : 0, phase: r() });
+    }
+  }
   mark('rcs');
   for (const z of [980, -1060]) for (let k = 0; k < 4; k++) {
     const t = TAU * (k / 4) + TAU / 8;

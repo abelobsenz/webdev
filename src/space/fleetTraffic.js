@@ -37,6 +37,8 @@ export const HULL_RANGE = 900;          // km from the station: hulls drawn insi
 export const LAMP_RANGE = 60000;        // km: beyond this the whole station's traffic is under a pixel
 const PUFF_SLOTS = 4;                   // RCS puffs a ship can show at once
 const PUFF_LIFE = 0.9;                  // s
+/** A drive plume as lamp sprites along the exhaust: [distance aft in bell radii, size, brightness, whiteness]. */
+const PLUME = [[0.5, 1.0, 4.5, 0.55], [2.4, 1.5, 2.0, 0.15], [5.5, 2.3, 0.8, 0.0]];
 
 // ------------------------------------------------------------------ routes ----
 /**
@@ -327,7 +329,7 @@ export class StationTraffic {
         world: new THREE.Vector3(), mat: new THREE.Matrix4(), puffs: new Float32Array(PUFF_SLOTS * 2).fill(-1),
       };
       nl += ship.nLamps;
-      ship.glow0 = nl; nl += r.design.glows.length;
+      ship.glow0 = nl; nl += r.design.glows.length * PLUME.length;
       ship.puff0 = nl; nl += PUFF_SLOTS;
       ship.spin0 = nl; ship.nSpin = r.design.spin?.lamps.length || 0; nl += ship.nSpin;
       this.ships.push(ship);
@@ -447,16 +449,25 @@ export class StationTraffic {
       }
       // drive glows: at the bells, radius and brightness with the throttle
       const gl = sh.design.glows;
+      // each bell's glow is a short plume: the throat, then two puffs of exhaust trailing aft,
+      // longer and softer with the throttle (a flickering few percent, never a blink)
+      const flick = 0.94 + 0.06 * Math.sin(t * 23.0 + sh.seed * 5.1);
       for (let j = 0; j < gl.length; j++) {
-        const o = (sh.glow0 + j) * 4, g = gl[j];
-        const x = g.p.x, y = g.p.y, z = g.p.z - g.r * 0.6;
-        L[o] = e[0] * x + e[4] * y + e[8] * z + e[12];
-        L[o + 1] = e[1] * x + e[5] * y + e[9] * z + e[13];
-        L[o + 2] = e[2] * x + e[6] * y + e[10] * z + e[14];
-        L[o + 3] = g.r * k * (0.7 + 1.1 * sh.thr);
-        const b = sh.thr * 4.5 * vis;
-        C[o] = eng[0] * b; C[o + 1] = eng[1] * b; C[o + 2] = eng[2] * b;
-        D[o] = 0; D[o + 1] = 0; D[o + 2] = 0; D[o + 3] = 0;
+        const g = gl[j];
+        for (let q = 0; q < PLUME.length; q++) {
+          const o = (sh.glow0 + j * PLUME.length + q) * 4, pl = PLUME[q];
+          const back = g.r * pl[0] * (0.4 + sh.thr);
+          const x = g.p.x + g.dir.x * back, y = g.p.y + g.dir.y * back, z = g.p.z + g.dir.z * back;
+          L[o] = e[0] * x + e[4] * y + e[8] * z + e[12];
+          L[o + 1] = e[1] * x + e[5] * y + e[9] * z + e[13];
+          L[o + 2] = e[2] * x + e[6] * y + e[10] * z + e[14];
+          L[o + 3] = g.r * k * pl[1] * (0.6 + 0.9 * sh.thr);
+          const b = sh.thr * pl[2] * vis * flick;
+          // the throat runs hotter (whiter) than the plume
+          const w = pl[3];
+          C[o] = (eng[0] * (1 - w) + w) * b; C[o + 1] = (eng[1] * (1 - w) + w) * b; C[o + 2] = (eng[2] * (1 - w) + w) * b;
+          D[o] = 0; D[o + 1] = 0; D[o + 2] = 0; D[o + 3] = 0;
+        }
       }
       // RCS puffs: short white bursts from real nozzles, more of them while the ship manoeuvres
       const rc = sh.design.rcs;
@@ -513,7 +524,13 @@ export class FleetTraffic {
       const n = 10;
       for (let i = 0; i < n; i++) {
         const cls = mix[(i + ri * 3) % mix.length];
-        const lead = { route: R, phase: (i / n) * R.T + ri * 91, design: pick(cls, i + ri), scale: cls === 'packet' || cls === 'clipper' ? 1 : 1.6, slot: [0, 0, 0], seed: 1 + i + ri * 17, fidget: 0.6 };
+        const phase = (i / n) * R.T + ri * 91;
+        if (ri === 1 && i === 5) {
+          // the scheduled packet train: three packets in line astern in this ship's slot
+          FORMATION.line.forEach((sl, j) => H.push({ route: R, phase, design: pick('packet', j), scale: 1, slot: sl, seed: 60 + j, fidget: 0.4 }));
+          continue;
+        }
+        const lead = { route: R, phase, design: pick(cls, i + ri), scale: cls === 'packet' || cls === 'clipper' ? 1 : 1.6, slot: [0, 0, 0], seed: 1 + i + ri * 17, fidget: 0.6 };
         H.push(lead);
         // every third hauler runs in convoy, a tug on each flank
         if (cls === 'hauler' && i % 3 === 0) {

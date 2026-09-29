@@ -364,6 +364,17 @@ assert.ok(minClear > 0, `working lanes clear every structure with ${minClear} km
   let lit = 0;
   for (const s of H.ships) if (s.thr > 0.2) lit++;
   assert.ok(lit >= 1, 'engines burn on the roads');
+  // the plumes trail aft of every burning ship, brightest at the throat
+  for (const s of H.ships) {
+    if (s.thr < 0.2) continue;
+    const n = s.design.glows.length * 3;
+    for (let i = s.glow0; i < s.glow0 + n; i++) {
+      const o = i * 4, q = V(H.aL.array[o], H.aL.array[o + 1], H.aL.array[o + 2]).sub(s.pos);
+      assert.ok(q.dot(s.fwd) < 0, 'plume aft of the ship');
+    }
+    const c0 = H.aC.array[s.glow0 * 4], c2 = H.aC.array[(s.glow0 + 2) * 4];
+    assert.ok(c0 > c2 && c2 >= 0, 'plume fades aft');
+  }
   // LOD: hulls hidden far off, lamps still drawn; everything hidden beyond the lamp range
   cam.position.copy(H.group.position).add(V(0, HULL_RANGE + 5000, 0));
   H.update(600, 0.016, cam);
