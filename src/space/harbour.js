@@ -5,6 +5,7 @@ import { LAMP } from './lamps.js';
 import { ctube } from './hull.js';
 import { buildEmbarkationTerrace } from './interfaces.js';
 import { craftMesh, craftPart, addLamps, placeMerge, placeLamps, pixelRadius, KM } from './craftMesh.js';
+import { HarbourLife } from './harbourLife.js';
 
 // THE GEOSTATIONARY HARBOUR, drawn in metres with the ships' own builder and material.
 // Local frame: +Y up the tether (away from the Earth), +Z north (the Earth's axis),
@@ -293,7 +294,7 @@ export function buildHarbour() {
     D.box(0, 270, 290, 22, 20, 580, CK.HULL);
     ctube(D, [V(0, 280, 0), V(0, 380, 0)], 8, 6, CK.DARK);
     ctube(D, [V(0, 376, 0), V(0, 279, 572)], 3.5, 6, CK.DARK);
-    D.box(0, 250, 330, 40, 20, 40, CK.DARK);
+    // (the trolley runs on the boom: src/space/harbourLife.js)
     D.box(0, 270, 584, 30, 30, 12, CK.BRONZE);
     D.pop();
     const W = new THREE.Matrix4().makeBasis(bth.d, V(0, s, 0), Z).setPosition(bth.tip);
@@ -345,6 +346,7 @@ export function buildHarbour() {
     _q.setFromRotationMatrix(_m);
     _s.setScalar(sc);
     const M = new THREE.Matrix4().compose(pos, _q, _s);
+    bth.ship = { big, halfW, sc, pos: pos.clone() };
     shipsBig.push({ geo: ship.geo, m: M });
     lamps.push(...placeLamps(ship.lamps || [], M, 6));
     lamps.push({ p: bth.tip.clone().addScaledVector(upv, 110), r: 9, color: LAMP.AMBER, i: 2.4, breathe: 0.3, phase: rnd() });
@@ -457,6 +459,8 @@ export class HarbourStation {
     addLamps(this.terrace,this.terraceData.lamps,{minPx:.65});
     this.group.add(this.terrace);
     this.group.traverse((o) => { o.frustumCulled = false; });
+    // the port at work: conveyors, cranes, berth gantries, drones, lift cars (harbourLife.js)
+    this.life = new HarbourLife(this);
     this._sunL = new THREE.Vector3();
     this._q = new THREE.Quaternion();
     this._w = new THREE.Vector3();
@@ -489,5 +493,6 @@ export class HarbourStation {
     this.shipsBig.visible = px > 40;
     this.terrace.visible=pixelRadius(cam,this.terrace.getWorldPosition(this._w),this.terraceData.radius,space.size.y)>3;
     if (this.lampMesh) this.lampMesh.visible = px > 10;
+    this.life.update(realTime, space);
   }
 }
