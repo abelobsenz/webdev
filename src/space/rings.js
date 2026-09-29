@@ -135,7 +135,10 @@ void main() {
   float ribFade = 1.0 - smoothstep(2.0 / 26.0, 2.0 / 9.0, fk);
   float rib = (1.0 - fPulse(u, 2.0, 0.0, 1.94, fk)) * mix(0.3, 1.0, ribFade);
   float mull = (1.0 - fPulse(v * uWidth + 1.0, 2.0, 0.0, 1.965, fk)) * (1.0 - smoothstep(0.02, 0.07, fk));
-  float frame = max(rib, mull * 0.5);
+  // glazing bars every 50 m both ways, seen from the deck and from low over the vault
+  float vkm0 = v * uWidth;
+  float bars = max(1.0 - fPulse(mod(u, 100.0), 0.05, 0.0, 0.0485, fk), 1.0 - fPulse(vkm0, 0.05, 0.0, 0.0485, fk)) * (1.0 - smoothstep(0.004, 0.012, fk));
+  float frame = max(max(rib, mull * 0.5), bars * 0.35);
   float ndv = clamp(abs(dot(N, V)), 0.0, 1.0);
   float Fg = 0.04 + 0.96 * pow(1.0 - ndv, 5.0);
   float nh = max(dot(N, H), 0.0);
