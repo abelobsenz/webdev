@@ -430,7 +430,7 @@ check(nonFinite === 0, `${nonFinite} non-finite transforms`);
   check(Array.isArray(m.defaultAttributeValues.aOcc) && m.defaultAttributeValues.aOcc[0] === 0, 'aOcc default supplied for meshes without it');
   check(m.userData.dressed && m.uniforms.uLivery && m.uniforms.uLivery2, 'port material keeps the dressed uniforms');
   const kinds = Object.values(PK);
-  check(Math.min(...kinds) > 26.5 && Math.max(...kinds) < 36.5, 'port kinds collide with the dressed kinds');
+  check(Math.min(...kinds) > 26.5 && Math.max(...kinds) < 37.5, 'port kinds collide with the dressed kinds');
   out.portFragChars = fs.length;
 }
 /** index max < vertex count, finite positions, aOcc (when present) finite in 0..1 and full length. */

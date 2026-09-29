@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { createDressedMaterial } from './craftMesh.js';
 
 // The dressed craft material with the geostationary port's civic finishes, and baked contact
-// occlusion. Kinds 30..36 (the plain and dressed materials fall back to pearl plate for them):
+// occlusion. Kinds 30..37 (the plain and dressed materials fall back to pearl plate for them):
 //   30 PAVING   granite setts in running bond, 12 m bays inlaid with basalt, path lights at
 //               the bay corners, worn paler along the busy lines
 //   31 LAWN     mown grass in 4 m stripes, clover-dark where it is walked
@@ -12,15 +12,17 @@ import { createDressedMaterial } from './craftMesh.js';
 //   35 BEDS     shrub beds and tree crowns: clumped foliage, a few flowering, soil between
 //   36 GLASSHOUSE  garden vaults: clear panes on bronze glazing bars, ribs every 18 m, the
 //               planting and its paths seen dimly through glass that mirrors the sky
+//   37 HALL     concourse vaults and enclosed walks: the same glazing over a lit public
+//               floor, warm and busy after dark, bright bands where the lamp rows run
 // A per-vertex aOcc (0 open .. 1 buried) darkens the lit terms only, so walls go dusky toward
 // the deck they stand on and the deck darkens round every footing; lamps and windows keep their
 // glow. A geometry without aOcc reads the attribute default 0 and draws unoccluded.
 
-export const PK = { PAVING: 30, LAWN: 31, WATER: 32, CANOPY: 33, STONE: 34, BEDS: 35, GLASSHOUSE: 36 };
+export const PK = { PAVING: 30, LAWN: 31, WATER: 32, CANOPY: 33, STONE: 34, BEDS: 35, GLASSHOUSE: 36, HALL: 37 };
 
 export const PORT_GLSL = /* glsl */ `
 void portKinds(float k, vec2 f, vec2 fw, float px, inout vec3 alb, inout float rough, inout float metal, inout vec3 em, inout vec2 bump) {
-  if (k < 29.5 || k > 36.5) return;
+  if (k < 29.5 || k > 37.5) return;
   float det = 1.0 - smoothstep(0.25, 0.8, px);
   float detB = 1.0 - smoothstep(1.2, 4.0, px);
   float farK = 1.0 - smoothstep(6.0, 18.0, px);
@@ -95,11 +97,17 @@ void portKinds(float k, vec2 f, vec2 fw, float px, inout vec3 alb, inout float r
     float frame = max(mix(0.07, bars, det), rib);
     float fol = mix(0.5, vnoise(f * 0.11) * 0.6 + vnoise(f * 0.6) * 0.4, detB);
     float walk = mix(0.15, max(cLine(f.x, 36.0, 1.6, fw.x), cLine(f.y, 30.0, 1.4, fw.y)), farK);
-    vec3 inside = mix(mix(vec3(0.02, 0.05, 0.018), vec3(0.07, 0.12, 0.04), fol), vec3(0.16, 0.15, 0.12), walk);
+    float hallK = step(36.5, k);
+    vec3 garden = mix(mix(vec3(0.02, 0.05, 0.018), vec3(0.07, 0.12, 0.04), fol), vec3(0.16, 0.15, 0.12), walk);
+    vec3 floorC = mix(vec3(0.09, 0.085, 0.08), vec3(0.2, 0.18, 0.15), fol);
+    vec3 inside = mix(garden, floorC, hallK);
     alb = mix(inside, vec3(0.5, 0.4, 0.26), frame);
     rough = mix(0.05, 0.35, frame); metal = mix(0.55, 0.85, frame);
     float hh = hash12(floor(f / vec2(6.0, 4.8)) + 29.0);
-    em = vec3(1.0, 0.76, 0.48) * (0.02 + 0.05 * walk + 0.05 * step(0.9, hh) * det) * (1.0 - frame);
+    // the hall's lamp rows every 12 m along it, pools of light and the crowd beneath
+    float rows = mix(0.3, 1.0 - smoothstep(0.6, 2.0, abs(fract(f.x / 12.0 + 0.5) - 0.5) * 12.0), detB);
+    float glow = mix(0.02 + 0.05 * walk + 0.05 * step(0.9, hh) * det, 0.07 + 0.16 * rows + 0.04 * hh, hallK);
+    em = vec3(1.0, 0.76, 0.48) * glow * (1.0 - frame);
   } else {
     float c = vnoise(f * 0.45) * 0.55 + vnoise(f * 1.7) * 0.45 * det;
     vec3 leaf = mix(vec3(0.035, 0.07, 0.03), vec3(0.11, 0.17, 0.06), c);

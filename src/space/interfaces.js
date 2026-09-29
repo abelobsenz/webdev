@@ -31,7 +31,7 @@ function hall(B,x,y,z,w,d,h,{garden=false,plinth=PORT?PK.STONE:CK.HULL,rooms=nul
   const pts=[[-w/2,0],[w/2,0],[w/2,h*.55]];
   for(let k=1;k<=12;k++){const a=k/12*Math.PI;pts.push([Math.cos(a)*w/2,h*.55+Math.sin(a)*h*.45]);}
   B.at(x,y,z);
-  const kind=garden?(PORT?PK.GLASSHOUSE:CK.CONSERVATORY):CK.GLASS;
+  const kind=garden?(PORT?PK.GLASSHOUSE:CK.CONSERVATORY):(PORT?PK.HALL:CK.GLASS);
   B.loft([{z:-d/2,pts},{z:d/2,pts}],kind,{capStart:kind,capEnd:kind});
   const bays=Math.max(6,Math.ceil(d/18));
   for(let k=0;k<=bays;k++) {
@@ -97,7 +97,7 @@ function closedWalk(B,pts,r=7) {
     const n=Math.max(1,Math.ceil(rounded[k-1].distanceTo(rounded[k])/8));
     for(let j=1;j<=n;j++)sections.push(rounded[k-1].clone().lerp(rounded[k],j/n));
   }
-  B.tube(sections,r,12,CK.GLASS);
+  B.tube(sections,r,12,PORT?PK.HALL:CK.GLASS);
   for(let k=0;k<pts.length-1;k++) {
     const a=pts[k],b=pts[k+1],n=Math.max(1,Math.floor(a.distanceTo(b)/12));
     const direction=b.clone().sub(a).normalize(),q=new THREE.Quaternion().setFromUnitVectors(V(0,0,1),direction);
