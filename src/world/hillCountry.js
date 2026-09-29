@@ -813,6 +813,10 @@ export function buildHillCountry(scene, { onComponent = null } = {}) {
       const best=laneNear(e);
       // (only ever raised: a lane above the walk is what buries its end; lowering would add treads to a fixed run)
       if(best&&best.y>e.bottom+.12&&best.y<e.top-.02){e.bottom=best.y;e.steps=Math.max(1,Math.ceil((e.top-e.bottom)/.19));}
+      // a lane passing the foot above the threshold (by up to four 0.15 m risers on the 2.1 m run):
+      // the entrance comes down from the lane, its foot on the lane's surface and the steps descending
+      // (shallower risers than going up: the lane's surface sits a little off its centreline height)
+      else if(best&&best.y>=e.top-.02&&best.y-e.top<=.6){e.bottom=best.y;e.steps=Math.max(1,Math.ceil((e.bottom-e.top)/.15));}
       stairs(s,e);
     }
     for(const {s,e}of doorLinks){const node={x:X(e.node),z:Z(e.node)},dx=e.approach.x-node.x,dz=e.approach.z-node.z,len=Math.hypot(dx,dz),landing=Math.min(2.3,len*.46),first=[node.x+dx/(len||1)*landing,node.z+dz/(len||1)*landing],middle=resample([first,[e.approach.x,e.approach.z]],1),walk=[[node.x,node.z],...middle,[e.foot.x,e.foot.z]],heights=[height[e.node],...middle.map((p,k)=>Math.max(height[e.node]+(e.bottom-height[e.node])*k/(middle.length-1),joiningHeight(...p,hw))),e.bottom];heights[1]=height[e.node];heights[heights.length-2]=e.bottom;const n0=[-dz/(len||1),dx/(len||1)],n1=[e.dz,-e.dx],den=1+n0[0]*n1[0]+n0[1]*n1[1],miter=[(n0[0]+n1[0])/den,(n0[1]+n1[1])/den],normals=walk.map((p,k)=>{if(k===walk.length-1)return n1;const u=Math.min(1,Math.hypot(p[0]-node.x,p[1]-node.z)/(len||1));return n0.map((v,j)=>v+(miter[j]-v)*u);});road(walk,hw,0,{heights,normals,kerbs:false,kind:'door-walk',lamps:false});
