@@ -9,6 +9,7 @@ import { R_EARTH, R_MOON, MERIDIAN_LON, bodyDir } from './sim.js';
 import { stationFrame, CORRIDORS } from './stations.js';
 import { HS } from './harbour.js';
 import { FleetTraffic } from './fleetTraffic.js';
+import { smoothLiner } from './linerSkin.js';
 import { buildLinerDetail, buildFreighterDetail, buildTenderDetail, buildEvaWorker, evaPose, evaLines, EVA_PARTIES } from './linerDetail.js';
 import { buildWheelDetail, buildLiftCar, buildRingCrane, liftPose, craneAngle, RING } from './seleneDetail.js';
 
@@ -187,8 +188,9 @@ export class Fleet {
     // ---- the Concord-class liner at the liner pier (engines dark, lamps lit)
     const liner = buildLiner(2400);
     this.linerGeo = liner;
-    // her markings (livery band, keel and drive-section plate) on a repainted copy of the hull
-    const linerPainted = { ...liner, geo: markLiner(liner.geo) };
+    // her skin re-tessellated smooth (src/space/linerSkin.js) and her markings (livery band, keel
+    // and drive-section plate) painted on it
+    const linerPainted = { ...liner, geo: markLiner(smoothLiner(liner)) };
     {
       const m = dressedMesh(linerPainted.geo, { accent: [0.55, 0.85, 1.0], lit: 0.62, livery: [0.58, 0.2, 0.12], livery2: [0.88, 0.84, 0.74] });
       station.linerBerth(m.position, m.quaternion);
@@ -475,7 +477,7 @@ export class Fleet {
       this.seleneLanes.position.copy(this.refinery.position);
       this.seleneLanes.quaternion.copy(this.refinery.quaternion);
       // the corridor beacons are for the tankers: full on the run, faded out from across the sky
-      const lg = 1 - smooth(900, 2600, space.camera.position.distanceTo(this.refinery.position));
+      const lg = space.camera ? 1 - smooth(900, 2600, space.camera.position.distanceTo(this.refinery.position)) : 1;
       this.seleneLaneLamps.material.uniforms.uGain.value = lg;
       this.seleneLaneLamps.visible = lg > 0.002;
       this.wheel.rotation.y = realTime * 0.04;

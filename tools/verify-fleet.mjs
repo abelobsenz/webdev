@@ -609,6 +609,31 @@ assert.ok(minClear > 0, `working lanes clear every structure with ${minClear} km
   assert.ok(fleet.docked.geometry.attributes.aFacade.array.some((k, i) => i % 3 === 2 && k === 20), 'the berthed liner wears her livery');
   const tg = markTender(fleet.tenderData.geo);
   assert.ok(tg.attributes.aFacade.array.some((k, i) => i % 3 === 2 && k === 24), 'tenders in working plate');
+  // the liner's smooth skin: it replaced the builder's loft (the layout check passed), every
+  // vertex lies on the builder's analytic surface, normals unit and outward
+  {
+    const { smoothLiner, buildLinerSkin, linerProf } = await import('../src/space/linerSkin.js');
+    const sm = smoothLiner(fleet.linerGeo);
+    assert.ok(sm.userData.smoothSkin, 'the liner skin replaced (builder loft layout recognised)');
+    out.linerTriangles = [fleet.linerGeo.geo.index.count / 3, sm.index.count / 3];
+    assert.ok(out.linerTriangles[1] > 90000 && out.linerTriangles[1] < 140000, `liner triangles ${out.linerTriangles}`);
+    const sk = buildLinerSkin(1), P = sk.attributes.position, Nn = sk.attributes.normal;
+    let worst = 0;
+    for (let i = 0; i < P.count; i += 7) {
+      const x = P.getX(i), y = P.getY(i), z = P.getZ(i);
+      if (Math.abs(z) > 1149 && z < 0) continue;
+      const f = Math.max(linerProf((z + 1150) / 2400), 0.02);
+      if (f < 0.05) continue;
+      const rho = Math.pow(Math.pow(Math.abs(x) / (170 * f), 2.3) + Math.pow(Math.abs(y) / (118 * f * (y < 0 ? 0.8 : 1)), 2.3), 1 / 2.3);
+      worst = Math.max(worst, Math.abs(rho - 1));
+      const nl = Math.hypot(Nn.getX(i), Nn.getY(i), Nn.getZ(i));
+      assert.ok(Math.abs(nl - 1) < 1e-3 && Nn.getX(i) * x + Nn.getY(i) * y > -1e-6, 'skin normal unit and outward');
+    }
+    assert.ok(worst < 1e-3, `skin on the builder's surface (${worst})`);
+    let mx = 0; for (const i of sm.index.array) if (i > mx) mx = i;
+    assert.ok(mx < sm.attributes.position.count, 'smoothed liner index in range');
+    assert.ok(fleet.docked.geometry.index.count === sm.index.count, 'the berthed liner draws the smooth skin');
+  }
   // Selene's foil tank shells: smooth, and their inner chords clear every vertex of the old tank
   const sg = fleet.refineryMesh.geometry, sp = sg.attributes.position;
   assert.ok(1.006 * Math.cos(Math.PI / 48) ** 2 > 1.0005, 'tank shell chords clear the builder tank');

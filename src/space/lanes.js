@@ -135,6 +135,7 @@ export class Lanes {
 
   update(sim, realTime, dt, space) {
     const cam = space.camera;
+    if (!cam) return;
     // Lane lights are for the ships using the lanes: seen from the lanes they mark the way, seen
     // from across the sky they would be dotted lines ruled over the view. Each set fades out
     // with the camera's distance from its lanes (the Harbour's corridors reach 1,500 km).
