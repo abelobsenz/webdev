@@ -521,7 +521,7 @@ export class FleetTraffic {
     this.harbourRoads = roads;
     const mix = ['hauler', 'tanker', 'packet', 'clipper', 'hauler', 'packet', 'tanker', 'hauler', 'packet', 'clipper'];
     roads.forEach((R, ri) => {
-      const n = 10;
+      const n = 13;
       for (let i = 0; i < n; i++) {
         const cls = mix[(i + ri * 3) % mix.length];
         const phase = (i / n) * R.T + ri * 91;
@@ -540,10 +540,10 @@ export class FleetTraffic {
     });
     this.stacks = [harbourStack(0), harbourStack(1)];
     this.stacks.forEach((R, li) => {
-      const n = li ? 4 : 5;
+      const n = li ? 6 : 7;
       for (let i = 0; i < n; i++) {
-        const cls = ['tanker', 'hauler', 'packet', 'lighter', 'hauler'][(i + li) % 5];
-        H.push({ route: R, phase: (i / n) * R.T, design: pick(cls, i + li), scale: cls === 'lighter' ? 1.5 : cls === 'packet' ? 1 : 1.4, slot: [0, 0, 0], seed: 40 + i + li * 7, fidget: 0.4 });
+        const cls = ['tanker', 'hauler', 'packet', 'lighter', 'hauler', 'clipper', 'tanker'][(i + li) % 7];
+        H.push({ route: R, phase: (i / n) * R.T, design: pick(cls, i + li), scale: cls === 'lighter' ? 1.5 : cls === 'packet' || cls === 'clipper' ? 1 : 1.4, slot: [0, 0, 0], seed: 40 + i + li * 7, fidget: 0.4 });
       }
     });
     const hDesigns = [...new Set(H.map((r) => r.design))];
@@ -555,7 +555,7 @@ export class FleetTraffic {
       for (let i = 0; i < 2; i++) S.push({ route: R, phase: (i / 2) * R.T + k * 233, design: pick('barge', k + i), scale: 1.3, slot: [0, 0, 0], seed: 70 + k * 3 + i, fidget: 0.5 });
     }
     const pat = selenePatrol();
-    for (let i = 0; i < 4; i++) S.push({ route: pat, phase: (i / 4) * pat.T, design: pick(i % 2 ? 'tug' : 'lighter', i), scale: 1.2, slot: [0, 0, 0], seed: 90 + i, fidget: 0.8 });
+    for (let i = 0; i < 6; i++) S.push({ route: pat, phase: (i / 6) * pat.T, design: pick(i % 2 ? 'tug' : 'lighter', i), scale: 1.2, slot: [0, 0, 0], seed: 90 + i, fidget: 0.8 });
     const conv = seleneConvoyRun();
     for (let g = 0; g < 2; g++) {
       FORMATION.vee.forEach((sl, j) => S.push({ route: conv, phase: g * conv.T * 0.5, design: pick(j ? 'hauler' : 'tanker', j + g), scale: 1.3, slot: sl, seed: 110 + g * 5 + j, fidget: 0.3 }));
