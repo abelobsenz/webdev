@@ -231,3 +231,42 @@ export function buildLinerDetail(seed = 2400) {
   void r; void lerp; void here;
   return { geo, lamps, rcs, parts };
 }
+
+/**
+ * Fittings for the outer-system freighter hull (src/craft/craftClasses.js buildFreighter, drawn
+ * at `len` m; Selene's tankers): a catwalk with railings along the spine's back, walkway lamps,
+ * floodlights on every tank-ring bulkhead looking at the tanks, RCS quads at the drive and the
+ * bow, a dish and whip masts on the crew section. Freighter metres at 1,100 m, scaled by len.
+ */
+export function buildFreighterDetail(len = 1100) {
+  const s = len / 1100;
+  const B = new CB();
+  B.push(new THREE.Matrix4().makeScale(s, s, s));
+  const lamps = [], rcs = [];
+  // catwalk along the spine's back (the spine's upper longerons are at y = 14, radius 3),
+  // under the inner faces of the tanks that stand over it (their inner faces at y = 27)
+  catwalk(B, V(0, 17.6, -276), V(0, 17.6, 386), V(0, 1, 0), 5, 1.2);
+  for (let z = -270; z <= 380; z += 41) lamps.push({ p: V(2.2, 19, z).multiplyScalar(s), r: 0.9 * s, color: LAMP.AMBER, i: 1.6, breathe: 0.2, phase: (z + 270) / 650 });
+  // floodlights on the tank-ring bulkheads (34 m square at z - 38), two corners each
+  for (let z = -236; z <= 336; z += 82) {
+    for (const [x, y, dx, dy] of [[17.5, 17.5, 0.6, 0.6], [-17.5, -17.5, -0.6, -0.6]]) {
+      const l = flood(B, V(x, y, z - 38), V(dx, dy, 1), 1.4, LAMP.WHITE, 1.7);
+      lamps.push({ ...l, r: l.r * s });            // (here() already carries the scale)
+    }
+  }
+  // RCS: four quads round the thrust structure, four round the crew section
+  for (let k = 0; k < 4; k++) {
+    const a = (k / 4) * TAU;
+    const n = V(Math.cos(a), Math.sin(a), 0);
+    rcs.push(...rcsQuad(B, n.clone().multiplyScalar(34).setZ(-330), n, V(0, 0, 1), 3.2));
+    rcs.push(...rcsQuad(B, n.clone().multiplyScalar(38).setZ(470), n, V(0, 0, 1), 3.2));
+  }
+  // the crew section's dish and masts (the old comms mast stands at z = 420 on top)
+  dish(B, V(24, 26, 460), V(0.6, 1, 0.2), 9);
+  for (const [x, z] of [[-18, 440], [-12, 500]]) {
+    const tip = mast(B, V(x, Math.sqrt(Math.max(38 * 38 - x * x, 0)) - 1, z), V(0, 1, 0), 22, 0.5);
+    lamps.push({ p: tip, r: 1.3 * s, color: LAMP.RED, i: 2.0, breathe: 0.3 });
+  }
+  B.pop();
+  return { geo: B.geometry(), lamps, rcs };
+}

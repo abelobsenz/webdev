@@ -502,6 +502,22 @@ assert.ok(minClear > 0, `working lanes clear every structure with ${minClear} km
     for (let i = 0; i < cp.count; i += 3) minCrane = Math.min(minCrane, dist(T, w.fromBufferAttribute(cp, i).applyMatrix4(m), 30));
   }
   out.craneClearanceM = +minCrane.toFixed(2);
+  // the tankers' fittings sit on their hulls: every fitting vertex within 45 m of the freighter's
+  // own surface (seated, nothing adrift) and none inside the bow collar's reach (z > 525 m)
+  {
+    const { buildFreighter } = await import('../src/craft/craftClasses.js');
+    const fr = tree(tris(new THREE.Mesh(buildFreighter(560).geo)));
+    const fp = D.data.tf.geo.attributes.position;
+    let far = 0, bow = 0;
+    for (let i = 0; i < fp.count; i += 3) {
+      w.fromBufferAttribute(fp, i);
+      if (dist(fr, w, 60) > 45) far++;
+      if (w.z > 525 * 560 / 1100) bow++;
+    }
+    assert.equal(far, 0, 'tanker fittings are seated on the hull');
+    assert.equal(bow, 0, 'tanker fittings clear of the bow collar');
+    assert.ok(D.runFits.length === 2 && D.berthFit.parent === rm, 'fittings on the berthed and the travelling tankers');
+  }
   assert.ok(minCrane > 0.8, `ring cranes clear the works and the berthed tankers (${minCrane} m)`);
   // the cranes keep to their sectors, apart from each other
   for (let t = 0; t < 3000; t += 7) {

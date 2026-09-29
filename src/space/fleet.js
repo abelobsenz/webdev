@@ -8,7 +8,7 @@ import { R_EARTH, R_MOON, MERIDIAN_LON, bodyDir } from './sim.js';
 import { stationFrame, CORRIDORS } from './stations.js';
 import { HS } from './harbour.js';
 import { FleetTraffic } from './fleetTraffic.js';
-import { buildLinerDetail } from './linerDetail.js';
+import { buildLinerDetail, buildFreighterDetail } from './linerDetail.js';
 import { buildWheelDetail, buildLiftCar, buildRingCrane, liftPose, craneAngle, RING } from './seleneDetail.js';
 
 /** km: the liners' near fittings are drawn inside this range (a 2.4 km hull spans ~60 px at 60 km). */
@@ -297,6 +297,7 @@ export class Fleet {
       berthed.push({ geo: tanker.geo, m: M });
     }
     rm.add(craftPart(rm, placeMerge(berthed)));
+    this.tankerBerths = berthed.map((b) => b.m);
     this.refinery.add(rm);
     this.refineryMesh = rm;
     this.crafts.push(rm);
@@ -491,7 +492,18 @@ export class Fleet {
         rm.add(pivot);
         cranes.push({ pivot, mesh: m, k });
       }
-      this.seleneDetail = { wheelPart, cars, cranes, parts: [wheelPart, ...cars.map((c) => c.mesh), ...cranes.map((c) => c.pivot)], data: { wd, car, crane } };
+      // the tankers' fittings: on the three berthed at the ring and the two on the Earth run
+      const tf = buildFreighterDetail(560);
+      const berthFit = craftPart(rm, placeMerge(this.tankerBerths.map((m) => ({ geo: tf.geo, m }))));
+      addLamps(berthFit, this.tankerBerths.flatMap((m) => placeLamps(tf.lamps, m)), { minPx: 1.0 });
+      rm.add(berthFit);
+      const runFits = this.movers.filter((m) => m.frameObj === this.refinery).map((mv) => {
+        const f = craftPart(mv.mesh, tf.geo);
+        addLamps(f, tf.lamps, { minPx: 1.0 });
+        mv.mesh.add(f);
+        return f;
+      });
+      this.seleneDetail = { wheelPart, cars, cranes, berthFit, runFits, parts: [wheelPart, berthFit, ...runFits, ...cars.map((c) => c.mesh), ...cranes.map((c) => c.pivot)], data: { wd, car, crane, tf } };
     }
     const D = this.seleneDetail;
     if (!D) return;
