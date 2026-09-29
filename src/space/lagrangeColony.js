@@ -241,6 +241,22 @@ export function buildRotor(seed = 7) {
   for (const s of [-1, 1]) {
     const P = capProf(s);
     B.lathe(s > 0 ? P : P.slice().reverse(), 96);
+    // twelve lit boulevards radiating down the terraces from the hub to the rim, and the
+    // terrace promenades' lamps in rings along every glazed step
+    const off = (p, d) => {
+      const dr = p[0], dz = p[1] - s * HL, l = Math.hypot(dr, dz) || 1;
+      return [p[0] + (dr / l) * d, p[1] + (dz / l) * d];
+    };
+    for (let k = 0; k < 12; k++) {
+      const a = (k / 12) * TAU + Math.PI / 12, c = Math.cos(a), sn = Math.sin(a);
+      const pts = P.slice(1, 10).map((p) => { const [r0, z0] = off(p, 14); return V(c * r0, sn * r0, z0); });
+      B.tube(pts, 9, 6, CK.CONDUIT);
+    }
+    P.forEach((p) => {
+      if (p[2] !== CK.GLASS) return;
+      const [r0, z0] = off(p, 8), n = Math.max(12, Math.round(r0 / 110));
+      for (let i = 0; i < n; i++) { const a = (i / n) * TAU; lamps.push({ p: V(Math.cos(a) * r0, Math.sin(a) * r0, z0), r: 9, color: LAMP.AMBER, i: 2.2, breathe: 0.25, phase: (i * 0.618) % 1 }); }
+    });
     for (let i = 0; i < 24; i++) {
       const a = (i / 24) * TAU;
       lamps.push({ p: V(Math.cos(a) * (R + 70), Math.sin(a) * (R + 70), s * (HL + 10)), r: 18, color: i % 6 === 0 ? LAMP.RED : LAMP.WHITE, i: 3.0, breathe: 0.4, phase: i / 24 });

@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { createCraftMaterial } from '../craft/craftMaterial.js';
 import { craftMesh, addLamps, KM } from './craftMesh.js';
 import { LAMP, createLamps } from './lamps.js';
-import { DynLamps, smooth } from './lifeKit.js';
+import { DynLamps, smooth, instancedPart } from './lifeKit.js';
 import { R_EARTH, R_MOON, GEO_ALT, MOON_DIST } from './sim.js';
 import { COL, WINDOW_CENTRES, buildRotor, buildWindows, buildMirror, buildStator, buildAgriRing, buildPairFrame } from './lagrangeColony.js';
 import { createWindowMaterial, createMirrorMaterial, bindWindow, bindMirror } from './lagrangeShaders.js';
@@ -154,6 +154,7 @@ export class LagrangeColonies {
     {
       const ro = [];
       this.parts.gate.berths.forEach((b, i) => {
+        if (i % 4 === 3) return;                 // a ship berthed there (below)
         const R = dockRoute(b.p.clone().multiplyScalar(KM), b.dir.clone(), i % 2 ? 1 : -1, 160 + 30 * (i % 3), i % 3);
         const cls = b.dir.z > 0 ? ['packet', 'lighter', 'clipper'][i % 3] : ['clipper', 'packet', 'hauler'][i % 3];
         ro.push({ route: R, phase: (i / 16) * R.T, design: pick(cls, i), scale: 1, slot: [0, 0, 0], seed: 300 + i, fidget: 0.5 });
@@ -163,6 +164,7 @@ export class LagrangeColonies {
       this.gateway.traffic = new StationTraffic(space, 'lagrange-L1', this.gateway.group, ro, [...new Set(ro.map((r) => r.design))], { engineColor: LAMP.AMBER });
     }
     this.traffic = [...this.pairs.map((p) => p.traffic), this.gateway.traffic];
+    this._gatewayBerthed(fam);
     this._lanes();
     this.buildMs = performance.now() - t0;
   }
@@ -267,6 +269,28 @@ export class LagrangeColonies {
     this.space.scene.add(g);
     this.space.addBody(`${name}-approach`, [g], (o) => (o || _a).copy(g.position), reach, { minNear: 0.02 });
     return g;
+  }
+
+  /** Ships berthed nose-in at every fourth gateway collar: lunar clippers at the Moon dock, Earth haulers at the other. */
+  _gatewayBerthed(fam) {
+    const hull = this.gateway.m.children[0];
+    const by = new Map();
+    this.gateway.berthed = [];
+    this.parts.gate.berths.forEach((b, i) => {
+      if (i % 4 !== 3) return;
+      const d = (b.dir.z > 0 ? fam.clipper : fam.hauler)[i % 2];
+      const q = new THREE.Quaternion().setFromUnitVectors(V(0, 0, 1), b.dir.clone().negate());
+      const p = b.p.clone().addScaledVector(b.dir, d.length * 0.55 + 6);
+      if (!by.has(d)) by.set(d, []);
+      by.get(d).push(new THREE.Matrix4().compose(p, q, V(1, 1, 1)));
+      this.gateway.berthed.push({ d, p, dir: b.dir });
+    });
+    for (const [d, list] of by) {
+      const im = instancedPart(hull, d.geo, list.length);
+      list.forEach((m, j) => im.setMatrixAt(j, m));
+      im.instanceMatrix.needsUpdate = true;
+      this.gateway.m.add(im);
+    }
   }
 
   // ----------------------------------------------------------------- lanes --

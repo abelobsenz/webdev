@@ -95,6 +95,8 @@ ok(rMax <= COL.ROTOR_MAX_R, `rotor's outer works within ${COL.ROTOR_MAX_R} m of 
   }
   ok(bad === 0, `gateway wheels turn clear of the spine and works (${bad} static vertices in their sweep)`);
   ok(gate.berths.length === 16, 'gateway has 16 berths');
+  const bs = lag.gateway.berthed;
+  ok(bs.length === 4 && bs.every((b) => Math.abs(b.p.z) > GATE.HALF && b.d.length > 0), '4 ships berthed nose-in at the gateway, clear of its ends');
 }
 {
   // pair frame trusses meet the spindles and clear the rotors
