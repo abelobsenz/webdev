@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { CB, CK, TAU, V, lerp, rng, here, hereDir, atAim, tank, sphereTank, rcsQuad, dockingCollar, truss, catwalk, radiatorWing, dish, mast, container, flood } from './shipKit.js';
 import { sectionEllipse } from '../craft/craftGeometry.js';
 import { DK } from './craftMesh.js';
+import { quadLoft, smoothRange } from './portMaterial.js';
 import { LAMP } from './lamps.js';
 import { design } from './shipDesigns.js';
 
@@ -35,6 +36,9 @@ import { design } from './shipDesigns.js';
 // their clear approach axes (d, outward).
 
 const X = V(1, 0, 0), Y = V(0, 1, 0), Z = V(0, 0, 1);
+/** Seam-smoothing of quad lofts, applied once the builder's geometry exists. */
+const smoothLater = (B, range) => { (B.smooth || (B.smooth = [])).push(range); };
+const smoothNow = (B, geo) => { for (const [a, b] of B.smooth || []) smoothRange(geo, a, b); return geo; };
 const TO_Y = new THREE.Matrix4().makeRotationX(-Math.PI / 2);        // lathe z -> +y
 const TO_X = new THREE.Matrix4().makeRotationY(Math.PI / 2);         // lathe z -> +x
 const G = 9.81;
@@ -58,7 +62,7 @@ class Ctx {
     const Bp = new CB();
     const lamps = [];
     build(Bp, lamps);
-    const geo = Bp.geometry();
+    const geo = smoothNow(Bp, Bp.geometry());
     this.parts.push({ geo, pivot: pivot.clone(), q: q.clone(), mode, rate, lamps, ...extra });
     return geo;
   }
@@ -404,7 +408,15 @@ function buildShipyard(c) {
     const f = u < 0.15 ? 0.7 + 2 * u : 1;
     rings.push({ z: -hl / 2 + u * hl, pts: sectionEllipse(hw * f, hh * f, 28, 2.4) });
   }
-  B.loft(rings, (i, j) => (j % 5 === 0 ? CK.BRONZE : Math.abs(Math.cos((i / 28) * TAU)) > 0.75 ? DK.PORTS : DK.LIVERY), { capStart: CK.DARK, capEnd: CK.DARK });
+  // one kind per plate (quadLoft: per-vertex kinds blended bronze into livery through every kind
+  // between); the newest rings forward still bare plate and dark insulation, raggedly
+  const nR = rings.length - 1;
+  const hs = (i, j) => { const x = Math.sin(i * 91.7 + j * 47.3 + c.livery * 13.1) * 43758.5453; return x - Math.floor(x); };
+  smoothLater(B, quadLoft(B, rings, (i, j) => {
+    const front = (j - (nR - 4)) / 4;
+    if (front > 0 && hs(i, j) < front * 1.2) return front > 0.5 && hs(i + 5, j) < 0.45 ? CK.DARK : DK.GRIME;
+    return j % 5 === 4 ? DK.GRIME : Math.abs(Math.cos(((i + 0.5) / 28) * TAU)) > 0.75 ? DK.PORTS : DK.LIVERY;
+  }, { capStart: CK.DARK, capEnd: CK.DARK }));
   const zP = -hl / 2 + plated * hl;
   for (let z = zP + 12; z < hl / 2; z += 14) {
     const f = 1 - Math.max(0, (z - hl * 0.3) / (hl * 0.2)) * 0.6;
@@ -601,7 +613,8 @@ function buildFarm(c) {
       for (let i = 0; i < segs; i++) { const a = (i / segs) * TAU; pts.push([Math.cos(a) * R, Math.sin(a) * R]); }
       rings.push({ z, pts });
     }
-    Bp.loft(rings, (i, j) => (j % 4 === 0 ? CK.BRONZE : Math.floor(i / 4) % 2 ? CK.ROOF : DK.LIVERY), { capStart: DK.PORTS, capEnd: DK.PORTS });
+    // field strips and livery strips, one kind per panel (the bronze girths are the tori below)
+    smoothLater(Bp, quadLoft(Bp, rings, (i) => (Math.floor(i / 4) % 2 ? CK.ROOF : DK.LIVERY), { capStart: DK.PORTS, capEnd: DK.PORTS }));
     for (let j = 0; j <= n; j += 2) Bp.at(0, 0, -L / 2 + (L * j) / n), Bp.torus(R + 0.8, 1.2, segs, 5, CK.BRONZE), Bp.pop();
     for (const s of [-1, 1]) Bp.lathe([[18, s * (L / 2 + 1), CK.BRONZE], [R * 0.9, s * (L / 2 + 1), DK.CONCOURSE], [R, s * (L / 2), CK.BRONZE]], segs, 0, { closedProfile: false });
     for (let k = 0; k < strips * 2; k++) {
@@ -727,7 +740,7 @@ export function buildBeltStation(kind, seed, livery = 0) {
   const t0 = performance.now();
   const c = new Ctx(seed, livery);
   BUILDERS[kind](c);
-  const geo = c.B.geometry();
+  const geo = smoothNow(c.B, c.B.geometry());
   let radius = geo.boundingSphere.center.length() + geo.boundingSphere.radius;
   let tris = geo.index.count / 3;
   for (const p of c.parts) {

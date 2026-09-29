@@ -110,7 +110,7 @@ export function buildConcordYard() {
       const w = LA * f * 0.4, top = LB * f - 5;
       deck.push({ z, pts: [[-w, top], [w, top], [w, top - 8], [-w, top - 8]] });
     }
-    H.loft(deck, (i) => (i === 0 ? CK.GARDEN : CK.HULL));
+    quadLoft(H, deck, (i) => (i === 0 ? CK.GARDEN : CK.HULL), { capStart: CK.HULL, capEnd: CK.HULL });   // (per-vertex kinds drew a lantern seam: 3 -> 1 through 2)
   }
   // crown bridge astern of the atrium (as on the finished ships)
   {
