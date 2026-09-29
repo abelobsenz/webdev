@@ -308,6 +308,12 @@ export function buildOutpost(seed, weight = 0.5, lat = 0, feature = null) {
 
 // ------------------------------------------------------------------------ runtime --
 
+/** Lamp gain for a settlement whose Sun stands at sine-elevation mu: 1 by night, dayK by day. */
+export function lampDayGain(mu, dayK) {
+  const t = Math.min(1, Math.max(0, (mu + 0.02) / 0.16));
+  return 1 - (1 - dayK) * t * t * (3 - 2 * t);
+}
+
 export class LunarOutposts {
   constructor(parent) {
     this.parent = parent;                 // the Moon's group (Moon frame, km)
@@ -325,6 +331,7 @@ export class LunarOutposts {
       return { lat, lon, w, up, feature, group: g, built: false, data: null, rovers: null, riders: null };
     });
     this._wp = new THREE.Vector3();
+    this.sunM = new THREE.Vector3(1, 0, 0);          // toward the Sun, Moon frame (set by the Moon each frame)
     this._local = new THREE.Vector3();
     this._inv = new THREE.Matrix4();
     this.buildMs = 0;
@@ -337,7 +344,7 @@ export class LunarOutposts {
     site.data = d;
     const mesh = lunarMesh(d.geo, {}, this.mat);
     mesh.name = `${site.group.name}: works, pads, domes and ground`;
-    addLamps(mesh, d.lamps, { minPx: 0.9 });
+    site.lamps = addLamps(mesh, d.lamps, { minPx: 0.9 });
     site.group.add(mesh);
     for (const [part, list] of Object.entries(d.inst)) {
       const tint = list.some((e) => e.tint);
@@ -397,6 +404,9 @@ export class LunarOutposts {
       if (!s.built && d < 600 && d < wantD) { want = i; wantD = d; }
       s.group.visible = s.built && (camera ? pixelRadius(camera, this._wp, (s.data?.radius || 3000) * 0.001, viewH) > 1.5 : d < 200);
       if (!s.built) continue;
+      // street and yard lamps burn by night; by day only the beacons and pad lights keep a glow
+      // (at full strength in sunlight thousands of lamp sprites read as white speckle)
+      if (s.lamps && s.group.visible) s.lamps.material.uniforms.uGain.value = lampDayGain(s.up.dot(this.sunM), 0.22);
       // the furniture (craft, domes, vaults, trackers, boulders) and the rovers only near enough
       // to be told apart; from farther the merged ground plan and its lamps stand for the town
       const near = s.group.visible && d < DETAIL_KM;

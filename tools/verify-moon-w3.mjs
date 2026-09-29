@@ -185,6 +185,30 @@ space.scene.add(moon.group);
   ok(bb.min.y >= -hh - 20 && bb.max.y <= hh + 40, 'yard within its frames');
 }
 
+// ------------------------------------------------------------ lamps by day --
+{
+  const { lampDayGain } = await import('../src/space/lunarOutposts.js');
+  ok(lampDayGain(-0.3, 0.2) === 1 && Math.abs(lampDayGain(0.5, 0.2) - 0.2) < 1e-9, 'lamp gain: full by night, dimmed by day');
+  let mono = true, prev = 2;
+  for (let mu = -0.1; mu <= 0.3; mu += 0.005) { const g = lampDayGain(mu, 0.06); if (g > prev + 1e-12 || !Number.isFinite(g)) mono = false; prev = g; }
+  ok(mono, 'lamp gain falls smoothly as the Sun rises');
+  // the Landing's lamps follow its Sun through a day (the Moon frame's +X)
+  const cam = space.camera;
+  cam.position.copy(sim.moonPos).add(new THREE.Vector3(R_MOON + 5, 0, 0).applyQuaternion(sim.moonQuat));
+  cam.updateMatrixWorld();
+  const gains = [];
+  for (let h = 0; h < 30 * 24; h += 36) {
+    sim.t = h * 3600; sim.step(0); moon.update(sim, h * 3600);
+    const muL = new THREE.Vector3().copy(sim.sunDir).applyQuaternion(sim.moonQuat.clone().invert()).x;
+    gains.push([muL, moon.landingLamps.material.uniforms.uGain.value]);
+  }
+  if (process.env.DBG) console.log(JSON.stringify(gains));
+  ok(gains.some(([m, g]) => m > 0.3 && g < 0.35) && gains.some(([m, g]) => m < -0.1 && g === 1), `Landing lamps dim by day, full by night (${gains.length} samples)`);
+  t0 = performance.now();
+  for (let f = 0; f < 300; f++) moon.update(sim, 5000 + f * 0.016);
+  report.moonUpdateMs = +((performance.now() - t0) / 300).toFixed(3);
+}
+
 // ------------------------------------------------------------ Medii roofs --
 {
   const L = buildMediiLanding();

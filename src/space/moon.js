@@ -14,7 +14,7 @@ import { lunarMesh, LUNAR_FRAME, LK, createLunarMaterial } from './lunarMaterial
 import { CB } from '../craft/craftGeometry.js';
 import { LunarTraffic } from './lunarTraffic.js';
 import { buildMediiWorks } from './lunarWorks.js';
-import { LunarOutposts } from './lunarOutposts.js';
+import { LunarOutposts, lampDayGain } from './lunarOutposts.js';
 import { LunarHops } from './lunarHops.js';
 import { LunarRingTrains, LunarRingHalls } from './lunarRing.js';
 import { LunarOrbitals } from './lunarOrbitals.js';
@@ -446,7 +446,7 @@ export class Moon {
     this.landingData = buildMediiLanding();
     this.landingMesh = lunarMesh(this.landingData.geo, { lit: 0.6 });
     this.landingMesh.name = 'Medii Landing town, harbour, landing fields and mass driver';
-    addLamps(this.landingMesh, this.landingData.lamps, { minPx: 1.0 });
+    this.landingLamps = addLamps(this.landingMesh, this.landingData.lamps, { minPx: 1.0 });
     this.landing.add(this.landingMesh);
     {
       const top = this.landingData.liftTop.clone().multiplyScalar(0.001);
@@ -576,11 +576,22 @@ export class Moon {
         _sunSite.copy(sim.sunDir).applyQuaternion(_lq);
         this.life.update(realTime, cam, this.landing, _sunSite);
       }
+      _sunM.copy(sim.sunDir).applyQuaternion(_lq.copy(sim.moonQuat).invert());
+      // lamps by day: the Landing's streets dark, its beacons and quays dimmed (the Landing
+      // stands at the Moon frame's +X)
+      const muL = _sunM.x;
+      if (this.landingLamps) this.landingLamps.material.uniforms.uGain.value = lampDayGain(muL, 0.3);
+      if (this.life) {
+        if (this.life.streetLamps) this.life.streetLamps.material.uniforms.uGain.value = lampDayGain(muL, 0.06);
+        // (the Works' lamp set, found once)
+        if (this._worksLamps === undefined) this._worksLamps = (this.life.worksMesh && this.life.worksMesh.children.find((c) => c.material && c.material.uniforms && c.material.uniforms.uGain)) || null;
+        if (this._worksLamps) this._worksLamps.material.uniforms.uGain.value = lampDayGain(muL, 0.45);
+      }
+      this.outposts.sunM.copy(_sunM);
       this.outposts.update(realTime, cam, this.space.camera, this.space.size.y);
       this.hops.update(realTime);
       this.ringTrains.update(realTime, cam);
       this.ringHalls.update(cam);
-      _sunM.copy(sim.sunDir).applyQuaternion(_lq.copy(sim.moonQuat).invert());
       this.orbitals.update(realTime, _sunM, cam, this.space.camera, this.space.size.y);
     }
     this.atmoU.uCenter.value.copy(sim.moonPos);
