@@ -250,37 +250,33 @@ float ef_seaIce(vec3 b, float fp, float ice) {
   return iceE;
 }
 
-// The water's own colour (linear albedo): phytoplankton blooms in the productive seas (the high
-// latitudes, the upwelling coasts, the shelves) drawn out into filaments by the eddies, milky
-// turquoise where coccolithophores bloom; brown sediment on the shelves off the coasts.
+// The water's own colour (linear albedo), refined below the bake's texels. The bake already
+// paints the blooms (milky turquoise coccolithophores, green diatoms), the river plumes and the
+// shelves as smooth patches ~20 km a texel; here each coloured patch is drawn out into the
+// filaments of the eddies that stir it (~40 km and ~12 km across), keeping its mean, and the
+// open ocean gets a faint swirl of the mesoscale eddies (~100 km). Ice and bergs are left alone.
+const vec3 EF_DEEP = vec3(0.004, 0.011, 0.028);      // the bake's open-ocean albedo
 vec3 ef_seaColour(vec3 b, float fp, float shelf, float H, vec3 seaAlb) {
-  float alat = abs(b.y);
-  float prod = smoothstep(0.5, 0.72, alat) * (1.0 - smoothstep(0.88, 0.96, alat)) + 0.8 * shelf;
-  prod *= smoothstep(-0.2, 0.4, snoise(b * 9.0 + 2.0));                         // ~700 km bloom regions
-  vec3 col = seaAlb;
-  // mesoscale eddies: a gentle darker and lighter swirl everywhere (~100 km)
   vec3 wq = b * 45.0;
   vec3 wv = vec3(snoise(wq + 7.0), snoise(wq + 19.0), snoise(wq + 31.0));
   float ed = snoise(b * 70.0 + wv * 1.8) * ef_fade(260.0, fp);
-  col *= 1.0 + 0.14 * ed;
-  if (prod > 0.02) {
-    // filaments: the ridges of a warped field, ~40 km and ~12 km across
-    float f1 = 1.0 - abs(snoise(b * 160.0 + wv * 2.6));
-    float fil = f1 * f1 * f1 * ef_fade(80.0, fp);
-    float w2 = ef_fade(22.0, fp);
-    if (w2 > 0.0) { float f2 = 1.0 - abs(snoise(b * 520.0 + wv * 5.0 + 3.0)); fil = mix(fil, fil * (0.4 + 1.3 * f2 * f2), w2); }
-    float bloom = prod * (0.35 + 0.65 * fil);
-    float cocco = smoothstep(0.1, 0.6, snoise(b * 5.0 + 13.0)) * smoothstep(0.55, 0.75, alat);
-    vec3 bc = mix(vec3(0.012, 0.05, 0.04), vec3(0.05, 0.13, 0.13), cocco);
-    col = mix(col, bc, clamp(bloom, 0.0, 1.0) * 0.75);
+  vec3 dv = seaAlb - EF_DEEP;
+  float colored = clamp(length(dv) / 0.03, 0.0, 1.0) * (1.0 - smoothstep(0.15, 0.3, seaAlb.r));
+  float s = 1.0;
+  if (colored > 0.02) {
+    float w1 = ef_fade(80.0, fp), w2 = ef_fade(22.0, fp);
+    if (w1 > 0.0) {
+      float f1 = 1.0 - abs(snoise(b * 160.0 + wv * 2.6));
+      s += 1.3 * w1 * (f1 * f1 * f1 - 0.3);
+    }
+    if (w2 > 0.0) {
+      float f2 = 1.0 - abs(snoise(b * 520.0 + wv * 5.0 + 3.0));
+      s += 0.8 * w2 * (f2 * f2 * f2 - 0.3);
+    }
+    // (the shelves' own colour is the sea floor's, stirred less than a bloom)
+    s = mix(1.0, clamp(s, 0.2, 2.0), colored * (1.0 - 0.5 * shelf * exp(-abs(H) * 20.0)));
   }
-  // sediment on the shelf near the coast, in plumes
-  float near = shelf * exp(-abs(H) * 40.0);
-  if (near > 0.02) {
-    float plume = smoothstep(-0.2, 0.6, snoise(b * 260.0 + wv * 1.5 + 5.0)) * ef_fade(60.0, fp);
-    col = mix(col, vec3(0.07, 0.07, 0.045), near * (0.3 + 0.5 * plume));
-  }
-  return col;
+  return (EF_DEEP + dv * s) * (1.0 + 0.08 * ed);
 }
 
 // The glint's texture from the wind: rows of rougher water along the wind (~3 km apart) and
