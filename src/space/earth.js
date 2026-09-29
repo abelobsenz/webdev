@@ -509,6 +509,12 @@ void main() {
   float ndl = max(dot(nb, sun), 0.0);
   vec3 landCol = landAlb / S_PI * (uSunE * sunT * ndl * shadow + skyAmb * (0.6 + 0.4 * shadow));
   // ocean with sun glint
+  // whitecaps: where the storms blow the sea is streaked with foam (Monahan's W = 3.8e-6 U^3.41:
+  // a few per cent of the surface at gale force), lifting its albedo and roughening its glint
+  float gale = smoothstep(0.55, 0.85, weatherAt(b, max(fp, 12.0)).r) * smoothstep(0.55, 0.85, abs(b.y));
+  float U10 = 6.0 + 12.0 * gale;
+  float wcap = 3.84e-6 * pow(U10, 3.41);
+  seaAlb += vec3(0.5 * wcap) * (1.0 - ice);
   vec3 seaCol;
   // ships on the lane the bake found here (the lights bake's alpha, read unfiltered)
   float shRough, shSlick, shFoam;
@@ -523,6 +529,7 @@ void main() {
     float slick = smoothstep(0.55, 0.8, snoise(b * vec3(90.0, 260.0, 90.0) + wind * 3.0) * 0.5 + 0.5) * (1.0 - smoothstep(2.0, 8.0, fp));
     al -= 0.05 * slick;
 #endif
+    al *= 1.0 + 0.35 * gale;                         // Cox-Munk: rougher in a gale
     // the sea's texture in the glint, and the ships' wakes through it
     al *= od_seaTexture(b, fp, B.a);
     al *= 1.0 + 0.7 * shRough - 0.45 * clamp(shSlick, 0.0, 1.0);

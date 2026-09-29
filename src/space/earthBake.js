@@ -3,7 +3,7 @@ import { FullscreenPass, FS_VERT } from '../core/fullscreen.js';
 import { SNOISE_GLSL } from './glsl.js';
 import { NOISE_GLSL } from '../shaders/noise.glsl.js';
 import { LAND_MASK_PNG } from './landmask.js';
-import { CITIES, RANGES, DESERTS, HALO_PORTS, WILDS, FISHING, RIVERS, VORTEX_ISLES } from './earthData.js';
+import { CITIES, RANGES, DESERTS, HALO_PORTS, WILDS, FISHING, RIVERS, VORTEX_ISLES, RIVER_VALLEYS } from './earthData.js';
 import { LANE_BAKE_GLSL, buildLaneTexture } from './earthDetail.js';
 import { bodyDir } from './sim.js';
 
@@ -19,6 +19,7 @@ precision highp float;
 uniform sampler2D uMask;
 uniform sampler2D uData;
 uniform int uNumSeg;
+uniform int uNumValley;
 uniform int uNumCity;
 uniform int uFace;
 uniform int uOut;
@@ -591,6 +592,24 @@ void main() {
   // hamada and massifs: dark rock plateaus between the sand seas
   dsand = mix(dsand, vec3(0.22, 0.16, 0.11), smoothstep(0.56, 0.74, sfbm(d * 13.0 + 3.0, 4) * 0.5 + 0.5) * 0.75);
   c = mix(c, dsand, dune);
+  // the rivers: green irrigated valleys through the deserts (the Nile, the Tigris and Euphrates,
+  // the Indus plain, the inland deltas), dark water through forest and plain
+  {
+    float oasis = 0.0, water = 0.0;
+    for (int i = 0; i < 64; i++) {
+      if (i >= uNumValley) break;
+      vec4 va = texelFetch(uData, ivec2(i, 6), 0);
+      vec4 vb = texelFetch(uData, ivec2(i, 7), 0);
+      vec3 ab = vb.xyz - va.xyz;
+      float t = clamp(dot(d - va.xyz, ab) / max(dot(ab, ab), 1e-9), 0.0, 1.0);
+      float dk = length(d - va.xyz - ab * t) * 6371.0;
+      float wk = va.w * (0.8 + 0.4 * sfbm(d * 400.0 + float(i), 2));
+      float f = exp(-dk * dk / (wk * wk));
+      if (vb.w > 0.5) oasis = max(oasis, f); else water = max(water, f);
+    }
+    c = mix(c, mix(vec3(0.05, 0.1, 0.03), vec3(0.08, 0.12, 0.05), n2 * 0.5 + 0.5), oasis * land);
+    c = mix(c, vec3(0.025, 0.04, 0.035), water * land * 0.85);
+  }
   // the desert works: solar fields (dark, blue-grey rectangles) and centre-pivot irrigation
   // (clusters of green discs) scattered through the dry country, ~20 km cells, a few per cent lit
   if (dune > 0.3) {
@@ -706,7 +725,9 @@ void main() {
     }
   }
   float seaIce = smoothstep(77.0, 82.0, latD + n2 * 6.0) + smoothstep(-68.0, -71.0, latD + n2 * 4.0);
-  ocean = mix(ocean, vec3(0.7, 0.75, 0.8) * (0.85 + 0.15 * n2), clamp(seaIce, 0.0, 1.0));
+  // the pack: floes split by a network of dark leads of open water
+  float leads = pow(max(sridged(d * 140.0 + 5.0, 4), 0.0), 6.0) * 0.7 + pow(max(sridged(d * 420.0 + 9.0, 3), 0.0), 8.0) * 0.4;
+  ocean = mix(ocean, vec3(0.7, 0.75, 0.8) * (0.85 + 0.15 * n2) * (1.0 - clamp(leads, 0.0, 0.85)), clamp(seaIce, 0.0, 1.0));
   vec3 alb = land > 0.5 ? c : ocean;
   gl_FragColor = vec4(sqrt(clamp(alb, 0.0, 1.0)), clamp(0.5 + 0.5 * H, 0.0, 1.0));
 }
@@ -771,8 +792,10 @@ function buildDataTexture() {
     for (let i = 0; i < r.pts.length - 1; i++) segs.push([r.pts[i], r.pts[i + 1], r.w, r.h]);
   }
   const arcs = buildArcs();
-  const W = Math.max(segs.length, CITIES.length + 2, arcs.length, 8);
-  const ROWS = 6;
+  const valleys = [];
+  for (const r of RIVER_VALLEYS) for (let i = 0; i < r.pts.length - 1; i++) valleys.push([r.pts[i], r.pts[i + 1], r.w, r.oasis]);
+  const W = Math.max(segs.length, CITIES.length + 2, arcs.length, valleys.length, 8);
+  const ROWS = 8;
   const data = new Float32Array(W * ROWS * 4);
   const v = new THREE.Vector3();
   segs.forEach(([a, b, w, h], i) => {
@@ -788,10 +811,14 @@ function buildDataTexture() {
     data.set([a.a.x, a.a.y, a.a.z, a.s], (4 * W + i) * 4);
     data.set([a.b.x, a.b.y, a.b.z, 0], (5 * W + i) * 4);
   });
+  valleys.forEach(([a, b, w, k], i) => {
+    bodyDir(a[0] * D2R, a[1] * D2R, v); data.set([v.x, v.y, v.z, w], (6 * W + i) * 4);
+    bodyDir(b[0] * D2R, b[1] * D2R, v); data.set([v.x, v.y, v.z, k], (7 * W + i) * 4);
+  });
   const tex = new THREE.DataTexture(data, W, ROWS, THREE.RGBAFormat, THREE.FloatType);
   tex.minFilter = tex.magFilter = THREE.NearestFilter;
   tex.needsUpdate = true;
-  return { tex, numSeg: segs.length, numCity: cities.length, numArc: arcs.length };
+  return { tex, numSeg: segs.length, numCity: cities.length, numArc: arcs.length, numValley: Math.min(valleys.length, 64) };
 }
 
 function cyclones() {
@@ -847,6 +874,7 @@ export class EarthBake {
         uMask: { value: null },
         uData: { value: this.data.tex },
         uNumSeg: { value: this.data.numSeg },
+        uNumValley: { value: this.data.numValley },
         uNumCity: { value: this.data.numCity },
         uFace: { value: 0 },
         uOut: { value: 0 },

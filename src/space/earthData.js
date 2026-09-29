@@ -188,3 +188,18 @@ export const VORTEX_ISLES = [
   [32.7, -17.0, 16, 200],     // Madeira
   [71.0, -8.4, 18, 235],      // Jan Mayen
 ];
+
+// Rivers you can see from orbit: the irrigated valleys that run green through the deserts, and
+// the great rivers' dark water through forest and plain. { pts [[lat, lon]...], w (km), oasis }
+export const RIVER_VALLEYS = [
+  { pts: [[15.6, 32.5], [17.7, 34.0], [19.5, 33.3], [19.2, 30.5], [21.8, 31.3], [24.1, 32.9], [25.7, 32.6], [27.2, 31.2], [30.0, 31.2]], w: 9, oasis: 1 },  // the Nile
+  { pts: [[36.0, 38.5], [34.5, 40.9], [33.4, 43.3], [31.0, 46.0], [30.0, 48.0]], w: 7, oasis: 1 },     // Euphrates
+  { pts: [[37.0, 42.5], [35.5, 43.3], [33.3, 44.4], [31.0, 47.4]], w: 6, oasis: 1 },                   // Tigris
+  { pts: [[33.0, 71.5], [29.5, 70.9], [27.0, 68.3], [24.9, 68.0]], w: 14, oasis: 1 },                  // the Indus plain
+  { pts: [[-19.3, 22.5], [-19.8, 23.4]], w: 30, oasis: 1 },                                             // the Okavango's fan
+  { pts: [[14.3, -4.4], [15.3, -4.0], [16.3, -3.0]], w: 18, oasis: 1 },                                 // the Niger's inland delta
+  { pts: [[-4.0, -73.0], [-3.4, -65.0], [-3.1, -60.0], [-2.3, -54.7], [-1.0, -51.5], [0.0, -50.0]], w: 5, oasis: 0 },  // Amazon
+  { pts: [[38.6, -90.2], [35.1, -90.1], [32.3, -91.0], [30.0, -91.2], [29.1, -89.3]], w: 3, oasis: 0 },  // Mississippi
+  { pts: [[30.0, 78.2], [27.0, 80.5], [25.4, 82.9], [25.6, 85.1], [24.8, 87.9], [22.5, 88.4]], w: 4, oasis: 0 },  // Ganges
+  { pts: [[30.5, 114.3], [30.0, 116.0], [31.9, 118.8], [31.9, 121.0]], w: 3, oasis: 0 },                // Yangtze
+];
