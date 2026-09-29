@@ -383,9 +383,9 @@ export class Starship {
     st.legs += (s.legs - st.legs) * k(1.2);
     st.rcs += (s.rcs - st.rcs) * k(12);
     for (const l of this.movers.legs) l.g.rotation.x = lerp(-1.52, l.out, st.legs);
-    for (const e of this.engines) e.g.setThrust(e.main ? Math.min(1.5, st.throttle * (1 + 0.8 * st.boost)) : st.aux, dt);
+    for (const e of this.engines) e.g.setThrust(e.main ? Math.min(1, st.throttle) : st.aux, dt, st.boost);
     st.reverse += ((s.reverse || 0) - st.reverse) * k(8);
-    if (this.reverse) for (const e of this.reverse) e.setThrust(st.reverse, dt);
+    if (this.reverse) for (const e of this.reverse) e.setThrust(st.reverse, dt, s.reverseBoost || 0);
     const ang = s.ang, lin = s.lin, sun = s.sunlit ?? 1, time = s.time ?? 0;
     for (const j of this.jets) {
       let d = 0;

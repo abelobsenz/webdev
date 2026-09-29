@@ -119,14 +119,22 @@ export function createEngine({ rt, re, len, plumeLen = 18 * re, plumeAngle = 0.2
     exit: [1.0, 0.97, 1.0], core: [0.8, 0.88, 1.0], far: color, env: [0.62, 0.42, 1.0] });
   plume.position.z = len;
   g.add(plume);
-  let heat = 0;
-  g.setThrust = (t, dt = 0.016) => {
+  let heat = 0, surge = 0;
+  // setThrust(t, dt, boost): boost (0..1) is the torch regime, twenty-five times the push, and it
+  // should look it: the jet grows to ~3.2x its length and ~1.9x its width, three times as bright,
+  // with a whiter core, and the skirt runs hotter
+  g.setThrust = (t, dt = 0.016, boost = 0) => {
+    surge += (boost - surge) * (1 - Math.exp(-dt * (boost > surge ? 2.5 : 4)));
+    const b = surge * Math.min(1, t * 1.5);
+    const tt = t * (1 + 2 * b);
     // metal heats in ~1.5 s and cools over ~6 s by radiation
-    const k = t > heat ? 1 - Math.exp(-dt / 1.5) : 1 - Math.exp(-dt / 6);
-    heat += (t - heat) * k;
+    const k = tt > heat ? 1 - Math.exp(-dt / 1.5) : 1 - Math.exp(-dt / 6);
+    heat += (tt - heat) * k;
     nozU.uHeat.value = Math.pow(Math.max(heat, 0), 0.25);                // radiance ~ T^4: temperature ~ power^(1/4)
-    thU.uThrust.value = t;
-    plume.setThrust(t, dt);
+    thU.uThrust.value = tt;
+    plume.scale.set(1 + 0.9 * b, 1 + 0.9 * b, 1 + 2.2 * b);
+    plume.setCore(b);
+    plume.setThrust(tt, dt);
     th.visible = t > 0.01;
   };
   return g;

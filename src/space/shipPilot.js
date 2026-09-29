@@ -299,7 +299,8 @@ export class ShipPilot {
     // the thrusters' visible linear work is only what the pilot asks of them (lift); flight assist's
     // hold against gravity is trimmed by the drives, and braking fires the reverse engines
     this.cmdLin.lerp(V().set(0, i.lift, 0), 1 - Math.exp(-h * 30));
-    this.reverseOn = i.fwd < 0 ? (this.boost ? 1.5 : 1) : 0;
+    this.reverseOn = i.fwd < 0 ? 1 : 0;
+    this.reverseBoost = i.fwd < 0 && this.boost ? 1 : 0;
     this.accel = a.length();                  // what the crew feels
     this.vel.addScaledVector(a.add(g), h);
     this.pos.addScaledVector(this.vel, h);
@@ -479,7 +480,7 @@ export class ShipPilot {
     const Pw = this.worldPos(V()), sd = sim.sunDir, along = Pw.dot(sd);
     const sunlit = along > 0 ? 1 : smooth(R_EARTH * 0.98, R_EARTH * 1.02, V().copy(Pw).addScaledVector(sd, -along).length());
     if (!this.active) { this.cmdAng.multiplyScalar(Math.exp(-dt * 8)); this.cmdLin.multiplyScalar(Math.exp(-dt * 8)); }
-    this.ship.update(dt, { throttle: this.active ? Math.min(burn, 1) : 0, aux: this.active ? Math.min(1, burn) * 0.7 : 0, boost: burn > 1.1 ? 1 : 0, legs: this.legs, rcs, reverse: this.active ? (this.reverseOn || 0) : 0,
+    this.ship.update(dt, { throttle: this.active ? Math.min(burn, 1) : 0, aux: this.active ? Math.min(1, burn) * 0.7 : 0, boost: burn > 1.1 ? 1 : 0, legs: this.legs, rcs, reverse: this.active ? (this.reverseOn || 0) : 0, reverseBoost: this.active ? (this.reverseBoost || 0) : 0,
       ang: this.cmdAng, lin: this.cmdLin, sunlit, time: realTime });
   }
 

@@ -157,6 +157,9 @@ export function createPlume({ r0, len, coreAngle = 0.07, envAngle = 0.44, lc = n
     const inside = c.z > -0.01 && c.z < len && Math.hypot(c.x, c.y) < rr * 1.02;
     mat.side = inside ? THREE.BackSide : THREE.FrontSide;
   };
+  // the torch regime whitens the core toward the far colour (0..1)
+  const core0 = u.uCoreCol.value.clone(), far0 = u.uFarCol.value.clone(), white = new THREE.Color(1, 0.97, 0.92);
+  mesh.setCore = (b) => { u.uCoreCol.value.copy(core0).lerp(white, 0.6 * b); u.uFarCol.value.copy(far0).lerp(core0, 0.45 * b); };
   // state: thrust with ignition growth and a detaching tail at cut-off
   let thrust = 0, grow = len, start = 0, lit = false;
   const speed = len * 1.6;                                            // how fast the front and tail travel (m/s)
