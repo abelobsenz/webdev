@@ -100,6 +100,13 @@ ok(tri < 900000, `demeter ${Math.round(tri)} triangles (< 900k)`);
   const cap = extent(drum.geo, null, (x, y, z) => Math.abs(z) > FARM.halfL + 2 && Math.hypot(x, y) > 30);
   // the frame's bearings sit L+56-10 +- 6 from the drum centre, radius 11..28
   ok(cap.zMax < FARM.halfL + 40, `demeter cap domes end at ${(cap.zMax - FARM.halfL).toFixed(1)} m past the hull, bearings from 40 m`);
+  {
+    const mp = drum.mirrors.attributes.position.array, mi = drum.mirrors.index.array;
+    let mMax = 0, rMin = Infinity; for (const i of mi) mMax = Math.max(mMax, i);
+    for (let i = 0; i < mp.length / 3; i++) rMin = Math.min(rMin, Math.hypot(mp[i * 3], mp[i * 3 + 1]));
+    ok(mMax < drum.mirrors.attributes.position.count && drum.mirrors.attributes.aMir.count === drum.mirrors.attributes.position.count && mp.every(Number.isFinite), `demeter mirror film: ${mi.length / 3} triangles, buffers sane`);
+    ok(rMin > FARM.R + 4, `demeter mirror film ${(rMin - FARM.R).toFixed(1)} m off the drum (clear of the ring girders' hinge bay)`);
+  }
   ok(drum.sweep < FARM.sep - 4, `demeter drums' sweep ${drum.sweep.toFixed(0)} m < half separation ${FARM.sep}`);
   const ring = extent(drum.geo, [8], (x, y, z) => Math.abs(z) < FARM.halfL - 30 && Math.hypot(x, y) > FARM.R + 1 && Math.hypot(x, y) < FARM.R + 30 && Math.abs(((z + FARM.halfL) % (FARM.halfL / 4)) - FARM.halfL / 8) > FARM.halfL / 8 - 5);
   ok(ring.rMax < FARM.R + 9, `demeter ring girders stand ${(ring.rMax - FARM.R).toFixed(1)} m proud (< mirror hinge line ${FARM.R + 4 + 1.8} + lacing)`);

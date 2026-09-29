@@ -302,7 +302,7 @@ export function bindWindow(mesh, sunDir) {
  * pair's day uniform) the cylinder it faces, in view space, for the film's reflection of it.
  * The material is shared, so each sheet sets its own cylinder as it draws. No allocation.
  */
-export function bindMirror(mesh, sunDir, rotor = null, day = null) {
+export function bindMirror(mesh, sunDir, rotor = null, day = null, { R = COL.R, HL = COL.HL, xAxis = null } = {}) {
   const u = mesh.material.uniforms;
   mesh.onBeforeRender = (r, s, cam) => {
     u.uSunView.value.copy(sunDir).transformDirection(cam.matrixWorldInverse);
@@ -310,10 +310,10 @@ export function bindMirror(mesh, sunDir, rotor = null, day = null) {
       _mv.multiplyMatrices(cam.matrixWorldInverse, rotor.matrixWorld);
       u.uCylC.value.setFromMatrixPosition(_mv);
       u.uCylA.value.set(0, 0, 1).transformDirection(_mv);
-      u.uCylX.value.set(1, 0, 0).transformDirection(_mv);
-      u.uCylR.value = COL.R * 0.001; u.uCylHL.value = COL.HL * 0.001;
+      if (xAxis) u.uCylX.value.copy(xAxis).transformDirection(_mv); else u.uCylX.value.set(1, 0, 0).transformDirection(_mv);
+      u.uCylR.value = R * 0.001; u.uCylHL.value = HL * 0.001;
       u.uDay.value = day ? day.value : 1;
-    } else u.uCylR.value = 0;
+    } else { u.uCylR.value = 0; u.uCylHL.value = 0; }
     mesh.material.uniformsNeedUpdate = true;
   };
 }

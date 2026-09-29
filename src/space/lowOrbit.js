@@ -12,6 +12,9 @@ import {
 } from './leoStations.js';
 import { Constellations } from './constellations.js';
 import { droneGeo, DynLamps } from './lifeKit.js';
+import { createMirrorMaterial, bindMirror } from './lagrangeShaders.js';
+
+const FARM_LAND_X = new THREE.Vector3(0, 1, 0);   // Demeter drums: a land strip's centre (the glazing lies between)
 
 // The low and middle shell: Meridian's orbital neighbourhood above the Halo. Everything here
 // flies a real orbit from the sim clock (src/space/kepler.js), in the inertial frame:
@@ -224,13 +227,19 @@ export class LowOrbit {
     {
       const o = new Orbit({ alt: 1050, inc: 28 * DEG, node: 2.3, M0: 2.1 });
       const s = new Station('demeter', o, 0.9, 1400, [0.75, 1.0, 0.55], 0.6);
-      const fr = buildFarmFrame(), dr = buildFarmDrum();
+      const fr = buildFarmFrame(), dr = buildFarmDrum(), mirMat = createMirrorMaterial();
       s.fixed = craftMesh(fr.geo, {}, s.mat);
       lampSet(s.fixed, fr.lamps);
       s.drums = [-1, 1].map((sx) => {
         const d = craftPart(s.fixed, dr.geo);
         d.position.set(sx * FARM.sep, 0, 0);
         lampSet(d, dr.lamps);
+        // the louvre-mirrors' film: the Lagrange mirror shader, reflecting the Sun's glint and,
+        // near the hinge, the drum's own glazing and land strips (land centred on local +y)
+        const film = new THREE.Mesh(dr.mirrors, mirMat);
+        film.frustumCulled = false; film.renderOrder = 3;
+        bindMirror(film, this.sun, d, null, { R: FARM.R, HL: FARM.halfL, xAxis: FARM_LAND_X });
+        d.add(film);
         s.fixed.add(d);
         return d;
       });

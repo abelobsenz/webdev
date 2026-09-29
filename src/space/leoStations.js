@@ -353,6 +353,24 @@ export function buildHabitat() {
   return { fixed: F.geometry(), wheel: W.geometry(), lamps, wheelLamps, ports };
 }
 
+/**
+ * A flat mirror film (w across x, L along +z from the hinge, at local height y, its reflective
+ * face down -y) appended to sheet { pos, nrm, uv, idx } through matrix M; aMir holds the film
+ * coordinates in metres for the mirror shader's gores and seams.
+ */
+function mirrorSheet(sheet, M, w, L, y, nx = 4, nz = 16) {
+  const base = sheet.pos.length / 3, p = new THREE.Vector3(), n = new THREE.Vector3(0, -1, 0).transformDirection(M);
+  for (let j = 0; j <= nz; j++) for (let i = 0; i <= nx; i++) {
+    const x = -w / 2 + (w * i) / nx, z = (L * j) / nz;
+    p.set(x, y, z).applyMatrix4(M);
+    sheet.pos.push(p.x, p.y, p.z); sheet.nrm.push(n.x, n.y, n.z); sheet.uv.push(x, z);
+  }
+  for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) {
+    const a = base + j * (nx + 1) + i, b = a + 1, c = a + nx + 1, d = c + 1;
+    sheet.idx.push(a, b, d, a, d, c);
+  }
+}
+
 // --------------------------------------------------------------- farm ----
 export const FARM = { R: 160, halfL: 320, sep: 290, mirrorLen: 520, tilt: THREE.MathUtils.degToRad(12), strips: 3 };
 export const farmOmega = () => Math.sqrt(9.81 / FARM.R);
@@ -361,7 +379,7 @@ const FARM_CAP = [[163, 4, CK.HULL], [146, 16, CK.HULL], [118, 26, CK.GLASS], [8
 
 /** One drum (axis z): alternating land and glazed strips, hoops and mullion ribs, louvre-mirrors. */
 export function buildFarmDrum() {
-  const B = new CB(), lamps = [];
+  const B = new CB(), lamps = [], sheet = { pos: [], nrm: [], uv: [], idx: [] };
   const { R, halfL: L } = FARM;
   const K = 72, rings = [];
   for (let j = 0; j <= 16; j++) {
@@ -418,7 +436,9 @@ export function buildFarmDrum() {
     const m = rotZ(a - Math.PI / 2).multiply(tr(0, R + 4, -L + 6)).multiply(new THREE.Matrix4().makeRotationX(-FARM.tilt));
     B.push(m);
     const w = R * (TAU / 6) * 0.94;
-    for (let j = 0; j < 8; j++) B.box(0, 0.8, (j + 0.5) * (Lm / 8), w, 0.5, Lm / 8 - 2, CK.PANEL);
+    // aluminised film facing the drum (a shader sheet, below), on a dark ribbed backing
+    for (let j = 0; j < 8; j++) B.box(0, 1.3, (j + 0.5) * (Lm / 8), w, 0.3, Lm / 8 - 2, CK.DARK);
+    mirrorSheet(sheet, B.M, w - 1, Lm - 1, 0.95);
     for (const s of [-1, 1]) B.box(s * w / 2, 0, Lm / 2, 2, 2, Lm, CK.DARK);
     for (let j = 0; j <= 8; j++) B.box(0, 0, j * (Lm / 8), w + 2, 1.4, 1.4, CK.BRONZE);
     B.box(0, -1, 0, w * 0.7, 3.6, 5, CK.BRONZE);                                  // hinge
@@ -429,7 +449,13 @@ export function buildFarmDrum() {
     const tipLocal = V(0, R + 4 + Math.sin(FARM.tilt) * Lm, -L + 6 + Math.cos(FARM.tilt) * Lm).applyMatrix4(rotZ(a - Math.PI / 2));
     B.tube([V(Math.cos(a) * (R + 3), Math.sin(a) * (R + 3), L - 20), tipLocal], 0.6, 4, CK.DARK);
   }
-  return { geo: B.geometry(), lamps, sweep: R + 4 + Math.sin(FARM.tilt) * Lm + 2 };
+  const mirrors = new THREE.BufferGeometry();
+  mirrors.setAttribute('position', new THREE.Float32BufferAttribute(sheet.pos, 3));
+  mirrors.setAttribute('normal', new THREE.Float32BufferAttribute(sheet.nrm, 3));
+  mirrors.setAttribute('aMir', new THREE.Float32BufferAttribute(sheet.uv, 2));
+  mirrors.setIndex(sheet.idx);
+  mirrors.computeBoundingSphere();
+  return { geo: B.geometry(), mirrors, lamps, sweep: R + 4 + Math.sin(FARM.tilt) * Lm + 2 };
 }
 
 /** The fixed frame: end trusses and bearings, the sunward dock, the granary stacks astern. */
