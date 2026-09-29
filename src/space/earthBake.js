@@ -40,6 +40,24 @@ ${SNOISE_GLSL}
 #define PI 3.14159265359
 ${LANE_BAKE_GLSL}
 
+// the maglev corridor (index + 1) within ~20 km of d, else 0
+float nearestArc(vec3 d) {
+  float best = 20.0, id = 0.0;
+  for (int i = 0; i < 400; i++) {
+    if (i >= uNumArc) break;
+    vec4 N = texelFetch(uData, ivec2(i, 3), 0);
+    float off = abs(dot(d, N.xyz)) * 6371.0;
+    if (off >= best) continue;
+    vec4 A = texelFetch(uData, ivec2(i, 4), 0);
+    vec4 Bq = texelFetch(uData, ivec2(i, 5), 0);
+    vec3 pp = d - N.xyz * dot(d, N.xyz);
+    if (dot(cross(A.xyz, pp), N.xyz) < 0.0 || dot(cross(pp, Bq.xyz), N.xyz) < 0.0) continue;
+    best = off;
+    id = float(i + 1);
+  }
+  return id;
+}
+
 vec3 faceDir(vec2 st) {
   float sc = st.x * 2.0 - 1.0, tc = st.y * 2.0 - 1.0;
   vec3 d;
@@ -264,6 +282,12 @@ void main() {
   float mC = maskAt(muv, 6.5);
   if (latD < -85.0) { m0 = 1.0; mc = 1.0; mC = 1.0; }
 
+  if (uOut == 4) {
+    // ids for the Earth shader's moving traffic, sampled unfiltered: the sea-lane leg and the
+    // maglev corridor nearest this texel (index + 1, 0 for none)
+    gl_FragColor = vec4(nearestLane(d), nearestArc(d), 0.0, 1.0);
+    return;
+  }
   if (uOut == 2) {
     float P, S, O, CI;
     cloudPotential(d, 0.0, P, S, O, CI);
@@ -514,7 +538,7 @@ void main() {
       }
     }
     // the alpha channel marks the sea lanes for the Earth shader's ships (an exact leg index + 1)
-    gl_FragColor = vec4(min(warm, 8.0), min(cool, 8.0), min(net, 8.0), nearestLane(d));
+    gl_FragColor = vec4(min(warm, 8.0), min(cool, 8.0), min(net, 8.0), 1.0);
     return;
   }
 
@@ -766,7 +790,7 @@ function mulberry(a) { return () => { a |= 0; a = (a + 0x6d2b79f5) | 0; let t = 
  * Maglev corridors: each metro joins its nearest neighbours (great-circle arcs, a few
  * thousand km at most), so the network follows the settled coasts and river plains.
  */
-function buildArcs() {
+export function buildArcs() {
   const pts = CITIES.map(([lat, lon, w]) => ({ v: bodyDir(lat * D2R, lon * D2R, new THREE.Vector3()), w }));
   const pairs = new Set();
   const arcs = [];
@@ -866,6 +890,9 @@ export class EarthBake {
     // night lights: linear half floats, so mip levels average true light, not its square root
     this.lights = new THREE.WebGLCubeRenderTarget(size, { type: THREE.HalfFloatType, format: THREE.RGBAFormat, generateMipmaps: true, minFilter: THREE.LinearMipmapLinearFilter, magFilter: THREE.LinearFilter, depthBuffer: false });
     this.lights.texture.colorSpace = THREE.NoColorSpace;
+    // traffic ids (sea lanes, maglev corridors): exact integers, so never filtered or mipmapped
+    this.ids = new THREE.WebGLCubeRenderTarget(Math.min(size, 512), { type: THREE.HalfFloatType, format: THREE.RGBAFormat, generateMipmaps: false, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter, depthBuffer: false });
+    this.ids.texture.colorSpace = THREE.NoColorSpace;
     this.data = buildDataTexture();
     const cyc = cyclones();
     while (cyc.length < 28) cyc.push(new THREE.Vector4(0, 1, 0, 0));
@@ -899,7 +926,7 @@ export class EarthBake {
     });
     this.pass = new FullscreenPass(this.mat);
     this.jobs = [];
-    for (const [out, rt] of [[0, this.surfA], [1, this.surfB], [2, this.clouds], [3, this.lights]]) for (let f = 0; f < 6; f++) this.jobs.push({ out, rt, f });
+    for (const [out, rt] of [[0, this.surfA], [1, this.surfB], [2, this.clouds], [3, this.lights], [4, this.ids]]) for (let f = 0; f < 6; f++) this.jobs.push({ out, rt, f });
     this.done = false;
   }
 
@@ -930,5 +957,5 @@ export class EarthBake {
     return this.done;
   }
 
-  dispose() { this.surfA.dispose(); this.surfB.dispose(); this.clouds.dispose(); this.lights.dispose(); this.mat.dispose(); }
+  dispose() { this.surfA.dispose(); this.surfB.dispose(); this.clouds.dispose(); this.lights.dispose(); this.ids.dispose(); this.mat.dispose(); }
 }

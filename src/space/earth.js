@@ -5,7 +5,8 @@ import { U } from '../core/uniforms.js';
 import { SNOISE_GLSL, SPACE_UTIL_GLSL } from './glsl.js';
 import { R_EARTH, MERIDIAN_LON, bodyDir } from './sim.js';
 import { Aurora } from './aurora.js';
-import { EARTH_DETAIL_GLSL, buildLaneTexture, arcologyUniforms, shipClock } from './earthDetail.js';
+import { EARTH_DETAIL_GLSL, buildLaneTexture, buildArcTexture, arcologyUniforms, shipClock, trainClock } from './earthDetail.js';
+import { buildArcs } from './earthBake.js';
 
 // The planet, rendered in one pass on a proxy sphere at the top of the
 // atmosphere. Each fragment ray-traces the ground and the cloud shell and
@@ -538,7 +539,8 @@ void main() {
   // ships on the lane the bake found here (the lights bake's alpha, read unfiltered)
   float shRough, shSlick, shFoam;
   vec3 shipLight;
-  od_ships(b, textureLod(uLights, b, 0.0).a, fp, shRough, shSlick, shFoam, shipLight);
+  vec4 trafficIds = textureLod(uIds, b, 0.0);
+  od_ships(b, trafficIds.r, fp, shRough, shSlick, shFoam, shipLight);
   {
     // sea-surface roughness from the wind (Cox-Munk, ~7 m/s): a broad smooth glint, gently
     // varied by weather systems, with calm slicks streaking it where they are resolved
@@ -642,6 +644,7 @@ void main() {
   emis += arcoNight * 0.12;
   emis += volcNight * 0.05;
   emis += shipLight * 0.05 * (1.0 - landF);
+  emis += od_trains(b, trafficIds.g, fp) * 0.05;
 
   // clouds: the low and middle deck (8 km) and the cirrus above it (12.5 km), each on its own
   // shell, so they part in parallax at a slant and the cirrus shadows the deck beneath it
@@ -762,6 +765,7 @@ void main() {
 // the lane legs (shared with the bake, which marks where each runs) and the arcologies
 const LANES = buildLaneTexture();
 const ARCO = arcologyUniforms();
+const ARCS = buildArcTexture(buildArcs());
 export { LANES as EARTH_LANES };
 const _clock = { t: 0, wrap: 0 };
 const _act = { act: 0, surge: 0 };
@@ -792,6 +796,10 @@ export class Earth {
       uReady: { value: 0 },
       uAtmoGain: { value: 0.36 },
       uLaneTex: { value: LANES.tex },
+      uIds: { value: bake.ids ? bake.ids.texture : null },
+      uArcTex: { value: ARCS.tex },
+      uTrainT: { value: 0 },
+      uTrainWrap: { value: 0 },
       uShipT: { value: 0 },
       uShipWrap: { value: 0 },
       uArco: { value: ARCO.pos },
@@ -835,6 +843,9 @@ export class Earth {
     shipClock(sim.t, _clock);
     u.uShipT.value = _clock.t;
     u.uShipWrap.value = _clock.wrap;
+    trainClock(sim.t, _clock);
+    u.uTrainT.value = _clock.t;
+    u.uTrainWrap.value = _clock.wrap;
     u.uAuroraAct.value = Aurora.activity(realTime, _act).act;
   }
 }

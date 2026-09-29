@@ -264,7 +264,7 @@ let metMat = null;
 
 // ---- Earth ------------------------------------------------------------------------------------
 const tex = () => ({ texture: new THREE.Texture() });
-const fakeBake = { surfA: tex(), surfB: tex(), clouds: { ...tex(), width: 1024 }, lights: tex(), ready: true };
+const fakeBake = { surfA: tex(), surfB: tex(), clouds: { ...tex(), width: 1024 }, lights: tex(), ids: tex(), ready: true };
 ta = performance.now();
 const earth = new Earth(fakeBake, { earthQ: 2, atmoSteps: 9 });
 const earthBuild = performance.now() - ta;
@@ -342,6 +342,9 @@ lint('meteors', metMat);
   ok(performance.now() - tb < 100, 'bake construction');
   lint('earth-bake', bake.mat);
   ok(/nearestLane\(d\)/.test(bake.mat.fragmentShader), 'bake writes the lane index');
+  ok(bake.ids && bake.ids.texture.minFilter === THREE.NearestFilter && !bake.ids.texture.generateMipmaps, 'id cube unfiltered');
+  ok(bake.jobs.filter((j) => j.rt === bake.ids).length === 6, 'id cube baked on all faces');
+  ok(bake.data.numArc < 2048, 'corridor ids exact in half float');
 }
 
 // ---- sea lanes, ships and arcologies -----------------------------------------------------------

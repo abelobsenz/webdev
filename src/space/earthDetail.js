@@ -20,6 +20,9 @@ export const SHIP_V = 0.012;          // km/s (~23 knots)
 export const SHIP_SPACING = 70;       // km between ship slots on each side of a lane
 export const SHIP_PERIOD = SHIP_SPACING / SHIP_V;
 export const LANE_WINDOW = 30;        // km: the bake marks a lane this far either side
+export const TRAIN_V = 0.15;          // km/s (540 km/h)
+export const TRAIN_SPACING = 45;      // km between train slots on each track
+export const TRAIN_PERIOD = TRAIN_SPACING / TRAIN_V;
 export const MAX_LANE_LEGS = 64;
 const D2R = Math.PI / 180;
 
@@ -66,6 +69,29 @@ export function shipClock(t, out = { t: 0, wrap: 0 }) {
   return out;
 }
 
+/** Maglev corridors as a float texture (row 0: normal; row 1: A, traffic; row 2: B). */
+export function buildArcTexture(arcs) {
+  const W = Math.max(arcs.length, 1);
+  const data = new Float32Array(W * 3 * 4);
+  arcs.forEach((a, i) => {
+    data.set([a.n.x, a.n.y, a.n.z, a.w], i * 4);
+    data.set([a.a.x, a.a.y, a.a.z, a.s], (W + i) * 4);
+    data.set([a.b.x, a.b.y, a.b.z, 0], (2 * W + i) * 4);
+  });
+  const tex = new THREE.DataTexture(data, W, 3, THREE.RGBAFormat, THREE.FloatType);
+  tex.minFilter = tex.magFilter = THREE.NearestFilter;
+  tex.needsUpdate = true;
+  return { tex, count: arcs.length };
+}
+
+/** The train clock (as the ship clock: wrapped per slot period so a slot never reshuffles). */
+export function trainClock(t, out = { t: 0, wrap: 0 }) {
+  const w = Math.floor(t / TRAIN_PERIOD);
+  out.t = t - w * TRAIN_PERIOD;
+  out.wrap = ((w % 4096) + 4096) % 4096;
+  return out;
+}
+
 /** Bake GLSL: the index + 1 of the nearest lane leg within LANE_WINDOW km of d, else 0. */
 export const LANE_BAKE_GLSL = /* glsl */ `
 uniform sampler2D uLanes;
@@ -91,6 +117,10 @@ float nearestLane(vec3 d) {
 
 export const EARTH_DETAIL_GLSL = /* glsl */ `
 uniform sampler2D uLaneTex;
+uniform samplerCube uIds;      // r: sea-lane leg + 1, g: maglev corridor + 1 (nearest-filtered)
+uniform sampler2D uArcTex;     // maglev corridors: row 0 normal, row 1 A (+ traffic), row 2 B
+uniform float uTrainT;
+uniform float uTrainWrap;
 uniform float uShipT;
 uniform float uShipWrap;
 uniform vec4 uArco[${ARCOLOGIES.length}];
@@ -102,6 +132,8 @@ const vec3 KILAUEA = vec3(${bodyDir(19.41 * D2R, -155.28 * D2R, new THREE.Vector
 vec4 weatherAt(vec3 b, float fp);      // (earth.js: the baked weather, drifted)
 const float SHIP_V = ${SHIP_V.toFixed(4)};
 const float SHIP_SP = ${SHIP_SPACING.toFixed(1)};
+const float TRAIN_V = ${TRAIN_V.toFixed(3)};
+const float TRAIN_SP = ${TRAIN_SPACING.toFixed(1)};
 
 // An elongated light or mark (sx, sy km) drawn no smaller than the pixel: its peak falls as its
 // drawn area grows, so what it adds to a pixel is kept as it shrinks below one.
@@ -163,6 +195,34 @@ void od_ships(vec3 b, float laneA, float fp, out float rough, out float slick, o
       foam += od_line(yo, 0.03 + 0.012 * d, fp) * exp(-d / 0.9) * 0.45 * dayK * ends;
     }
   }
+}
+
+// Trains on the maglev corridor the bake found near b: lit consists ~400 m long running at
+// ~540 km/h both ways on the two tracks, each corridor's traffic by its size; drawn at their true
+// size and so, far off, as the faint moving beads the corridor's glow is made of.
+vec3 od_trains(vec3 b, float arcA, float fp) {
+  float id = floor(arcA + 0.5);
+  if (id < 0.5 || fp > 12.0) return vec3(0.0);
+  int i = int(id) - 1;
+  vec4 N = texelFetch(uArcTex, ivec2(i, 0), 0);
+  vec4 A = texelFetch(uArcTex, ivec2(i, 1), 0);
+  float y = dot(b, N.xyz) * 6371.0;
+  if (abs(y) > 1.5 + fp) return vec3(0.0);
+  vec3 pp = normalize(b - N.xyz * dot(b, N.xyz));
+  float along = atan(dot(cross(A.xyz, pp), N.xyz), dot(A.xyz, pp)) * 6371.0;
+  vec3 L = vec3(0.0);
+  for (int k = 0; k < 2; k++) {
+    float dir = k == 0 ? 1.0 : -1.0;
+    float yl = y - dir * 0.012;
+    float u = along * dir - TRAIN_V * uTrainT;
+    float slotF = u / TRAIN_SP;
+    float slot = floor(slotF);
+    vec3 hh = hash33(vec3(slot - uTrainWrap, id * 3.0 + float(k), 9.1));
+    if (hh.x > 0.35 + 0.6 * A.w) continue;
+    float x = (slotF - slot - 0.5 - 0.3 * (hh.y - 0.5)) * TRAIN_SP;
+    L += mix(vec3(0.8, 0.9, 1.0), vec3(1.0, 0.85, 0.6), hh.z) * od_blob(x, yl, 0.2, 0.02, fp) * 40.0;
+  }
+  return L;
 }
 
 // The sea's texture in the glint: a roughness factor (1 = the mean) from the eddies and fronts,
