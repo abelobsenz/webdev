@@ -17,6 +17,7 @@ import { PerfManager } from './core/perf.js';            // [experience] GPU tim
 import { loaderProgress, nextPaint } from './ui/loader.js'; // [experience] loader stages
 // [space] orbital view (src/space): its own km-scale scene, entered by riding the tether
 import { SpaceMode } from './space/index.js';
+import { Pilot } from './core/pilot.js';
 
 const smooth = (a, b, x) => { const t = Math.min(Math.max((x - a) / (b - a), 0), 1); return t * t * (3 - 2 * t); };
 const params = new URLSearchParams(location.search);
@@ -87,6 +88,8 @@ class App {
     this.perf = new PerfManager(this);
     { const frame = this.frame.bind(this); this.frame = (dt) => { this.perf.begin(); frame(dt); this.perf.end(); }; }
     this.ui = new UI(this);
+    // the piloted aerodyne (V): built on first boarding
+    this.pilot = new Pilot(this);
     // [space] orbital view (heavy resources are built on first use)
     this.space = new SpaceMode(this);
     const start = POIS[0];
@@ -178,7 +181,11 @@ class App {
 
     // [space] while the orbital view is up the city is not rendered at all
     if (this.space && this.space.onlySpace) { this.space.frame(dt); if (this.ui) this.ui.update(dt); this.adaptResolution(dt); return; }
-    if (this.space && this.space.cityCam) this.space.driveCity(dt); else this.controls.update(dt); // [space] ride up/down the tether
+    if (this.space && this.space.cityCam) this.space.driveCity(dt); // [space] ride up/down the tether
+    else {
+      if (!(this.pilot && this.pilot.active)) this.controls.update(dt);
+      if (this.pilot) this.pilot.update(dt);    // flies the aerodyne (and the chase camera) or keeps it hovering, parked
+    }
     // adapt clip planes: keep depth precision when flying high above the city
     {
       const alt = this.camera.position.y;

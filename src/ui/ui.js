@@ -270,6 +270,10 @@ export class UI {
       if (code === 'Escape') { own(); this.tour.stop(); return; }
     }
     if (t && t.type === 'range' && code.startsWith('Arrow')) return;
+    // the aerodyne: V boards it or leaves it; the guided moves hand the camera back first
+    const pilot = this.app.pilot;
+    if (code === 'KeyV' && pilot && !(this.app.space && this.app.space.active)) { own(); this.tour.stop(); pilot.toggle(); return; }
+    if (pilot && pilot.active && (['KeyO', 'KeyM', 'KeyT', 'KeyK'].includes(code) || POIS.some((p) => p.key === e.key))) pilot.exit();
     // [space] orbital view: its own keys while it is up; O toggles it from anywhere
     if (this.app.space && this.app.space.handleKey(e)) return;
     if (code === 'KeyO' && this.app.space) { own(); this.tour.stop(); this.app.space.toggle(); return; }
