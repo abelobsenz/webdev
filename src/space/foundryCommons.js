@@ -171,6 +171,28 @@ export function buildCommons() {
   return { geo: B.geometry(), lamps, blocks };
 }
 
+/**
+ * The foundry's working lights (metres, foundry frame; lamps only, nothing in any approach):
+ * guidance rows down each bay's floor (green toward the mouth, white inboard), floodlights under
+ * the vault beams washing the floors, amber edge lights along the bays' upper rails, red
+ * beacons on the stock stacks and the courts' corners.
+ */
+export function buildFoundryLights() {
+  const lamps = [];
+  for (const x of [-4200, 0, 4200]) {
+    for (let z = -3400, k = 0; z <= 1400; z += 200, k++) for (const dx of [-160, 160]) {
+      lamps.push({ p: V(x + dx, -968, z), r: 7, color: z < -2200 ? LAMP.GREEN : LAMP.WHITE, i: 1.6, breathe: 0.7, phase: ((1400 - z) / 4800 * 2) % 1 });
+    }
+    for (const z of [-3400, -1000, 1400]) for (const dx of [-700, 0, 700]) lamps.push({ p: V(x + dx, 1210, z), r: 22, color: LAMP.WHITE, i: 2.2, dir: V(0, -1, 0) });
+    for (const dx of [-1450, 1450]) for (let z = -3300; z <= 1500; z += 300) lamps.push({ p: V(x + dx, 530, z), r: 9, color: LAMP.AMBER, i: 1.5 });
+  }
+  for (const s of [-1, 1]) {
+    for (const z of [1750, 2600, 3450, 4300, 5150]) lamps.push({ p: V(s * 6500, 64, z), r: 12, color: LAMP.RED, i: 2, breathe: 0.8, phase: z / 5150 });
+    for (const [dx, dz] of [[-850, 1000], [850, 1000], [-850, 6000], [850, 6000]]) lamps.push({ p: V(s * 6500 + dx, -800, dz), r: 12, color: LAMP.AMBER, i: 1.8 });
+  }
+  return lamps;
+}
+
 /** A tram car (metres, +Z along the street): 120 m, glazed, on its bogies. */
 export function buildTram() {
   const B = new CB();
@@ -223,6 +245,8 @@ export class FoundryCommons {
     this.data = buildCommons();
     const m = craftMesh(this.data.geo, opt);
     addLamps(m, this.data.lamps, { minPx: 1.2 });
+    this.lights = buildFoundryLights();
+    addLamps(m, this.lights, { minPx: 1.1 });
     this.root.add(m);
     this.mesh = m;
     this.trams = craftInstances(buildTram(), Array.from({ length: COMMONS.trams }, () => new THREE.Matrix4()), opt, m.material);

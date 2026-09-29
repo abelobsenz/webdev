@@ -505,3 +505,29 @@ console.log('SUN_SHADERS_UNIFORMS_VERIFIED');
   console.log(JSON.stringify({ shuttleFlotillaClearKm: +flo.toFixed(1), shuttleMinSeparationM: Math.round(meet * 1000) }));
 }
 console.log('SHUTTLES_VERIFIED');
+// the foundry's working lights: out of every bay's receiving volume and the tenders' way, on the foundry's own fittings
+{
+  const { buildFoundryLights } = await import('../src/space/foundryCommons.js');
+  const L = buildFoundryLights(), F = buildFoundry();
+  // (the foundry's triangles bucketed by 200 m cells of their bounds)
+  const P = F.geo.attributes.position, ix = F.geo.index, C = 200, grid = new Map(), tris = [];
+  for (let i = 0; i < ix.count; i += 3) {
+    const t = new THREE.Triangle(...[0, 1, 2].map((j) => V().fromBufferAttribute(P, ix.getX(i + j))));
+    const bb = new THREE.Box3().setFromPoints([t.a, t.b, t.c]), k = tris.push(t) - 1;
+    for (let x = Math.floor(bb.min.x / C); x <= Math.floor(bb.max.x / C); x++) for (let y = Math.floor(bb.min.y / C); y <= Math.floor(bb.max.y / C); y++) for (let z = Math.floor(bb.min.z / C); z <= Math.floor(bb.max.z / C); z++) {
+      const key = `${x},${y},${z}`; if (!grid.has(key)) grid.set(key, []); grid.get(key).push(k);
+    }
+  }
+  let worst = 0; const cp = V();
+  for (const l of L) {
+    assert.ok(Number.isFinite(l.p.x + l.p.y + l.p.z), 'finite lamp');
+    for (const b of F.bays) assert.ok(!(l.p.x > b.min.x && l.p.x < b.max.x && l.p.y > b.min.y && l.p.y < b.max.y && l.p.z > b.min.z && l.p.z < b.max.z), 'lamp outside the receiving volume');
+    let d = Infinity;
+    const cx = Math.floor(l.p.x / C), cy = Math.floor(l.p.y / C), cz = Math.floor(l.p.z / C);
+    for (let x = cx - 1; x <= cx + 1; x++) for (let y = cy - 1; y <= cy + 1; y++) for (let z = cz - 1; z <= cz + 1; z++) for (const k of grid.get(`${x},${y},${z}`) || []) d = Math.min(d, tris[k].closestPointToPoint(l.p, cp).distanceTo(l.p));
+    worst = Math.max(worst, d);
+  }
+  assert.ok(worst < 60, `every lamp on a fitting (worst ${worst.toFixed(0)} m from the foundry's surface)`);
+  console.log(JSON.stringify({ foundryLights: L.length, foundryLightWorstMetres: Math.round(worst) }));
+}
+console.log('FOUNDRY_LIGHTS_VERIFIED');
