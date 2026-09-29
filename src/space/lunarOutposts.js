@@ -23,6 +23,7 @@ import { Path } from './lunarTraffic.js';
 // Moon like Medii Landing is.
 
 const UP = new THREE.Vector3(0, 1, 0);
+const DETAIL_KM = 90;
 const TAU = Math.PI * 2;
 const _m = new THREE.Matrix4(), _p = new THREE.Vector3(), _t = new THREE.Vector3(), _x = new THREE.Vector3(), _y = new THREE.Vector3(), _z = new THREE.Vector3();
 const LIVERY = [[0.14, 0.26, 0.55], [0.86, 0.82, 0.72], [0.7, 0.2, 0.14], [0.2, 0.45, 0.4], [0.9, 0.6, 0.12]];
@@ -100,22 +101,21 @@ export function buildOutpost(seed, weight = 0.5, lat = 0) {
   // vault terraces: rows of shielded vaults on two or three bearings, doors to a lane
   const nRows = 2 + Math.round(weight * 4);
   for (let r = 0; r < nRows; r++) {
-    const s = spot(80, 260 * sz, 420 * sz);
+    // a row pair: n vaults either side of a lane, 34 m apart (the berms 5 m clear), doors in
+    const n = 4 + Math.floor(rnd() * 5 * sz);
+    const RR = Math.hypot(n * 17 + 1, 30 + 18.5) + 2;
+    const s = spot(RR, 260 * sz + RR * 0.5, 460 * sz + RR);
     if (!s) continue;
     const [cx, cz, a] = s;
+    claim('vaults', cx, cz, RR);
     const yaw = a + Math.PI / 2;
-    const n = 4 + Math.floor(rnd() * 5 * sz);
-    const cells = [];
+    const c = Math.cos(yaw), sn = Math.sin(yaw);
     for (let i = 0; i < n; i++) for (const side of [-1, 1]) {
       const lx = (i - (n - 1) / 2) * 34, lz = side * 30;
-      const c = Math.cos(yaw), sn = Math.sin(yaw);
       const x = cx + lx * c + lz * sn, z = cz - lx * sn + lz * c;
-      if (!free(x, z, 19)) continue;
-      cells.push([x, z]);
       put('vault', seatLocal(_m, cx, cz, yaw, lx, lz, side > 0 ? Math.PI : 0));
       lamps.push({ p: new THREE.Vector3(x - side * 18.6 * sn, gy(x, z) + 5.3, z - side * 18.6 * c), r: 0.9, color: LAMP.AMBER, i: 0.8 });
     }
-    for (const [x, z] of cells) claim('vault', x, z, 19);
     // the lane between the rows, to the square
     road([cx, cz], [cx * 0.3, cz * 0.3], 8);
   }
@@ -314,6 +314,7 @@ export class LunarOutposts {
       list.forEach((e, i) => { im.setMatrixAt(i, e.m); if (tint) im.instanceColor.setXYZ(i, ...(e.tint || [1, 1, 1])); });
       im.name = `${site.group.name} ${part}`;
       site.group.add(im);
+      (site.detail ||= []).push(im);                       // hidden beyond DETAIL_KM
     }
     // rovers on the outpost's roads
     site.paths = d.loops.filter((p) => p.length > 1).map((p) => new Path(p));
@@ -339,7 +340,12 @@ export class LunarOutposts {
       const d = this._wp.distanceTo(cam);
       if (!s.built && d < 600 && d < wantD) { want = i; wantD = d; }
       s.group.visible = s.built && (camera ? pixelRadius(camera, this._wp, (s.data?.radius || 3000) * 0.001, viewH) > 1.5 : d < 200);
-      if (s.group.visible && d < 40 && s.rovers) this.moveRovers(s, t);
+      if (!s.built) continue;
+      // the furniture (craft, domes, vaults, trackers, boulders) and the rovers only near enough
+      // to be told apart; from farther the merged ground plan and its lamps stand for the town
+      const near = s.group.visible && d < DETAIL_KM;
+      if (near !== s.detailOn) { s.detailOn = near; for (const m of s.detail || []) m.visible = near; s.rovers.visible = near; }
+      if (near && d < 40) this.moveRovers(s, t);
     }
     if (want >= 0) this.build(this.sites[want], want);
   }

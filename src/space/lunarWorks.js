@@ -328,7 +328,7 @@ export function buildMediiWorks(landingPlan = [], driver = null) {
   {
     const { u0, u1, v0, v1 } = MINE;
     pad(u0, u1, v0, v1, 0.25, LK.GROUND, 110);
-    foot('mine', u0, u1, v0, v1 + 260);
+    foot('mine', u0, u1, v0, v1 + 225);                    // (the haul loop runs on into the plant's yard, to the hopper)
     // the working face: three benches stepping up to the undisturbed plain beyond (v < v0)
     const bench = (vA, h, depth) => {
       const n = 24;

@@ -436,6 +436,7 @@ export class LunarTraffic {
     this.walkers.visible = dTown < 4500;
     this.suits.visible = dFields < 4000;
     for (const b of this.boulders) b.visible = dMine < 14000;
+    this.posts.visible = this.panels.visible = near < 40000;
     const vehNear = near < 30000;
     for (let i = 0; i < this.vehicles.length; i++) this.vehicles[i].visible = vehNear;
     // the array follows the Sun (a new turn when it has moved 0.3 degrees)
