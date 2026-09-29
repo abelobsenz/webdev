@@ -26,6 +26,8 @@ space.moon = new Moon(space);
 space.scene.add(space.moon.group);
 const mods = [];
 for (const [k, C] of [['fleet', Fleet], ['works', WorkingStations], ['geoRoads', GeoRoads], ['lanes', Lanes], ['releaseYard', ReleaseYard]]) { space[k] = new C(space); mods.push(space[k]); }
+// the lazily built near detail (Helianth district and flotilla, foundry yard): force it, then animate it below
+space.works.district.build(); space.works.yard.build();
 let tri = 0;
 space.scene.traverse((o) => { if (o.isMesh && o.geometry?.index && !o.geometry.isInstancedBufferGeometry) tri += o.geometry.index.count / 3; });
 for (const t of [0, 60, 400, 900, 1500]) {

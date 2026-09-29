@@ -1,0 +1,332 @@
+// The sun domain's working places, headless: the Helianth district and its flotilla, the foundry
+// yard and the Hearth district. Seating, clearances of every moving part, triangle counts per LOD,
+// finite transforms, build and per-frame timings. Run: node tools/verify-sun.mjs
+import assert from 'node:assert/strict';
+import * as THREE from 'three';
+import { auditGeometry } from './geometry-audit.mjs';
+import { buildSolarCollector, buildFoundry } from '../src/space/workingStations.js';
+import { helianthCircuits, circuitPose } from '../src/space/helianthTraffic.js';
+import {
+  HelianthDistrict, buildPetalFittings, buildCrawler, buildBerths, petalMatrix, petalTop, spineY, DECK_TOP, CATWALK, CREW_LANE, crawlerZ, crewOnCatwalk,
+  flotillaLayout, courierRoute, courierPose, COURIER, FLOTILLA, PETAL, buildConcentrator, buildRelayPlatform, BERTH,
+} from '../src/space/helianthDistrict.js';
+import { FoundryYard, buildCraneWorks, cranePose, cartPose, droneOrbits, dronePos, crewPos, COURT, CRANE, CART, QUEUE } from '../src/space/foundryYard.js';
+import { buildTender } from '../src/craft/craftGeometry.js';
+import { Hearth } from '../src/space/hearth.js';
+import { buildStationFittings, tramArc, tramAngle, RING, TRAM, tankerSlots, tankerPose, TANKER, MODULE, HearthDistrict } from '../src/space/hearthDistrict.js';
+import { buildFeeder } from '../src/space/hearthWorks.js';
+
+const V = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z), results = {}, I = new THREE.Matrix4();
+function tris(g, m = I, s = 1, step = 1) {
+  const out = [], p = g.attributes.position, ix = g.index;
+  const M = new THREE.Matrix4().makeScale(s, s, s).premultiply(m);
+  for (let i = 0; i < (ix?.count ?? p.count); i += 3 * step) out.push(new THREE.Triangle(...[0, 1, 2].map((j) => V().fromBufferAttribute(p, ix ? ix.getX(i + j) : i + j).applyMatrix4(M))));
+  return out;
+}
+function tree(t) {
+  const box = new THREE.Box3();
+  for (const x of t) { box.expandByPoint(x.a); box.expandByPoint(x.b); box.expandByPoint(x.c); }
+  if (t.length < 16) return { box, t };
+  const s = box.getSize(V()), ax = s.x > s.y ? (s.x > s.z ? 'x' : 'z') : (s.y > s.z ? 'y' : 'z');
+  t.sort((a, b) => a.a[ax] + a.b[ax] + a.c[ax] - b.a[ax] - b.b[ax] - b.c[ax]);
+  const h = t.length >> 1; return { box, l: tree(t.slice(0, h)), r: tree(t.slice(h)) };
+}
+const np = V();
+function dist(T, p, best = Infinity) {
+  if (T.box.distanceToPoint(p) > best) return best;
+  if (T.t) { for (const x of T.t) { x.closestPointToPoint(p, np); best = Math.min(best, np.distanceTo(p)); } return best; }
+  const [n, f] = T.l.box.distanceToPoint(p) < T.r.box.distanceToPoint(p) ? [T.l, T.r] : [T.r, T.l];
+  return dist(f, p, dist(n, p, best));
+}
+const verts = (g, m = I, step = 1) => { const p = g.attributes.position, out = []; for (let i = 0; i < p.count; i += step) out.push(V().fromBufferAttribute(p, i).applyMatrix4(m)); return out; };
+const finite = (g) => g.attributes.position.array.every(Number.isFinite);
+const triCount = (g) => (g.index ? g.index.count : g.attributes.position.count) / 3;
+const segDist = (p, a, b) => { const ab = b.clone().sub(a), t = THREE.MathUtils.clamp(p.clone().sub(a).dot(ab) / ab.lengthSq(), 0, 1); return a.clone().addScaledVector(ab, t).distanceTo(p); };
+const time = (f) => { const t0 = performance.now(); const r = f(); return [r, performance.now() - t0]; };
+const closed = (name, g, tol = 1e-3) => {
+  const a = auditGeometry(g, { tolerance: tol });
+  for (const k of ['nonManifoldEdges', 'inconsistentEdges', 'nonFinite']) assert.equal(a[k], 0, `${name}: ${k}=${a[k]}`);
+  results[`${name}Tris`] = a.triangles;
+};
+
+// ============================================================ the Helianth district (metres)
+const sc = buildSolarCollector();
+const stT = tree(tris(sc.geo));
+{
+  const f = buildPetalFittings();
+  assert.ok(finite(f.geo), 'petal fittings finite');
+  closed('petalFittings', f.geo);
+  // the catwalk deck bears on the spine: straight below the deck's centre line the spine's skin
+  // lies within the metre the deck is seated into it
+  for (let z = CATWALK.z0 + 100; z < CATWALK.z1; z += 911) {
+    const under = DECK_TOP(z) - CATWALK.deck, d = dist(stT, V(0, under, z));
+    assert.ok(d < 1.6 + PETAL.spineR * (1 - Math.cos(Math.PI / 8)), `catwalk at z ${z} seated on the spine (${d.toFixed(2)} m)`);
+    assert.ok(Math.abs(spineY(z) + PETAL.spineR * Math.cos(Math.PI / 8) - (under + 1)) < 1e-9, 'deck seated a metre into the spine flats');
+  }
+  // coolant lines: the lowest point of each pipe is within a few metres of the petal skin
+  let pipeGap = 0;
+  for (let z = 1900; z < 14200; z += 997) for (const sd of [-1, 1]) {
+    const wv = 100 + 1450 * Math.pow(Math.sin(Math.PI * (z - 1550) / 12950), 0.8), x = sd * (70 + 0.25 * (wv - 100));
+    const bottom = V(x, petalTop(x, z) - 2 + 0.01, z);
+    pipeGap = Math.max(pipeGap, dist(stT, bottom));
+  }
+  assert.ok(pipeGap < 4, `coolant lines lie on the petal skin (worst ${pipeGap.toFixed(2)} m)`);
+  // receivers stand on the skin: their base is at or below the skin under all four sides
+  for (const r of f.receivers) {
+    const skin = Math.min(...[[-40, 0], [40, 0], [0, -55], [0, 55]].map(([dx, dz]) => petalTop(r.x + dx, r.z + dz)));
+    assert.ok(r.base <= skin + 1e-6 && skin - r.base < 60, `receiver at z ${r.z.toFixed(0)} seated (${(skin - r.base).toFixed(1)} m embed)`);
+    assert.ok(dist(stT, V(r.x, r.base + 3, r.z)) < 40, 'receiver base meets the petal');
+  }
+  // tugs keep clear of all twelve petals' fittings and the berths
+  const fitT = tree([...Array.from({ length: PETAL.count }, (_, k) => tris(f.geo, petalMatrix(k), 1, 2)).flat(), ...tris(buildBerths().geo)]);
+  const circuits = helianthCircuits(), P = V(), F = V();
+  let clear = Infinity;
+  for (let t = 0; t < 460; t += 1) for (const c of circuits) { circuitPose(c, t, P, F); clear = Math.min(clear, dist(fitT, P, clear + 230) - 230); }
+  assert.ok(clear > 150, `Helianth tugs clear the petal fittings and berths by ${clear.toFixed(0)} m`);
+  results.tugFittingClearanceMetres = +clear.toFixed(0);
+  results.petalFittingsTotalTris = triCount(f.geo) * PETAL.count;
+}
+// crawlers stay between the railings and on the deck; the crews walk beside them
+{
+  const cg = buildCrawler(), bb = new THREE.Box3().setFromBufferAttribute(cg.attributes.position);
+  assert.ok(Math.max(-bb.min.x, bb.max.x) < CATWALK.half - 0.3 - 0.12 - 0.5, `crawler (${bb.max.x.toFixed(1)} m half-width) fits between the railings`);
+  assert.ok(Math.abs(bb.min.y) < 1e-6, 'crawler wheels touch the deck');
+  assert.ok(CREW_LANE - 0.4 > bb.max.x + 0.5 && CREW_LANE + 0.4 < CATWALK.half - 0.42, 'crew lanes pass between crawler and railing');
+  for (let t = 0; t < 1800; t += 7) for (let k = 0; k < PETAL.count; k++) {
+    const z = crawlerZ(t, k);
+    assert.ok(z > CATWALK.z0 + 20 && z < CATWALK.z1 - 20 && Number.isFinite(z), 'crawler stays on its catwalk');
+  }
+  const P = V();
+  for (let t = 0; t < 3000; t += 13) for (let j = 0; j < PETAL.count * 4; j++) { crewOnCatwalk(j, t, P); assert.ok(P.z > CATWALK.z0 && P.z < CATWALK.z1 && Math.abs(P.y - DECK_TOP(P.z) - 1.7) < 1e-9); }
+}
+// berths: shuttles seated on their cradles, clear of the station; arms rooted in the hub
+{
+  const b = buildBerths();
+  closed('berths', b.geo);
+  const hubR = 1400 - 250 * (BERTH.y - 1550) / 700;
+  assert.ok(BERTH.root < hubR - 40, `berth arms rooted ${(hubR - BERTH.root).toFixed(0)} m inside the hub skin`);
+  for (const c of b.cradles) {
+    const vs = verts(b.shipGeo, c.ship);
+    const lo = Math.min(...vs.map((p) => p.y));
+    assert.ok(Math.abs(lo - c.deck) < 1e-3, `berthed shuttle seated on its cradle (${(lo - c.deck).toFixed(4)} m)`);
+    let cl = Infinity;
+    for (const p of vs.filter((_, i) => i % 5 === 0)) cl = Math.min(cl, dist(stT, p, cl + 1));
+    assert.ok(cl > 20, `berthed shuttle clears the station by ${cl.toFixed(0)} m`);
+    results.berthShipClearanceMetres = Math.min(results.berthShipClearanceMetres ?? Infinity, +cl.toFixed(0));
+  }
+}
+// flotilla and couriers
+{
+  const L = flotillaLayout(), con = buildConcentrator(), rel = buildRelayPlatform();
+  closed('concentrator', con.geo); closed('relayPlatform', rel.geo);
+  const ext = Math.max(new THREE.Box3().setFromBufferAttribute(con.geo.attributes.position).getSize(V()).length(), new THREE.Box3().setFromBufferAttribute(rel.geo.attributes.position).getSize(V()).length()) / 2;
+  let sep = Infinity;
+  for (let i = 0; i < L.length; i++) {
+    assert.ok(L[i].p.length() - ext * L[i].size > 50000, 'statites stand well off the station');
+    for (let j = i + 1; j < L.length; j++) sep = Math.min(sep, L[i].p.distanceTo(L[j].p) - ext * (L[i].size + L[j].size));
+  }
+  assert.ok(sep > 5000, `statites keep ${(sep / 1000).toFixed(1)} km between their extents`);
+  results.statiteSeparationKm = +(sep / 1000).toFixed(1);
+  const routes = Array.from({ length: COURIER.count }, (_, c) => courierRoute(c, L)), P = V(), F = V(), Q = [];
+  let pathClear = Infinity, apart = Infinity, holdClear = Infinity;
+  for (const r of routes) {
+    holdClear = Math.min(holdClear, dist(stT, r.hold) - COURIER.len);
+    // its own statite: the berth sits outside its extent
+    assert.ok(r.berth.distanceTo(r.target.p) > ext * r.target.size + COURIER.len, 'courier berth clear of its statite');
+  }
+  for (let t = 0; t < COURIER.T; t += 1) {
+    Q.length = 0;
+    for (const r of routes) {
+      courierPose(r, t, P, F);
+      assert.ok(Number.isFinite(P.x + P.y + P.z + F.x + F.y + F.z) && Math.abs(F.length() - 1) < 1e-6, 'finite courier pose');
+      // clear of the station's working field (the relays stand at 18.5 km) once past the hold
+      const rr = Math.hypot(P.x, P.z);
+      if (P.distanceTo(r.hold) > 1) assert.ok(rr > 20000 || P.y > 5800, `courier over the station at r ${rr.toFixed(0)} y ${P.y.toFixed(0)}`);
+      for (const s of L) if (s !== r.target) pathClear = Math.min(pathClear, P.distanceTo(s.p) - ext * s.size);
+      Q.push(P.clone());
+    }
+    for (let i = 0; i < Q.length; i++) for (let j = i + 1; j < Q.length; j++) apart = Math.min(apart, Q[i].distanceTo(Q[j]));
+  }
+  assert.ok(holdClear > 2000, `courier holds clear the crown by ${holdClear.toFixed(0)} m`);
+  assert.ok(pathClear > 1000, `couriers pass other statites by ${pathClear.toFixed(0)} m`);
+  assert.ok(apart > 150, `couriers keep ${apart.toFixed(0)} m apart`);
+  results.courierStatiteClearanceKm = +(pathClear / 1000).toFixed(1); results.courierSeparationMetres = +apart.toFixed(0);
+}
+// the district as the space mode builds it: lazily, a step a frame; then its per-frame cost
+{
+  const station = new THREE.Group(), scene = new THREE.Scene(), bodies = [];
+  const space = { scene, addBody: (n, o, c, r, opt) => { const b = { n, o, c, r, ...opt }; bodies.push(b); return b; } };
+  const [d, tc] = time(() => new HelianthDistrict(station, V(0, -1, 0), space));
+  const cam = V(0, 0, 50);
+  const stepMs = [];
+  for (let f = 0; f < 10 && !d.built; f++) stepMs.push(time(() => d.update(f * 0.016, cam))[1]);
+  assert.ok(d.built && bodies.length === 1, 'district builds on approach');
+  assert.ok(Math.max(...stepMs) < 120 && tc < 20, `build steps ${stepMs.map((x) => x.toFixed(0)).join('/')} ms, constructor ${tc.toFixed(1)} ms`);
+  d.update(1, cam);
+  assert.ok(d.near.visible && bodies[0].visible, 'near district and flotilla shown close in');
+  d.update(2, V(0, 0, 9000)); assert.ok(!d.near.visible && !bodies[0].visible, 'hidden far out');
+  d.update(3, cam);
+  let tri = 0, inst = 0;
+  const count = (o) => o.traverse((m) => { if (m.isMesh && m.geometry.index && !m.geometry.isInstancedBufferGeometry) { tri += triCount(m.geometry) * (m.isInstancedMesh ? m.count : 1); if (m.isInstancedMesh) inst++; } });
+  count(station); count(d.flotilla);
+  results.helianthDistrictRenderedTris = tri; results.helianthInstancedMeshes = inst;
+  results.helianthBuildMs = +(stepMs.reduce((a, b) => a + b, 0) + tc).toFixed(1);
+  const [, ta] = time(() => { for (let i = 0; i < 200; i++) d.update(10 + i * 0.016, cam); });
+  results.helianthFrameMs = +(ta / 200).toFixed(3);
+  assert.ok(ta / 200 < 0.3, `district frame ${(ta / 200).toFixed(3)} ms`);
+  const bad = [];
+  station.updateMatrixWorld(true); d.flotilla.updateMatrixWorld(true);
+  for (const o of [station, d.flotilla]) o.traverse((m) => { if (m.isInstancedMesh && !m.instanceMatrix.array.every(Number.isFinite)) bad.push(m); if (!m.matrixWorld.elements.every(Number.isFinite)) bad.push(m); });
+  assert.equal(bad.length, 0, 'finite instance and world matrices');
+}
+
+// ================================================================ the foundry yard (metres)
+{
+  const fo = buildFoundry(), foT = tree(tris(fo.geo));
+  const works = [-1, 1].map((s) => buildCraneWorks(s));
+  for (const [i, w] of works.entries()) closed(`craneWorks${i}`, w.geo);
+  const allT = tree([...tris(fo.geo), ...works.flatMap((w) => tris(w.geo))]);
+  // nothing enters the receiving halls
+  for (const w of works) for (const p of verts(w.geo)) for (const b of fo.bays) assert.ok(!new THREE.Box3(b.min, b.max).containsPoint(p), 'crane works stay out of the receiving halls');
+  // columns founded on the slab
+  for (const s of [-1, 1]) for (const dx of [-CRANE.railX, CRANE.railX]) for (const z of CRANE.cols) {
+    assert.ok(Math.abs(s * COURT.x + dx - s * COURT.x) < 850 - 35, 'column base plate on the slab');
+    assert.ok(dist(foT, V(s * COURT.x + dx, COURT.slabTop - 0.5, z)) < 1, 'crane column meets the slab top');
+  }
+  // the crane's load: seated on a roof or hanging clear of the court, its spine pipe and the rails
+  const c = {}, [w, h, l] = CRANE.box;
+  let hangClear = Infinity, seatErr = 0;
+  for (let t = 0; t < CRANE.T * 8; t += 1.5) for (const s of [-1, 1]) {
+    cranePose(t, s, c);
+    const cx = s * COURT.x + c.x, pts = [];
+    for (const dx of [-w / 2, 0, w / 2]) for (const dz of [-l / 2, 0, l / 2]) for (const dy of [0, h]) pts.push(V(cx + dx, c.y + dy, c.z + dz));
+    if (Math.abs(c.y - COURT.roofTop) < 1e-6) {
+      // seated: the cassette stands on a stack roof
+      const st = COURT.stacks.find((z) => Math.abs(z - c.z) < 1e-6);
+      assert.ok(st !== undefined && Math.abs(c.x) + w / 2 < COURT.stackHalfX && l / 2 < COURT.stackHalfZ, `seated cassette on a stack roof (z ${c.z})`);
+      seatErr = Math.max(seatErr, dist(foT, V(cx, c.y - 0.5, c.z)));
+    } else if (c.y < CRANE.carry - 1e-6) {
+      // lifting or lowering: straight over a stack, the load inside its roof's footprint
+      assert.ok(COURT.stacks.some((z) => Math.abs(z - c.z) < 1e-6) && Math.abs(c.x) + w / 2 < COURT.stackHalfX, 'hoisting only over a stack roof');
+      for (const p of pts.filter((q) => q.y > c.y + 1)) hangClear = Math.min(hangClear, dist(allT, p, hangClear + 1));
+    } else {
+      for (const p of pts) hangClear = Math.min(hangClear, dist(allT, p, hangClear + 1));
+    }
+  }
+  assert.ok(seatErr < 1, `seated cassettes bear on the roof (${seatErr.toFixed(2)} m)`);
+  assert.ok(hangClear > 25, `hanging cassettes clear the court, pipe and crane works by ${hangClear.toFixed(0)} m`);
+  results.craneLoadClearanceMetres = +hangClear.toFixed(0);
+  // carts: side lanes, clear of stacks and columns; their tracks on the slab
+  const P = V();
+  let cartClear = Infinity;
+  const Q = V();
+  for (let t = 0; t < CART.T; t += 2) for (let k = 0; k < 4; k++) {
+    cartPose(t, k, P); P.x = (k < 2 ? -1 : 1) * (COURT.x + P.x);
+    if (k % 2) { cartPose(t, k - 1, Q); assert.ok(Math.abs(P.z - Q.z) > CART.size[2] + 20, 'carts sharing a lane never meet'); }
+    for (const dx of [-CART.size[0] / 2, CART.size[0] / 2]) for (const dz of [-CART.size[2] / 2, CART.size[2] / 2]) for (const dy of [3, CART.size[1] + 8]) cartClear = Math.min(cartClear, dist(allT, V(P.x + dx, P.y + dy, P.z + dz), cartClear + 1));
+    assert.ok(dist(foT, V(P.x, P.y - 0.5, P.z)) < 1, 'cart tracks on the slab');
+  }
+  assert.ok(cartClear > 2.5, `carts clear stacks and crane columns by ${cartClear.toFixed(1)} m`);
+  results.cartClearanceMetres = +cartClear.toFixed(1);
+  // drones on clear orbits
+  let droneClear = Infinity;
+  for (const o of droneOrbits()) for (let k = 0; k < 96; k++) droneClear = Math.min(droneClear, dist(allT, dronePos(o, (k / 96) * o.T, P), droneClear + 11) - 10);
+  assert.ok(droneClear > 60, `drones clear the works by ${droneClear.toFixed(0)} m`);
+  results.droneClearanceMetres = +droneClear.toFixed(0);
+  // crews on the roofs, under the pipe, clear of any seated cassette's footprint
+  for (let t = 0; t < 600; t += 5) for (let j = 0; j < 24; j++) {
+    crewPos(j, t, P);
+    const lx = Math.abs(P.x) - COURT.x;
+    assert.ok(Math.abs(lx) < CRANE.pickX - w / 2 - 20 && Math.abs(lx) > COURT.spineR + 10, 'crews walk the roof strip between the pipe and the set-down places');
+    assert.ok(Math.abs(P.y - COURT.roofTop - 1.7) < 1e-9, 'crews on the roof');
+  }
+  // the tender queue stands off the halls
+  const te = buildTender(300);
+  let qClear = Infinity;
+  for (const q of QUEUE) for (const p of verts(te.geo, new THREE.Matrix4().makeTranslation(q.x, q.y, q.z), 7)) qClear = Math.min(qClear, dist(foT, p, qClear + 1));
+  assert.ok(qClear > 3000, `queued tenders hold ${qClear.toFixed(0)} m off the works`);
+  results.tenderQueueClearanceMetres = +qClear.toFixed(0);
+  // build and frame
+  const g = new THREE.Group(), y = new FoundryYard(g, fo);
+  const [, tb] = time(() => y.update(0, 100));
+  assert.ok(y.built && y.root.visible && tb < 100, `yard builds on approach in ${tb.toFixed(1)} ms`);
+  y.update(0, 1000); assert.ok(!y.root.visible, 'yard hidden far out');
+  const [, ta] = time(() => { for (let i = 0; i < 200; i++) y.update(i * 0.016, 20); });
+  results.yardFrameMs = +(ta / 200).toFixed(3); results.yardBuildMs = +tb.toFixed(1);
+  assert.ok(ta / 200 < 0.3, 'yard frame under 0.3 ms');
+  let tri = 0;
+  g.traverse((m) => { if (m.isMesh && m.geometry.index) tri += triCount(m.geometry) * (m.isInstancedMesh ? m.count : 1); });
+  results.yardRenderedTris = tri;
+}
+
+// ================================================================ the Hearth district (km)
+{
+  const [hearth, th] = time(() => new Hearth({}, { bhSteps: 110, bhScale: 0.6 }));
+  const d = hearth.district;
+  results.hearthConstructMs = +th.toFixed(0);
+  const [, td] = time(() => new HearthDistrict(hearth));       // (a second copy, only to time it)
+  results.hearthDistrictBuildMs = +td.toFixed(1);
+  assert.ok(td < 300, `Hearth district builds in ${td.toFixed(0)} ms`);
+  // fittings: behind the hab's far end, clear of every support and brace
+  const f = buildStationFittings();
+  closed('stationFittings', f.geo);
+  const fv = verts(f.geo, I, 3);
+  assert.ok(fv.every((p) => p.x < MODULE.x0 + 1e-6), 'all fittings lie behind the hab end');
+  assert.ok(MODULE.x0 > -5.12 && 0.5 < 0.96, 'the drum is seated in the hab end cap');
+  let supClear = Infinity;
+  for (const [i, m] of hearth.collectorMounts.entries()) {
+    const M = m.collector.matrix, ws = fv.filter((_, k) => k % 4 === i % 4).map((p) => p.clone().applyMatrix4(M));
+    const segs = [[m.root, m.mount, 0.55]];
+    const a = (i / 14) * Math.PI * 2;
+    for (const sd of [-1, 1]) segs.push([V(Math.cos(a + sd * 0.006) * RING.R, 0, Math.sin(a + sd * 0.006) * RING.R), m.mount, 0.2]);
+    for (const p of ws) for (const [A, B, r] of segs) supClear = Math.min(supClear, segDist(p, A, B) - r);
+  }
+  assert.ok(supClear > 0.3, `station fittings clear the supports by ${supClear.toFixed(2)} km`);
+  results.fittingSupportClearanceKm = +supClear.toFixed(2);
+  // ferry: its dorsal face meets the port, nothing of it inside the node
+  const fv2 = verts(f.ferry.geo, f.ferry.m).map((p) => p.multiplyScalar(0.001));
+  const zmin = Math.min(...fv2.map((p) => p.z));
+  assert.ok(Math.abs(zmin - 1.07) < 1e-6, `ferry seated on its port (${((zmin - 1.07) * 1000).toFixed(2)} m)`);
+  const portD = Math.min(...fv2.map((p) => p.distanceTo(V(MODULE.node, 0, 1.07))));
+  assert.ok(portD < 0.12, `ferry hull over the port (${(portD * 1000).toFixed(0)} m)`);
+  // trams: their arcs stop short of every station's dish and braces; platforms beside the rail
+  for (let i = 0; i < RING.count; i++) {
+    const { a0, a1 } = tramArc(i);
+    assert.ok(a1 > a0 && a0 - (i / 14) * Math.PI * 2 >= 0.0093 + 0.006 && ((i + 1) / 14) * Math.PI * 2 - a1 >= 0.0093 + 0.006, 'tram arcs clear the dishes and braces');
+  }
+  let tramClear = Infinity;
+  const supports = hearth.collectorMounts.map((m) => [m.root, m.mount]);
+  for (let t = 0; t < TRAM.T; t += 1) for (let i = 0; i < RING.count; i++) {
+    const th2 = tramAngle(i, t), { a0, a1 } = tramArc(i);
+    assert.ok(th2 >= a0 && th2 <= a1, 'tram within its arc');
+    const p = V(Math.cos(th2) * RING.R, RING.rail + TRAM.h / 2, Math.sin(th2) * RING.R);
+    for (const [A, B] of supports) tramClear = Math.min(tramClear, segDist(p, A, B) - 0.55 - TRAM.len / 2);
+  }
+  assert.ok(tramClear > 5, `trams clear every support by ${tramClear.toFixed(1)} km`);
+  results.tramSupportClearanceKm = +tramClear.toFixed(1);
+  // tankers: the queue and the working tanker's run clear the feeder and its injector
+  const fd = buildFeeder();
+  const feT = tree([...tris(fd.hull, I, 1, 2), ...tris(fd.injector)]);
+  const s = tankerSlots(), tv = verts(d.tankers[0].mesh.geometry, I, 11);
+  const q = d.tankerQuat;
+  let tankClear = Infinity;
+  const at = (c) => tv.map((p) => p.clone().applyQuaternion(q).add(c));
+  for (const c of s.queue) for (const p of at(c)) tankClear = Math.min(tankClear, dist(feT, p, tankClear + 1));
+  for (let t = 0; t < TANKER.T; t += 4) for (const p of at(tankerPose(t))) tankClear = Math.min(tankClear, dist(feT, p, tankClear + 1));
+  assert.ok(tankClear > 0.25, `tankers clear the feeder by ${(tankClear * 1000).toFixed(0)} m`);
+  results.tankerFeederClearanceMetres = +(tankClear * 1000).toFixed(0);
+  let qsep = Infinity;
+  for (let i = 0; i < s.queue.length; i++) for (let j = i + 1; j < s.queue.length; j++) qsep = Math.min(qsep, s.queue[i].distanceTo(s.queue[j]));
+  for (let t = 0; t < TANKER.T; t += 4) for (const c of s.queue.slice(1)) qsep = Math.min(qsep, tankerPose(t).distanceTo(c));
+  assert.ok(qsep > TANKER.scale * 1.1 + 1, `tankers keep ${qsep.toFixed(1)} km apart`);
+  // frame cost and finiteness
+  const [, ta] = time(() => { for (let i = 0; i < 200; i++) d.update(i * 0.37); });
+  results.hearthDistrictFrameMs = +(ta / 200).toFixed(3);
+  assert.ok(ta / 200 < 0.3, 'Hearth district frame under 0.3 ms');
+  assert.ok(d.trams.instanceMatrix.array.every(Number.isFinite) && d.tramAttr.array.every(Number.isFinite), 'finite trams');
+  let tri = 0;
+  for (const m of [d.fittings, d.platforms, d.trams, d.coils, ...d.tankers.map((x) => x.mesh)]) tri += triCount(m.geometry) * (m.isInstancedMesh ? m.count : 1);
+  results.hearthDistrictRenderedTris = tri;
+}
+console.log(JSON.stringify(results));
+console.log('SUN_DOMAIN_VERIFIED');

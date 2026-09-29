@@ -52,7 +52,7 @@ export function petalTop(x, z) {
 export const petalMatrix = (k, out = new THREE.Matrix4()) => out.makeRotationY((k / PETAL.count) * TAU);
 
 export const CATWALK = { z0: 1750, z1: 14200, half: 7, deck: 2, rail: 1.1 };
-export const DECK_TOP = (z) => spineY(z) + PETAL.spineR - 1 + CATWALK.deck;   // (deck seated 1 m into the spine)
+export const DECK_TOP = (z) => spineY(z) + PETAL.spineR * Math.cos(Math.PI / 8) - 1 + CATWALK.deck;   // (deck seated a metre into the octagonal spine's flats)
 export const RECEIVERS = [0.2, 0.32, 0.44, 0.56, 0.68, 0.8];
 
 /** One petal's fittings (petal-local metres). Returns the geometry and its lamps. */
@@ -65,7 +65,7 @@ export function buildPetalFittings() {
     B.at(0, DECK_TOP(z) - CATWALK.deck / 2, z, -Math.atan(s));
     B.box(0, 0, 0, CATWALK.half * 2, CATWALK.deck, len, CK.DECK);
     // side kerbs: a bronze toe-board each side
-    for (const sd of [-1, 1]) B.box(sd * (CATWALK.half - 0.25), CATWALK.deck / 2 + 0.2, 0, 0.5, 0.4, len, CK.BRONZE);
+    for (const sd of [-1, 1]) B.box(sd * (CATWALK.half - 0.25), CATWALK.deck / 2 + 0.15, 0, 0.5, 0.4, len, CK.BRONZE);
     B.pop();
   }
   for (const sd of [-1, 1]) {
@@ -93,7 +93,7 @@ export function buildPetalFittings() {
   // thermal receiver cassettes: dark housings astride the petal skin, their apertures glowing
   for (const t of RECEIVERS) for (const sd of [-1, 1]) {
     const z = PETAL.inner + t * (PETAL.outer - PETAL.inner), w = petalW(z), x = sd * w * 0.55;
-    const y0 = Math.max(petalTop(x - 40, z), petalTop(x + 40, z), petalTop(x, z - 55), petalTop(x, z + 55)) - 3;
+    const y0 = Math.min(petalTop(x - 40, z), petalTop(x + 40, z), petalTop(x, z - 55), petalTop(x, z + 55), petalTop(x, z)) - 2;   // (seated on the low side)
     B.box(x, y0 + 16, z, 80, 32, 110, CK.DARK);
     B.box(x, y0 + 33, z, 64, 4, 90, CK.LANTERN);                       // the hot aperture
     B.box(x, y0 + 26, z + 56, 50, 10, 3, CK.GLASS);                    // inspection ports
@@ -127,7 +127,9 @@ export function buildCrawler() {
   B.box(0, 5, 7.7, 4, 1.2, 0.6, CK.LANTERN);
   B.tube([V(0, 6.8, -4), V(0, 14, -8), V(0, 11.5, -14)], 0.6, 6, CK.BRONZE);
   B.box(0, 11, -14.6, 2.6, 2, 2.2, CK.DARK);
-  return B.geometry();
+  // (the faceted wheels' lowest points on the deck, exactly)
+  const g = B.geometry(); g.computeBoundingBox(); g.translate(0, -g.boundingBox.min.y, 0); g.computeBoundingBox();
+  return g;
 }
 
 /** Crawler pose on its catwalk: z along the petal, pausing at each receiver station. */
@@ -208,8 +210,8 @@ export function buildConcentrator() {
   facet(0, 0, 440, 0, 0);
   for (let k = 0; k < 6; k++) { const a = (k / 6) * TAU; facet(Math.cos(a) * 800, Math.sin(a) * 800, 430, 0.2, -a + Math.PI / 2); }
   // backing truss and the spine to the receiver
-  for (let k = 0; k < 6; k++) { const a = (k / 6) * TAU; B.tube([V(0, 60, 0), V(Math.cos(a) * 800, 110, Math.sin(a) * 800)], 12, 6, CK.DARK); }
-  B.push(TO_Y); B.at(0, 0, 0); B.torus(800, 9, 36, 6, CK.HULL); B.pop(); B.pop();
+  for (let k = 0; k < 6; k++) { const a = (k / 6) * TAU; B.tube([V(Math.cos(a) * 90, 130, Math.sin(a) * 90), V(Math.cos(a) * 800, 110, Math.sin(a) * 800)], 12, 6, CK.DARK); }
+  B.at(0, 110, 0); B.push(TO_Y); B.torus(800, 9, 36, 6, CK.HULL); B.pop(); B.pop();
   B.tube([V(0, -3, 0), V(0, -1350, 0)], 16, 8, CK.HULL);
   for (let k = 0; k < 3; k++) { const a = (k / 3) * TAU + 0.5; B.tube([V(Math.cos(a) * 800, 0, Math.sin(a) * 800), V(0, -1300, 0)], 6, 5, CK.DARK); }
   B.at(0, -1400, 0); B.push(TO_Y);

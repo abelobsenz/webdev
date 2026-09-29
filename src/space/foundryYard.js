@@ -12,7 +12,7 @@ import { craftInstances, MovingLamps } from './helianthDistrict.js';
 //             travels the court, its trolley crosses it, and a spreader lifts a cast billet
 //             cassette from one stack's roof, carries it clear over the court's spine pipe and
 //             sets it down on the next stack: the cassette is always seated or hanging
-//   carts     tracked stock carts shuttle the court's open side lanes between the crane columns
+//   carts     tracked stock carts shuttle each court's outer side lane inside the crane columns
 //   furnaces  the three reduction furnaces glow through their glazed bands; the process pods
 //             breathe with the arc light of the melt
 //   drones    inspection drones circle the garden wheel and the courts on fixed, clear orbits
@@ -44,7 +44,7 @@ export function buildCraneWorks(s) {
       // column: founded on the slab through a base plate, braced into the girder
       B.box(x, COURT.slabTop + 6, z, 70, 12, 70, CK.BRONZE);
       B.tube([V(x, COURT.slabTop, z), V(x, CRANE.railY - 38, z)], CRANE.colR, 10, CK.HULL);
-      for (const dz of [-1, 1]) if (z + dz * 180 > CRANE.railZ0 - 30 && z + dz * 180 < CRANE.railZ1 + 30) B.tube([V(x, CRANE.railY - 260, z), V(x, CRANE.railY - 40, z + dz * 180)], 8, 6, CK.DARK);
+      for (const dz of [-1, 1]) if (z + dz * 180 > CRANE.railZ0 - 30 && z + dz * 180 < CRANE.railZ1 + 30) B.tube([V(x, CRANE.railY - 260, z + dz * 18), V(x, CRANE.railY - 40, z + dz * 180)], 8, 6, CK.DARK);
       lamps.push({ p: V(x, CRANE.railY + 20, z), r: 8, color: LAMP.AMBER, i: 2, breathe: 0.3, phase: z / 7000 });
     }
     // end stops
@@ -104,10 +104,12 @@ export function cranePose(t, s, out = {}) {
   return out;
 }
 
-/** Cart k's pose (court-relative lane x, z). */
+/** Cart k's pose (court-relative lane x, z): two carts per court share the outer lane, each its own half
+ * (the inner lane is crossed by the transfer tube from the halls at z = 1800). */
 export function cartPose(t, k, out = V(0, 0, 0)) {
-  const lane = k % 2 ? 1 : -1, u = (((t / CART.T) + k * 0.29) % 1 + 1) % 1, s = u < 0.5 ? smooth(0, 1, u * 2) : smooth(0, 1, 2 - u * 2);
-  return out.set(lane * CART.laneX, COURT.slabTop, CART.z0 + (CART.z1 - CART.z0) * s);
+  const half = k % 2, u = (((t / CART.T) + k * 0.29) % 1 + 1) % 1, s = u < 0.5 ? smooth(0, 1, u * 2) : smooth(0, 1, 2 - u * 2);
+  const mid = (CART.z0 + CART.z1) / 2, z0 = half ? mid + 70 : CART.z0, z1 = half ? CART.z1 : mid - 70;
+  return out.set(CART.laneX, COURT.slabTop, z0 + (z1 - z0) * s);
 }
 export function buildCart() {
   const B = new CB(), [w, h, l] = CART.size;
@@ -121,7 +123,7 @@ export function buildCart() {
 /** Drone orbits (foundry metres): centre, radius, height, period, phase. */
 export function droneOrbits() {
   const out = [];
-  for (let k = 0; k < 18; k++) out.push({ c: V(0, 500, 6200), R: 2650 + (k % 3) * 120, y: 500 + ((k % 4) - 1.5) * 90, T: 260 + (k % 5) * 25, ph: k / 18, dir: k % 2 ? 1 : -1 });
+  for (let k = 0; k < 18; k++) out.push({ c: V(0, 500, 6200), R: 2500 + (k % 3) * 110, y: 500 + ((k % 4) - 1.5) * 90, T: 260 + (k % 5) * 25, ph: k / 18, dir: k % 2 ? 1 : -1 });
   for (const s of [-1, 1]) for (let k = 0; k < 6; k++) out.push({ c: V(s * COURT.x, 0, 3450), R: 1300 + (k % 2) * 140, y: 1150 + (k % 3) * 80, T: 200 + k * 17, ph: k / 6, dir: s });
   return out;
 }
@@ -146,7 +148,7 @@ export function crewPos(j, t, out = V(0, 0, 0)) {
 }
 
 /** Tender queue in the approach lane (foundry metres). */
-export const QUEUE = [V(-4200, -200, -9200), V(4200, -200, -9800), V(0, -350, -12600)];
+export const QUEUE = [V(-4200, -200, -9200), V(4200, -200, -9800), V(-4200, -350, -12800)];
 
 /** Furnace and process lamps. */
 export function furnaceLamps(data) {
@@ -181,12 +183,12 @@ export class FoundryYard {
     // hoist cables: a unit-length vertical tube, scaled per frame
     const cb = new CB(); cb.tube([V(0, 0, 0), V(0, 1, 0)], 1.5, 6, CK.DARK);
     this.cables = craftInstances(cb.geometry(), [0, 1, 2, 3].map(() => new THREE.Matrix4()), opt);
-    this.carts = craftInstances(buildCart(), Array.from({ length: 8 }, () => new THREE.Matrix4()), opt);
+    this.carts = craftInstances(buildCart(), Array.from({ length: 4 }, () => new THREE.Matrix4()), opt);
     this.orbits = droneOrbits();
     this.drones = craftInstances(buildDrone(), this.orbits.map(() => new THREE.Matrix4()), opt);
     this.root.add(this.bridges, this.trolleys, this.cassettes, this.cables, this.carts, this.drones);
     this.droneLamps = new MovingLamps(this.orbits.length, { r: 3, color: LAMP.TEAL, i: 3, breathe: 0.5 });
-    this.cartLamps = new MovingLamps(8, { r: 3, color: LAMP.AMBER, i: 3 });
+    this.cartLamps = new MovingLamps(4, { r: 3, color: LAMP.AMBER, i: 3 });
     this.crew = new MovingLamps(24, { r: 1.1, color: LAMP.WHITE, i: 2.6 });
     this.root.add(this.droneLamps.mesh, this.cartLamps.mesh, this.crew.mesh);
     // furnace light (the foundry's own lamps ride the foundry mesh; these breathe with the melt)
@@ -226,10 +228,10 @@ export class FoundryYard {
       const top = bridgeTop - 52 + 2, bottom = c.y + CRANE.box[1] + 10;
       for (const dz of [-60, 60]) this.cables.setMatrixAt(ci++, m.compose(P.set(x0 + c.x, bottom, c.z + dz * 0.5), q, S.set(1, Math.max(top - bottom, 1), 1)));
     });
-    for (let k = 0; k < 8; k++) {
-      const s = k < 4 ? -1 : 1;
+    for (let k = 0; k < 4; k++) {
+      const s = k < 2 ? -1 : 1;
       cartPose(t, k, P);
-      P.x += s * COURT.x;
+      P.x = s * (COURT.x + P.x);
       this.carts.setMatrixAt(k, m.compose(P, q, S.set(1, 1, 1)));
       this.cartLamps.set(k, P.setY(P.y + CART.size[1] + 8));
     }
