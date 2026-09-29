@@ -50,7 +50,8 @@ varying float vPhi;
 varying float vSeed;
 
 vec3 arcPos(float s, float v) {
-  float seed = aArc.w;
+  float seed = fract(aArc.w);
+  float steve = step(2.0, aArc.w);
   float phi = aArc.x + s * aArc.y;
   float t = uTime;
   float act = 0.5 + 0.5 * uActivity;
@@ -62,7 +63,9 @@ vec3 arcPos(float s, float v) {
   // the surge bulges the oval poleward where it passes
   float dS = phi - uSurge;
   float surge = exp(-dS * dS / 0.18) * uActivity;
-  float th = ovalColat(phi) + aArc.z + fold - 0.03 * surge;
+  // (STEVE runs remarkably straight and narrow, east-west)
+  fold *= 1.0 - 0.85 * steve;
+  float th = ovalColat(phi) + aArc.z + fold - 0.03 * surge * (1.0 - steve);
   // the field lines lean a little poleward with height (inclination ~78 deg)
   th -= 0.0035 * v;
   float h = mix(aH.x, aH.y, v);
@@ -149,6 +152,17 @@ void main() {
   // a thin emitting sheet: bright edge-on, faint face-on
   vec3 V = normalize(cameraPosition - vPosW);
   float path = 1.0 / max(abs(dot(vNormW, V)), 0.14);
+  if (vSeed >= 2.0) {
+    // STEVE: a narrow mauve ribbon of hot, fast-flowing plasma (thermal emission, not the
+    // electrons' glow) far equatorward of the oval, the green 'picket fence' of short rays
+    // beneath it; it shows in the recovery after a substorm
+    float on = smoothstep(0.8, 1.6, -uSurge);
+    float fence = pow(0.5 + 0.5 * cos(vU * 0.42 + 2.0 * au_noise(vU * 0.05 + 3.0)), 6.0) * smoothstep(0.0, 0.03, v) * (1.0 - smoothstep(0.1, 0.22, v));
+    float rib = smoothstep(0.1, 0.24, v) * (1.0 - smoothstep(0.75, 1.0, v)) * (0.75 + 0.25 * au_noise(vU * 0.3 - t * 2.0));
+    vec3 cs = vec3(0.72, 0.28, 0.86) * rib * 0.7 + vec3(0.2, 1.0, 0.42) * fence * 1.3;
+    gl_FragColor = vec4(cs * on * min(path, 7.0) * night * uGain * 0.05 * smoothstep(1.0, 0.75, abs(s)), 0.0);
+    return;
+  }
   vec3 col = au_colour(vH, 0.3 + 0.7 * uActivity) * I * min(path, 7.0);
   gl_FragColor = vec4(col * uGain * night * 0.05, 0.0);
 }
@@ -238,6 +252,8 @@ export function arcLayout(seed, count) {
     }
     arcs.push({ c, span, dth, seed: r(), h0, h1: Math.min(h1, H_TOP_MAX) });
   }
+  // STEVE, one per hemisphere, in the evening sector well equatorward of the oval (seed + 2 flags it)
+  arcs.push({ c: -0.35, span: 0.9, dth: 0.1, seed: 2 + r(), h0: H_BOTTOM + 4, h1: 270 });
   return arcs;
 }
 

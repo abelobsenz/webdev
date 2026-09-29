@@ -434,6 +434,18 @@ void main() {
       cool += sea * shelfT * 0.35;
       warm += sea * shelfT * 0.15;
     }
+    // fires on the savannas at night: prescribed burns keeping the grasslands open, strings of
+    // orange points along the fire fronts, in the dry season (June: the southern tropics)
+    {
+      float savZone = land * smoothstep(0.08, 0.2, arid) * (1.0 - smoothstep(0.45, 0.6, arid)) * smoothstep(-2.0, -8.0, latD) * (1.0 - smoothstep(-20.0, -26.0, latD));
+      if (savZone > 0.0) {
+        vec3 fq = d * 420.0;
+        vec3 fc = floor(fq);
+        vec3 fh = hash33(fc + 61.3);
+        float front = step(0.93, fh.x) * exp(-dot(fq - fc - 0.5, fq - fc - 0.5) / 0.06);
+        warm += front * savZone * (0.3 + 0.5 * fh.y);
+      }
+    }
     // settled countryside: a faint even glow, none in the wilds
     warm += habit * place * 0.0015 * (0.4 + 1.2 * grain);
     // maglev corridors between the metros: great-circle filaments, dim where they run under the
@@ -579,6 +591,25 @@ void main() {
   // hamada and massifs: dark rock plateaus between the sand seas
   dsand = mix(dsand, vec3(0.22, 0.16, 0.11), smoothstep(0.56, 0.74, sfbm(d * 13.0 + 3.0, 4) * 0.5 + 0.5) * 0.75);
   c = mix(c, dsand, dune);
+  // the desert works: solar fields (dark, blue-grey rectangles) and centre-pivot irrigation
+  // (clusters of green discs) scattered through the dry country, ~20 km cells, a few per cent lit
+  if (dune > 0.3) {
+    vec3 wq = d * 300.0;
+    vec3 wc = floor(wq);
+    vec3 wh = hash33(wc + 13.7);
+    vec3 wf = wq - wc - 0.5;
+    if (wh.x > 0.965) {
+      // a solar field: a rectangle of panels in a sub-rectangle of the cell
+      vec2 half = vec2(0.12 + 0.2 * wh.y, 0.08 + 0.12 * wh.z);
+      vec2 qq = abs(vec2(wf.x + wf.z, wf.y)) - half;
+      float fld = 1.0 - smoothstep(-0.02, 0.02, max(qq.x, qq.y));
+      c = mix(c, vec3(0.055, 0.065, 0.085), fld * dune);
+    } else if (wh.x > 0.93) {
+      // irrigation: green pivots on the gravel plain
+      float piv = smoothstep(0.55, 0.8, sfbm(d * 2400.0 + wh * 7.0, 2) * 0.5 + 0.5) * (1.0 - smoothstep(0.25, 0.45, length(wf)));
+      c = mix(c, vec3(0.05, 0.09, 0.03), piv * dune);
+    }
+  }
   c *= 0.78 + 0.44 * (n2 * 0.5 + 0.5);
   // farmland: the settled plains as a county-scale patchwork of crops, fallow and woodlots
   // (greener in the wet, straw and ochre toward the steppe), none in the deserts or the far north
@@ -660,6 +691,19 @@ void main() {
     }
     vec3 silt = mix(vec3(0.03, 0.05, 0.035), vec3(0.1, 0.075, 0.04), smoothstep(0.3, 0.8, plume));
     ocean = mix(ocean, silt, clamp(plume * 1.3, 0.0, 1.0) * (1.0 - land) * (0.6 + 0.4 * shelf));
+  }
+  // icebergs: tabular bergs calved from the Antarctic shelves drifting in the Southern Ocean,
+  // and the Greenland bergs down Baffin Bay: white specks over the dark sea
+  {
+    float bergZone = smoothstep(-52.0, -58.0, latD) * (1.0 - smoothstep(-66.0, -70.0, latD))
+                   + boxMask(latD, lonD, vec4(60.0, 75.0, -70.0, -48.0), 2.0) * 0.8;
+    if (bergZone > 0.0) {
+      vec3 iq = d * 900.0;
+      vec3 ic = floor(iq);
+      vec3 ih = hash33(ic + 29.3);
+      float berg = step(0.975, ih.x) * (1.0 - smoothstep(0.1 + 0.2 * ih.y, 0.2 + 0.25 * ih.y, length(iq - ic - 0.5 - 0.3 * (ih - 0.5))));
+      ocean = mix(ocean, vec3(0.62, 0.68, 0.74), berg * bergZone * (1.0 - land));
+    }
   }
   float seaIce = smoothstep(77.0, 82.0, latD + n2 * 6.0) + smoothstep(-68.0, -71.0, latD + n2 * 4.0);
   ocean = mix(ocean, vec3(0.7, 0.75, 0.8) * (0.85 + 0.15 * n2), clamp(seaIce, 0.0, 1.0));

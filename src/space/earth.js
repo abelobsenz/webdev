@@ -719,7 +719,9 @@ void main() {
     vec3 cc = ciCol * li + cloudCol * lcv * (1.0 - li);
     float ca = li + lcv * (1.0 - li);
     float a = max(ca, 1.0 - dot(T, vec3(1.0 / 3.0)));
-    gl_FragColor = vec4(cc * T + L + nlc, a);
+    // red sprites over the storms along the night limb
+    vec3 spr = od_sprites(ro, rd, sun, uTime);
+    gl_FragColor = vec4(cc * T + L + nlc + spr, a);
     gl_FragDepth = gl_FragCoord.z;
   }
   gl_FragColor.rgb *= uReady;

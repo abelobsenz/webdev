@@ -99,6 +99,7 @@ uniform float uNlcGain;
 uniform float uAuroraAct;
 const vec3 MAG_POLE = vec3(${bodyDir(MAG_POLE_LAT, MAG_POLE_LON, new THREE.Vector3()).toArray().map((v) => v.toFixed(5)).join(', ')});
 const vec3 KILAUEA = vec3(${bodyDir(19.41 * D2R, -155.28 * D2R, new THREE.Vector3()).toArray().map((v) => v.toFixed(6)).join(', ')});
+vec4 weatherAt(vec3 b, float fp);      // (earth.js: the baked weather, drifted)
 const float SHIP_V = ${SHIP_V.toFixed(4)};
 const float SHIP_SP = ${SHIP_SPACING.toFixed(1)};
 
@@ -347,6 +348,49 @@ vec4 od_volcano(vec3 b, float fp, out vec3 night) {
   float yw = y / (4.0 + 0.3 * max(x, 0.0));
   float vog = exp(-yw * yw) * smoothstep(-2.0, 4.0, x) * exp(-max(x, 0.0) / 120.0) * (0.6 + 0.4 * snoise(vec3(P * 0.05, 7.0)));
   return vec4(0.34, 0.35, 0.36, clamp(vog, 0.0, 1.0) * 0.35);
+}
+
+// Red sprites over the storms, seen edge-on above the night limb: when a strong positive
+// stroke drains a storm's charge, the mesosphere above it lights for a few milliseconds to a
+// tenth of a second: a diffuse red crown at 70 - 85 km, and below it blue-violet tendrils
+// reaching down toward the cloud tops. Drawn for rays grazing the limb (tangent height 30 -
+// 100 km) above deep convection, in columns along the limb each with its own rare flash.
+vec3 od_sprites(vec3 ro, vec3 rd, vec3 sun, float t) {
+  float tt = -dot(ro, rd);
+  if (tt <= 0.0) return vec3(0.0);
+  vec3 pt = ro + rd * tt;
+  float r = length(pt);
+  float h = r - Rg;
+  if (h < 30.0 || h > 100.0) return vec3(0.0);
+  vec3 up = pt / r;
+  if (dot(up, sun) > -0.15) return vec3(0.0);               // only over the night
+  // along-limb coordinate (km) round the camera's axis
+  vec3 ax = normalize(ro);
+  vec3 e1 = normalize(cross(ax, abs(ax.y) < 0.9 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0)));
+  vec3 e2 = cross(ax, e1);
+  float s = atan(dot(up, e2), dot(up, e1)) * Rg;
+  float colW = 60.0;
+  float cid = floor(s / colW);
+  vec3 hh = hash33(vec3(cid, 7.3, 1.1));
+  // is there a storm beneath this stretch of limb? (the weather's convective potential)
+  vec4 w = weatherAt(uToBody * up, 30.0);
+  float storm = smoothstep(0.7, 0.85, w.r) * (1.0 - smoothstep(0.3, 0.6, w.g));
+  if (storm <= 0.0) return vec3(0.0);
+  float period = 6.0 + 20.0 * hh.x;
+  float ph = t / period + hh.y * 17.0;
+  float n = floor(ph);
+  float age = (ph - n) * period;
+  if (hash11(cid * 3.1 + n) > 0.5 || age > 0.25) return vec3(0.0);
+  float I = exp(-age / 0.04) * storm;
+  float x = s - (cid + 0.2 + 0.6 * hash11(cid + n * 1.7)) * colW;  // km from the sprite's axis
+  float wd = 6.0 + 8.0 * hh.z;
+  // the crown: a red dome with a darker hollow, 70 - 88 km
+  float zc = (h - 78.0) / 7.0, xc = x / wd;
+  float crown = exp(-zc * zc - xc * xc);
+  // the tendrils: narrow streamers hanging from the crown to ~45 km
+  float tend = pow(0.5 + 0.5 * cos(x * 1.4 + 3.0 * hash11(cid + n)), 8.0) * exp(-xc * xc * 0.5) * smoothstep(42.0, 55.0, h) * (1.0 - smoothstep(70.0, 76.0, h));
+  vec3 col = vec3(1.0, 0.16, 0.22) * crown + mix(vec3(0.45, 0.2, 0.9), vec3(0.9, 0.2, 0.35), smoothstep(50.0, 72.0, h)) * tend * 0.8;
+  return col * I * 0.35;
 }
 
 // Noctilucent clouds (added in front of the planet and its limb).
