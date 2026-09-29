@@ -173,6 +173,12 @@ export class SpaceMode {
       frame:q=>q.copy(sim.moonQuat).multiply(courtFrame),
       minDist:.12,maxDist:20000,defaultDist:1.35,view:{az:1.15,el:.55},
     });
+    // the Moon's orbital stations (src/space/lunarOrbitals.js), followed along their orbits
+    for (const [key, name, d] of [['endymionWheel', 'wheel', 3.2], ['aitkenDepot', 'depot', 2.6], ['heveliusYard', 'yard', 2.2]]) T(key, {
+      position: (o) => (self.moon ? o.copy(self.moon.orbitals[name].group.position).applyQuaternion(sim.moonQuat).add(sim.moonPos) : o.copy(sim.moonPos)),
+      frame: (q) => (self.moon ? q.copy(sim.moonQuat).multiply(self.moon.orbitals[name].group.quaternion) : q.copy(sim.moonQuat)),
+      minDist: 0.4, maxDist: 40000, defaultDist: d, view: { az: 0.7, el: 0.35 },
+    });
     const foundryUp=bodyDir(0,NAURU_LON+.009);
     T('foundry', {
       position:o=>o.copy(foundryUp).multiplyScalar(R_EARTH+627).add(_v2.set(0,42,0)).applyQuaternion(sim.earthQuat),

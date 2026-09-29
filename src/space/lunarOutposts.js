@@ -7,6 +7,8 @@ import { kit, seat, seatLocal, mulberry, KIT_R, TRACKER_AXLE } from './lunarKit.
 import { stationFrame } from './stations.js';
 import { addLamps, pixelRadius } from './craftMesh.js';
 import { TOWNS } from './moonBake.js';
+import { FAR_TOWNS } from './lunarNetwork.js';
+import { buildSettlementQuarter, buildLandmarks, QuarterLife } from './lunarSettlement.js';
 import { R_MOON } from './sim.js';
 import { Path, LunarTraffic, plumeMesh } from './lunarTraffic.js';
 
@@ -46,7 +48,7 @@ export function hopPad(seed, weight) {
  * Lay out one outpost (pure data + geometry, no renderer): returns { geo, lamps, inst, plan,
  * loops, radius }. weight (0.3..0.6) scales it; seed makes it its own.
  */
-export function buildOutpost(seed, weight = 0.5, lat = 0) {
+export function buildOutpost(seed, weight = 0.5, lat = 0, feature = null) {
   const rnd = mulberry(seed * 7919 + 13);
   const B = new CB();
   const lamps = [];
@@ -263,6 +265,12 @@ export function buildOutpost(seed, weight = 0.5, lat = 0) {
     loops.push(pts);
   }
 
+  // --- the town quarter: terraces on a lit main street, a plaza, a tram, greenhouses, people ---
+  // (and first the settlement's own landmark: polar light towers and ice mine, the far side's
+  // observatory or arcology)
+  if (feature) buildLandmarks(feature, seed, weight, plan, B, lamps, put, loops);
+  const quarter = buildSettlementQuarter(seed, weight, plan, B, lamps, put, loops);
+
   // --- the ground: craters and boulders beyond the works ---
   const outer = 1700 * sz;
   let nCr = 0;
@@ -295,7 +303,7 @@ export function buildOutpost(seed, weight = 0.5, lat = 0) {
     put('boulder' + (k % 3), seat(_m, x, z, rnd() * TAU, -0.1 * s, s), [tone, tone * 0.97, tone * 0.93]);
   }
 
-  return { geo: B.geometry(), lamps, inst, plan, loops, pads, parked, cycler, radius: outer + 200 };
+  return { geo: B.geometry(), lamps, inst, plan, loops, pads, parked, cycler, quarter, radius: outer + 200 };
 }
 
 // ------------------------------------------------------------------------ runtime --
@@ -304,15 +312,17 @@ export class LunarOutposts {
   constructor(parent) {
     this.parent = parent;                 // the Moon's group (Moon frame, km)
     this.mat = createLunarMaterial({ lit: 0.55 });
-    this.sites = TOWNS.slice(1).map(([lat, lon, w], i) => {
+    // the near-side towns, then the far-side and polar settlements (lunarNetwork.js FAR_TOWNS)
+    this.sites = TOWNS.slice(1).concat(FAR_TOWNS).map(([lat, lon, w, name], i) => {
       const up = townDir(lat, lon);
       const g = new THREE.Group();
-      g.name = `Lunar outpost ${i + 1}`;
+      g.name = name ? `${name} (lunar outpost ${i + 1})` : `Lunar outpost ${i + 1}`;
       g.position.copy(up).multiplyScalar(R_MOON);
       stationFrame(up, g.quaternion);
       g.visible = false;
       parent.add(g);
-      return { lat, lon, w, up, group: g, built: false, data: null, rovers: null, riders: null };
+      const feature = Math.abs(lat) > 80 ? 'polar' : name === 'Daedalus' ? 'observatory' : Math.abs(lon) > 90 ? 'farside' : null;
+      return { lat, lon, w, up, feature, group: g, built: false, data: null, rovers: null, riders: null };
     });
     this._wp = new THREE.Vector3();
     this._local = new THREE.Vector3();
@@ -323,7 +333,7 @@ export class LunarOutposts {
   /** Build one outpost now (its geometry and instanced furniture). */
   build(site, idx) {
     const t0 = performance.now();
-    const d = buildOutpost(idx + 101, site.w, site.lat);
+    const d = buildOutpost(idx + 101, site.w, site.lat, site.feature);
     site.data = d;
     const mesh = lunarMesh(d.geo, {}, this.mat);
     mesh.name = `${site.group.name}: works, pads, domes and ground`;
@@ -366,7 +376,9 @@ export class LunarOutposts {
       site.plume.scale.setScalar(0.001);
       site.group.add(site.shuttle, site.plume);
     }
-    site.live = [site.rovers, site.roverLamps, site.suits, site.shuttle].filter(Boolean);
+    // the quarter's people and tram
+    site.town = new QuarterLife(d.quarter, this.mat, site.group, idx);
+    site.live = [site.rovers, site.roverLamps, site.suits, site.shuttle, ...site.town.objects].filter(Boolean);
     this.moveRovers(site, 0);                               // (their lamps start on the roads)
     site.group.traverse((o) => { o.frustumCulled = false; });
     site.built = true;
@@ -395,6 +407,7 @@ export class LunarOutposts {
   }
 
   moveLife(s, t, idx) {
+    s.town.update(t);
     for (let i = 0; i < s.crew.length; i++) {
       const c = s.crew[i], a = c.a0 + t * c.w / c.r;
       seat(_m, c.x + Math.cos(a) * c.r, c.z + Math.sin(a) * c.r, -a + (c.w > 0 ? 0 : Math.PI), 0.9);

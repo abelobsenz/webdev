@@ -192,3 +192,20 @@ TARGET_INFO.lagrangeL1 = {
   lore:'The gateway at the balance point between the Earth and the Moon, where a ship can hold station for almost nothing. Earth ferries dock at one end and lunar packets and colony shuttles at the other, and in between two counter-rotating wheels hold the transit halls and the hotels for the travellers changing ships.',
   facts:[['Wheels','2, at 0.5 g'],['Berths','16'],['To the Moon','58,000 km']],
 };
+// The Moon's orbital stations (src/space/lunarOrbitals.js)
+TARGET_INFO.endymionWheel = {
+  key:'',name:'Endymion Wheel',district:'The Moon · low lunar orbit, 110 km',
+  lore:'The Moon\'s orbital town, circling every two hours below the ring. Two habitat rings a kilometre across turn in opposite directions once every 43 seconds, a full Earth gravity on their floors, twelve decks of lit windows under glazed roofs over parkland; lift cars run the spokes to the despun hub, where the ferries from the surface berth at the docking arms. Its radiators turn edge-on to the Sun, its arrays face it.',
+  facts:[['Orbit','110 km, 119 min'],['Rings','2 x 964 m, 1 g'],['Spin','43 s a turn']],
+};
+TARGET_INFO.aitkenDepot = {
+  key:'',name:'Aitken Depot',district:'The Moon · polar orbit, 293 km',
+  lore:'A kilometre of truss hanging plumb over the Moon, gravity-gradient steady, with gold-foiled clusters of propellant tanks along it and the crew hangar at its outer end. Tankers lie alongside while the robot arm swings hoses between them; from here the far-side and polar settlements are refuelled.',
+  facts:[['Orbit','polar, 293 km'],['Tanks','12'],['Spine','1.04 km']],
+};
+TARGET_INFO.heveliusYard = {
+  key:'',name:'Hevelius Yard',district:'The Moon · low lunar orbit, 160 km',
+  lore:'The Moon\'s shipyard, building out of lunar metal where no ship need ever climb out of a deep well. A liner lies on the stocks in the open drydock, plated from her stern to midships and bare frames forward, her drive section waiting behind her; gantries run the length of the dock carrying hull plates, worker pods tend the plating front, and the welders\' arcs flicker blue along it.',
+  facts:[['Orbit','160 km'],['Dock','900 x 240 x 240 m'],['On the stocks','a 760 m liner']],
+};
+TARGET_ORDER.push('endymionWheel', 'aitkenDepot', 'heveliusYard');
