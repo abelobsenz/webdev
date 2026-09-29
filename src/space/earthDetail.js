@@ -146,7 +146,7 @@ float od_line(float dist, float w, float fp) {
   return exp(-dist * dist / (W * W)) * w / W;
 }
 
-// Ships on the lane leg the bake found near b (laneA: the lights bake's alpha, an exact integer
+// Ships on the lane leg the bake found near b (laneA: the id cube's red, an exact integer
 // where a lane is near). rough: extra roughness (Kelvin arms), slick: calmer water (turbulent
 // wake), foam: white water, light: the ship's lights.
 void od_ships(vec3 b, float laneA, float fp, out float rough, out float slick, out float foam, out vec3 light) {
@@ -245,11 +245,11 @@ float od_seaTexture(vec3 b, float fp, float shelf) {
     vec3 p = b * 160.0;                               // 40 km cells
     vec3 c = floor(p);
     vec3 h = hash33(c + 5.3);
-    vec3 o = c + 0.5 + 0.4 * (h - 0.5);
+    vec3 o = c + 0.5 + 0.2 * (h - 0.5);               // (the packet stays inside its cell)
     float r = length(p - o) * 40.0;                   // km from the packet's origin
     vec3 dirv = normalize(h - 0.5 + 1e-4);
     float cone = smoothstep(0.2, 0.7, dot(normalize(p - o + 1e-5), dirv));
-    float zr = (r - 12.0) / 6.0;
+    float zr = (r - 10.0) / 3.5;
     float env = exp(-zr * zr) * cone;
     iw = cos(r * 6.2832 / (1.3 + 0.5 * h.x)) * env * brk * (1.0 - smoothstep(0.35, 1.2, fp));
   }

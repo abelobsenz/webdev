@@ -536,7 +536,7 @@ void main() {
   float wcap = 3.84e-6 * pow(U10, 3.41);
   seaAlb += vec3(0.5 * wcap) * (1.0 - ice);
   vec3 seaCol;
-  // ships on the lane the bake found here (the lights bake's alpha, read unfiltered)
+  // ships on the lane the bake found here (the id cube, nearest-filtered)
   float shRough, shSlick, shFoam;
   vec3 shipLight;
   vec4 trafficIds = textureLod(uIds, b, 0.0);
