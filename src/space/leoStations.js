@@ -124,6 +124,7 @@ export function buildHotel() {
       wheelLamps.push({ p: V(-sn * (R + 2.4), c * (R + 2.4), s * (hw + 1.6)), r: 0.7, color: LAMP.AMBER, i: 1.7, breathe: 0.15, phase: k / segs });
     }
     if (k % 12 === 6) { const c = Math.cos(a), sn = Math.sin(a); wheelLamps.push({ p: V(-sn * (r0 - 3), c * (r0 - 3), 0), r: 1.2, color: WARM, i: 1.6 }); }
+    if (k % 4 === 2) for (const s of [-1, 1]) { const c = Math.cos(a), sn = Math.sin(a); wheelLamps.push({ p: V(-sn * (r0 - 1.6), c * (r0 - 1.6), s * 1.6), r: 0.4, color: WARM, i: 1.4, breathe: 0.1, phase: k / segs }); }
   }
   // spokes with glazed lift shafts and tension stays, hub drum on the bearings
   for (let k = 0; k < HOTEL.spokes; k++) {
@@ -195,7 +196,17 @@ export function buildFarmDrum() {
   }
   // six sectors: glazed (gardens under glass) and land (the plated outer shell)
   const sector = (i) => Math.floor((i / K) * 6);
-  B.loft(rings, (i) => (sector(i) % 2 === 0 ? CK.ROOF : CK.HULL), { capStart: false, capEnd: false });
+  // land strips are the plated shell, except the towns at their ends, where the hull is glazed
+  B.loft(rings, (i, j) => (sector(i) % 2 === 0 ? CK.ROOF : (j === 1 || j === 15 ? CK.GLASS : CK.HULL)), { capStart: false, capEnd: false });
+  for (let k = 0; k < 3; k++) {
+    const a = ((2 * k + 1.5) / 6) * TAU;
+    B.push(rotZ(a - Math.PI / 2));
+    B.box(0, R + 0.5, 0, 1.6, 1, 2 * L - 8, CK.DARK);                               // service ladder
+    for (let j = 0; j < 32; j++) B.box(0, R + 1.2, -L + 10 + j * ((2 * L - 20) / 31), 3.4, 0.5, 0.4, CK.BRONZE);
+    for (const zt of [-L + 40, L - 40]) { B.box(-12, R + 1.6, zt, 8, 3, 10, CK.HULL); B.box(-12, R + 3.2, zt, 6, 0.4, 8, CK.DECK); }   // airlocks
+    B.pop();
+    for (const zt of [-L + 40, L - 40]) for (const da of [-0.06, 0, 0.06]) lamps.push({ p: V(Math.cos(a + da) * (R + 1.2), Math.sin(a + da) * (R + 1.2), zt + da * 300), r: 1.6, color: WARM, i: 2.0 });
+  }
   for (const s of [-1, 1]) {
     latheAt(B, tr(0, 0, 0), [[R, s * L, CK.BRONZE], [R + 3, s * (L - 2), CK.BRONZE], [R + 3, s * (L + 4), CK.HULL], [R * 0.7, s * (L + 16), CK.HULL], [R * 0.3, s * (L + 22), s > 0 ? CK.PANEL : CK.RADIATOR], [12, s * (L + 24), CK.DARK], [10, s * (L + 44), CK.BRONZE], [0.02, s * (L + 44), CK.DARK]], 72);
   }
@@ -338,7 +349,19 @@ export function buildPolar() {
 }
 
 // -------------------------------------------------------------- power ----
-export const POWER = { half: 950, height: 360, pivotZ: -300, disc: 120, discOff: 64 };
+export const POWER = { half: 950, height: 360, pivotZ: -300, disc: 120, discOff: 64, tramY: 12, tramZ: -16.5 };
+
+/** The Dawnline inspection tram (+x along the rail), 14 m. */
+export function buildTram() {
+  const B = new CB();
+  B.box(0, 0, 0, 14, 3.6, 3.2, CK.HULL);
+  B.box(0, 0.6, 1.62, 12, 1.4, 0.1, CK.GLASS);
+  B.box(0, 0.6, -1.62, 12, 1.4, 0.1, CK.GLASS);
+  for (const x of [-5, 5]) B.box(x, 2.1, 1.0, 2.4, 0.8, 1.6, CK.BRONZE);
+  B.box(7.1, 0, 0, 0.3, 3, 2.6, CK.LANTERN);
+  B.box(-7.1, 0, 0, 0.3, 3, 2.6, CK.DARK);
+  return B.geometry();
+}
 
 /** Solar-inertial power station (+z to the Sun): the array, hub, radiators, emitter mast. */
 export function buildPower() {
@@ -372,6 +395,11 @@ export function buildPower() {
   for (const s of [-1, 1]) dockPort(B, lamps, ports, V(0, s * 25, -60), V(0, s, 0), 16, 4.2);
   for (const s of [-1, 1]) radiatorWing(B, V(s * 26, 0, -60), V(s, 0, 0), V(0, 1, 0), 130, 44, lamps, LAMP.AMBER);
   truss(B, V(0, 0, -100), V(0, 0, POWER.pivotZ + 6), 8, 12, 0.4, CK.DARK);
+  // the tram rail along the spine's back, on posts, with a lit stop at the hub
+  B.box(0, POWER.tramY, POWER.tramZ + 2.3, 2 * half, 1, 1, CK.BRONZE);
+  for (let x = -half; x <= half; x += 60) B.box(x, (POWER.tramY + 7) / 2, POWER.tramZ + 2.5, 0.8, POWER.tramY - 7, 0.8, CK.DARK);
+  B.box(0, POWER.tramY - 1, POWER.tramZ - 3, 30, 0.6, 5, CK.DECK);
+  lamps.push({ p: V(-15, POWER.tramY - 0.4, POWER.tramZ - 3), r: 0.9, color: WARM, i: 2 }, { p: V(15, POWER.tramY - 0.4, POWER.tramZ - 3), r: 0.9, color: WARM, i: 2 });
   latheAt(B, tr(0, 0, POWER.pivotZ), [[0.02, -2, CK.DARK], [9, 0, CK.BRONZE], [10, 6, CK.BRONZE], [0.02, 8, CK.DARK]], 24);
   for (let i = 0; i < 6; i++) lamps.push({ p: V(26.8 * Math.cos(i), 26.8 * Math.sin(i), -30 - i * 7), r: 0.7, color: WARM, i: 1.6 });
   // the emitter (+z toward the ground station): a phased array of hexagonal tiles on a yoke

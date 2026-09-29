@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import { SpaceSim, R_EARTH, bodyDir, MERIDIAN_LON } from '../src/space/sim.js';
 import { Orbit, MU, sunSyncInclination, sunlitFraction, periodOf } from '../src/space/kepler.js';
 import { LowOrbit } from '../src/space/lowOrbit.js';
-import { buildHotel, HOTEL, buildPolar, POLAR, buildFarmDrum, buildFarmFrame, FARM, buildPower, POWER, SKYHOOK } from '../src/space/leoStations.js';
+import { buildHotel, HOTEL, buildPolar, POLAR, buildFarmDrum, buildFarmFrame, FARM, buildPower, POWER, SKYHOOK, buildTram } from '../src/space/leoStations.js';
 import { SHELLS } from '../src/space/constellations.js';
 import { buildRelayCollar, buildCrawler, crawlerAt, CRAWLERS, CRAWL_RANGE } from '../src/space/tetherStations.js';
 import { RIBBON } from '../src/space/climbers.js';
@@ -288,6 +288,23 @@ function sweptHits(moving, fixed, ax, c = new THREE.Vector3(), cell = 1) {
   }
   log('closest pass to the tether (km)', +worst.toFixed(1));
   ok(worst > 8, 'traffic keeps clear of the elevator tether');
+}
+
+// ---- Dawnline's tram runs its rail without meeting the station (swept box along the whole rail)
+{
+  const pw = buildPower(), tg = buildTram();
+  tg.computeBoundingBox();
+  const bb = tg.boundingBox, y0 = POWER.tramY + 2.3 + bb.min.y, y1 = POWER.tramY + 2.3 + bb.max.y, z0 = POWER.tramZ + 2.3 + bb.min.z, z1 = POWER.tramZ + 2.3 + bb.max.z;
+  const p = pw.body.attributes.position;
+  let hits = 0, seatGap = Infinity;
+  for (let i = 0; i < p.count; i++) {
+    const x = p.getX(i), y = p.getY(i), z = p.getZ(i);
+    if (Math.abs(x) < POWER.half + 8 && y > y0 + 0.05 && y < y1 && z > z0 && z < z1) hits++;
+    if (Math.abs(x) <= POWER.half + 1 && z > z0 && z < z1 && y <= y0 + 0.05) seatGap = Math.min(seatGap, y0 - y);
+  }
+  log('tram swept-box intrusions', hits);
+  ok(hits === 0, 'tram path clear');
+  ok(seatGap < 0.1, `tram rides on its rail (gap ${seatGap.toFixed(2)} m)`);
 }
 
 // ---- relay crawlers run the ribbon's faces through the collar bore without meeting it

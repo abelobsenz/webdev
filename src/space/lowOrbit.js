@@ -8,7 +8,7 @@ import { R_EARTH, MERIDIAN_LON, bodyDir } from './sim.js';
 import { Orbit, MU, sunSyncInclination, nodeFacing, sunlitFraction } from './kepler.js';
 import {
   buildHotel, hotelOmega, buildFarmDrum, buildFarmFrame, FARM, farmOmega, buildPolar, POLAR, polarOmega,
-  buildPower, POWER, buildSkyhookHub, buildGrapple, SKYHOOK, buildSweeper, buildDebrisChunk, buildSatellites,
+  buildPower, POWER, buildTram, buildSkyhookHub, buildGrapple, SKYHOOK, buildSweeper, buildDebrisChunk, buildSatellites,
 } from './leoStations.js';
 import { Constellations } from './constellations.js';
 import { droneGeo, DynLamps } from './lifeKit.js';
@@ -256,15 +256,29 @@ export class LowOrbit {
       s.emitter.position.set(0, 0, POWER.pivotZ);
       s.fixed.add(s.emitter);
       lampSet(s.fixed, b.lamps); lampSet(s.emitter, b.emitterLamps);
+      // the inspection tram running the spine, its headlamp ahead of it
+      s.tram = craftPart(s.fixed, buildTram());
+      s.tramLamp = new DynLamps([{ p: new THREE.Vector3(), r: 1.4, color: LAMP.WHITE, i: 3.2 }, { p: new THREE.Vector3(), r: 1.1, color: LAMP.RED, i: 2.4 }], { minPx: 1.0 });
+      s.fixed.add(s.tram, s.tramLamp.mesh);
       s.root.add(s.fixed);
       s.ports = b.ports;
       const pn = new THREE.Vector3();
       s.frameAt = (t, p, q) => { o.pos(t, p); if (q) basisQ(sun, o.normal(t, pn), q); return p; };
-      s.animate = () => {
+      s.animate = (rt) => {
         // aim the emitter at the Earth's centre (the rectenna below), held off the array side
         _s.copy(s.root.position).negate().normalize().applyQuaternion(_qi.copy(s.root.quaternion).invert());
         if (_s.z > -0.05) { _s.z = -0.05; const k = Math.sqrt(Math.max(1 - 0.0025, 0) / Math.max(_s.x * _s.x + _s.y * _s.y, 1e-9)); _s.x *= k; _s.y *= k; }
         s.emitter.quaternion.setFromUnitVectors(_c.set(0, 0, 1), _s.normalize());
+        // tram: out along one wing and back, dwelling at the ends and at the hub stop
+        const T = 900, u = ((rt / T) % 1 + 1) % 1, ph = u * 4, leg = Math.floor(ph), f = ph - leg;
+        const e = f < 0.15 ? 0 : f > 0.85 ? 1 : (f - 0.15) / 0.7, ee = e * e * (3 - 2 * e);
+        const X = POWER.half - 20, x = leg === 0 ? ee * X : leg === 1 ? X * (1 - ee) : leg === 2 ? -ee * X : -X * (1 - ee);
+        const dir = leg === 0 || leg === 3 ? 1 : -1;
+        s.tram.position.set(x, POWER.tramY + 2.3, POWER.tramZ + 2.3);
+        s.tram.rotation.y = dir > 0 ? 0 : Math.PI;
+        s.tramLamp.set(0, x + dir * 7.4, POWER.tramY + 2.3, POWER.tramZ + 2.3);
+        s.tramLamp.set(1, x - dir * 7.4, POWER.tramY + 2.3, POWER.tramZ + 2.3);
+        s.tramLamp.commit();
       };
       s.meshes = [s.fixed];
       this.stations.push(s);
