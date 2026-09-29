@@ -585,9 +585,23 @@ export class LunarOrbitals {
       });
       docked.name = 'Endymion Wheel berthed ferries';
       g.add(docked);
+      // and one coming in: a ferry working its approach to the free berth along the arm's axis,
+      // braking as it closes, a while berthed, then backing away and burning for the surface
+      const inbound = lunarInstanced(f.geo, 1, {}, this.mat, { tint: true });
+      inbound.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      inbound.instanceColor.setXYZ(0, 0.2, 0.45, 0.4);
+      inbound.name = 'Endymion Wheel inbound ferry';
+      const inLamps = createLamps([
+        { p: new THREE.Vector3(), r: 1.2, color: LAMP.RED, i: 3 }, { p: new THREE.Vector3(), r: 1.2, color: LAMP.GREEN, i: 3 },
+        { p: new THREE.Vector3(), r: 1.5, color: LAMP.WHITE, i: 3.2, breathe: 1 }, { p: new THREE.Vector3(), r: 7, color: LAMP.BLUE, i: 2.6 },
+      ], { minPx: 0.9 });
+      inLamps.scale.setScalar(0.001);
+      inLamps.frustumCulled = false;
+      g.add(inbound, inLamps);
+      this.approach = { mesh: inbound, lamps: inLamps, berth: hub.berths[1] };
       g.visible = false;
       parent.add(g);
-      this.wheel = { group: g, orbit: o, rings, radG, solG, near: [hubMesh, radM, solM, docked, ...rings.map((r) => r.group)], hubR: 1.2 };
+      this.wheel = { group: g, orbit: o, rings, radG, solG, near: [hubMesh, radM, solM, docked, inbound, inLamps, ...rings.map((r) => r.group)], hubR: 1.2 };
       this.stations.push(this.wheel);
     }
     // --- the Depot ---
@@ -692,6 +706,7 @@ export class LunarOrbitals {
       s.group.add(s.far);
     }
     this._moveCars(0);
+    this._moveApproach(0);
     this._moveYard(0);
     this._sun = new THREE.Vector3(1, 0, 0);
     this.buildMs = performance.now() - t0;
@@ -744,7 +759,7 @@ export class LunarOrbitals {
       const near = camera ? pixelRadius(camera, _w, s.hubR, viewH) > 0.5 : d < 2000;
       if (near !== s.nearOn) { s.nearOn = near; for (const m of s.near) m.visible = near; s.far.visible = !near; }
       if (d < 3000) camNear = true;
-      if (s === W && near && d < 60) this._moveCars(t);
+      if (s === W && near && d < 60) { this._moveCars(t); this._moveApproach(t); }
       if (s === this.yard && near && d < 80) this._moveYard(t);
     }
     // --- relays and ferries (Moon frame, metres) ---
@@ -785,6 +800,35 @@ export class LunarOrbitals {
     this.ferryLamps.geometry.attributes.iLamp.needsUpdate = true;
     this.ferries.visible = !cam || camNear;
     this.relays.visible = !cam || camNear;
+  }
+
+  /** The inbound ferry's cycle (15 min): approach 5 min from 2 km, 6 min berthed, back off 2, away 2. */
+  static approachS(t) {
+    const c = ((t % 900) + 900) % 900;
+    if (c < 300) { const u = c / 300; return { s: 2000 * (1 - u) * (1 - u), burn: u < 0.15 ? 1 : u > 0.75 ? 0.5 : 0 }; }   // braking in (a quadratic glide)
+    if (c < 660) return { s: 0, burn: 0 };
+    if (c < 780) { const u = (c - 660) / 120; return { s: 60 * u * u, burn: 0 }; }                                   // backing off on the thrusters
+    const u = (c - 780) / 120;
+    return { s: 60 + 2400 * u * u, burn: 1 };
+  }
+
+  _moveApproach(t) {
+    const A = this.approach, b = A.berth;
+    const { s, burn } = LunarOrbitals.approachS(t);
+    _x.set(Math.cos(b.a), Math.sin(b.a), 0);                   // out along the arm
+    _z.copy(_x).negate(); _y.set(0, 0, 1);
+    const ox = _y.y * _z.z - _y.z * _z.y, oy = _y.z * _z.x - _y.x * _z.z, oz = _y.x * _z.y - _y.y * _z.x;
+    _w.set(ox, oy, oz);
+    const r = b.r + 34 + s;
+    _p.set(_x.x * r, _x.y * r, b.z);
+    _m.makeBasis(_w, _y, _z).setPosition(_p);
+    A.mesh.setMatrixAt(0, _m);
+    A.mesh.instanceMatrix.needsUpdate = true;
+    const L = A.lamps.geometry.attributes.iLamp.array;
+    // (the lamps ride the ferry: its own offsets through its basis, no per-frame closures)
+    lampAt(L, 0, -6.6, 0, 8); lampAt(L, 1, 6.6, 0, 8); lampAt(L, 2, 0, 6.8, -24);
+    lampAt(L, 3, 0, 0, burn > 0 ? -38 : 0);                       // the engine glow (inside the hull when cold)
+    A.lamps.geometry.attributes.iLamp.needsUpdate = true;
   }
 
   _moveYard(t) {
@@ -836,3 +880,10 @@ export class LunarOrbitals {
   }
 }
 const V0 = new THREE.Vector3(0, 0, 1);
+
+/** Write lamp k of a lamp buffer at offset (lx, ly, lz) in the frame (_w, _y, _z) about _p. */
+function lampAt(L, k, lx, ly, lz) {
+  L[k * 4] = _p.x + _w.x * lx + _y.x * ly + _z.x * lz;
+  L[k * 4 + 1] = _p.y + _w.y * lx + _y.y * ly + _z.y * lz;
+  L[k * 4 + 2] = _p.z + _w.z * lx + _y.z * ly + _z.z * lz;
+}

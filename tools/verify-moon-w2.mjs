@@ -158,6 +158,10 @@ ok(report.orbitalTris > 30000 && report.orbitalTris < 1.5e6, `orbital triangles 
     }
   }
   ok(armClear > 3, `depot arm passes ${armClear.toFixed(1)} m from the tanks`);
+  // the inbound ferry: seated at the berth when docked, never inside the hub, arm or rings
+  ok(LunarOrbitals.approachS(400).s === 0, 'inbound ferry berthed mid-cycle');
+  for (let k = 0; k < 900; k += 3) { const { s } = LunarOrbitals.approachS(k); ok(s >= 0 && Number.isFinite(s), `approach s at ${k}`); }
+  ok(Math.abs(O.approach.berth.z) - fR > WHEEL.ringZ + zHi, 'inbound berth clear of the rings');
   // the yard's pods: between the stocks, under the hull, clear of it
   for (let k = 0; k < 200; k++) {
     O._moveYard(k * 7.3);
