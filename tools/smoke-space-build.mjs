@@ -10,6 +10,9 @@ import { GeoRoads } from '../src/space/geoRoads.js';
 import { Lanes } from '../src/space/lanes.js';
 import { ReleaseYard } from '../src/space/releaseYard.js';
 import { Moon } from '../src/space/moon.js';
+import { Rings } from '../src/space/rings.js';
+import { HaloPorts } from '../src/space/stations.js';
+import { HALO_PORTS } from '../src/space/earthData.js';
 
 const sim = new SpaceSim();
 sim.syncFromHours(12);
@@ -18,6 +21,10 @@ const space = {
   addBody(name, objects, center, radius, opts) { const b = { name, objects, center, radius, ...opts }; this.bodies.push(b); return b; },
 };
 space.scene.add(space.earthFixed);
+space.rings = new Rings(space, { ringSegs: 0.5 });
+space.earthFixed.add(space.rings.group);
+space.rings.districts.buildAll();
+space.ports = new HaloPorts(space, HALO_PORTS);
 space.elevator = new Elevator(space, { climbers: 60 });
 space.earthFixed.add(space.elevator.group);
 space.hearth = new Hearth(space, { bhSteps: 110, bhScale: 0.6 });
@@ -32,6 +39,8 @@ for (const t of [0, 60, 400, 900, 1500]) {
   sim.step(0);
   space.earthFixed.quaternion.copy(sim.earthQuat); space.earthFixed.updateMatrixWorld(true);
   space.elevator.update(sim, t, 0.016, space);
+  space.rings.update(sim, t, 0.016, space);
+  space.ports.update(sim, t, 0.016, space);
   space.hearth.update(sim, t, 0.016, space);
   space.moon.update(sim, t);
   for (const m of mods) if (m.update) m.update(sim, t, 0.016, space);

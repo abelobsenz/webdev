@@ -29,8 +29,8 @@ export const WHEELS = [
 export const WHEEL = { rimIn: 3370, rimOut: 3630, halfAxial: 90, hubIn: 950, hubOut: 1100, stemR: 800, stemTube: 30, bearingOut: 940, spokes: 6, g: 9.81 };
 export const wheelOmega = () => Math.sqrt(WHEEL.g / WHEEL.rimOut);          // rad/s for 1 g on the rim floor
 export const STEM = { top: -15000, bottom: -19500, bore: 320 };   // bore: clear of the climbers (<= 201 m off the axis)
-export const TUGS = { n: 8, r: 5000, yMin: -16300, yMax: -14700 };
-export const CAPSULE = { spacing: 260, speed: 14, lift: 216 };
+export const TUGS = { n: 8, r: 5000, laneGap: 600, yMin: -16300, yMax: -14700 };
+export const CAPSULE = { spacing: 260, speed: 14, rail: 170, railR: 32, bodyY: 69, bodyH: 18 };   // rail: stations.js conveyor rail offset (+y) and radius
 
 function mulberry(seed) {
   let a = seed >>> 0;
@@ -247,12 +247,14 @@ export function buildWheel() {
   return { geo: B.geometry(), lamps };
 }
 
-function buildCapsule() {
-  const B = new CB();
-  B.box(0, 0, 0, 22, 18, 40, CK.BRONZE);
-  B.box(0, 9.5, 0, 18, 1, 36, CK.DARK);
-  B.box(0, -10, 0, 8, 2, 30, CK.HULL);
-  B.box(0, 0, 20.3, 16, 8, 0.6, CK.LANTERN);
+/** Ore capsule, origin on its rail's axis, +y away from the rail, +z along the belt. */
+export function buildCapsule() {
+  const B = new CB(), c = CAPSULE;
+  B.box(0, c.railR + 2, 0, 14, 4, 30, CK.DARK);                                   // bogie on the rail top
+  B.box(0, (c.railR + 4 + c.bodyY - c.bodyH / 2) / 2, 0, 4, c.bodyY - c.bodyH / 2 - c.railR - 4, 6, CK.HULL);   // hanger strut
+  B.box(0, c.bodyY, 0, 22, c.bodyH, 40, CK.BRONZE);
+  B.box(0, c.bodyY + c.bodyH / 2 + 0.5, 0, 18, 1, 36, CK.DARK);
+  B.box(0, c.bodyY, 20.3, 16, 8, 0.6, CK.LANTERN);
   return B.geometry();
 }
 
@@ -285,8 +287,10 @@ export class CounterLife {
     this.belts = works.conveyors.map((c) => {
       const dir = c.end.clone().sub(c.start), len = dir.length();
       dir.normalize();
-      const lift = V(0, CAPSULE.lift, 0);
-      return { start: c.start.clone().add(lift), dir, len, n: Math.floor(len / CAPSULE.spacing), q: new THREE.Quaternion().setFromUnitVectors(V(0, 0, 1), dir) };
+      // capsule frame: z along the belt, y the rail's outward side (world +y made perpendicular)
+      const up = V(0, 1, 0).addScaledVector(dir, -dir.y).normalize(), x = new THREE.Vector3().crossVectors(up, dir);
+      const q = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(x, up, dir));
+      return { start: c.start.clone().add(V(0, CAPSULE.rail, 0)), dir, up, len, n: Math.floor(len / CAPSULE.spacing), q, tubeR: c.radius };
     });
     const nCaps = this.belts.reduce((s, b) => s + b.n, 0);
     const inst = (geo, n) => {
@@ -305,9 +309,12 @@ export class CounterLife {
 
   wheelAngle(i, t) { return WHEELS[i].spin * this.omega * t; }
   tugPose(i, t, out) {
-    const a = (i / TUGS.n) * TAU + t * (0.004 + 0.0007 * (i % 3)) * (i % 2 ? 1 : -1);
-    const y = (TUGS.yMin + TUGS.yMax) / 2 + ((TUGS.yMax - TUGS.yMin) / 2) * Math.sin(t * 0.01 + i * 1.3);
-    return out.set(Math.cos(a) * TUGS.r, y, Math.sin(a) * TUGS.r);
+    // two circulation lanes, one each way, 600 m apart; tugs in a lane keep station (one speed)
+    // and each flies its own height band with a gentle bob
+    const dir = i % 2 ? 1 : -1, r = TUGS.r + (i % 2 ? 0 : TUGS.laneGap);
+    const a = (i / TUGS.n) * TAU + t * 0.0045 * dir;
+    const y = TUGS.yMin + 60 + ((TUGS.yMax - TUGS.yMin - 120) * i) / (TUGS.n - 1) + 60 * Math.sin(t * 0.01 + i * 1.3);
+    return out.set(Math.cos(a) * r, y, Math.sin(a) * r);
   }
 
   update(t) {

@@ -138,9 +138,11 @@ function cliffs(B, M, lamps, S, r) {
       // light-well lift shaft and its glass at the crest
       const zs = z1 + gap / 2;
       if (j < TILE_L / segL - 1) {
-        B.tube([V3(sg * (X0 - 26), S.deck(sg * (X0 - 26)) - 10, zs), V3(sg * (X0 - 26), S.wall + 30, zs)], 11, 10, CK.GLASS);
-        for (let yy = 320; yy < S.wall; yy += 480) M.box(sg * (X0 - 60), yy, zs, 70, 5, gap + 8, CK.DECK);
-        lamps.push({ p: V3(sg * (X0 - 26), S.wall + 36, zs), r: 6, color: LAMP.AMBER, i: 2.2, breathe: 0.2, phase: j / 8 });
+        // (they stop at the top terrace: the glass meets the wall just above it)
+        const shaftTop = levels * H + 20;
+        B.tube([V3(sg * (X0 - 26), S.deck(sg * (X0 - 26)) - 10, zs), V3(sg * (X0 - 26), shaftTop, zs)], 11, 10, CK.GLASS);
+        for (let yy = 320; yy < shaftTop; yy += 480) M.box(sg * (X0 - 60), yy, zs, 70, 5, gap + 8, CK.DECK);
+        lamps.push({ p: V3(sg * (X0 - 26), shaftTop + 6, zs), r: 6, color: LAMP.AMBER, i: 2.2, breathe: 0.2, phase: j / 8 });
       }
       if (j % 2 === 0) lamps.push({ p: V3(sg * (X0 - d0 - 6), H * 0.6, zc), r: 8, color: LAMP.WHITE, i: 1.6 });
     }
@@ -231,7 +233,7 @@ function farmCell(B, M, lamps, S, r, x0, x1, z0, z1) {
     const x = x0 + (i + 0.5) * pitch, y = Math.max(S.deck(x - half), S.deck(x + half)) + 1;
     const h = 30 + r() * 16;
     vault(B, x, y, len0, len1, half, h, CK.CONSERVATORY, CK.BRONZE, 10, 3);
-    for (let z = len0 + 60; z < len1; z += 90) ribArc(M, x, y, z, half, h, 1.1, CK.BRONZE, 8);
+    for (let z = len0 + 75; z < len1; z += 150) ribArc(M, x, y, z, half, h, 1.1, CK.BRONZE, 6);
   }
   standBox(B, S, (x0 + x1) / 2, z0 + 34, (x1 - x0) - 40, 48, 22, CK.HULL);
   B.box((x0 + x1) / 2, S.deck((x0 + x1) / 2) + 20, z0 + 10, (x1 - x0) - 80, 6, 2, CK.LANTERN);
@@ -393,7 +395,7 @@ function rotors(B, M, lamps, S) {
         B.pop();
       }
       // hanger from the wall's outer foot to the sheath's upper inboard face
-      const fa = (5 * Math.PI) / 8, top = V3(sg * (S.outer - 30), -380, z), bot = V3(sg * (S.tubeX + Math.cos(fa) * (G.apo - 5)), cy + Math.sin(fa) * (G.apo - 5), z);
+      const fa = (5 * Math.PI) / 8, top = V3(sg * (S.outer - 30), -380, z), bot = V3(sg * (S.tubeX + Math.cos(fa) * (G.apo + 4)), cy + Math.sin(fa) * (G.apo + 4), z);
       B.tube([top, bot], 9, 8, CK.DARK);
       lamps.push({ p: V3(cx + sg * (G.apo + 30) * Math.cos(G.face), cy + (G.apo + 30) * Math.sin(G.face), z), r: 6, color: LAMP.TEAL, i: 2.0, breathe: 0.4, phase: (z / TILE_L + 0.5) % 1 });
     }
@@ -441,6 +443,7 @@ function crest(B, M, lamps, S, hubArch) {
   const pts = P.pts, D = P.depth * 1000, back = 0.28 * 1000;
   for (let i = 0; i < pts.length - 1; i++) {
     const [ax, ay] = pts[i], [bx, by] = pts[i + 1];
+    if (Math.min(ay, by) * 1000 < S.wall + 340) continue;       // the girder's ends are buried in the corbels
     const tx = bx - ax, ty = by - ay, l = Math.hypot(tx, ty) * 1000;
     // outward normal (away from the vault): the right of the +x->-x path
     let nx = -ty, ny = tx; const nl = Math.hypot(nx, ny); nx /= nl; ny /= nl;
