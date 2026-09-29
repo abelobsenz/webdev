@@ -550,7 +550,7 @@ export class Fleet {
   /** Near detail for the berthed and the visiting liner (src/space/linerDetail.js): lazy, hidden beyond range. */
   _linerDetail(cam, force = false, t = 0) {
     if (!cam && !force) return;
-    const hulls = [this.docked, this.movers.find((m) => m.name === 'approach')?.mesh].filter(Boolean);
+    const hulls = (this._linerHulls ||= [this.docked, this.movers.find((m) => m.name === 'approach')?.mesh].filter(Boolean));   // (cached: no per-frame allocation)
     let near = force;
     for (const h of hulls) {
       h.getWorldPosition(_v);
