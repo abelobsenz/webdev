@@ -3,7 +3,8 @@ import { NOISE_GLSL } from '../shaders/noise.glsl.js';
 import { U } from '../core/uniforms.js';
 import { SNOISE_GLSL } from './glsl.js';
 import { R_MOON } from './sim.js';
-import { MoonBake, TOWNS } from './moonBake.js';
+import { MoonBake } from './moonBake.js';
+import { ALL_TOWNS, ARCS, arcUniforms, townUniforms } from './lunarNetwork.js';
 import { SITE_GLSL, SITE_UP } from './lunarSite.js';
 
 // The terraformed Moon's surface, ray-traced on a proxy sphere so the ground is the exact
@@ -48,7 +49,9 @@ uniform float uPixAng;      // radians per pixel
 uniform float uCloudRot;    // cloud drift (rad about the axis)
 uniform float uCloudPh;     // 0..1 cross-fade phase
 uniform float uTime;
-uniform vec4 uTown[${TOWNS.length}];
+uniform vec4 uTown[${ALL_TOWNS.length}];
+uniform vec4 uArcA[${ARCS.length}];
+uniform vec4 uArcB[${ARCS.length}];
 varying vec3 vView;
 ${NOISE_GLSL}
 ${SNOISE_GLSL}
@@ -124,6 +127,137 @@ float lightLattice(vec3 p, float cellKm, float r0, float fp, float seed) {
   // mean of the pattern: 0.62 x 1.0 x pi r0^2 per cell, on about 1.2 cells per unit area
   float mean = 0.62 * 1.0 * PI * r0 * r0 * 1.2;
   return mix(1.0, acc / mean, res);
+}
+
+// ---- the settled Moon seen from above (lunarNetwork.js): towns with their street plans, the
+// highways and rail corridors between them, harbours on the coasts, ships in the roads ----
+
+// a lit line of half-width w (km) seen at footprint fp (km per pixel): its light spreads over
+// at least a pixel but keeps its total, so a 40 m highway still reads from orbit as a faint
+// thread instead of vanishing or shimmering, and sharpens to a lamp-lit strip up close
+float litLine(float d, float w, float fp) {
+  float s = max(w, fp * 0.75);
+  float x = d / s;
+  return exp(-x * x) * (w / s);
+}
+
+struct City {
+  vec3 land;      // lights drawn on land: street grids, avenues, rings, highways, villages, quays
+  vec3 rail;      // rail corridors and their trains (on land, and on the causeways over the sea)
+  float near;     // how deep in a town's metropolitan area (harbour traffic, sea glow)
+  float urb;      // built-up fraction (daytime albedo)
+  float road;     // paved-line coverage (daytime albedo)
+  float own;      // 0 where an outpost or the Landing draws its own lamps
+};
+
+City cityAt(vec3 up, float fp, float shore, float t, float siteD) {
+  City c;
+  c.land = vec3(0.0); c.rail = vec3(0.0);
+  c.near = 0.0; c.urb = 0.0; c.road = 0.0; c.own = smoothstep(22.0, 30.0, siteD);
+  float resolvedGrid = 1.0 - smoothstep(0.05, 0.14, fp);
+  for (int i = 0; i < ${ALL_TOWNS.length}; i++) {
+    vec4 T = uTown[i];
+    float w = T.w;
+    float Rc = 4.0 + 14.0 * w;                          // core radius (km)
+    if (dot(up, T.xyz) < cos(Rc * 3.4 / RM)) continue;
+    vec3 e1 = normalize(cross(T.xyz, abs(T.y) < 0.95 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0)));
+    vec3 e2 = cross(T.xyz, e1);
+    float rot = float(i) * 0.71;
+    vec2 q0 = vec2(dot(up, e1), dot(up, e2)) * RM;
+    vec2 q = vec2(cos(rot) * q0.x - sin(rot) * q0.y, sin(rot) * q0.x + cos(rot) * q0.y);
+    float r = length(q);
+    if (i > 0) c.own = min(c.own, smoothstep(2.6, 4.2, r));
+    // the Landing (town 0) is modelled out to ~25 km: only its outer metropolis is drawn here
+    float keep = i == 0 ? smoothstep(24.0, 34.0, r) : 1.0;
+    float core = exp(-r * r / (Rc * Rc)) * keep;
+    float metro = exp(-r * r / (Rc * Rc * 5.0)) * keep;
+    c.near = max(c.near, metro);
+    // boulevards out of the centre, and ring roads round it
+    float nav = 6.0 + floor(w * 8.0);
+    float sect = 6.2831853 / nav;
+    float th = atan(q.y, q.x);
+    float dA = abs(fract(th / sect + 0.5) - 0.5) * sect * r;
+    float av = litLine(dA, 0.03, fp) * smoothstep(0.3, 1.2, r) * metro;
+    float rp = Rc * 0.42;
+    float dR = abs(fract(r / rp + 0.5) - 0.5) * rp;
+    float rings = litLine(dR, 0.025, fp) * (1.0 - smoothstep(Rc * 1.6, Rc * 2.0, r)) * smoothstep(0.4, 1.2, r) * keep;
+    // the blocks' street grid (350 m), normalised to a mean of one; each 1.4 km district its
+    // own brightness (dark parks and yards, bright centres)
+    vec2 gq = abs(fract(q / 0.35 + 0.5) - 0.5) * 0.35;
+    float grid = mix(1.0, (litLine(gq.x, 0.008, fp) + litLine(gq.y, 0.008, fp)) / 0.081, resolvedGrid);
+    float blk = hash12(floor(q / 1.4) + float(i) * 7.0);
+    float dist = step(0.16, blk) * mix(0.35, 1.35, blk);
+    c.urb = max(c.urb, (core * 0.8 + metro * 0.2) * mix(1.0, dist, 0.5));
+    c.road = max(c.road, (av + rings) * 2.0);
+    c.land += w * (vec3(1.0, 0.71, 0.42) * core * dist * min(grid, 3.0) * 1.3
+                 + vec3(1.0, 0.85, 0.64) * (av * 3.0 + rings * 2.2)
+                 + vec3(1.0, 0.72, 0.45) * metro * 0.06);
+    // harbour: the quays along the shore within the town, cool floodlights on the cranes and
+    // the container stacks, a red beacon on each crane jib
+    float quay = shore * metro * w;
+    float cranes = mix(0.25, step(0.93, hash12(floor(q / 0.3) + 13.0)) * 3.0, resolvedGrid);
+    c.land += quay * (vec3(0.8, 0.9, 1.0) * 2.4 + vec3(1.0, 0.2, 0.08) * cranes);
+  }
+  // highways and rail corridors: great-circle arcs between the towns
+  for (int i = 0; i < ${ARCS.length}; i++) {
+    vec3 a = uArcA[i].xyz, b = uArcB[i].xyz;
+    vec3 n = normalize(cross(a, b));
+    float dn = abs(dot(up, n)) * RM;
+    float wk = uArcA[i].w;
+    if (dn > max(0.5, fp * 3.0)) continue;
+    if (dot(cross(a, up), n) < 0.0 || dot(cross(up, b), n) < 0.0) continue;
+    float s = acos(clamp(dot(up, a), -1.0, 1.0)) * RM;
+    float L = acos(clamp(dot(a, b), -1.0, 1.0)) * RM;
+    float ends = smoothstep(3.0, 14.0, s) * smoothstep(3.0, 14.0, L - s);
+    float line = litLine(dn, wk, fp) * ends;
+    if (uArcB[i].w < 0.5) {
+      // a highway: sodium lamps every 50 m where they resolve, a corridor of roadside plots,
+      // and a village every ~28 km of it
+      float lp = abs(fract(s / 0.05) - 0.5) * 0.05;
+      float lamps = mix(1.0, litLine(lp, 0.004, fp) / 0.142, 1.0 - smoothstep(0.004, 0.02, fp));
+      float plots = litLine(dn, 0.35, fp) * step(0.55, hash12(vec2(floor(s / 0.6), float(i) + 0.5 * sign(dot(up, n)))));
+      float vc = (floor(s / 28.0) + 0.5) * 28.0;
+      float hv = hash12(vec2(floor(s / 28.0), float(i) * 3.1));
+      float ds = s - vc - (hv - 0.5) * 10.0;
+      float vil = exp(-(ds * ds + dn * dn) / 1.6) * step(0.35, hv) * ends;
+      c.land += vec3(1.0, 0.6, 0.28) * line * lamps * 1.6 + vec3(1.0, 0.72, 0.45) * (plots * 0.5 + vil * 0.9) * ends;
+      c.road = max(c.road, line);
+    } else {
+      // a rail corridor: cool white line lighting, a station every 45 km, and the trains,
+      // 400 m of lit carriages at 140 m/s each way, a train every 36 km
+      float st = s - (floor(s / 45.0) + 0.5) * 45.0;
+      float sta = exp(-(st * st + dn * dn) / 0.36);
+      float sp = max(0.4, fp);
+      float d1 = (fract((s - t * 0.14) / 36.0 + 0.5) - 0.5) * 36.0;
+      float d2 = (fract((s + t * 0.14) / 36.0) - 0.5) * 36.0;
+      float trains = (exp(-d1 * d1 / (sp * sp)) + exp(-d2 * d2 / (sp * sp))) * (0.4 / sp) * litLine(dn, 0.02, fp) / max(litLine(0.0, 0.02, fp), 1e-4);
+      c.rail += (vec3(0.7, 0.86, 1.0) * line * 1.3 + vec3(0.8, 0.92, 1.0) * sta * 1.2 + vec3(1.0, 0.95, 0.85) * trains * 2.5) * ends;
+      c.road = max(c.road, line);
+    }
+  }
+  return c;
+}
+
+// ships in the roads off the towns: running lights moving slowly on the water, one in some
+// cells of a 3 km lattice, falling to their mean where they no longer resolve
+float shipLights(vec3 p, float fp, float t) {
+  vec3 q = p * (RM / 3.0);
+  float fc = fp / 3.0;
+  float res = 1.0 - smoothstep(0.1, 0.3, fc);
+  if (res <= 0.0) return 0.3;
+  vec3 base = floor(q - 0.5);
+  float acc = 0.0;
+  float r0 = 0.012, rr = max(r0, fc * 0.8);
+  for (int i = 0; i < 2; i++) for (int j = 0; j < 2; j++) for (int k = 0; k < 2; k++) {
+    vec3 cell = base + vec3(float(i), float(j), float(k));
+    vec3 h = hash33(cell + 71.0);
+    float ph = t * (0.0015 + 0.002 * h.z) + h.y * 6.2831853;
+    vec3 c = cell + 0.5 + 0.3 * vec3(cos(ph), sin(ph * 0.7), sin(ph));
+    vec3 dv = q - c;
+    dv -= p * dot(dv, p);
+    acc += step(h.x, 0.3) * exp(-dot(dv, dv) / (rr * rr)) * (r0 * r0) / (rr * rr);
+  }
+  return mix(0.3, acc / (0.3 * PI * r0 * r0 * 1.2), res);
 }
 
 // fields, hedgerows and orchards around the Landing (site ortho coordinates, km): estates of
@@ -258,6 +392,14 @@ void main() {
     float depth = max(-h, 0.0015);
     float hl = max(h, 0.0);
     float mu = dot(up, sun);
+    // the settled Moon (lunarNetwork.js): towns with their street plans, highways and rail
+    // corridors, harbours along the coasts; grey built-up ground and pale roads by day
+    float wsh = textureLod(uMoonN, up, 1.5).a;
+    float shore = smoothstep(0.05, 0.22, wsh) * (1.0 - smoothstep(0.55, 0.9, wsh)) * (1.0 - waterF);
+    City city = cityAt(up, fp, shore, uTime, siteD);
+    alb = mix(alb, vec3(0.15, 0.145, 0.14), clamp(city.urb, 0.0, 1.0) * 0.45 * (1.0 - nearSite));
+    alb = mix(alb, vec3(0.3, 0.29, 0.27), clamp(city.road, 0.0, 1.0) * 0.55 * (1.0 - nearSite));
+    float nightC = (1.0 - smoothstep(-0.06, 0.03, mu)) * city.own;
     float lit = smoothstep(-0.012, 0.012, mu);
     // sunlight through the thin air: warmer as the Sun sinks
     vec3 sunCol = mix(vec3(1.0, 0.62, 0.36), vec3(1.0, 0.975, 0.94), smoothstep(-0.01, 0.14, mu));
@@ -306,9 +448,9 @@ void main() {
         float clus = smoothstep(0.6, 0.9, snoise(up * 30.0) * 0.5 + 0.5 + 0.22 * snoise(up * 95.0));
         float dens = suit * side * (band * 0.5 * clus + 0.02);
         float ownT = 1.0;
-        for (int i = 0; i < ${TOWNS.length}; i++) {
+        for (int i = 0; i < ${ALL_TOWNS.length}; i++) {
           float dk = acos(clamp(dot(up, uTown[i].xyz), -1.0, 1.0)) * RM;
-          dens += uTown[i].w * (exp(-dk * dk / 60.0) * 1.2 + exp(-dk * dk / 1500.0) * 0.25) * (i == 0 ? 0.12 : 1.0);
+          dens += uTown[i].w * (exp(-dk * dk / 60.0) * 0.5 + exp(-dk * dk / 1500.0) * 0.12) * (i == 0 ? 0.12 : 1.0);
           // the outposts (lunarOutposts.js) draw their own lamps within a few kilometres
           if (i > 0) ownT = min(ownT, smoothstep(1.8, 3.8, dk));
         }
@@ -317,6 +459,7 @@ void main() {
         float own = (nearSite > 0.0 ? smoothstep(2.0, 4.5, siteD) : 1.0) * ownT;
         landCol += vec3(1.0, 0.7, 0.42) * dens * pat * night * 0.12 * own;
       }
+      landCol += (city.land + city.rail) * 0.12 * nightC;
     }
     if (waterF > 0.001) {
       // shallow seas: the sea bed seen through clear water, the sky and the Sun mirrored
@@ -344,6 +487,13 @@ void main() {
       vec3 body = mix(deep, bed * shallowTint, tr) / PI * (E * max(mu, 0.0) + sky + earth);
       vec3 skyR = uSunE * vec3(0.02, 0.04, 0.09) * smoothstep(-0.1, 0.3, mu);
       seaCol = body * (1.0 - Fv) + Fv * skyR + spec;
+      // at night: ships riding in the roads off the towns, the harbour lights mirrored near the
+      // quays, and the rail causeways' lamps across the shallows
+      if (nightC > 0.0) {
+        float ships = shipLights(up, fp, uTime) * (city.near * 1.2 + 0.03);
+        float sheen = city.near * (1.0 - smoothstep(0.55, 1.0, wsh));
+        seaCol += (vec3(1.0, 0.88, 0.7) * ships * 0.9 + vec3(1.0, 0.7, 0.4) * sheen * 0.18 + city.rail * 0.8) * 0.12 * nightC;
+      }
     }
     col = mix(landCol, seaCol, waterF);
     // aerial perspective from within the air (from space the air shell's own glow veils the
@@ -424,7 +574,8 @@ export class MoonSurface {
       uPixAng: { value: 0.001 },
       uCloudRot: { value: 0 }, uCloudPh: { value: 0 },
       uTime: { value: 0 },
-      uTown: { value: TOWNS.map(([la, lo, w]) => { const a = la * Math.PI / 180, o = lo * Math.PI / 180; return new THREE.Vector4(Math.cos(a) * Math.cos(o), Math.sin(a), -Math.cos(a) * Math.sin(o), w); }) },
+      uTown: { value: townUniforms() },
+      uArcA: { value: arcUniforms().A }, uArcB: { value: arcUniforms().B },
     };
     this.material = new THREE.ShaderMaterial({
       vertexShader: VERT, fragmentShader: FRAG, uniforms: this.uniforms,

@@ -22,7 +22,7 @@ const D2R = Math.PI / 180;
 
 // Mare basins: [lat, lon, angular radius (deg), floor depth (km)]. The irregular seas are
 // chains of lobes; the shore itself comes from the terrain.
-const MARIA = [
+export const MARIA = [
   // Oceanus Procellarum
   [43, -50, 7, 0.45], [34, -57, 8, 0.55], [22, -59, 8.5, 0.6], [11, -56, 8, 0.55], [1, -58, 6.5, 0.45],
   [-6, -47, 6, 0.45], [18, -45, 7, 0.55], [29, -43, 6, 0.5], [5, -44, 5, 0.4], [-2, -39, 4, 0.35],
@@ -45,7 +45,7 @@ const MARIA = [
 ];
 
 // Basin ring mountains: [lat, lon, ring radius (deg), height (km), width (deg), open side bearing (deg, -1 none)]
-const BASINS = [
+export const BASINS = [
   [33, -16, 19.5, 3.4, 1.7, 260],     // Imbrium: Apennines, Carpathians, Alps, Caucasus (open to Procellarum)
   [28, 17.5, 12.5, 1.8, 1.2, -1],     // Serenitatis: Haemus
   [17, 59, 9.5, 2.4, 1.1, -1],        // Crisium
@@ -59,7 +59,7 @@ const BASINS = [
 ];
 
 // Named craters: [lat, lon, diameter (km), age 0 fresh .. 1 ancient, rays, lake]
-const CRATERS = [
+export const CRATERS = [
   [-43.3, -11.2, 86, 0.02, 1, 0],   // Tycho
   [9.6, -20.1, 93, 0.06, 1, 0],     // Copernicus
   [8.1, -38.0, 31, 0.05, 1, 0],     // Kepler
@@ -107,9 +107,12 @@ const CRATERS = [
 ];
 
 // Settled places at night: [lat, lon, weight]. Medii Landing first (under the Exchange).
+// Every other town stands on dry land: at least 8 km from anywhere the bake can put water
+// (lunarNetwork.js seaClearance, asserted by tools/verify-moon-w2.mjs); the ones first laid
+// out in the maria were moved to the nearest dry shore.
 export const TOWNS = [
-  [0, 0, 1.0], [8, -2.5, 0.6], [24, 3, 0.55], [18, 30, 0.6], [2, 22, 0.55], [-8, 44, 0.45], [-22, -30, 0.45],
-  [40, -2, 0.45], [12, -24, 0.5], [30, -30, 0.45], [-2, 15, 0.5], [15, 50, 0.4], [-28, -20, 0.35], [-14, -8, 0.4],
+  [0, 0, 1.0], [8, -2.5, 0.6], [24, 3, 0.55], [18.56, 30.37, 0.6], [2, 21.83, 0.55], [-8.08, 42.34, 0.45], [-22, -30, 0.45],
+  [40.82, 5.11, 0.45], [12, -24, 0.5], [26.62, -36.34, 0.45], [-2, 15, 0.5], [14.39, 49.19, 0.4], [-29.34, -21.1, 0.35], [-13.68, -6.51, 0.4],
 ];
 
 const BAKE_FRAG = /* glsl */ `

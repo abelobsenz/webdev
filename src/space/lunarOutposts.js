@@ -7,6 +7,7 @@ import { kit, seat, seatLocal, mulberry, KIT_R, TRACKER_AXLE } from './lunarKit.
 import { stationFrame } from './stations.js';
 import { addLamps, pixelRadius } from './craftMesh.js';
 import { TOWNS } from './moonBake.js';
+import { FAR_TOWNS } from './lunarNetwork.js';
 import { R_MOON } from './sim.js';
 import { Path, LunarTraffic, plumeMesh } from './lunarTraffic.js';
 
@@ -304,10 +305,11 @@ export class LunarOutposts {
   constructor(parent) {
     this.parent = parent;                 // the Moon's group (Moon frame, km)
     this.mat = createLunarMaterial({ lit: 0.55 });
-    this.sites = TOWNS.slice(1).map(([lat, lon, w], i) => {
+    // the near-side towns, then the far-side and polar settlements (lunarNetwork.js FAR_TOWNS)
+    this.sites = TOWNS.slice(1).concat(FAR_TOWNS).map(([lat, lon, w, name], i) => {
       const up = townDir(lat, lon);
       const g = new THREE.Group();
-      g.name = `Lunar outpost ${i + 1}`;
+      g.name = name ? `${name} (lunar outpost ${i + 1})` : `Lunar outpost ${i + 1}`;
       g.position.copy(up).multiplyScalar(R_MOON);
       stationFrame(up, g.quaternion);
       g.visible = false;
