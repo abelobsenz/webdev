@@ -48,7 +48,7 @@ for (const [k, C] of [['fleet', Fleet], ['works', WorkingStations], ['geoRoads',
 // the fleet's lazily built near detail (liners, Selene, tenders), forced so it is exercised too
 space.fleet._linerDetail(null, true); space.fleet._seleneDetail(null, 0, true); space.fleet._tenderDetail(null, true);
 // the lazily built near detail (Helianth district and flotilla, foundry yard): force it, then animate it below
-space.works.district.build(); space.works.yard.build(); space.works.swarm.build(); space.works.commons.build();   // (and the Helianth's collector shells, the foundry's town)
+space.works.district.build(); space.works.yard.build(); space.works.swarm.build(); space.works.commons.build(); space.works.road.build();   // (and the Helianth's collector shells, the foundry's town)
 let tri = 0;
 space.scene.traverse((o) => { if (o.isMesh && o.geometry?.index && !o.geometry.isInstancedBufferGeometry) tri += o.geometry.index.count / 3; });
 for (const t of [0, 60, 400, 900, 1500]) {

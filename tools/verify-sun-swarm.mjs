@@ -336,5 +336,60 @@ const D = V(0, 0.025 * 1.496e8, 0.004 * 1.496e8).length();
   }
   out.beams = sw.beamCount;
 }
+// ================================================================== the Earth Road
+{
+  const { HelianthRoad, ROAD, GATES, gateZ, laneX, shipPose, buildGate } = await import('../src/space/helianthRoad.js');
+  out.roadGateTris = tri(buildGate());
+  const offset = V(0, 0.025 * 1.496e8, 0.004 * 1.496e8);
+  let flo = Infinity, shell = Infinity, beam = Infinity, worstMs = 0;
+  // through the year: the Sun round the Earth (the world origin), the Helianth fixed on the Sun
+  for (let k = 0; k < 12; k++) {
+    const a = k / 12 * Math.PI * 2, sun = V(Math.cos(a) * 1.496e8, 0, Math.sin(a) * 1.496e8);
+    const station = new THREE.Group();
+    station.position.copy(sun).add(offset);
+    station.quaternion.setFromUnitVectors(V(0, 1, 0), offset.clone().normalize());
+    station.updateMatrixWorld(true);
+    const bodies = [], space = { addBody(n, o, c, r, opts) { const b = { n, o, c, r, ...opts }; bodies.push(b); return b; } };
+    const road = new HelianthRoad(station, V(0, -1, 0), space);
+    const cam = station.position.clone().add(V(0, 50, 0));
+    const [, ms] = time(() => road.update(k * 97, cam)); worstMs = Math.max(worstMs, road.buildMs);
+    assert.ok(road.on && bodies.length === 1, 'road on near the Helianth');
+    const iv = bodies[0].interval(); assert.ok(iv[0] > 0 && iv[1] > iv[0], 'road depth interval');
+    station.add(road.group); station.updateMatrixWorld(true);
+    buffers(`road@${k}`, road.group);
+    // the road points in the station frame (km) along both lanes
+    const toStation = new THREE.Matrix4().compose(V(), road.group.quaternion, V(1, 1, 1));
+    const earth = station.position.clone().negate().normalize().applyQuaternion(station.quaternion.clone().invert());
+    for (let l = 0; l < 2; l++) for (let z = ROAD.z0; z <= ROAD.z0 + ROAD.len; z += 20) {
+      const p = V(laneX(l), ROAD.y, z).applyMatrix4(toStation);
+      const r = Math.hypot(p.x, p.z);
+      if (r < 420) flo = Math.min(flo, Math.abs(p.y) - 24 - ROAD.gateR);
+      for (const L of SWARM.layers) shell = Math.min(shell, Math.abs(p.y - shellY(D, L.y, p.x, p.z)) - ROAD.gateR - 4.5);
+      // the beam leaves the hub along the Earth's direction
+      const u = Math.max(p.dot(earth), 0);
+      beam = Math.min(beam, p.clone().addScaledVector(earth, -u).length() - ROAD.gateR);
+    }
+    // ships stay inside their gates' inner half
+    const p = V();
+    for (let s = 0; s < ROAD.ships; s++) for (let t = 0; t < 900; t += 13) {
+      shipPose(s, t, p);
+      assert.ok(Math.hypot(p.x - laneX(s % 2), p.y - ROAD.y) < ROAD.gateR * 0.5, 'ship within its lane');
+      assert.ok(p.z >= ROAD.z0 && p.z <= ROAD.z0 + ROAD.len, 'ship on the road');
+    }
+    void ms;
+  }
+  assert.ok(flo > 5, `the road clears the flotilla (${flo.toFixed(1)} km)`);
+  assert.ok(shell > 5, `the road runs between the shells (${shell.toFixed(1)} km)`);
+  assert.ok(beam > 10, `the lanes keep off the Helianth's beam (${beam.toFixed(1)} km)`);
+  assert.ok(gateZ(0) > 40, 'first gate well clear of the Helianth');
+  // ships on a lane keep apart
+  let sep = Infinity; const a = V(), b = V();
+  for (let t = 0; t < 1200; t += 2) for (let i = 0; i < ROAD.ships; i++) for (let j = i + 1; j < ROAD.ships; j++) {
+    if (i % 2 !== j % 2) continue;
+    shipPose(i, t, a); shipPose(j, t, b); sep = Math.min(sep, a.distanceTo(b));
+  }
+  assert.ok(sep > ROAD.shipLen / 1000 + 1, `ships on a lane keep apart (${sep.toFixed(1)} km)`);
+  Object.assign(out, { roadGates: GATES * 2, roadFloClearKm: +flo.toFixed(1), roadShellClearKm: +shell.toFixed(1), roadBeamClearKm: +beam.toFixed(1), roadShipSepKm: +sep.toFixed(1), roadBuildMs: +worstMs.toFixed(1) });
+}
 console.log(JSON.stringify(out));
 console.log('SUN_SWARM_VERIFIED');
