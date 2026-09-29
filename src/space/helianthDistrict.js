@@ -338,7 +338,7 @@ export function crewOnCatwalk(j, t, out) {
 export class HelianthDistrict {
   /** station: the collector's group (km); sunDir: its light direction; scene: where the flotilla lives. */
   constructor(station, sunDir, space) {
-    this.station = station; this.sunDir = sunDir; this.space = space;
+    this.station = station; this.sunDir = sunDir; this.space = space; this._center = new THREE.Vector3();
     this.built = false; this.queue = null;
     this.near = new THREE.Group(); this.near.visible = false; station.add(this.near);
     this.flotilla = new THREE.Group(); this.flotilla.visible = false;
@@ -348,7 +348,7 @@ export class HelianthDistrict {
     this.crawlers = null; this.couriers = [];
     this._m = new THREE.Matrix4(); this._q = new THREE.Quaternion(); this._p = V(0, 0, 0); this._f = V(0, 0, 1); this._x = V(0, 0, 0); this._y = V(0, 0, 0);
     this._pm = new THREE.Matrix4(); this._s = V(1, 1, 1); this._flip = new THREE.Quaternion().setFromAxisAngle(V(0, 1, 0), Math.PI);
-    if (space?.addBody) this.body = space.addBody('helianthFlotilla', [this.flotilla], (v) => v.copy(this.flotilla.position), FLOTILLA.rMax * 0.001 + 5, {});
+    if (space?.addBody) this.body = space.addBody('helianthFlotilla', [this.flotilla], (v) => (v || this._center).copy(this.flotilla.position), FLOTILLA.rMax * 0.001 + 5, {});
   }
 
   /** Build steps (each a few tens of ms at most), run one per frame on approach. */

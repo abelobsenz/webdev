@@ -6,6 +6,7 @@ import { createHullMaterial, tag, merge, beam, KIND } from './hull.js';
 import { CB } from '../craft/craftGeometry.js';
 import { HearthWorks, FEEDER_IMPACT } from './hearthWorks.js';
 import { RS, M_KM, BH_FRAG, COMP_FRAG, createLensTarget } from './hearthLens.js';
+import { HearthDistrict } from './hearthDistrict.js';
 
 // THE HEARTH: a spinning black hole (a = 0.7) kept on a halo orbit around Sun-Earth L2,
 // with its accretion disc, the collector ring that turns the disc's light into power, the
@@ -224,6 +225,8 @@ export class Hearth {
     this.group.add(this.stations);
     // docked carriers, gallery shuttles and the feeder with its matter stream (src/space/hearthWorks.js)
     this.works = new HearthWorks(this);
+    // collector-station modules, ring trams, feeder tankers and wheel lights (src/space/hearthDistrict.js)
+    this.district = new HearthDistrict(this);
     this.mode = 'far';
     this.scale = 1;
     this.size = new THREE.Vector2(1, 1);
@@ -245,6 +248,7 @@ export class Hearth {
   update(sim, realTime, dt, space) {
     for(const rotor of this.refugeRotors)rotor.rotation.y=(realTime*rotor.userData.omega*rotor.userData.dir)%(Math.PI*2);
     if (this.works) this.works.update(sim, realTime);
+    if (this.district) this.district.update(realTime);
     this.group.position.copy(sim.hearthPos);
     this.group.quaternion.copy(this.quat);
     this.group.updateMatrixWorld(true);
