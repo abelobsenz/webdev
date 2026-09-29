@@ -62,8 +62,11 @@ export function cranePlate(c, u, out = {}) {
   const f = [0], i = CRANE_STEPS.at(u, f), s = f[0], e = smooth(0, 1, s);
   const bay = craneBay(c);
   const sgn = c.top ? 1 : -1;
-  const hullY = hullCrown(c.target, c.top);
-  const yT = hullY + sgn * 5;                                   // plate centre over its gap
+  // plate centre over its gap: 5 m off the highest crown under its length (the hull swells
+  // toward the stern across the plate's 42 m), which clears the crown stringer (2.2 m)
+  let hullY = 0;
+  for (let k = 0; k <= 4; k++) { const y = hullCrown(c.target + (k / 4 - 0.5) * WORKS.plate[2], c.top); if (Math.abs(y) > Math.abs(hullY)) hullY = y; }
+  const yT = hullY + sgn * 5;
   const P = WORKS.platformY * sgn + sgn * 2, Tr = WORKS.travelY * sgn;
   let z = bay.pick, hook = P, carried = true, fitted = false, onPad = false;
   switch (CRANE_STEPS.names[i]) {
@@ -144,7 +147,16 @@ function buildPlating(seed = 5) {
   const edges = [YARD.plated, ...YARD.ribs];
   const NT = 24, inset = WORKS.plateInset, lift = WORKS.plateLift;
   const fitted = [];
-  const reserved = (zc, i) => WORKS.cranes.some((c) => Math.abs(c.target - zc) < 40 && (c.top ? (i === 5 || i === 6) : (i === 17 || i === 18)));
+  // a crane's gap: every panel under its plate's footprint (|x| within the plate's half width
+  // and a margin) on its side of the hull, in the bay between the ribs round its target
+  const reserved = (zc, i) => WORKS.cranes.some((c) => {
+    if (Math.abs(c.target - zc) >= 40) return false;
+    const pa = sectionPoint(zc, (i / NT) * TAU), pb = sectionPoint(zc, ((i + 1) / NT) * TAU);
+    const side = c.top ? 1 : -1;
+    if (pa.y * side <= 0 && pb.y * side <= 0) return false;
+    const half = WORKS.plate[0] / 2 + 6;
+    return Math.min(Math.abs(pa.x), Math.abs(pb.x)) < half || pa.x * pb.x <= 0;
+  });
   for (let j = 0; j < edges.length - 1; j++) {
     const za = edges[j] + inset, zb = edges[j + 1] - inset, zc = (za + zb) / 2;
     const p = Math.min(Math.max(1.08 - (zc - 260) / 760, 0.04), 1);

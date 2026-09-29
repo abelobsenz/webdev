@@ -34,7 +34,7 @@ import {
 //      (the keel is at y 330), z across (s * side); scale HS to drawn metres
 export const LIFE = {
   conveyor: { r0: 1500, r1: 12000, rail: 330, pod: 430, podR: 60, podL: 240, spacing: 500, speed: 42 },
-  crane: { r0: 1450, r1: 11650, railZ: 420, railY: 410, padA: 1850, padB: 11000, padZ: 190, pad: 596, travel: 1000, bridge: 1320, legX: 150, T: 260 },
+  crane: { r0: 1400, r1: 11650, railZ: 420, railY: 410, padA: 1790, padB: 11000, padZ: 190, pad: 596, travel: 1000, bridge: 1320, legX: 150, T: 260 },
   drone: { y: -520, r0: 2400, r1: 11600, z: 300, perArm: 6, speed: 55 },
   finger0: 12600,
 };
