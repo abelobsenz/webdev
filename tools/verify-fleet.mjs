@@ -717,7 +717,7 @@ assert.ok(minClear > 0, `working lanes clear every structure with ${minClear} km
     out.tenderTriangles = [fleet.tenderData.geo.index.count / 3, st.index.count / 3];
     let mx = 0; for (const i of st.index.array) if (i > mx) mx = i;
     assert.ok(mx < st.attributes.position.count, 'smoothed tender index in range');
-    assert.ok(fleet.tenders[0].mesh.geometry.index.count === st.index.count, 'the tenders draw the smooth spine');
+    assert.ok(fleet.tenders[0].mesh.geometry.userData.spineTriangles === st.index.count / 3 - (fleet.tenderData.geo.index.count / 3 - (24 * 20 * 2 + 2 * 20)), 'the tenders draw the smooth spine');
     // the new spine hugs the builder's: every builder spine vertex within 0.05 m of the new surface's radius
     const bp = fleet.tenderData.geo.attributes.position, np = st.attributes.position;
     const s = fleet.tenderData.length / 300;
@@ -733,8 +733,8 @@ assert.ok(minClear > 0, `working lanes clear every structure with ${minClear} km
   // Selene's foil tank shells: smooth, and their inner chords clear every vertex of the old tank
   const sg = fleet.refineryMesh.geometry, sp = sg.attributes.position;
   assert.ok(1.006 * Math.cos(Math.PI / 48) ** 2 > 1.0005, 'tank shell chords clear the builder tank');
-  out.seleneFoilVertices = sg.attributes.aFacade.array.filter((k, i) => i % 3 === 2 && k === 22).length;
-  assert.ok(out.seleneFoilVertices === 8 * 49 * 25, `Selene foil shells (${out.seleneFoilVertices})`);
+  out.seleneFoilVertices = sg.attributes.aFacade.array.filter((k, i) => i % 3 === 2 && k === 38).length;
+  assert.ok(out.seleneFoilVertices === 8 * 49 * 25, `Selene insulated tank shells (${out.seleneFoilVertices})`);
   // buffer sanity: indices in range, finite positions, instanced capacity respected
   for (const g of [sg, fleet.docked.geometry, pg, tg]) {
     let mx = 0; for (const i of g.index.array) if (i > mx) mx = i;
