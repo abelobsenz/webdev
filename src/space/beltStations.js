@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { CB, CK, TAU, V, lerp, rng, here, hereDir, atAim, tank, sphereTank, rcsQuad, dockingCollar, truss, catwalk, radiatorWing, dish, mast, container, flood } from './shipKit.js';
 import { sectionEllipse } from '../craft/craftGeometry.js';
 import { DK } from './craftMesh.js';
+import { quadLoft, smoothRange } from './portMaterial.js';
 import { LAMP } from './lamps.js';
 import { design } from './shipDesigns.js';
 
@@ -35,6 +36,9 @@ import { design } from './shipDesigns.js';
 // their clear approach axes (d, outward).
 
 const X = V(1, 0, 0), Y = V(0, 1, 0), Z = V(0, 0, 1);
+/** Seam-smoothing of quad lofts, applied once the builder's geometry exists. */
+const smoothLater = (B, range) => { (B.smooth || (B.smooth = [])).push(range); };
+const smoothNow = (B, geo) => { for (const [a, b] of B.smooth || []) smoothRange(geo, a, b); return geo; };
 const TO_Y = new THREE.Matrix4().makeRotationX(-Math.PI / 2);        // lathe z -> +y
 const TO_X = new THREE.Matrix4().makeRotationY(Math.PI / 2);         // lathe z -> +x
 const G = 9.81;
@@ -58,7 +62,7 @@ class Ctx {
     const Bp = new CB();
     const lamps = [];
     build(Bp, lamps);
-    const geo = Bp.geometry();
+    const geo = smoothNow(Bp, Bp.geometry());
     this.parts.push({ geo, pivot: pivot.clone(), q: q.clone(), mode, rate, lamps, ...extra });
     return geo;
   }
@@ -185,7 +189,18 @@ function block(c, x, y, z, w, h, l, kinds = [DK.PORTS, CK.GLASS]) {
  * down the sides.
  */
 function rim(B, R, h, w, seg, { inner = DK.CONCOURSE, side = DK.PORTS, floor = DK.LIVERY } = {}) {
-  B.lathe([[R, -w / 2, floor], [R, w / 2, floor], [R - h * 0.35, w / 2, side], [R - h, w / 2 - h * 0.3, side], [R - h, -w / 2 + h * 0.3, inner], [R - h * 0.35, -w / 2, side], [R, -w / 2, side]], seg, 0, { closedProfile: true });
+  // floor plate outward in livery, ported side walls, the shoulders glazed (the homes along the
+  // rim look out through them), the lit concourse roof facing the hub
+  B.lathe([[R, -w / 2, floor], [R, w / 2, floor], [R - h * 0.35, w / 2, side], [R - h, w / 2 - h * 0.3, CK.GLASS], [R - h, -w / 2 + h * 0.3, inner], [R - h * 0.35, -w / 2, CK.GLASS], [R, -w / 2, side]], seg, 0, { closedProfile: true });
+  // twelve districts between pressure bulkheads: heavy collars standing proud of the plate
+  for (let i = 0; i < 12; i++) {
+    B.push(new THREE.Matrix4().makeRotationZ(((i + 0.5) / 12) * TAU));
+    B.box(R - h * 0.5, 0, 0, h * 1.12, 7, w * 1.03, DK.GRIME);
+    B.box(R + h * 0.06 + 0.4, 0, 0, 0.8, 3, w * 0.5, CK.LANTERN);
+    B.pop();
+  }
+  // service mains along the floor plate near each edge, pulsing with the station's accent
+  for (const s of [-1, 1]) { B.at(0, 0, s * (w / 2 - 4)); B.torus(R + 0.8, 0.8, seg, 6, CK.CONDUIT); B.pop(); }
   // a lit gallery under the eaves each side and rib frames every 1/seg of a turn
   for (const s of [-1, 1]) { B.at(0, 0, s * (w / 2 + 0.4)); B.torus(R - h * 0.45, h * 0.06, seg, 5, CK.LANTERN); B.pop(); }
   for (let i = 0; i < seg; i += 2) {
@@ -295,12 +310,15 @@ function buildHabitat(c) {
         const a = (k / nSpokes) * TAU + (zo > 0 ? Math.PI / nSpokes : 0);
         const u = V(Math.cos(a), Math.sin(a), 0);
         const p0 = u.clone().multiplyScalar(hubR * 1.25).setZ(zo * 0.5), p1 = u.clone().multiplyScalar(R - rimH * 0.98).setZ(zo);
-        Bp.tube([p0, p1], 4.2, 10, DK.LIVERY);
+        // a twin-boom spoke, laced with ties (a single 8 m pipe read as a wire at the wheel's scale)
+        const ax = V(0, 0, 5.5);
+        for (const e of [-1, 1]) Bp.tube([p0.clone().addScaledVector(ax, e), p1.clone().addScaledVector(ax, e)], 3, 10, DK.LIVERY);
+        for (let t = 0.075; t < 0.99; t += 0.125) { const m = p0.clone().lerp(p1, t); Bp.tube([m.clone().sub(ax), m.clone().add(ax)], 1.1, 6, CK.BRONZE); }
         Bp.tube([p0.clone().addScaledVector(V(-u.y, u.x, 0), 7), p1.clone().addScaledVector(V(-u.y, u.x, 0), 7)], 1.2, 6, CK.GLASS);   // lift shaft
         // the lift car rides the shaft's outer rail, hub collar to rim
         const side = V(-u.y, u.x, 0).multiplyScalar(LIFT_SIDE);
         lifts.push({ a: u.clone().multiplyScalar(hubR * 1.45 + 8).setZ(zo * 0.5).add(side), b: u.clone().multiplyScalar(R - rimH - 8).setZ(zo).add(side), axis: u.clone() });
-        for (let t = 0.2; t < 0.95; t += 0.25) Bp.tube([p0.clone().lerp(p1, t).addScaledVector(V(-u.y, u.x, 0), -1.5), p0.clone().lerp(p1, t).addScaledVector(V(-u.y, u.x, 0), 8)], 0.8, 5, CK.BRONZE);
+        for (let t = 0.2; t < 0.95; t += 0.25) Bp.tube([p0.clone().lerp(p1, t).addScaledVector(V(-u.y, u.x, 0), -0.6), p0.clone().lerp(p1, t).addScaledVector(V(-u.y, u.x, 0), 8)], 0.8, 5, CK.BRONZE);
         lamps.push({ p: p1.clone().addScaledVector(u, -rimH * 0.2).setZ(zo + (twin ? rimW * 0.3 : rimW * 0.55)), r: 2.4, color: LAMP.AMBER, i: 3, breathe: 0.4 });
       }
     }
@@ -378,11 +396,13 @@ function buildShipyard(c) {
   const zs = Array.from({ length: nF }, (_, i) => -L / 2 + i * pitch);
   for (const z of zs) {
     const a = V(-Wd / 2, -Hd / 2, z), b = V(Wd / 2, -Hd / 2, z), cc = V(Wd / 2, Hd / 2, z), d = V(-Wd / 2, Hd / 2, z);
-    truss(B, a, b, 4, 10, 0.3); truss(B, b, cc, 4, 10, 0.3); truss(B, cc, d, 4, 10, 0.3); truss(B, d, a, 4, 10, 0.3);
+    // deep portal trusses painted in the owner's livery (each slipway known by its colour)
+    truss(B, a, b, 6.5, 11, 0.5, DK.LIVERY); truss(B, b, cc, 6.5, 11, 0.5, DK.LIVERY); truss(B, cc, d, 6.5, 11, 0.5, DK.LIVERY); truss(B, d, a, 6.5, 11, 0.5, DK.LIVERY);
+    for (const p of [a, b, cc, d]) B.box(p.x, p.y, p.z, 9, 9, 9, CK.BRONZE);
   }
-  for (const [x, y] of [[-Wd / 2, -Hd / 2], [Wd / 2, -Hd / 2], [Wd / 2, Hd / 2], [-Wd / 2, Hd / 2]]) truss(B, V(x, y, -L / 2), V(x, y, L / 2), 4, 12, 0.3);
+  for (const [x, y] of [[-Wd / 2, -Hd / 2], [Wd / 2, -Hd / 2], [Wd / 2, Hd / 2], [-Wd / 2, Hd / 2]]) truss(B, V(x, y, -L / 2), V(x, y, L / 2), 5, 12, 0.42, DK.GRIME);
   // crane rails along the top stringers
-  for (const s of [-1, 1]) B.box(s * Wd / 2, Hd / 2 + 2.6, 0, 2.4, 1.2, L, CK.BRONZE);
+  for (const s of [-1, 1]) B.box(s * Wd / 2, Hd / 2 + 3.4, 0, 2.4, 2.2, L, CK.BRONZE);     // (on the stringers, under the bridges' bogies)
   // the hull on the slip: plated astern in livery with ports, ribs and stringers forward
   const hl = L * 0.9, hw = Wd * 0.3, hh = Hd * 0.3;
   const plated = r.range(0.35, 0.7);
@@ -393,7 +413,15 @@ function buildShipyard(c) {
     const f = u < 0.15 ? 0.7 + 2 * u : 1;
     rings.push({ z: -hl / 2 + u * hl, pts: sectionEllipse(hw * f, hh * f, 28, 2.4) });
   }
-  B.loft(rings, (i, j) => (j % 5 === 0 ? CK.BRONZE : Math.abs(Math.cos((i / 28) * TAU)) > 0.75 ? DK.PORTS : DK.LIVERY), { capStart: CK.DARK, capEnd: CK.DARK });
+  // one kind per plate (quadLoft: per-vertex kinds blended bronze into livery through every kind
+  // between); the newest rings forward still bare plate and dark insulation, raggedly
+  const nR = rings.length - 1;
+  const hs = (i, j) => { const x = Math.sin(i * 91.7 + j * 47.3 + c.livery * 13.1) * 43758.5453; return x - Math.floor(x); };
+  smoothLater(B, quadLoft(B, rings, (i, j) => {
+    const front = (j - (nR - 4)) / 4;
+    if (front > 0 && hs(i, j) < front * 1.2) return front > 0.5 && hs(i + 5, j) < 0.45 ? CK.DARK : DK.GRIME;
+    return j % 5 === 4 ? DK.GRIME : Math.abs(Math.cos(((i + 0.5) / 28) * TAU)) > 0.75 ? DK.PORTS : DK.LIVERY;
+  }, { capStart: CK.DARK, capEnd: CK.DARK }));
   const zP = -hl / 2 + plated * hl;
   for (let z = zP + 12; z < hl / 2; z += 14) {
     const f = 1 - Math.max(0, (z - hl * 0.3) / (hl * 0.2)) * 0.6;
@@ -445,7 +473,7 @@ function buildShipyard(c) {
   const nc = r.int(1, 2);
   for (let i = 0; i < nc; i++) {
     const z0 = -L / 2 + L * (0.25 + 0.5 * i);
-    c.part(V(0, Hd / 2 + 4, z0), new THREE.Quaternion(), 'rail', 0, (Bp, lamps) => {
+    c.part(V(0, Hd / 2 + 6, z0), new THREE.Quaternion(), 'rail', 0, (Bp, lamps) => {   // (clear over the portal trusses)
       truss(Bp, V(-Wd / 2, 0, 0), V(Wd / 2, 0, 0), 5, 8, 0.35, CK.BRONZE);
       Bp.box(0, -4, 0, 10, 4, 8, DK.HAZARD);
       Bp.box(0, -2, 0, 7, 3, 7, CK.GLASS);
@@ -496,6 +524,20 @@ function buildRelay(c) {
         Bp.box(s * (x0 + x1) / 2, 2.4, -chord / 2, x1 - x0, 0.6, 0.8, CK.BRONZE);
       }
       lamps.push({ p: V(s * (span + 10), 0, 0), r: 3, color: LAMP.RED, i: 5, breathe: 1, phase: s > 0 ? 0 : 0.5 });
+      // a tensioned wing: king posts at the root either side of the blankets and stays to the
+      // boom's thirds and tip, the way long deployable arrays are held flat against their own
+      // slewing; the power harness runs beneath the boom to the slip ring, glowing with the
+      // relay's accent as it carries the collected power inward
+      const post = chord / 2 + r.range(24, 40);
+      for (const e of [-1, 1]) {
+        const tip = V(s * 12, 0, e * post);
+        Bp.tube([V(s * 12, 0, e * 1.5), tip], 1.3, 6, CK.BRONZE);
+        Bp.box(tip.x, tip.y, tip.z, 4, 4, 4, CK.DARK);
+        lamps.push({ p: tip.clone().add(V(0, 2.6, 0)), r: 1.4, color: LAMP.WHITE, i: 3, breathe: 1, phase: (e + 1) * 0.25 + (s > 0 ? 0 : 0.12) });
+        for (const f of [0.34, 0.67, 1]) Bp.tube([tip.clone().add(V(s * 1.5, 0, -e * 1.5)), V(s * (12 + span * f), 0, e * 2.6)], 0.55, 4, CK.DARK);
+      }
+      Bp.tube([V(s * 10, -3.6, 0), V(s * (span + 4), -3.6, 0)], 1.1, 6, CK.CONDUIT);
+      for (let i = 1; i < nb; i++) { const x = s * (12 + (span - 4) * (i / nb) - 1.5); Bp.box(x, 0.2, 0, 3.4, 6.6, 5, CK.BRONZE); }   // hinge frames
     }
   }, { axis: 'z' });
   truss(B, V(0, 32, 0), V(0, 55, 0), 6, 6, 0.4);
@@ -590,7 +632,8 @@ function buildFarm(c) {
       for (let i = 0; i < segs; i++) { const a = (i / segs) * TAU; pts.push([Math.cos(a) * R, Math.sin(a) * R]); }
       rings.push({ z, pts });
     }
-    Bp.loft(rings, (i, j) => (j % 4 === 0 ? CK.BRONZE : Math.floor(i / 4) % 2 ? CK.ROOF : DK.LIVERY), { capStart: DK.PORTS, capEnd: DK.PORTS });
+    // field strips and livery strips, one kind per panel (the bronze girths are the tori below)
+    smoothLater(Bp, quadLoft(Bp, rings, (i) => (Math.floor(i / 4) % 2 ? CK.ROOF : DK.LIVERY), { capStart: DK.PORTS, capEnd: DK.PORTS }));
     for (let j = 0; j <= n; j += 2) Bp.at(0, 0, -L / 2 + (L * j) / n), Bp.torus(R + 0.8, 1.2, segs, 5, CK.BRONZE), Bp.pop();
     for (const s of [-1, 1]) Bp.lathe([[18, s * (L / 2 + 1), CK.BRONZE], [R * 0.9, s * (L / 2 + 1), DK.CONCOURSE], [R, s * (L / 2), CK.BRONZE]], segs, 0, { closedProfile: false });
     for (let k = 0; k < strips * 2; k++) {
@@ -716,7 +759,7 @@ export function buildBeltStation(kind, seed, livery = 0) {
   const t0 = performance.now();
   const c = new Ctx(seed, livery);
   BUILDERS[kind](c);
-  const geo = c.B.geometry();
+  const geo = smoothNow(c.B, c.B.geometry());
   let radius = geo.boundingSphere.center.length() + geo.boundingSphere.radius;
   let tris = geo.index.count / 3;
   for (const p of c.parts) {

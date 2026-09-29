@@ -7,6 +7,7 @@ import { buildEmbarkationTerrace } from './interfaces.js';
 import { craftMesh, craftPart, addLamps, placeMerge, placeLamps, pixelRadius, KM, dressedMesh, DK } from './craftMesh.js';
 import { HarbourLife } from './harbourLife.js';
 import { TerraceLife } from './terraceLife.js';
+import { createPortMaterial } from './portMaterial.js';
 
 // THE GEOSTATIONARY HARBOUR, drawn in metres with the ships' own builder and material.
 // Local frame: +Y up the tether (away from the Earth), +Z north (the Earth's axis),
@@ -453,7 +454,9 @@ export class HarbourStation {
     this.group.add(this.shipsBig, this.shipsSmall);
     this.lampMesh = addLamps(this.body, h.lamps, { minPx: 1.4 });
     this.terraceData=buildEmbarkationTerrace();
-    this.terrace=craftMesh(this.terraceData.geo,{accent:[.55,.85,1],lit:.62});
+    // drawn with the port finishes (paving, lawns, pools, canopies, glasshouses) and its baked contact shade
+    const terraceOpts={accent:[.55,.85,1],lit:.62,fill:.03};
+    this.terrace=craftMesh(this.terraceData.geo,terraceOpts,createPortMaterial(terraceOpts));
     const pier=h.arms[4];
     this.terrace.position.copy(pier.d).multiplyScalar((pier.L-1200)*KM).addScaledVector(pier.side,.32).setY(pier.y*KM+.19);
     this.terrace.rotation.y=-pier.a;

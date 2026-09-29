@@ -11,6 +11,7 @@ import { StoreWorks } from './storeWorks.js';
 import { WaterRun } from './waterRun.js';
 import { DynLamps } from './lifeKit.js';
 import { HS } from './harbour.js';
+import { quadLoft, smoothRange, createPortMaterial, bakeCavity, stamp } from './portMaterial.js';
 
 // THE GEOSTATIONARY ROADS: the Harbour's neighbourhood along the geostationary arc.
 //
@@ -81,12 +82,18 @@ export function buildConcordYard() {
     const f = linerF(z);
     rings.push({ z, pts: sectionEllipse(LA * f, LB * f, NR, 2.3, 0, 0.8) });
   }
-  H.loft(rings, (i, j) => {
-    const t = i / NR, side = Math.abs(Math.cos(t * TAU));
-    if (j % 9 === 0 && j > 0 && j < N) return CK.BRONZE;
-    if (j > 10 && side > 0.9 && Math.abs(Math.sin(t * TAU)) < 0.22) return CK.LANTERN;
+  // one kind per plate (quadLoft): the old per-vertex kinds blended glazing (0) into livery (20)
+  // through every kind between, drawing thin bands of foil, hazard and lantern along each seam.
+  // Toward the construction front the paint gives out: the last eight rings of plate go ragged
+  // from painted to bare working plate, the newest few still dark unfaired insulation.
+  const hsh = (i, j) => { const x = Math.sin(i * 127.1 + j * 311.7) * 43758.5453; return x - Math.floor(x); };
+  const skin = quadLoft(H, rings, (i, j) => {
+    const t = (i + 0.5) / NR, c = Math.cos(t * TAU), sn = Math.sin(t * TAU), side = Math.abs(c);
+    const front = (j - (N - 8)) / 8;
+    if (front > 0 && hsh(i, j) < front * 1.15) return front > 0.6 && hsh(i + 7, j) < 0.4 ? CK.DARK : DK.GRIME;
+    if (j > 10 && side > 0.9 && Math.abs(sn) < 0.22) return CK.LANTERN;
     if (side > 0.55 && side < 0.8) return CK.GLASS;
-    return Math.sin(t * TAU) < -0.35 ? DK.GRIME : j % 3 === 1 ? DK.PORTS : DK.LIVERY;
+    return sn < -0.35 ? DK.GRIME : j % 3 === 1 ? DK.PORTS : DK.LIVERY;
   }, { capStart: CK.DARK, capEnd: CK.DARK });
   // the garden atrium over the plated part: planted deck under its colonnade of ribs
   const zA0 = -600, zA1 = 200;
@@ -103,7 +110,7 @@ export function buildConcordYard() {
       const w = LA * f * 0.4, top = LB * f - 5;
       deck.push({ z, pts: [[-w, top], [w, top], [w, top - 8], [-w, top - 8]] });
     }
-    H.loft(deck, (i) => (i === 0 ? CK.GARDEN : CK.HULL));
+    quadLoft(H, deck, (i) => (i === 0 ? CK.GARDEN : CK.HULL), { capStart: CK.HULL, capEnd: CK.HULL });   // (per-vertex kinds drew a lantern seam: 3 -> 1 through 2)
   }
   // crown bridge astern of the atrium (as on the finished ships)
   {
@@ -139,16 +146,42 @@ export function buildConcordYard() {
     if ((k + Math.round(t * 2)) % 3) continue;
     lamps.push({ p: sectionPoint(z, t).multiplyScalar(1).add(V(0, 0, 0)).addScaledVector(sectionPoint(z, t).setZ(0).normalize(), 6), r: 2.4, color: (k % 2) ? LAMP.TEAL : LAMP.WHITE, i: 3.2, breathe: 0.6, phase: (k * 0.37 + t) % 1 });
   }
-  const hullGeo = H.geometry();
+  const hullGeo = smoothRange(H.geometry(), skin[0], skin[1]);
 
   // ---- the dock: nine octagonal portal frames, four rails, surveyed clamps
   const probe = new THREE.Mesh(hullGeo, new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }));
   probe.updateMatrixWorld(true);
   const ray = new THREE.Raycaster();
+  // Each portal frame is a box truss 26 m deep and 13 m thick (it was a single 16 m pipe, and
+  // read as a wire cage): four oxide-red chords, Warren lacing in working grey on its two
+  // faces, ties across them at every panel point, bronze nodes at the corners. The inner chords
+  // keep the old tube's inner face (apothem 250 m), so the clamps, hatches and walkway brackets
+  // still seat on them; the truss deepens outward, clear of the ship.
+  const FA = YARD.frameR, FD = 26, FZ = 6.5, NP = 9;
+  const corner = (k, a, z) => { const ang = Math.PI / 8 + (k % 8) * Math.PI / 4, r = a / Math.cos(Math.PI / 8); return V(Math.cos(ang) * r, Math.sin(ang) * r, z); };
+  // one side's lacing and ties, built once at z = 0 for side 0 and stamped round every frame
+  const yardSide = new CB();
+  {
+    const at = (a, u, dz) => corner(0, a, dz).lerp(corner(1, a, dz), u);
+    for (const dz of [-FZ, FZ]) for (let m = 0; m < NP; m++) {
+      const u0 = m / NP + 0.004, u1 = (m + 1) / NP - 0.004;      // (ends inside the chord, each its own cap)
+      const [a0, a1] = m % 2 ? [FA + FD, FA] : [FA, FA + FD];
+      yardSide.tube([at(a0, u0, dz), at(a1, u1, dz)], 1.1, 6, DK.GRIME);
+    }
+    for (let m = 1; m < NP; m++) for (const a of [FA, FA + FD]) yardSide.tube([at(a, m / NP, -FZ), at(a, m / NP, FZ)], 0.9, 6, DK.GRIME);
+  }
   for (const z of YARD.frames) {
-    const loop = []; for (let k = 0; k < 8; k++) loop.push(octV(k, z)); loop.push(loop[0].clone());
-    B.tube(loop, 8, 8, CK.HULL);
-    for (let k = 0; k < 8; k++) { const p = octV(k, z); B.box(p.x, p.y, p.z, 26, 26, 26, CK.BRONZE); }
+    for (const a of [FA, FA + FD]) for (const dz of [-FZ, FZ]) {
+      const loop = []; for (let k = 0; k < 8; k++) loop.push(corner(k, a, z + dz)); loop.push(loop[0].clone());
+      B.tube(loop, 2.4, 8, DK.LIVERY);
+    }
+    for (let k = 0; k < 8; k++) {
+      stamp(B, yardSide, new THREE.Matrix4().makeTranslation(0, 0, z).multiply(new THREE.Matrix4().makeRotationZ(k * Math.PI / 4)));
+      const p = octV(k, z), q = corner(k, FA + FD, z);
+      B.box(p.x, p.y, p.z, 26, 26, 26, CK.BRONZE);
+      B.box(q.x, q.y, q.z, 18, 18, 18, CK.BRONZE);
+      lamps.push({ p: q.clone().multiplyScalar((FA + FD + 12) / (FA + FD)), r: 2.2, color: k % 2 ? LAMP.RED : LAMP.WHITE, i: 2.6, breathe: 0.8, phase: (k * 0.13 + z * 0.0007) % 1 });
+    }
   }
   for (const k of [1, 2, 5, 6]) B.tube([octV(k, YARD.frames[0]), octV(k, YARD.frames[8])], 6, 8, CK.DARK);
   // cross bracing on the port and starboard faces between frames (the sides stay open above and below)
@@ -237,8 +270,18 @@ export function buildConcordYard() {
     B.tube([d.clone().multiplyScalar(30).setZ(zw + 185), v], 5, 8, CK.HULL);
   }
   // the wheel: a glazed habitat ring with a bronze belt, spokes to a transfer collar round the hub
+  // (a habitat section, not a glass tube: livery floor plate outward, ported walls, glazed
+  // shoulders, the lit concourse roof toward the hub, eight pressure bulkheads)
+  {
+    const R = YARD.wheelR;
+    W.lathe([[R + 35, zw - 38, DK.LIVERY], [R + 35, zw + 38, DK.LIVERY], [R + 10, zw + 38, DK.PORTS], [R - 35, zw + 22, CK.GLASS], [R - 35, zw - 22, DK.CONCOURSE], [R + 10, zw - 38, CK.GLASS], [R + 35, zw - 38, DK.PORTS]], 96, 0, { closedProfile: true });
+    for (let k = 0; k < 8; k++) {
+      W.push(new THREE.Matrix4().makeTranslation(0, 0, zw).multiply(new THREE.Matrix4().makeRotationZ(((k + 0.5) / 8) * TAU)));
+      W.box(R, 0, 0, 74, 9, 82, DK.GRIME);
+      W.pop();
+    }
+  }
   W.push(new THREE.Matrix4().makeTranslation(0, 0, zw));
-  W.torus(YARD.wheelR, 38, 96, 14, CK.GLASS);
   W.torus(YARD.wheelR + 36, 6, 96, 6, CK.BRONZE);
   W.pop();
   W.lathe([[84, zw - 40, CK.BRONZE], [100, zw - 34, CK.HULL], [100, zw + 34, CK.HULL], [84, zw + 40, CK.BRONZE]], 32, 0, { closedProfile: true });
@@ -273,10 +316,31 @@ export function buildWaterStore() {
   const side = (phi, y, r = ap) => V(Math.cos(phi) * r, y, Math.sin(phi) * r);
   const F = STORE.frames, yLo = F[0], yHi = F[F.length - 1];
   // the cage: octagonal frames, eight longerons, bronze nodes
+  // each ring frame a box truss 24 m deep (it was one 18 m pipe): pearl chords, dark lacing and
+  // ties; the inner chords keep the old pipe's inner face, so the ribbon's climbers and the
+  // drones inside see the same clear bore
+  const SA = ap - 6, SD = 24, SY = 6, SP = 8;
+  const sc = (k, a, y) => { const ang = Math.PI / 8 + (k % 8) * Math.PI / 4, r = a / Math.cos(Math.PI / 8); return V(Math.cos(ang) * r, y, Math.sin(ang) * r); };
+  const storeSide = new CB();
+  {
+    const at = (a, u, dy) => sc(0, a, dy).lerp(sc(1, a, dy), u);
+    for (const dy of [-SY, SY]) for (let m = 0; m < SP; m++) {
+      const [a0, a1] = m % 2 ? [SA + SD, SA] : [SA, SA + SD];
+      storeSide.tube([at(a0, m / SP + 0.005, dy), at(a1, (m + 1) / SP - 0.005, dy)], 1.3, 6, DK.GRIME);
+    }
+    for (let m = 1; m < SP; m++) for (const a of [SA, SA + SD]) storeSide.tube([at(a, m / SP, -SY), at(a, m / SP, SY)], 1, 6, DK.GRIME);
+  }
   for (const y of F) {
-    const loop = []; for (let k = 0; k < 8; k++) loop.push(oct(k, y)); loop.push(loop[0].clone());
-    B.tube(loop, 9, 8, CK.HULL);
-    for (let k = 0; k < 8; k++) { const p = oct(k, y); B.box(p.x, p.y, p.z, 30, 30, 30, CK.BRONZE); }
+    for (const a of [SA, SA + SD]) for (const dy of [-SY, SY]) {
+      const loop = []; for (let k = 0; k < 8; k++) loop.push(sc(k, a, y + dy)); loop.push(loop[0].clone());
+      B.tube(loop, 3, 8, CK.HULL);
+    }
+    for (let k = 0; k < 8; k++) {
+      stamp(B, storeSide, new THREE.Matrix4().makeTranslation(0, y, 0).multiply(new THREE.Matrix4().makeRotationY(-k * Math.PI / 4)));
+      const p = oct(k, y), q = sc(k, SA + SD, y);
+      B.box(p.x, p.y, p.z, 30, 30, 30, CK.BRONZE);
+      B.box(q.x, q.y, q.z, 16, 16, 16, CK.BRONZE);
+    }
   }
   for (let k = 0; k < 8; k++) B.tube([oct(k, yLo), oct(k, yHi)], 7, 8, CK.DARK);
   for (let i = 0; i < F.length - 1; i++) for (let k = 0; k < 8; k += 2) B.tube([oct(k, F[i]), oct(k + 1, F[i + 1])], 2.6, 6, CK.DARK);
@@ -322,9 +386,14 @@ export function buildWaterStore() {
     const a = (k / 4) * TAU, d = V(Math.cos(a), 0, Math.sin(a));
     const top = d.clone().multiplyScalar(620).setY(yw - 100);
     B.tube([d.clone().multiplyScalar(STORE.wheelR - 20).setY(yw - 6), top.clone().add(V(0, -20, 0))], 8, 8, CK.DARK);
+    // each leaf five ceramic panels hung from a bronze header, coolant risers in the gaps
+    // between them and a tie bar along the foot (one 360 x 600 m slab read as a lit billboard)
     B.at(top.x, yw - 420, top.z, 0, -a, 0);
-    B.box(0, 0, 0, 360, 600, 8, CK.RADIATOR);
-    B.box(0, 304, 0, 368, 8, 16, CK.BRONZE);
+    for (let p = 0; p < 5; p++) B.box(-148 + p * 74, -2, 0, 64, 596, 5, CK.RADIATOR);
+    for (let p = 0; p < 6; p++) B.tube([V(-185 + p * 74, 300, 0), V(-185 + p * 74, -300, 0)], 3.2, 6, p % 5 ? CK.DARK : CK.BRONZE);
+    B.box(0, 304, 0, 380, 8, 16, CK.BRONZE);
+    B.box(0, -303, 0, 380, 6, 10, CK.DARK);
+    lamps.push({ p: V(0, -310, 0).applyMatrix4(B.M), r: 3, color: LAMP.RED, i: 3, breathe: 1, phase: k / 4 });
     B.pop();
   }
   // berths: two collars facing out along x at the top level (the ships lie across the ribbon's
@@ -540,7 +609,9 @@ export class GeoRoads {
     const qYard = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(V(0, 0, 1), V(0, 1, 0), V(-1, 0, 0)));
     this.yardLocal = YARD_POS.clone();
     place(this.yard, this.yardLocal, qYard);
-    const ym = dressedMesh(this.yardData.dockGeo, { accent: [1.0, 0.72, 0.45], lit: 0.6, livery: [0.58, 0.2, 0.12], livery2: [0.88, 0.84, 0.74] });
+    // the dressed finishes with baked cavity shade (baked on first approach, _bakeNear)
+    const yOpts = { accent: [1.0, 0.72, 0.45], lit: 0.6, livery: [0.58, 0.2, 0.12], livery2: [0.88, 0.84, 0.74] };
+    const ym = craftMesh(this.yardData.dockGeo, yOpts, createPortMaterial(yOpts));
     ym.add(craftPart(ym, this.yardData.hullGeo));
     this.yardWheel = craftPart(ym, this.yardData.wheelGeo);
     ym.add(this.yardWheel);
@@ -555,7 +626,8 @@ export class GeoRoads {
     this.storeData = buildWaterStore();
     this.store = new THREE.Group();
     place(this.store, STORE_POS.clone(), new THREE.Quaternion());
-    const sm = dressedMesh(this.storeData.geo, { accent: [0.55, 0.9, 1.0], lit: 0.55, livery: [0.82, 0.8, 0.74], livery2: [0.16, 0.42, 0.52] });
+    const sOpts = { accent: [0.55, 0.9, 1.0], lit: 0.55, livery: [0.82, 0.8, 0.74], livery2: [0.16, 0.42, 0.52] };
+    const sm = craftMesh(this.storeData.geo, sOpts, createPortMaterial(sOpts));
     sm.add(craftPart(sm, this.storeData.ships));
     addLamps(sm, this.storeData.lamps, { minPx: 1.2 });
     this.store.add(sm);
@@ -689,9 +761,13 @@ export class GeoRoads {
     const yardPx = pixelRadius(space.camera, this.yard.getWorldPosition(this._w), this.yardData.radius, space.size.y);
     if (this.yardBody) this.yardBody.visible = yardPx > 0.5;
     this.yardWorks.update(realTime, yardPx);
+    // cavity shade baked the first time each works fills a good part of the view (~12 ms and
+    // ~4 ms, once, off the entry path; until then aOcc reads 0)
+    if (!this._yardBaked && yardPx > 60) { this._yardBaked = true; for (const g of [this.yardData.dockGeo, this.yardData.hullGeo, this.yardData.wheelGeo]) bakeCavity(g, { minCell: 6 }); }
     const storePx = pixelRadius(space.camera, this.store.getWorldPosition(this._w), this.storeData.radius, space.size.y);
     if (this.storeBody) this.storeBody.visible = storePx > 0.5;
     this.storeWorks.update(realTime, storePx);
+    if (!this._storeBaked && storePx > 60) { this._storeBaked = true; bakeCavity(this.storeData.geo, { minCell: 4 }); }
   }
 }
 

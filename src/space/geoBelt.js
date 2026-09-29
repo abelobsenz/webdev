@@ -1,10 +1,11 @@
 import * as THREE from 'three';
-import { dressedMesh, craftPart, addLamps, pixelRadius, CRAFT_FRAME, KM, LIVERIES } from './craftMesh.js';
+import { craftMesh, dressedMesh, craftPart, addLamps, pixelRadius, CRAFT_FRAME, KM, LIVERIES } from './craftMesh.js';
 import { LAMP } from './lamps.js';
 import { DynLamps, rng, smooth, TAU } from './lifeKit.js';
 import { R_EARTH, GEO_ALT, MERIDIAN_LON, bodyDir } from './sim.js';
 import { stationFrame } from './stations.js';
 import { buildBeltStation } from './beltStations.js';
+import { createPortMaterial, bakeCavity } from './portMaterial.js';
 import { BeltLife, buildFittings, liftCarGeo } from './beltLife.js';
 import { instancedPart, poseMatrix } from './lifeKit.js';
 import { StationTraffic, makeRoute } from './fleetTraffic.js';
@@ -233,7 +234,12 @@ export class GeoBelt {
     const d = st.desc;
     const data = buildBeltStation(d.kind, d.seed, d.livery);
     const lv = LIVERIES[d.livery];
-    const mesh = dressedMesh(data.geo, { accent: d.kind === 'relay' ? [1.0, 0.5, 0.3] : [0.55, 0.88, 1.0], lit: 0.62, livery: lv[0], livery2: lv[1], fill: 0.035 });
+    // the dressed finishes plus baked cavity shade (portMaterial.js): booms, trusses and cans
+    // darken where they crowd each other instead of every face lit as if it stood alone
+    bakeCavity(data.geo);
+    for (const p of data.parts) bakeCavity(p.geo);
+    const opts = { accent: d.kind === 'relay' ? [1.0, 0.5, 0.3] : [0.55, 0.88, 1.0], lit: 0.62, livery: lv[0], livery2: lv[1], fill: 0.035 };
+    const mesh = craftMesh(data.geo, opts, createPortMaterial(opts));
     const parts = data.parts.map((p) => {
       const m = craftPart(mesh, p.geo);
       m.position.copy(p.pivot);
@@ -418,12 +424,15 @@ export function geoBeltTargets(space) {
     out[key] = {
       position: (o) => o.copy(pos).applyQuaternion(sim.earthQuat),
       frame: (qq) => qq.copy(sim.earthQuat).multiply(q),
-      minDist: 0.25, maxDist: 200000, defaultDist: dist, view,
+      minDist: 0.12, maxDist: 200000, defaultDist: dist, view,
       station: s,
     };
   };
-  pick('beltWheel', 'habitat', 2.2, { az: 0.6, el: 0.35 });
-  pick('beltYard', 'shipyard', 1.3, { az: 0.9, el: 0.3 });
-  pick('beltRelay', 'relay', 2.0, { az: 0.4, el: 0.5 });
+  // framed at ~2.6 station radii (Kalani Wheel 284 m, Ironwood Slip 264 m, Helion Relay 4
+  // 524 m across its blankets; tools/verify-port.mjs holds the ratio): the station fills the
+  // middle of the view instead of sitting a speck among its approach lights
+  pick('beltWheel', 'habitat', 0.74, { az: 0.5, el: 0.32 });
+  pick('beltYard', 'shipyard', 0.7, { az: 0.85, el: 0.36 });
+  pick('beltRelay', 'relay', 1.35, { az: 0.45, el: 0.42 });
   return out;
 }
