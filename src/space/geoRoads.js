@@ -11,7 +11,7 @@ import { StoreWorks } from './storeWorks.js';
 import { WaterRun } from './waterRun.js';
 import { DynLamps } from './lifeKit.js';
 import { HS } from './harbour.js';
-import { quadLoft, smoothRange, createPortMaterial, bakeCavity } from './portMaterial.js';
+import { quadLoft, smoothRange, createPortMaterial, bakeCavity, stamp } from './portMaterial.js';
 
 // THE GEOSTATIONARY ROADS: the Harbour's neighbourhood along the geostationary arc.
 //
@@ -159,19 +159,24 @@ export function buildConcordYard() {
   // still seat on them; the truss deepens outward, clear of the ship.
   const FA = YARD.frameR, FD = 26, FZ = 6.5, NP = 9;
   const corner = (k, a, z) => { const ang = Math.PI / 8 + (k % 8) * Math.PI / 4, r = a / Math.cos(Math.PI / 8); return V(Math.cos(ang) * r, Math.sin(ang) * r, z); };
+  // one side's lacing and ties, built once at z = 0 for side 0 and stamped round every frame
+  const yardSide = new CB();
+  {
+    const at = (a, u, dz) => corner(0, a, dz).lerp(corner(1, a, dz), u);
+    for (const dz of [-FZ, FZ]) for (let m = 0; m < NP; m++) {
+      const u0 = m / NP + 0.004, u1 = (m + 1) / NP - 0.004;      // (ends inside the chord, each its own cap)
+      const [a0, a1] = m % 2 ? [FA + FD, FA] : [FA, FA + FD];
+      yardSide.tube([at(a0, u0, dz), at(a1, u1, dz)], 1.1, 6, DK.GRIME);
+    }
+    for (let m = 1; m < NP; m++) for (const a of [FA, FA + FD]) yardSide.tube([at(a, m / NP, -FZ), at(a, m / NP, FZ)], 0.9, 6, DK.GRIME);
+  }
   for (const z of YARD.frames) {
     for (const a of [FA, FA + FD]) for (const dz of [-FZ, FZ]) {
       const loop = []; for (let k = 0; k < 8; k++) loop.push(corner(k, a, z + dz)); loop.push(loop[0].clone());
       B.tube(loop, 2.4, 8, DK.LIVERY);
     }
     for (let k = 0; k < 8; k++) {
-      const at = (a, u, dz) => corner(k, a, z + dz).lerp(corner(k + 1, a, z + dz), u);
-      for (const dz of [-FZ, FZ]) for (let m = 0; m < NP; m++) {
-        const u0 = m / NP + 0.004, u1 = (m + 1) / NP - 0.004;      // (ends inside the chord, each its own cap)
-        const [a0, a1] = m % 2 ? [FA + FD, FA] : [FA, FA + FD];
-        B.tube([at(a0, u0, dz), at(a1, u1, dz)], 1.1, 6, DK.GRIME);
-      }
-      for (let m = 1; m < NP; m++) for (const a of [FA, FA + FD]) B.tube([at(a, m / NP, -FZ), at(a, m / NP, FZ)], 0.9, 6, DK.GRIME);
+      stamp(B, yardSide, new THREE.Matrix4().makeTranslation(0, 0, z).multiply(new THREE.Matrix4().makeRotationZ(k * Math.PI / 4)));
       const p = octV(k, z), q = corner(k, FA + FD, z);
       B.box(p.x, p.y, p.z, 26, 26, 26, CK.BRONZE);
       B.box(q.x, q.y, q.z, 18, 18, 18, CK.BRONZE);
@@ -306,18 +311,22 @@ export function buildWaterStore() {
   // drones inside see the same clear bore
   const SA = ap - 6, SD = 24, SY = 6, SP = 8;
   const sc = (k, a, y) => { const ang = Math.PI / 8 + (k % 8) * Math.PI / 4, r = a / Math.cos(Math.PI / 8); return V(Math.cos(ang) * r, y, Math.sin(ang) * r); };
+  const storeSide = new CB();
+  {
+    const at = (a, u, dy) => sc(0, a, dy).lerp(sc(1, a, dy), u);
+    for (const dy of [-SY, SY]) for (let m = 0; m < SP; m++) {
+      const [a0, a1] = m % 2 ? [SA + SD, SA] : [SA, SA + SD];
+      storeSide.tube([at(a0, m / SP + 0.005, dy), at(a1, (m + 1) / SP - 0.005, dy)], 1.3, 6, DK.GRIME);
+    }
+    for (let m = 1; m < SP; m++) for (const a of [SA, SA + SD]) storeSide.tube([at(a, m / SP, -SY), at(a, m / SP, SY)], 1, 6, DK.GRIME);
+  }
   for (const y of F) {
     for (const a of [SA, SA + SD]) for (const dy of [-SY, SY]) {
       const loop = []; for (let k = 0; k < 8; k++) loop.push(sc(k, a, y + dy)); loop.push(loop[0].clone());
       B.tube(loop, 3, 8, CK.HULL);
     }
     for (let k = 0; k < 8; k++) {
-      const at = (a, u, dy) => sc(k, a, y + dy).lerp(sc(k + 1, a, y + dy), u);
-      for (const dy of [-SY, SY]) for (let m = 0; m < SP; m++) {
-        const [a0, a1] = m % 2 ? [SA + SD, SA] : [SA, SA + SD];
-        B.tube([at(a0, m / SP + 0.005, dy), at(a1, (m + 1) / SP - 0.005, dy)], 1.3, 6, DK.GRIME);
-      }
-      for (let m = 1; m < SP; m++) for (const a of [SA, SA + SD]) B.tube([at(a, m / SP, -SY), at(a, m / SP, SY)], 1, 6, DK.GRIME);
+      stamp(B, storeSide, new THREE.Matrix4().makeTranslation(0, y, 0).multiply(new THREE.Matrix4().makeRotationY(-k * Math.PI / 4)));
       const p = oct(k, y), q = sc(k, SA + SD, y);
       B.box(p.x, p.y, p.z, 30, 30, 30, CK.BRONZE);
       B.box(q.x, q.y, q.z, 16, 16, 16, CK.BRONZE);

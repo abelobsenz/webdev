@@ -264,27 +264,46 @@ export function quadLoft(B, rings, kindFn, { capStart = 10, capEnd = 10 } = {}) 
 }
 
 /**
+ * Append a copy of builder S's triangles to builder B under matrix m (then B's own frame): a
+ * repeated assembly (one side of a truss ring) is built once and stamped, rather than every
+ * member rebuilt through the tube generator. m must keep handedness (rotations, translations).
+ */
+export function stamp(B, S, m) {
+  const base = B.pos.length / 3, v = new THREE.Vector3(), M = new THREE.Matrix4().multiplyMatrices(B.M, m), P = S.pos;
+  for (let i = 0; i < P.length; i += 3) { v.set(P[i], P[i + 1], P[i + 2]).applyMatrix4(M); B.pos.push(v.x, v.y, v.z); }
+  for (let i = 0; i < S.fac.length; i++) B.fac.push(S.fac[i]);
+  for (let i = 0; i < S.idx.length; i++) B.idx.push(base + S.idx[i]);
+}
+
+/**
  * Smooth the normals of a vertex range across its split seams: every vertex in [first, end)
  * takes the mean of the face normals meeting at its position within that range (the geometry's
  * other parts, box corners and all, keep their own).
  */
 export function smoothRange(geo, first, end) {
   const p = geo.attributes.position.array, nrm = geo.attributes.normal.array, idx = geo.index.array;
-  const key = (i) => `${Math.round(p[i * 3] * 100)},${Math.round(p[i * 3 + 1] * 100)},${Math.round(p[i * 3 + 2] * 100)}`;
-  const acc = new Map();
+  // weld the range once: every vertex to the first vertex at its position (to 1 cm)
+  const weld = new Map(), rep = new Int32Array(end - first);
+  for (let v = first; v < end; v++) {
+    const k = `${Math.round(p[v * 3] * 100)},${Math.round(p[v * 3 + 1] * 100)},${Math.round(p[v * 3 + 2] * 100)}`;
+    let r = weld.get(k);
+    if (r === undefined) { r = v - first; weld.set(k, r); }
+    rep[v - first] = r;
+  }
+  const acc = new Float64Array((end - first) * 3);
   for (let t = 0; t < idx.length; t += 3) {
     const a = idx[t], b = idx[t + 1], c = idx[t + 2];
     if (a < first || a >= end || b < first || b >= end || c < first || c >= end) continue;
     const ux = p[b * 3] - p[a * 3], uy = p[b * 3 + 1] - p[a * 3 + 1], uz = p[b * 3 + 2] - p[a * 3 + 2];
     const vx = p[c * 3] - p[a * 3], vy = p[c * 3 + 1] - p[a * 3 + 1], vz = p[c * 3 + 2] - p[a * 3 + 2];
     const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
-    for (const v of [a, b, c]) { const k = key(v); const s = acc.get(k); if (s) { s[0] += nx; s[1] += ny; s[2] += nz; } else acc.set(k, [nx, ny, nz]); }
+    for (const v of [a, b, c]) { const r = rep[v - first] * 3; acc[r] += nx; acc[r + 1] += ny; acc[r + 2] += nz; }
   }
   for (let v = first; v < end; v++) {
-    const s = acc.get(key(v));
-    if (!s) continue;
-    const l = Math.hypot(s[0], s[1], s[2]) || 1;
-    nrm[v * 3] = s[0] / l; nrm[v * 3 + 1] = s[1] / l; nrm[v * 3 + 2] = s[2] / l;
+    const r = rep[v - first] * 3, x = acc[r], y = acc[r + 1], z = acc[r + 2];
+    const l = Math.hypot(x, y, z);
+    if (l < 1e-12) continue;
+    nrm[v * 3] = x / l; nrm[v * 3 + 1] = y / l; nrm[v * 3 + 2] = z / l;
   }
   geo.attributes.normal.needsUpdate = true;
   return geo;
