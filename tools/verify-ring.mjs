@@ -58,6 +58,7 @@ out.districtWorstRenderedTris = majorSlots * maxMajor + (2 * WINDOW + 1 - majorS
 assert.ok(maxFar < maxMajor / 8, 'Far silhouettes are a small fraction of the full tiles');
 for (const v of D.variants) { assert.ok(finite(v.far)); let hi = -Infinity; eachVertex(v.far, (x, y) => { if (Math.abs(x) < S.hw - 1) hi = Math.max(hi, y - S.roofLow(x)); }); assert.ok(hi < -150, 'Silhouettes stay under the glass too'); }
 out.districtUniqueTris = D.variants.reduce((s, v) => s + tris(v.major) + tris(v.minor) + tris(v.fine), 0) + tris(D.vaultFrame.geo) + D.crests.reduce((s, c) => s + tris(c.major) + tris(c.minor), 0) + tris(D.gantryGeo);
+console.log(JSON.stringify(out), majorSlots, minorSlots, fineSlots, movers);
 assert.ok(out.districtWorstRenderedTris < 12e6, `Districts render at most ${out.districtWorstRenderedTris} triangles (budget 12M)`);
 assert.ok(out.districtUniqueTris < 4e6, 'Unique district geometry within 4M triangles');
 

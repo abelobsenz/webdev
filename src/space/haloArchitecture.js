@@ -279,8 +279,8 @@ function setbackTower(C, cx, cz, sx, sz, hmax, fk, dens = 0.6) {
     // a lit band at each set-back (the tiers read as rings of light at night)
     B.box(tx, y + h - 2.5, tz, tw + 0.8, 2.4, td + 0.8, t === tiers - 1 ? CK.LANTERN : CK.BRONZE);
     // corner piers on stone tiers and fins on glass ones: the tier keeps its edges from afar
-    if (!isGlass) for (const [ax, az] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) M.box(tx + ax * (tw / 2 - 1), y + h / 2, tz + az * (td / 2 - 1), 3.2, h - 3, 3.2, stoneK);
-    else for (const s of [-1, 1]) M.box(tx + s * tw * 0.25, y + h / 2, tz + td / 2 + 0.6, 1.2, h - 4, 1.2, CK.BRONZE);
+    if (!isGlass) for (const [ax, az] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) N.box(tx + ax * (tw / 2 - 1), y + h / 2, tz + az * (td / 2 - 1), 3.2, h - 3, 3.2, stoneK);
+    else for (const s of [-1, 1]) N.box(tx + s * tw * 0.25, y + h / 2, tz + td / 2 + 0.6, 1.2, h - 4, 1.2, CK.BRONZE);
     // balconies on the long faces of stone tiers, floor lines on glass
     if (!isGlass) for (let yy = y + 10.8; yy < y + h - 6; yy += 10.8) N.box(tx, yy, tz + (t % 2 ? 1 : -1) * (td / 2 + 0.9), tw * 0.8, 0.3, 1.8, CK.DECK);
     else for (let yy = y + 28.8; yy < y + h - 6; yy += 28.8) N.box(tx, yy, tz, tw + 0.6, 0.5, td + 0.6, CK.BRONZE);
@@ -411,8 +411,9 @@ function slabBlock(C, cx, cz, sx, sz, hmax, fk, dens) {
       else N.box(x + s * (w / 2 + 0.8), yy, z, 1.6, 0.35, d - 4, CK.DECK);
     }
     M.box(alongX ? x : x + (off > 0 ? -1 : 1) * (w / 2 + 0.3), deckHi(S, x, w) + 4, alongX ? z + (off > 0 ? -1 : 1) * (d / 2 + 0.3) : z, alongX ? w * 0.8 : 0.5, 2, alongX ? 0.5 : d * 0.8, HK.NEON);
-    if (F) massBox(F, S, x, z, w, d, top + 3.6, k, HK.ROOFGARDEN);
   }
+  // (far: the slab as one mass under its planted roof)
+  if (F) massBox(F, S, alongX ? cx : cx + off, alongX ? cz + off : cz, alongX ? sx : D, alongX ? D : sz, maxTop + 2, tintKind(fk, r()), HK.ROOFGARDEN);
   C.flamps.push({ p: V3(gx, deckHi(S, gx, 1) + 5, gz), r: 1.5, color: LAMPC.WARM, i: 1.5 });
   return maxTop;
 }
@@ -449,13 +450,12 @@ function rowHouses(C, cx, cz, sx, sz, fk) {
   let hiTop = 0;
   for (const [x, z, w, d, top] of runs) {
     hiTop = Math.max(hiTop, top);
-    M.box(x, deckHi(S, x, w) + 3.2, z, w * 0.9 + 0.8, 1.4, d * 0.9 + 0.8, HK.NEON);
+    N.box(x, deckHi(S, x, w) + 3.2, z, w * 0.9 + 0.8, 1.4, d * 0.9 + 0.8, HK.NEON);
   }
   // (far: the four sides as four runs under their roofs)
-  if (F) for (let side = 0; side < 4; side++) {
-    const alongX = side < 2, s = side % 2 ? 1 : -1;
-    const x = alongX ? cx : cx + s * (sx / 2 - depth / 2), z = alongX ? cz + s * (sz / 2 - depth / 2) : cz;
-    massBox(F, S, x, z, alongX ? sx : depth, alongX ? depth : sz - 2 * depth - 2, hiTop + 1, tintKind(fk, r()), roofK);
+  if (F) for (let side = 0; side < 2; side++) {
+    const s = side ? 1 : -1;
+    massBox(F, S, cx, cz + s * (sz / 2 - depth / 2), sx, depth, hiTop + 1, tintKind(fk, r()), roofK);
   }
   const nt = 6 + Math.floor(r() * 6);
   for (let q = 0; q < nt; q++) tree(M, null, cx + (r() - 0.5) * (sx - 2 * depth - 20), inner, cz + (r() - 0.5) * (sz - 2 * depth - 20), 7 + r() * 6, pickTree(C));
@@ -469,7 +469,6 @@ function rowHouses(C, cx, cz, sx, sz, fk) {
 function villaBlock(C, cx, cz, sx, sz, fk) {
   const { B, M, N, S, r, F } = C;
   const g = standBox(B, S, cx, cz, sx, sz, 0.9, tk(C, HK.LAWN), 6);
-  if (F) standBox(F, S, cx, cz, sx, sz, 0.9, HK.LAWN, 6);
   const nx = 2, nz = 2 + (r() < 0.5 ? 1 : 0), px = sx / nx, pz = sz / nz;
   const roofK = roofTint(C);
   for (let i = 0; i < nx; i++) for (let j = 0; j < nz; j++) {
@@ -689,7 +688,7 @@ export function parkCell(C, x0, x1, z0, z1, lakeFrac) {
     B.push(new THREE.Matrix4().makeTranslation(lx, 0, lz).multiply(new THREE.Matrix4().makeScale(1, 1, e)));
     latheAt(B, 0, y + 1.0, 0, [[0.1, 0, HK.WATER], [R, 0, HK.WATER], [R, 1.1, HK.WATER], [0.1, 1.1, HK.WATER]], 28);
     latheAt(B, 0, y + 0.6, 0, [[R - 1, 0, HK.STONE], [R + 7, 0, HK.STONE], [R + 7, 2.6, HK.STONE], [R - 1, 2.6, HK.STONE]], 28, true);
-    if (F) latheAt(F, 0, y + 1.0, 0, [[0.1, 0, HK.WATER], [R, 0, HK.WATER], [R, 1.1, HK.WATER], [0.1, 1.1, HK.WATER]], 10);
+    if (F) latheAt(F, 0, y + 1.0, 0, [[0.1, 1.1, HK.WATER], [R, 1.1, HK.WATER], [R, 0, HK.WATER]], 7);
     // island mound with a pavilion
     const ir = R * 0.16, ia = r() * TAU, ix = Math.cos(ia) * R * 0.4, iz = Math.sin(ia) * R * 0.4;
     latheAt(B, ix, y + 1.5, iz, [[0.1, 0, HK.LAWN], [ir, 0, HK.LAWN], [ir * 0.6, 6, HK.LAWN], [0.1, 8, HK.LAWN]], 10);
@@ -754,8 +753,8 @@ export function parkCell(C, x0, x1, z0, z1, lakeFrac) {
     const rx = 45 + r() * 80, rz = 35 + r() * 70, qx = x0 + rx + 15 + r() * (sx - 2 * rx - 30), qz = z0 + rx + 15 + r() * (sz - 2 * rx - 30);
     if (!clear(qx, qz, Math.max(rx, rz) + 12) || onMound(qx, qz)) continue;
     const kk = tk(C, HK.CANOPY), rot = r() * TAU, h = 14 + r() * 10;
-    canopyMass(B, S, qx, qz, rx, rz, h, kk, rot, 12, r);
-    if (F) canopyMass(F, S, qx, qz, rx, rz, h, kk, rot, 7, r);
+    canopyMass(B, S, qx, qz, rx, rz, h, kk, rot, 10, r);
+    if (F) massBox(F, S, qx, qz, 1.5 * Math.max(rx, rz), 1.5 * Math.max(rx, rz) * 0.8, S.deck(qx) + h * 0.7, kk, kk);
     const sp = pickTree(C), ne = 8 + Math.floor(r() * 8);
     for (let t = 0; t < ne; t++) {
       const a = r() * TAU, e = 1.0 + r() * 0.25, lx = Math.cos(a) * rx * e, lz = Math.sin(a) * rz * e;
@@ -801,7 +800,7 @@ export function farmCell(C, x0, x1, z0, z1) {
     const h = 30 + r() * 16;
     vault(B, x, y, len0, len1, half, h, CK.CONSERVATORY, CK.BRONZE, 10, 3);
     if (F) F.box(x, y + h * 0.35, (len0 + len1) / 2, half * 2, h * 0.7, len1 - len0, CK.CONSERVATORY);
-    for (let z = len0 + 75; z < len1; z += 150) ribArc(M, x, y, z, half, h, 1.1, CK.BRONZE, 6);
+    for (let z = len0 + 110; z < len1; z += 220) ribArc(M, x, y, z, half, h, 1.1, CK.BRONZE, 6);
     C.flamps.push({ p: V3(x, y + h + 2, (len0 + len1) / 2), r: 1.6, color: LAMPC.LEAF, i: 1.2, breathe: 0.2, phase: r() });
   }
   // farmstead: a barn and houses under tiled roofs round a yard, silos
@@ -1063,7 +1062,7 @@ export function stadiumCell(C, x0, x1, z0, z1) {
   for (let q = 0; q < 8; q++) {
     const rr = 178 + q * 9.5, yy = y - 6 + 10 + (q + 0.5) * 5.25;
     M.push(new THREE.Matrix4().makeTranslation(cx, yy, cz).multiply(new THREE.Matrix4().makeRotationX(Math.PI / 2)));
-    M.torus(rr, 0.8, 64, 4, q % 2 ? facadeKind(C.style.pal + 1) : HK.AWNING);
+    M.torus(rr, 0.8, 40, 4, q % 2 ? facadeKind(C.style.pal + 1) : HK.AWNING);
     M.pop();
   }
   void r;
@@ -1115,7 +1114,7 @@ export function cliffs(C) {
         const xin = sg * (X0 - depth), xw = sg * (X0 + 20);
         const k = blockK === CK.GLASS || i % 4 !== 3 ? blockK : CK.GLASS;
         B.box((xin + xw) / 2, (y0 + y1) / 2, zc, Math.abs(xw - xin), y1 - y0, zl, k);
-        if (F && i % 3 === 0) F.box((xin + xw) / 2, (y0 + Math.min(levels, i + 3) * H - 12) / 2, zc, Math.abs(xw - xin), Math.min(levels, i + 3) * H - 12 - y0, zl, blockK);
+        if (F && i % 4 === 0) massBox(F, S, (xin + xw) / 2, zc, Math.abs(xw - xin), zl, Math.min(levels, i + 4) * H - 12, blockK, HK.STONE);
         B.box((xin + xw) / 2, y1 + 6, zc, Math.abs(xw - xin) + 6, 12, zl + 4, HK.STONE);
         B.box(xin - sg * 3.4, y1 - 3, zc, 0.8, 2.4, zl, CK.LANTERN);                 // the slab's lit soffit edge
         if (i < levels - 1) {

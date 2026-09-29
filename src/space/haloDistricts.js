@@ -34,8 +34,8 @@ export const TILE_L = 4000;                  // m of ring per district tile
 export const WINDOW = 15;                    // tiles either side of the camera's tile
 const SLOTS = 2 * WINDOW + 1;
 export const NEAR_RANGE_KM = 150;            // districts drawn within this distance of the band
-export const MINOR_RANGE_KM = 14;            // small detail (trees, balconies, loggias, boats) within this
-export const MAJOR_RANGE_KM = 26;            // full massing within this; out to the window edge the tile's silhouette
+export const MINOR_RANGE_KM = 12;            // small detail (trees, balconies, loggias, boats) within this
+export const MAJOR_RANGE_KM = 20;            // full massing within this; out to the window edge the tile's silhouette
 export const FINE_RANGE_KM = 8;              // finest detail (railings, street trees, pier fins, street lamps)
 export const FRAME_RANGE_KM = 40;            // the vault's ribs and purlins over the tiles within this
 const SEAM_TILES = 8;                        // the last tiles before theta = 0 share the ring's remainder
