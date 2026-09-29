@@ -16,7 +16,7 @@ import { LunarTraffic } from './lunarTraffic.js';
 import { buildMediiWorks } from './lunarWorks.js';
 import { LunarOutposts } from './lunarOutposts.js';
 import { LunarHops } from './lunarHops.js';
-import { LunarRingTrains } from './lunarRing.js';
+import { LunarRingTrains, LunarRingHalls } from './lunarRing.js';
 import { LunarOrbitals } from './lunarOrbitals.js';
 
 // The terraformed Moon: seas in the old maria, green highlands softened craters,
@@ -416,7 +416,8 @@ export class Moon {
     this.far.renderOrder = 11;
     this.group.add(this.far);
     this.districtData=buildLunarRingDistricts();
-    this.districts=lunarMesh(this.districtData.geo,{accent:[.7,.85,1],lit:.5,side:THREE.DoubleSide});
+    const districtMat=createLunarMaterial({accent:[.7,.85,1],lit:.5,side:THREE.DoubleSide});
+    this.districts=lunarMesh(this.districtData.geo,{},districtMat);
     addLamps(this.districts,this.districtData.lamps,{minPx:1.1});   // lit halls, parapets and rails (src/space/lunarPort.js)
     this.group.add(this.districts);
     this.port = new THREE.Group();
@@ -490,7 +491,8 @@ export class Moon {
     // settlements (lunarOutposts.js) one at a time as the camera nears each
     this.life = null;
     this.outposts = new LunarOutposts(this.group);
-    this.ringTrains = new LunarRingTrains(this.group);   // expresses on the ring's transit rails (lunarRing.js)
+    this.ringTrains = new LunarRingTrains(this.group);
+    this.ringHalls = new LunarRingHalls(this.group, this.districtData, districtMat);   // the halls: far forms all round, full halls near (lunarRing.js)   // expresses on the ring's transit rails (lunarRing.js)
     this.hops = new LunarHops(this.group);           // hoppers between Medii and the outposts (lunarHops.js)
     this.orbitals = new LunarOrbitals(this.group);    // Endymion Wheel, Aitken Depot, relays and ferries in lunar orbit (lunarOrbitals.js)
   }
@@ -577,6 +579,7 @@ export class Moon {
       this.outposts.update(realTime, cam, this.space.camera, this.space.size.y);
       this.hops.update(realTime);
       this.ringTrains.update(realTime, cam);
+      this.ringHalls.update(cam);
       _sunM.copy(sim.sunDir).applyQuaternion(_lq.copy(sim.moonQuat).invert());
       this.orbitals.update(realTime, _sunM, cam, this.space.camera, this.space.size.y);
     }
