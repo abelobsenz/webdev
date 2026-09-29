@@ -177,3 +177,18 @@ TARGET_INFO.halcyon = {
   facts:[['Torus','1.9 km, 1 g at 1 rpm'],['Residents','40,000'],['Orbit','frozen, 63.4°']],
 };
 TARGET_ORDER.push('halcyon', 'aurelia', 'demeter', 'anansi', 'boreal', 'dawnline');
+TARGET_INFO.lagrangeL4 = {
+  key:'',name:'The Morning Isles',district:'Earth–Moon L4 · 60° ahead of the Moon',
+  lore:'Two Island-Three cylinders, Lucern and Aubade, turning against each other so the pair can follow the Sun. Each is eight kilometres across and thirty-two long, and spins once every two minutes for a full g. Three mirrors on each fold open at dawn and throw daylight through the windows onto the valleys; at night they close and the river towns show through the glass.',
+  facts:[['Founded','2410 CE'],['Residents','9.4 million'],['Spin','1 turn / 127 s'],['Farms','6 agricultural rings']],
+};
+TARGET_INFO.lagrangeL5 = {
+  key:'',name:'The Evening Isles',district:'Earth–Moon L5 · 60° behind the Moon',
+  lore:'The trailing pair, Vesper and Eventide, built a century after the Morning Isles on the same pattern and never outgrown. Their foundries sit despun at the shadow end, radiators edge-on to the Sun, and the docking wheels handle most of the ice and ore that comes in from the belt for the Concord\'s yards.',
+  facts:[['Founded','2520 CE'],['Residents','8.1 million'],['Berths','24'],['Day','mirror-set, 16 h']],
+};
+TARGET_INFO.lagrangeL1 = {
+  key:'',name:'The Fulcrum',district:'Earth–Moon L1 · 326,000 km',
+  lore:'The gateway at the balance point between the Earth and the Moon, where a ship can hold station for almost nothing. Earth ferries dock at one end and lunar packets and colony shuttles at the other, and in between two counter-rotating wheels hold the transit halls and the hotels for the travellers changing ships.',
+  facts:[['Wheels','2, at 0.5 g'],['Berths','16'],['To the Moon','58,000 km']],
+};

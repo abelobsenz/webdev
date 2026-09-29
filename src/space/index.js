@@ -30,6 +30,7 @@ import { ReleaseYard, releaseYardTarget } from './releaseYard.js';
 import { LowOrbit, leoTargets } from './lowOrbit.js';
 import { computeSky } from '../core/sun.js';
 import { ShipPilot } from './shipPilot.js';
+import { LagrangeColonies, lagrangePoint, lagrangeFrame } from './lagrange.js';
 
 const smooth = (a, b, x) => { const t = Math.min(Math.max((x - a) / (b - a), 0), 1); return t * t * (3 - 2 * t); };
 const easeInOut = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
@@ -189,6 +190,10 @@ export class SpaceMode {
       frame:q=>q.setFromUnitVectors(_v2.set(0,1,0),_v3.copy(solarOffset).normalize()),
       minDist:.12,maxDist:1e8,defaultDist:6,view:{az:1,el:.4},
     });
+    // the Lagrange colonies (src/space/lagrange.js): the pairs at L4 and L5, the L1 gateway
+    for (const [name, pt, dist, view] of [['lagrangeL4', 'L4', 120, { az: 0.7, el: 0.35 }], ['lagrangeL5', 'L5', 120, { az: 2.3, el: 0.3 }], ['lagrangeL1', 'L1', 5.5, { az: 0.9, el: 0.25 }]]) {
+      T(name, { position: (o) => lagrangePoint(sim, pt, o), frame: (q) => lagrangeFrame(sim, pt, q), minDist: pt === 'L1' ? 1.2 : 12, maxDist: 500000, defaultDist: dist, view });
+    }
     T('hearthworks', {
       position:o=>self.hearth?o.copy(self.hearth.refugePosition).applyAxisAngle(_v2.set(0,0,1),.12).applyQuaternion(self.hearth.quat).add(sim.hearthPos):o.copy(sim.hearthPos),
       frame:q=>self.hearth?q.copy(self.hearth.quat):q.identity(),
@@ -274,6 +279,9 @@ export class SpaceMode {
     this.lowOrbit = new LowOrbit(this);
     this.scene.add(this.lowOrbit.group);
     this.modules.push(this.lowOrbit);
+    // the Lagrange colonies at L4 and L5 and the Fulcrum gateway at L1, with their lanes
+    this.lagrange = new LagrangeColonies(this);
+    this.modules.push(this.lagrange);
     // the Lodestar, flown by the visitor (V): built on first boarding
     this.ship = new ShipPilot(this);
     this.modules.push(this.ship);
