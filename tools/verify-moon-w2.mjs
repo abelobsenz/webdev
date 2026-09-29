@@ -9,7 +9,7 @@ import { SpaceSim, R_MOON } from '../src/space/sim.js';
 import { Moon } from '../src/space/moon.js';
 import { ALL_TOWNS, FAR_TOWNS, ARCS, seaClearance, latLonDir, arcUniforms, townUniforms } from '../src/space/lunarNetwork.js';
 import { TOWNS } from '../src/space/moonBake.js';
-import { ORBITS, orbitPos, WHEEL, DEPOT, buildWheelRing, buildWheelHub, buildWings, buildFerry, buildDepot, LunarOrbitals } from '../src/space/lunarOrbitals.js';
+import { ORBITS, orbitPos, descentPhase, WHEEL, DEPOT, buildWheelRing, buildWheelHub, buildWings, buildFerry, buildDepot, LunarOrbitals } from '../src/space/lunarOrbitals.js';
 import { buildOutpost } from '../src/space/lunarOutposts.js';
 import { MoonSurface } from '../src/space/moonSurface.js';
 import { SETTLEMENT_PARTS, buildSettlementQuarter } from '../src/space/lunarSettlement.js';
@@ -162,6 +162,27 @@ ok(report.orbitalTris > 30000 && report.orbitalTris < 1.5e6, `orbital triangles 
   ok(LunarOrbitals.approachS(400).s === 0, 'inbound ferry berthed mid-cycle');
   for (let k = 0; k < 900; k += 3) { const { s } = LunarOrbitals.approachS(k); ok(s >= 0 && Number.isFinite(s), `approach s at ${k}`); }
   ok(Math.abs(O.approach.berth.z) - fR > WHEEL.ringZ + zHi, 'inbound berth clear of the rings');
+  // descent ferries: above the ground all the way, seated on their pads while down, far from
+  // the Lift's tether
+  {
+    const NF0 = O.ferries.count - O.descents.length, m = new THREE.Matrix4(), p = new THREE.Vector3();
+    let minAlt = Infinity, minTether = Infinity;
+    for (let k = 0; k < 540; k++) {
+      const t = k * 10;
+      O.update(t, new THREE.Vector3(1, 0, 0));
+      for (let j = 0; j < O.descents.length; j++) {
+        O.ferries.getMatrixAt(NF0 + j, m); p.setFromMatrixPosition(m).multiplyScalar(0.001);
+        ok(Number.isFinite(p.x + p.y + p.z), `descent ${j} finite at ${t}`);
+        minAlt = Math.min(minAlt, p.length() - R_MOON);
+        if (p.x > 0) minTether = Math.min(minTether, Math.hypot(p.y, p.z));
+        const D = O.descents[j];
+        if (descentPhase(t + D.ph).u === 1) ok(p.distanceTo(D.p) < 0.05, `descent ${j} seated on its pad (${(p.distanceTo(D.p) * 1000).toFixed(0)} m off)`);
+      }
+    }
+    ok(minAlt > 0.02, `descent ferries dip to ${minAlt.toFixed(3)} km`);
+    ok(minTether > 50, `descent ferries pass ${minTether.toFixed(0)} km from the tether's line`);
+    report.descentMinTetherKm = +minTether.toFixed(0);
+  }
   // the yard's pods: between the stocks, under the hull, clear of it
   for (let k = 0; k < 200; k++) {
     O._moveYard(k * 7.3);

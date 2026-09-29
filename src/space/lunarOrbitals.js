@@ -5,6 +5,10 @@ import { LAMP, createLamps } from './lamps.js';
 import { addLamps, pixelRadius } from './craftMesh.js';
 import { mulberry } from './lunarKit.js';
 import { R_MOON } from './sim.js';
+import { stationFrame } from './stations.js';
+import { TOWNS } from './moonBake.js';
+import { FAR_TOWNS, latLonDir } from './lunarNetwork.js';
+import { hopPad } from './lunarOutposts.js';
 
 // The Moon's own orbital stations, below the ring: real circular orbits about the Moon
 // (GM 4902.8 km^3/s^2), each station-kept in a plane that never crosses the Lift's tether or
@@ -32,7 +36,7 @@ const GM = 4902.8;                                  // km^3/s^2
 const V = (x, y, z) => new THREE.Vector3(x, y, z);
 const _p = new THREE.Vector3(), _q = new THREE.Quaternion(), _qi = new THREE.Quaternion(), _s = new THREE.Vector3();
 const _m = new THREE.Matrix4(), _x = new THREE.Vector3(), _y = new THREE.Vector3(), _z = new THREE.Vector3(), _w = new THREE.Vector3();
-const _e = new THREE.Euler();
+const _e = new THREE.Euler(), _t = new THREE.Vector3();
 const _one = new THREE.Vector3(1, 1, 1);
 
 /** Orbit records (Moon frame): radius km, plane normal, phase at t = 0. */
@@ -519,6 +523,33 @@ const FERRY_SLOTS = [
   ['wheel', 0.055, -0.6, 0], ['wheel', -0.11, 1.2, 0], ['wheel', 0.24, -2.5, 0], ['wheel', -0.35, 3, 0],
   ['depot', 0.07, 0.8, 0], ['depot', -0.18, -1.5, 0],
 ];
+// Ferries between the Depot and the polar and far-side towns: from a hold point 6 km behind
+// the Depot, a deorbit burn, the long fall along the ground track, a braking burn and a
+// tail-first landing on the town's hop pad; ten minutes down, then the climb back.
+const DESCENTS = [['Shackleton Crown', 0], ['Peary Rim', 1800], ['Daedalus', 3600]];
+const TD = 2400, TW = 600, CYC = 2 * TD + TW;
+const HOLD = -0.003;                                // rad behind the Depot (~6 km)
+
+/** Where a descent ferry is in its cycle: u along the path (0 hold .. 1 pad), burn 0..1. */
+export function descentPhase(t) {
+  const c = ((t % CYC) + CYC) % CYC;
+  if (c < TD) { const u = c / TD; return { u, up: false, burn: u < 0.08 || u > 0.72 ? 1 : 0, c0: 0 }; }
+  if (c < TD + TW) return { u: 1, up: false, burn: 0, c0: TD };
+  const u = 1 - (c - TD - TW) / TD;
+  return { u, up: true, burn: u > 0.7 ? 1 : u < 0.06 ? 0.6 : 0, c0: TD + TW };
+}
+
+/** Moon-frame pad centre (km, on the drawn sphere) of a town's hop pad, and its up. */
+export function descentPad(name) {
+  const k = FAR_TOWNS.findIndex((t) => t[3] === name);
+  const [lat, lon, w] = FAR_TOWNS[k];
+  const idx = TOWNS.length - 1 + k;                 // (the outpost's index: seed idx + 101)
+  const hp = hopPad(idx + 101, w);
+  const up = latLonDir(lat, lon);
+  const p = new THREE.Vector3(hp.x, 0, hp.z).multiplyScalar(0.001).applyQuaternion(stationFrame(up)).addScaledVector(up, R_MOON);
+  return { p, up: p.clone().normalize() };
+}
+
 const RELAYS = [['relayA', 0], ['relayA', TAU / 3], ['relayA', 2 * TAU / 3], ['relayB', 0.5], ['relayB', 0.5 + TAU / 3], ['relayB', 0.5 + 2 * TAU / 3]];
 
 export class LunarOrbitals {
@@ -681,12 +712,14 @@ export class LunarOrbitals {
     this.relayLamps = createLamps(RELAYS.map((_, i) => ({ p: new THREE.Vector3(), r: 3, color: i % 2 ? LAMP.WHITE : LAMP.TEAL, i: 3.2, breathe: 1, phase: i / RELAYS.length })), { minPx: 0.9 });
     this.relayLamps.scale.setScalar(0.001);
     // --- ferries in flight ---
-    this.ferries = lunarInstanced(this.ferryGeo, FERRY_SLOTS.length, {}, this.mat, { tint: true });
+    this.descents = DESCENTS.map(([name, ph]) => ({ name, ph, ...descentPad(name) }));
+    const NF = FERRY_SLOTS.length + DESCENTS.length;
+    this.ferries = lunarInstanced(this.ferryGeo, NF, {}, this.mat, { tint: true });
     this.ferries.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-    FERRY_SLOTS.forEach((_, i) => this.ferries.instanceColor.setXYZ(i, ...[[0.86, 0.3, 0.16], [0.18, 0.34, 0.62], [0.9, 0.84, 0.7], [0.2, 0.45, 0.4], [0.9, 0.6, 0.12], [0.7, 0.2, 0.14]][i % 6]));
+    for (let i = 0; i < NF; i++) this.ferries.instanceColor.setXYZ(i, ...[[0.86, 0.3, 0.16], [0.18, 0.34, 0.62], [0.9, 0.84, 0.7], [0.2, 0.45, 0.4], [0.9, 0.6, 0.12], [0.7, 0.2, 0.14]][i % 6]);
     this.ferries.name = 'Lunar ferries in orbit';
     // their running lights and engine glow, carried with them (4 per ferry)
-    this.ferryLamps = createLamps(FERRY_SLOTS.flatMap(() => [
+    this.ferryLamps = createLamps(Array.from({ length: NF }).flatMap(() => [
       { p: new THREE.Vector3(), r: 1.2, color: LAMP.RED, i: 3 }, { p: new THREE.Vector3(), r: 1.2, color: LAMP.GREEN, i: 3 },
       { p: new THREE.Vector3(), r: 1.5, color: LAMP.WHITE, i: 3.2, breathe: 1 }, { p: new THREE.Vector3(), r: 6, color: LAMP.BLUE, i: 2.2 },
     ]), { minPx: 0.9 });
@@ -796,10 +829,46 @@ export class LunarOrbitals {
         FL[o4 + k * 4 + 2] = _p.z + _x.z * lx + _y.z * ly + _z.z * lz;
       }
     }
+    for (let j = 0; j < this.descents.length; j++) this._placeDescent(FERRY_SLOTS.length + j, this.descents[j], t, FL);
     this.ferries.instanceMatrix.needsUpdate = true;
     this.ferryLamps.geometry.attributes.iLamp.needsUpdate = true;
     this.ferries.visible = !cam || camNear;
     this.relays.visible = !cam || camNear;
+  }
+
+  /** A descent ferry: slerp along the ground track from the hold point to the pad, height falling
+   * away, the last stretch straight down tail-first; its lamps and engine glow with it. */
+  _placeDescent(i, D, t, FL) {
+    const ph = descentPhase(t + D.ph);
+    const o = ORBITS.depot;
+    orbitPos(o, t, HOLD, _s);          // the hold point, co-moving 6 km behind the Depot (a rendezvous, not a fixed spot)
+    const hs = _s.length() - R_MOON;
+    // (the track eases out of the hold: the ferry first drops away below the Depot, then runs)
+    const v = Math.min(1, ph.u / 0.88), f = v * v * (3 - 2 * v);
+    // direction: slerp from the hold point's to the pad's
+    const om = Math.acos(Math.max(-1, Math.min(1, _w.copy(_s).normalize().dot(D.up))));
+    const so = Math.sin(om) || 1e-9;
+    const a = Math.sin((1 - f) * om) / so, b = Math.sin(f * om) / so;
+    _p.copy(_w).multiplyScalar(a).addScaledVector(D.up, b).normalize();
+    const h = 0.035 + (hs - 0.035) * Math.pow(1 - ph.u, 1.35);
+    // the last stretch drops onto the pad itself (its offset from the town's centre line)
+    const land = Math.max(0, (ph.u - 0.88) / 0.12);
+    _p.multiplyScalar(R_MOON + h).lerp(_t.copy(D.p).addScaledVector(D.up, h), land);
+    // nose along the track while flying, tail-down (nose up) for the landing and the pad
+    _y.copy(_p).normalize();
+    _z.copy(D.up).sub(_w).normalize();
+    if (ph.up) _z.negate();
+    _z.addScaledVector(_y, -_z.dot(_y)).normalize().lerp(_y, Math.min(1, Math.max(0, (ph.u - 0.7) / 0.2))).normalize();
+    _x.crossVectors(_y, _z);
+    if (_x.lengthSq() < 1e-8) _x.set(1, 0, 0).addScaledVector(_z, -_z.x);
+    _x.normalize(); _y.crossVectors(_z, _x);
+    _p.multiplyScalar(1000);
+    _m.makeBasis(_x, _y, _z).setPosition(_p);
+    this.ferries.setMatrixAt(i, _m);
+    _w.copy(_x);
+    const o4 = i * 4;
+    lampAt(FL, o4, -6.6, 0, 8); lampAt(FL, o4 + 1, 6.6, 0, 8); lampAt(FL, o4 + 2, 0, 6.8, -24);
+    lampAt(FL, o4 + 3, 0, 0, ph.burn > 0 ? -38 : 0);
   }
 
   /** The inbound ferry's cycle (15 min): approach 5 min from 2 km, 6 min berthed, back off 2, away 2. */
