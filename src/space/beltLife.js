@@ -74,14 +74,20 @@ export class BeltLife {
       const n = d.d.clone().normalize();
       // the pilots keep station beside the axis (a berthed ship lies on it)
       const side = new THREE.Vector3().crossVectors(n, Math.abs(n.y) > 0.9 ? V(1, 0, 0) : UP).normalize().multiplyScalar(PILOT_SIDE);
-      return { p: d.p.clone(), d: n, side, reach: Math.min(320, R * 1.6 + 40) };
+      // the pilots work out to `reach`; the lit approach runs a shorter way, a lead-in at the
+      // collar's scale (a 300 m dotted ray from every berth read as a diagram, not a light)
+      return { p: d.p.clone(), d: n, side, reach: Math.min(320, R * 1.6 + 40), lead: Math.min(150, R * 0.45 + 50) };
     });
     const lamps = [];
     this.chain0 = 0;
     for (const k of this.docks) {
       for (let i = 0; i < CHAIN; i++) {
-        const s = 24 + (i / (CHAIN - 1)) * (k.reach - 24);
-        lamps.push({ p: k.p.clone().addScaledVector(k.d, s), r: 1.1, color: i % 3 === 2 ? LAMP.WHITE : LAMP.GREEN, i: 3.2 });
+        // spacing closing up toward the collar; the three nearest amber (stop), the rest white
+        // with a green gate lamp at the far end
+        const u = i / (CHAIN - 1);
+        const s = 16 + u * u * (k.lead - 16);
+        const color = i < 3 ? LAMP.AMBER : i === CHAIN - 1 ? LAMP.GREEN : LAMP.WHITE;
+        lamps.push({ p: k.p.clone().addScaledVector(k.d, s), r: i === CHAIN - 1 ? 0.9 : 0.55, color, i: 2.6 });
       }
     }
     // ---- drones: pilots at up to three berths, patrols round the outside
@@ -132,12 +138,15 @@ export class BeltLife {
 
   update(t) {
     const L = this.lamps;
-    // approach chains: a pulse running in toward each collar every 3 s
+    // approach chains: dark between runs, a sequenced strobe running in toward each collar
+    // every 4 s (each lamp a short flash as it passes), the gate lamp steady and dim
     let k = 0;
     for (let d = 0; d < this.docks.length; d++) {
       for (let i = 0; i < CHAIN; i++, k++) {
-        const ph = ((t / 3 + (CHAIN - i) / CHAIN + d * 0.13) % 1 + 1) % 1;
-        L.gain(k, 0.25 + 1.2 * Math.max(0, 1 - ph * 6));
+        if (i === CHAIN - 1) { L.gain(k, 0.35); continue; }
+        const ph = ((t / 4 + (CHAIN - i) / (CHAIN * 2) + d * 0.13) % 1 + 1) % 1;
+        const flash = Math.max(0, 1 - ph * 14);
+        L.gain(k, 0.03 + 1.3 * flash * flash);
       }
     }
     // pilots

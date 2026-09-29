@@ -418,12 +418,15 @@ export function geoBeltTargets(space) {
     out[key] = {
       position: (o) => o.copy(pos).applyQuaternion(sim.earthQuat),
       frame: (qq) => qq.copy(sim.earthQuat).multiply(q),
-      minDist: 0.25, maxDist: 200000, defaultDist: dist, view,
+      minDist: 0.12, maxDist: 200000, defaultDist: dist, view,
       station: s,
     };
   };
-  pick('beltWheel', 'habitat', 2.2, { az: 0.6, el: 0.35 });
-  pick('beltYard', 'shipyard', 1.3, { az: 0.9, el: 0.3 });
-  pick('beltRelay', 'relay', 2.0, { az: 0.4, el: 0.5 });
+  // framed at ~2.6 station radii (Kalani Wheel 284 m, Ironwood Slip 264 m, Helion Relay 4
+  // 524 m across its blankets; tools/verify-port.mjs holds the ratio): the station fills the
+  // middle of the view instead of sitting a speck among its approach lights
+  pick('beltWheel', 'habitat', 0.74, { az: 0.5, el: 0.32 });
+  pick('beltYard', 'shipyard', 0.7, { az: 0.85, el: 0.36 });
+  pick('beltRelay', 'relay', 1.35, { az: 0.45, el: 0.42 });
   return out;
 }
