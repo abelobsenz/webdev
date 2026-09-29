@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { CB, CK, sectionEllipse } from '../craft/craftGeometry.js';
 import { lathe, sphere, buildFreighter, buildTug } from '../craft/craftClasses.js';
 import { createGlowMesh } from '../craft/craftMaterial.js';
-import { craftMesh, craftPart, addEngines, addLamps, placeMerge, placeLamps, pixelRadius, KM } from './craftMesh.js';
+import { craftMesh, craftPart, addEngines, addLamps, placeMerge, placeLamps, pixelRadius, KM, dressedMesh, DK, LIVERIES } from './craftMesh.js';
 import { LAMP } from './lamps.js';
 import { R_EARTH, GEO_ALT, MERIDIAN_LON, bodyDir } from './sim.js';
 import { stationFrame, CORRIDORS } from './stations.js';
@@ -86,7 +86,7 @@ export function buildConcordYard() {
     if (j % 9 === 0 && j > 0 && j < N) return CK.BRONZE;
     if (j > 10 && side > 0.9 && Math.abs(Math.sin(t * TAU)) < 0.22) return CK.LANTERN;
     if (side > 0.55 && side < 0.8) return CK.GLASS;
-    return CK.HULL;
+    return Math.sin(t * TAU) < -0.35 ? DK.GRIME : j % 3 === 1 ? DK.PORTS : DK.LIVERY;
   }, { capStart: CK.DARK, capEnd: CK.DARK });
   // the garden atrium over the plated part: planted deck under its colonnade of ribs
   const zA0 = -600, zA1 = 200;
@@ -296,7 +296,7 @@ export function buildWaterStore() {
     const v = oct(k, y);
     B.tube([v, d.clone().multiplyScalar(STORE.tankOrbit - STORE.tankR + 14).setY(y)], 10, 8, CK.HULL);
     B.at(c.x, c.y, c.z); B.push(TO_Y);
-    sphere(B, STORE.tankR, ri % 2 ? CK.BRONZE : CK.HULL, 28, 14);
+    sphere(B, STORE.tankR, ri % 2 ? DK.FOIL : DK.LIVERY, 28, 14);
     B.pop(); B.pop();
     B.push(new THREE.Matrix4().makeTranslation(c.x, c.y, c.z).multiply(new THREE.Matrix4().makeRotationX(Math.PI / 2)));
     B.torus(STORE.tankR + 1.5, 3.2, 48, 6, ri % 2 ? CK.HULL : CK.BRONZE);
@@ -540,7 +540,7 @@ export class GeoRoads {
     const qYard = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(V(0, 0, 1), V(0, 1, 0), V(-1, 0, 0)));
     this.yardLocal = YARD_POS.clone();
     place(this.yard, this.yardLocal, qYard);
-    const ym = craftMesh(this.yardData.dockGeo, { accent: [1.0, 0.72, 0.45], lit: 0.6 });
+    const ym = dressedMesh(this.yardData.dockGeo, { accent: [1.0, 0.72, 0.45], lit: 0.6, livery: [0.58, 0.2, 0.12], livery2: [0.88, 0.84, 0.74] });
     ym.add(craftPart(ym, this.yardData.hullGeo));
     this.yardWheel = craftPart(ym, this.yardData.wheelGeo);
     ym.add(this.yardWheel);
@@ -555,7 +555,7 @@ export class GeoRoads {
     this.storeData = buildWaterStore();
     this.store = new THREE.Group();
     place(this.store, STORE_POS.clone(), new THREE.Quaternion());
-    const sm = craftMesh(this.storeData.geo, { accent: [0.55, 0.9, 1.0], lit: 0.55 });
+    const sm = dressedMesh(this.storeData.geo, { accent: [0.55, 0.9, 1.0], lit: 0.55, livery: [0.82, 0.8, 0.74], livery2: [0.16, 0.42, 0.52] });
     sm.add(craftPart(sm, this.storeData.ships));
     addLamps(sm, this.storeData.lamps, { minPx: 1.2 });
     this.store.add(sm);
@@ -584,7 +584,7 @@ export class GeoRoads {
     });
     this.movers = this.plans.map((c, i) => {
       const g = new THREE.Group();
-      const m = craftMesh(fr.geo, { accent: [0.55, 0.85, 1.0], lit: 0.5 });
+      const m = dressedMesh(fr.geo, { accent: [0.55, 0.85, 1.0], lit: 0.5, livery: LIVERIES[i % LIVERIES.length][0], livery2: LIVERIES[i % LIVERIES.length][1] });
       m.scale.setScalar(KM * c.scale);
       const engines = addEngines(m, fr.glows, { scale: 0.62, length: 16, color: 0x7fd8ff, throttle: 0 });
       // lamps and the drive glow ride a holder at the hull's scale, so they stay when the hull is culled
