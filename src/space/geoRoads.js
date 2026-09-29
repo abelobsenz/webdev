@@ -26,6 +26,11 @@ import { HS } from './harbour.js';
 //                  (tail first, braking), flip at the gate, glide to a free arm head and dock
 //                  bow-in, lie alongside, back out, and leave by the departure gate under power
 //
+//   the works    the yard's plating, bay cranes, welders, drones, crew pods, stages and keel
+//                deck (yardWorks.js); the store's mains, risers, pump houses and drones
+//                (storeWorks.js); the water run between them (waterRun.js); docking guidance
+//                lamps at the arm heads (below)
+//
 // Everything is in metres (craft builder and material), placed in the Harbour's local frame
 // (x west, y up the tether, z north) and drawn at true size.
 
