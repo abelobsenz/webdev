@@ -337,6 +337,23 @@ export class LunarTraffic {
       this.walkers.name = 'Townspeople';
       this.group.add(this.walkers);
       this.townCentre = new THREE.Vector3(...(() => { const [x, z] = UV(0, 1600); return [x, 0, z]; })());
+      // the Works' people, in high-visibility orange and white: the yard's aisles between the
+      // container rows, the plant's apron, the quarter's square and its lanes, the stations' plazas
+      const ww = [];
+      const lane = (kind, a, v0, v1, h, n) => { for (let i = 0; i < n; i++) ww.push({ kind, a: a + (rnd() - 0.5) * 0.6, v0, v1, h, ph: rnd() * 4000, sp: 0.9 + rnd() * 0.5 }); };
+      for (const du of [-14, 0, 14]) lane(0, YARD.gantryU + du, YARD.v0 + 20, YARD.v1 - 20, 0.3, 6);
+      lane(3, -3915, 3380, 4260, 0.3, 14);                     // along the plant's north apron (between stores and the quarter)
+      lane(3, -4800, 3400, 3950, 0.3, 10);                     // and south of the smelter hall, short of the conveyor's trestles
+      for (const v of [-3470, -3350]) lane(3, v, 3610, 4040, 0.35, 10);   // the quarter's square
+      lane(0, 3790, -3515, -3305, 0.35, 6);
+      for (const [su, sv, alongV] of [[3134, -4180, true], [3134, -5560, true], [1600, -2114, false]]) lane(alongV ? 0 : 3, alongV ? su : sv, alongV ? sv - 70 : su - 70, alongV ? sv + 70 : su + 70, 0.35, 8);
+      this.workWalks = ww;
+      this.workers = lunarInstanced(kit('walker'), ww.length, {}, this.mat, { tint: true });
+      this.workers.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      ww.forEach((w, i) => this.workers.instanceColor.setXYZ(i, ...(i % 3 ? [0.95, 0.5, 0.12] : [0.92, 0.9, 0.86])));
+      this.workers.name = 'Works people';
+      this.group.add(this.workers);
+      this.yardCentre = new THREE.Vector3(...(() => { const [x, z] = UV(YARD.gantryU, (YARD.v0 + YARD.v1) / 2); return [x, 0, z]; })());
     }
 
     // --- the cross streets' lamps, and kiosks along the Strand ---
@@ -457,8 +474,11 @@ export class LunarTraffic {
       arr[o + 8] = e[8]; arr[o + 9] = e[9]; arr[o + 10] = e[10]; arr[o + 11] = 0;
       arr[o + 12] = P[i * 3]; arr[o + 13] = P[i * 3 + 1]; arr[o + 14] = P[i * 3 + 2]; arr[o + 15] = 1;
     }
+    // upload only the rewritten chunk
+    const im = this.panels.instanceMatrix;
+    if (im.clearUpdateRanges) { im.clearUpdateRanges(); im.addUpdateRange(this.panelNext * 16, (end - this.panelNext) * 16); }
     this.panelNext = end;
-    this.panels.instanceMatrix.needsUpdate = true;
+    im.needsUpdate = true;
     if (end >= n) this.panelBusy = false;
   }
 
@@ -524,6 +544,8 @@ export class LunarTraffic {
     if (vehNear) { this.updateVehicles(t); this.updateMine(t); this.updateYard(t); }
     if (this.suits.visible) this.updateCrews(t);
     if (this.walkers.visible) this.updateWalkers(t);
+    this.workers.visible = dMine < 5000 || c.distanceTo(this.yardCentre) < 4000;
+    if (this.workers.visible) this.updateWalkers(t, this.workers, this.workWalks);
     this.cartMesh.visible = dTown < 9000;
     this.lampposts.visible = this.kiosks.visible = dTown < 12000;
     if (this.cartMesh.visible) this.updateCarts(t);
@@ -690,10 +712,10 @@ export class LunarTraffic {
     this.suits.instanceMatrix.needsUpdate = true;
   }
 
-  updateWalkers(t) {
-    const arr = this.walkers.instanceMatrix.array;
-    for (let i = 0; i < this.walks.length; i++) {
-      const w = this.walks[i];
+  updateWalkers(t, mesh = this.walkers, walks = this.walks) {
+    const arr = mesh.instanceMatrix.array;
+    for (let i = 0; i < walks.length; i++) {
+      const w = walks[i];
       let u, v, yaw;
       if (w.kind === 2) {
         const a = w.ph + t * w.sp / w.a;
@@ -713,6 +735,6 @@ export class LunarTraffic {
       arr[o + 8] = sn; arr[o + 9] = 0; arr[o + 10] = cs; arr[o + 11] = 0;
       arr[o + 12] = x; arr[o + 13] = surfaceY(x, z) + w.h + 0.03 * Math.abs(Math.sin(t * 5.5 + i)); arr[o + 14] = z; arr[o + 15] = 1;
     }
-    this.walkers.instanceMatrix.needsUpdate = true;
+    mesh.instanceMatrix.needsUpdate = true;
   }
 }

@@ -236,6 +236,26 @@ report.landingTris = tris(L.geo); report.worksTris = tris(W.geo);
   ok(furnBad === 0, `street furniture clear (${furnBad} bad)`);
   report.streetLamps = life.streetPosts.length; report.kiosks = life.kioskMats.length;
   ok(walkBad === 0, `townspeople clear of trunks and buildings (${walkBad} bad)`);
+  // the Works' people: not inside a works structure (the yard's stacks, halls, silos, trestles, the pylon)
+  {
+    const solids = [];
+    const pushC = (u, v, r) => solids.push([u, v, r]);
+    for (const [u, v] of W.stacks) pushC(u, v, 1.3);
+    let bad = 0;
+    for (let k = 0; k < 20; k++) {
+      life.update(k * 53.1, new THREE.Vector3(3.2, 0.1, -0.4), new THREE.Object3D(), new THREE.Vector3(0, 1, 0));
+      for (let i = 0; i < life.workWalks.length; i++) {
+        life.workers.getMatrixAt(i, m); p.setFromMatrixPosition(m);
+        const [u, v] = toUV(p.x, p.z);
+        if (!Number.isFinite(u + v + p.y)) { bad++; continue; }
+        for (const [su, sv] of W.stacks) if (Math.abs(su - u) < 1.25 + 0.3 && Math.abs(sv - v) < 6.1 + 0.3) bad++;
+        for (const [hu, hv, hl, hw] of [[3800, -4700, 360, 70], [3560, -4300, 240, 50], [4020, -4300, 240, 50], [3800, -4040, 520, 40]]) if (Math.abs(u - hu) < hl / 2 + 0.3 && Math.abs(v - hv) < hw / 2 + 0.3) bad++;
+        if (Math.hypot(u - 3825, v + 3410) < 3) bad++;
+        for (let tt = 0.15; tt < 0.95; tt += 0.2) if (Math.hypot(u - (4300 - 310 * tt), v - (-4960 + 220 * tt)) < 1.4) bad++;
+      }
+    }
+    ok(bad === 0, `works people clear of the works (${bad} bad)`);
+  }
   ok(rovBad === 0, `rovers on their roads (${rovBad} off)`);
   ok(tramBad === 0, `trains on their tracks (${tramBad} off)`);
   ok(gapMin > 24.4, `train cars do not overlap (${gapMin.toFixed(2)} m between centres)`);
