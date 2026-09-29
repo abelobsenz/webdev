@@ -19,6 +19,10 @@
 // turns; the verify script checks the tables against that rule.
 
 // ---- tables (shared with tools/verify-earth.mjs) -----------------------------------------------
+/** Moments of snoise() over space (the verify script measures them with snoiseJS): E|n|, E(1-|n|)^2,
+ *  E(1-|n|)^3. Every shaped octave subtracts its mean, so a field keeps its mean as octaves fade in
+ *  and out with range (no shift in cover, height or colour at the LOD handover). */
+export const NOISE_MOMENTS = { abs: 0.308, ridge2: 0.522, ridge3: 0.417 };
 const LACUNARITY = 2.13;
 const CLOUD_AMPS = [0.75, 0.8, 0.8, 0.8, 0.7, 0.55, 0.4];
 /** The cloud detail octaves: wavelength (km) and amplitude, coarse to fine. */
@@ -93,6 +97,9 @@ const float EF_CD_RMS = ${f(Math.sqrt(CLOUD_OCTAVES.reduce((s, o) => s + o.amp *
 const float EF_FADE_LO = ${f(OCTAVE_FADE.lo)};
 const float EF_FADE_HI = ${f(OCTAVE_FADE.hi)};
 const float EF_TOP_KM = ${f(SHADOW_MARCH.topKm)};
+const float EF_ABS_MEAN = ${f(NOISE_MOMENTS.abs)};
+const float EF_RIDGE2_MEAN = ${f(NOISE_MOMENTS.ridge2)};
+const float EF_RIDGE3_MEAN = ${f(NOISE_MOMENTS.ridge3)};
 
 float ef_fade(float wl, float fp) { return 1.0 - smoothstep(wl * EF_FADE_LO, wl * EF_FADE_HI, fp); }
 
@@ -121,7 +128,7 @@ vec3 ef_cloudDetail(vec3 q, float fp, float cumu, int oct) {
       float n = snoise(x);
       // cumulus: the 6 - 13 km octaves gather into lines of convergence (cloud along the
       // zero crossings: a network of cloud round clear gaps); finer octaves round into domes
-      if (i == 3 || i == 4) n = mix(n, (0.32 - abs(n)) * 1.55, 0.4 * cumu);
+      if (i == 3 || i == 4) n = mix(n, (EF_ABS_MEAN - abs(n)) * 1.55, 0.4 * cumu);
       else if (i >= 5) n = mix(n, sign(n) * sqrt(abs(n)) * 0.8, 0.5 * cumu);
       s += a * w * n;
       if (i >= 3) res += w * a;
@@ -171,13 +178,13 @@ float ef_land(vec3 b, float fp, float H, float arid, float ice, inout vec3 alb, 
     float w = ef_fade(${f(o.wl)}, fp)${o.q > 0 ? ` * (QUALITY >= ${o.q} ? 1.0 : 0.0)` : ''};
     if (w > 0.0) {
       float r = ef_ridge(p / ${f(o.wl)} + ${f(i * 7.31 + 1.7)});
-      dh += w * ${f(o.amp)} * (r - 0.45);
+      dh += w * ${f(o.amp)} * (r - EF_RIDGE2_MEAN);
       crest += w * ${f(o.amp)} * r;
       wsum += w * ${f(o.amp)};
     }
   }`).join('\n  ')}
   dh *= hills;
-  float cr = wsum > 0.0 ? crest / wsum : 0.45;
+  float cr = wsum > 0.0 ? crest / wsum : EF_RIDGE2_MEAN;
   valley = (1.0 - smoothstep(0.08, 0.5, cr)) * step(1e-4, wsum);
   float hNow = hTrue + dh;
   // mottling of the ground cover (forest and clearings, 9 km and 2.6 km), faded to its mean
@@ -192,7 +199,7 @@ float ef_land(vec3 b, float fp, float H, float arid, float ice, inout vec3 alb, 
   // snow above a latitude-dependent snowline, deepest on the high crests and shaded gullies
   float xl = min(abs(lat) / 1.5708, 1.0);
   float line = 5.3 - 5.6 * pow(xl, 1.6);
-  float snow = smoothstep(line - 0.35, line + 0.35, hNow + 0.5 * (cr - 0.45)) * (1.0 - 0.8 * arid) * step(0.0, H);
+  float snow = smoothstep(line - 0.35, line + 0.35, hNow + 0.5 * (cr - EF_RIDGE2_MEAN)) * (1.0 - 0.8 * arid) * step(0.0, H);
   alb = mix(alb, vec3(0.7, 0.72, 0.76), snow * (1.0 - ice));
   // fields: a patchwork of plots in the farmed lowlands (1.4 km, each its own crop), grouped in
   // districts (6 km) of different practice; never on the mountains, deserts or ice
@@ -294,11 +301,11 @@ vec3 ef_seaColour(vec3 b, float fp, float shelf, float H, vec3 seaAlb) {
     float w1 = ef_fade(80.0, fp), w2 = ef_fade(22.0, fp);
     if (w1 > 0.0) {
       float f1 = 1.0 - abs(snoise(b * 160.0 + wv * 2.6));
-      s += 1.3 * w1 * (f1 * f1 * f1 - 0.3);
+      s += 1.3 * w1 * (f1 * f1 * f1 - EF_RIDGE3_MEAN);
     }
     if (w2 > 0.0) {
       float f2 = 1.0 - abs(snoise(b * 520.0 + wv * 5.0 + 3.0));
-      s += 0.8 * w2 * (f2 * f2 * f2 - 0.3);
+      s += 0.8 * w2 * (f2 * f2 * f2 - EF_RIDGE3_MEAN);
     }
     // (the shelves' own colour is the sea floor's, stirred less than a bloom)
     s = mix(1.0, clamp(s, 0.2, 2.0), colored * (1.0 - 0.5 * shelf * exp(-abs(H) * 20.0)));
@@ -426,3 +433,43 @@ bool ef_deck(vec3 ro, vec3 rd, vec2 tC, out vec2 lcl, out float tHit, out float 
   return hitBase;
 }
 `;
+
+// ---- the GLSL snoise() in JS, for the verify script's statistics of the shaped octaves ----------
+const m289 = (x) => x - Math.floor(x / 289) * 289;
+const perm = (x) => m289((x * 34 + 10) * x);
+/** 3D simplex noise, the same arithmetic as SNOISE_GLSL's snoise() (glsl.js). */
+export function snoiseJS(vx, vy, vz) {
+  const C1 = 1 / 6, C2 = 1 / 3;
+  const s = (vx + vy + vz) * C2;
+  let ix = Math.floor(vx + s), iy = Math.floor(vy + s), iz = Math.floor(vz + s);
+  const t = (ix + iy + iz) * C1;
+  const x0 = [vx - ix + t, vy - iy + t, vz - iz + t];
+  const g = [x0[1] <= x0[0] ? 1 : 0, x0[2] <= x0[1] ? 1 : 0, x0[0] <= x0[2] ? 1 : 0];
+  const l = g.map((v) => 1 - v);
+  const i1 = [Math.min(g[0], l[2]), Math.min(g[1], l[0]), Math.min(g[2], l[1])];
+  const i2 = [Math.max(g[0], l[2]), Math.max(g[1], l[0]), Math.max(g[2], l[1])];
+  const x1 = [0, 1, 2].map((k) => x0[k] - i1[k] + C1);
+  const x2 = [0, 1, 2].map((k) => x0[k] - i2[k] + C2);
+  const x3 = [0, 1, 2].map((k) => x0[k] - 0.5);
+  ix = m289(ix); iy = m289(iy); iz = m289(iz);
+  const pz = [0, i1[2], i2[2], 1].map((o) => perm(iz + o));
+  const py = pz.map((v, k) => perm(v + iy + [0, i1[1], i2[1], 1][k]));
+  const p = py.map((v, k) => perm(v + ix + [0, i1[0], i2[0], 1][k]));
+  const nsx = 2 / 7, nsy = 0.5 / 7 - 1, nsz = 1 / 7;
+  let sum = 0;
+  const xs = [x0, x1, x2, x3];
+  for (let k = 0; k < 4; k++) {
+    const j = p[k] - 49 * Math.floor(p[k] * nsz * nsz);
+    const x_ = Math.floor(j * nsz), y_ = Math.floor(j - 7 * x_);
+    const x = x_ * nsx + nsy, y = y_ * nsx + nsy;
+    const h = 1 - Math.abs(x) - Math.abs(y);
+    const sx = Math.floor(x) * 2 + 1, sy = Math.floor(y) * 2 + 1;
+    const sh = h <= 0 ? -1 : 0;
+    const ax = x + sx * sh, ay = y + sy * sh;
+    const nrm = 1.79284291400159 - 0.85373472095314 * (ax * ax + ay * ay + h * h);
+    const q = xs[k];
+    const m = Math.max(0.6 - (q[0] * q[0] + q[1] * q[1] + q[2] * q[2]), 0);
+    sum += m * m * m * m * nrm * (ax * q[0] + ay * q[1] + h * q[2]);
+  }
+  return 42 * sum;
+}

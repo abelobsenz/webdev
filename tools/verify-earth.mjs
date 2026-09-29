@@ -436,6 +436,26 @@ lint('meteors', metMat);
   // a 3 km top shades its neighbour a few km off at a low Sun, not at noon
   const occludes = (muSun, dKm) => SM.topKm - (0.3 + dKm * muSun / Math.sqrt(1 - muSun * muSun)) > 0;
   ok(occludes(0.1, 3) && !occludes(0.95, 3), 'self-shadows long at a low Sun, short at noon');
+  // the shaped octaves keep their means (no shift in cover, height or colour as octaves fade in
+  // and out with range): the moments the GLSL subtracts, measured on the same noise
+  {
+    let seed = 11;
+    const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+    const N = 60000;
+    let sAbs = 0, sR2 = 0, sR3 = 0, sN = 0, sDome = 0, maxAbs = 0;
+    for (let i = 0; i < N; i++) {
+      const n = F.snoiseJS(rnd() * 400 - 200, rnd() * 400 - 200, rnd() * 400 - 200);
+      const a = Math.abs(n);
+      sN += n; sAbs += a; sR2 += (1 - a) ** 2; sR3 += (1 - a) ** 3; sDome += Math.sign(n) * Math.sqrt(a);
+      maxAbs = Math.max(maxAbs, a);
+    }
+    ok(maxAbs <= 1.0 && Math.abs(sN / N) < 0.01 && Math.abs(sDome / N) < 0.01, `snoise range and symmetry (max ${maxAbs.toFixed(3)})`);
+    const M = F.NOISE_MOMENTS;
+    ok(Math.abs(sAbs / N - M.abs) < 0.006, `E|n| ${(sAbs / N).toFixed(4)} vs ${M.abs}`);
+    ok(Math.abs(sR2 / N - M.ridge2) < 0.006, `E(1-|n|)^2 ${(sR2 / N).toFixed(4)} vs ${M.ridge2}`);
+    ok(Math.abs(sR3 / N - M.ridge3) < 0.006, `E(1-|n|)^3 ${(sR3 / N).toFixed(4)} vs ${M.ridge3}`);
+    ok(/EF_ABS_MEAN - abs\(n\)/.test(src) && /r - EF_RIDGE2_MEAN/.test(src) && /f1 \* f1 \* f1 - EF_RIDGE3_MEAN/.test(src) && /f2 \* f2 \* f2 - EF_RIDGE3_MEAN/.test(src), 'shaped octaves subtract their measured means');
+  }
   // terrain shadows toward the terminator: the march reaches ~100 km, a 3 km range (exaggerated as
   // the shading is) shades a plain ~50 km off at a Sun 3 degrees up, nothing at a Sun 30 degrees up
   const TM = F.TERRAIN_MARCH;
@@ -521,6 +541,7 @@ lint('meteors', metMat);
     const b = new EarthBake(null, 64, q.cloudCube);
     ok(Math.abs(b.mat.uniforms.uCloudTexelKm.value - texel) < 1e-9, `bake cloud texel uniform at ${k}`);
     ok(/mesoWeather\(p, seed, storm, trades, polar\)/.test(b.mat.fragmentShader), 'bake adds the mesoscale weather');
+    ok(/\(0\.308 - abs\(n\)\) \* 1\.6/.test(b.mat.fragmentShader), 'bake meso octaves re-centred on the measured mean');
   }
 }
 

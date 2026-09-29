@@ -155,7 +155,8 @@ float mesoWeather(vec3 p, float seed, float storm, float trades, float polar) {
     float n = snoise(x);
     // the finer octaves gather into cells and lines (cloud along the convergence) in the
     // cumulus regimes: absolute-value turbulence, re-centred on zero
-    if (i > 0) n = mix(n, (0.3 - abs(n)) * 1.6, 0.35 * clamp(1.0 - storm, 0.0, 1.0));
+    // (0.308 = E|snoise|: re-centred, so the cover keeps its mean; see earthFine.js NOISE_MOMENTS)
+    if (i > 0) n = mix(n, (0.308 - abs(n)) * 1.6, 0.35 * clamp(1.0 - storm, 0.0, 1.0));
     s += a * w * n;
     nrm += a;
     x = x * 2.1 + vec3(2.3, 5.9, 3.7);
