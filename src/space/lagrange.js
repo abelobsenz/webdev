@@ -3,6 +3,7 @@ import { craftMesh, addLamps, KM, createDressedMaterial } from './craftMesh.js';
 import { LAMP, createLamps } from './lamps.js';
 import { DynLamps, smooth, instancedPart, spanMatrix } from './lifeKit.js';
 import { CB, CK } from '../craft/craftGeometry.js';
+import { createRibbonMaterial, buildRibbonGeometry } from './lines.js';
 import { R_EARTH, R_MOON, GEO_ALT, MOON_DIST } from './sim.js';
 import { COL, WINDOW_CENTRES, buildRotor, buildWindows, buildMirror, buildStator, buildAgriRing, buildPairFrame } from './lagrangeColony.js';
 import { createWindowMaterial, createMirrorMaterial, bindWindow, bindMirror } from './lagrangeShaders.js';
@@ -28,7 +29,20 @@ import { LagrangeLife } from './lagrangeLife.js';
 
 const L1_FRAC = 1 - 58020 / MOON_DIST;
 const NEAR_KM = 25000;          // meshes drawn inside this
-const DETAIL_KM = 900;          // lamps, stations' fine parts
+const DETAIL_KM = 900;
+const TRUSS_NEAR = 22;          // km: inside this the pair-frame chords are geometry (32 m tubes ~ 1 px)
+const TRUSS_FRAG = /* glsl */ `
+uniform float uGainF;
+void main() {
+  // three bronze chords and a glazed tube, 240 m across: sunlit metal as a thin thread, the
+  // transit cars' windows a faint warm line down its middle
+  vec3 sunL = spaceSunlight(uTransmittanceLUT, vWorld, uSunDir) * uSunE;
+  float x = clamp(vAcross, -1.0, 1.0);
+  float body = 0.55 + 0.45 * sqrt(max(1.0 - x * x, 0.0));
+  vec3 col = vec3(0.7, 0.52, 0.32) * sunL * 0.035 * body + vec3(1.0, 0.72, 0.45) * 0.03;
+  gl_FragColor = vec4(col * vCoverage * uGainF, 0.0);
+}
+`;          // lamps, stations' fine parts
 const LIFE_KM = 400;
 const RAMS = 6, RAM_X = 2070;   // two rams per mirror, on the longeron crests either side of it            // trams, fittings, docked ships, cranes
 const _n = new THREE.Vector3(), _a = new THREE.Vector3(), _b = new THREE.Vector3(), _c = new THREE.Vector3(), _d = new THREE.Vector3();
@@ -234,6 +248,18 @@ export class LagrangeColonies {
     const frame = craftMesh(pt.frame.geo, { scale: 1 }, mat);
     m.add(frame);
     const lampSets = [addLamps(frame, pt.frame.lamps, { minPx: 1.2 })];
+    // the trusses between the twins: geometry near, an anti-aliased thread (its sunlit bronze
+    // at its true width, a pixel wide at least, dimmed by its coverage) from the default view out
+    const chords = craftMesh(pt.frame.chords, { scale: 1 }, mat);
+    m.add(chords);
+    const trussMat = createRibbonMaterial({ widthKm: 0.24, minPx: 1.0, frag: TRUSS_FRAG, uniforms: { uGainF: { value: 0 } } });
+    const trussLine = new THREE.Mesh(buildRibbonGeometry(pt.frame.spans.map((sp, i) => {
+      const pts = [], along = [];
+      for (let k = 0; k <= 40; k++) { pts.push(sp.a.clone().lerp(sp.b, k / 40).multiplyScalar(KM)); along.push((k / 40) * sp.a.distanceTo(sp.b) * KM); }
+      return { pts, along, id: i };
+    })), trussMat);
+    trussLine.frustumCulled = false; trussLine.renderOrder = 12; trussLine.visible = false;
+    group.add(trussLine);
     const cyls = [];
     for (const s of [-1, 1]) {
       const cyl = new THREE.Group();
@@ -285,7 +311,7 @@ export class LagrangeColonies {
     // string of buoys down the corridor to the port (km, pair frame)
     const approach = this._approach(group.name, approachBeacons([-1, 1].map((s) => ({ c: V(s * COL.PAIR_X * KM, 0, -200), r: 6, size: 1.6, from: V(s * COL.PAIR_X * KM, 0, -28), to: V(s * COL.PAIR_X * KM, 0, -190) })), name === 'L4' ? LAMP.BLUE : LAMP.TEAL, mat), 215);
     space.scene.add(group);
-    const P = { name, group, approach, m, mat, winMat, cyls, lampSets, dayOffset, day: 1, alpha: COL.MIRROR_MAX, ramAlpha: -1, pos: new THREE.Vector3() };
+    const P = { name, group, approach, m, mat, winMat, cyls, lampSets, chords, trussLine, trussMat, dayOffset, day: 1, alpha: COL.MIRROR_MAX, ramAlpha: -1, pos: new THREE.Vector3() };
     this._rams(P);
     P.body = space.addBody(group.name, [group], (o) => (o || _a).copy(P.pos), 50, { solid: true, minNear: 0.02 });
     return P;
@@ -452,6 +478,15 @@ export class LagrangeColonies {
       P.winMat.uniforms.uDay.value = 0.02 + 0.98 * day;
       P.winMat.uniforms.uTime.value = t;
       P.mat.uniforms.uLit.value = 0.3 + 0.5 * (1 - day);
+      // truss hand-over: geometry while its chords span a pixel or so, the thread beyond
+      const tg = smooth(TRUSS_NEAR * 0.65, TRUSS_NEAR, d);
+      P.chords.visible = d < TRUSS_NEAR;
+      P.trussLine.visible = P.m.visible && tg > 0.001;
+      if (P.trussLine.visible) {
+        const U = P.trussMat.uniforms;
+        U.uGainF.value = tg; U.uSunDir.value.copy(this.sunDir);
+        if (space.size) U.uResolution.value.copy(space.size);
+      }
       if (!P.m.visible) continue;
       const det = d < DETAIL_KM * 8;
       // the hull's lamps are for the near view: from tens of km they would dot the whole hull, so

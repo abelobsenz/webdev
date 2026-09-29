@@ -515,31 +515,34 @@ export function buildAgriRing() {
 // ------------------------------------------------------------- pair frame ----
 /** The trusses tying the two cylinders together (pair frame: cylinders at x = +-PAIR_X). */
 export function buildPairFrame() {
-  const B = new CB();
+  const B = new CB(), C = new CB();
   const lamps = [];
   const X = COL.PAIR_X, h = 120;
   for (const z of COL.TRUSS_Z) {
     const x0 = -X + COL.SPINDLE_A + 60, x1 = X - COL.SPINDLE_A - 60;
     const tri = [V(0, h, 0), V(-h * 0.87, -h * 0.5, 0), V(h * 0.87, -h * 0.5, 0)];
-    for (const c of tri) B.tube([V(x0, c.y, z + c.x), V(x1, c.y, z + c.x)], 16, 6, CK.BRONZE);
+    for (const c of tri) C.tube([V(x0, c.y, z + c.x), V(x1, c.y, z + c.x)], 16, 6, CK.BRONZE);
     const bays = Math.round((x1 - x0) / 500);
     for (let i = 0; i <= bays; i++) {
       const x = x0 + ((x1 - x0) * i) / bays, xn = x0 + ((x1 - x0) * (i + 1)) / bays;
       for (let k = 0; k < 3; k++) {
         const a = tri[k], b = tri[(k + 1) % 3];
-        B.tube([V(x, a.y, z + a.x), V(x, b.y, z + b.x)], 7, 4, CK.DARK);
-        if (i < bays) B.tube([V(x, a.y, z + a.x), V(xn, b.y, z + b.x)], 5, 4, CK.DARK);
+        C.tube([V(x, a.y, z + a.x), V(x, b.y, z + b.x)], 7, 4, CK.DARK);
+        if (i < bays) C.tube([V(x, a.y, z + a.x), V(xn, b.y, z + b.x)], 5, 4, CK.DARK);
       }
       if (i % 4 === 0) lamps.push({ p: V(x, h + 20, z), r: 14, color: i % 8 ? LAMP.AMBER : LAMP.RED, i: 2.6, phase: i / bays, breathe: 0.7 });
     }
     // the transit tube between the twins, glazed, with its cars' lit windows
-    B.push(new THREE.Matrix4().makeRotationY(Math.PI / 2));
-    B.tube([V(-z, 0, x0), V(-z, 0, x1)], 34, 12, CK.GLASS);
-    B.pop();
+    C.push(new THREE.Matrix4().makeRotationY(Math.PI / 2));
+    C.tube([V(-z, 0, x0), V(-z, 0, x1)], 34, 12, CK.GLASS);
+    C.pop();
     // saddles where the truss meets each spindle
     for (const s of [-1, 1]) { B.at(s * X, 0, z); ring(B, [[COL.SPINDLE_A + 5, -180, CK.BRONZE], [COL.SPINDLE_A + 160, -120, CK.HULL], [COL.SPINDLE_A + 160, 120, CK.HULL], [COL.SPINDLE_A + 5, 180, CK.BRONZE]], 32); B.pop(); }
   }
-  return { geo: B.geometry(), lamps };
+  // (the far threads: each truss's span, metres, for the ribbon that stands in for it)
+  const x0 = -X + COL.SPINDLE_A + 60, x1 = X - COL.SPINDLE_A - 60;
+  const spans = COL.TRUSS_Z.map((z) => ({ a: V(x0, 0, z), b: V(x1, 0, z) }));
+  return { geo: B.geometry(), chords: C.geometry(), spans, lamps };
 }
 
 export { inLand, LAND_CENTRES, WINDOW_CENTRES };

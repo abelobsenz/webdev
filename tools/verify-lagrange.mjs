@@ -101,7 +101,7 @@ ok(rMax <= COL.ROTOR_MAX_R, `rotor's outer works within ${COL.ROTOR_MAX_R} m of 
 }
 {
   // pair frame trusses meet the spindles and clear the rotors
-  const a = P(frame.geo); let bad = 0;
+  const a = Float32Array.from([...P(frame.geo), ...P(frame.chords)]); let bad = 0;
   for (let i = 0; i < a.length; i += 3) for (const s of [-1, 1]) { const x = a[i] - s * COL.PAIR_X; if (Math.abs(a[i + 2]) < zMaxRotor + 4 && Math.hypot(x, a[i + 1]) < rMax + 20) bad++; }
   ok(bad === 0, 'pair trusses clear both rotors');
 }
@@ -111,7 +111,7 @@ ok(rMax <= COL.ROTOR_MAX_R, `rotor's outer works within ${COL.ROTOR_MAX_R} m of 
   const pts = [];
   const add = (geo, mx) => { const a = P(geo), v = new THREE.Vector3(); for (let i = 0; i < a.length; i += 3) { v.set(a[i], a[i + 1], a[i + 2]); if (mx) v.applyMatrix4(mx); pts.push(v.x / 1000, v.y / 1000, v.z / 1000); } };
   for (const s of [-1, 1]) add(stator.geo, new THREE.Matrix4().makeRotationZ(s > 0 ? 0 : Math.PI / COL.BERTHS).setPosition(s * COL.PAIR_X, 0, 0));
-  add(frame.geo);
+  add(frame.geo); add(frame.chords);
   for (const s of [-1, 1]) for (const z of COL.AGRI_Z) add(agri.geo, new THREE.Matrix4().makeTranslation(s * COL.PAIR_X, 0, z));
   const cell = 0.5, grid = new Map();
   const key = (x, y, z) => `${Math.floor(x / cell)},${Math.floor(y / cell)},${Math.floor(z / cell)}`;
@@ -280,6 +280,19 @@ for (let k = 0; k < 240; k++) {
   if (k >= 40) { upd += performance.now() - a; frames++; }
 }
 const perFrame = upd / frames;
+// the pair-frame trusses hand over: geometry close, one anti-aliased thread from the default view out
+{
+  const P = lag.pairs[0], lg0 = [];
+  for (const [d, wantChords, wantLine] of [[8, true, false], [60, false, true], [140, false, true]]) {
+    space.camera.position.copy(P.pos).add(new THREE.Vector3(0, 0, d)); space.camera.updateMatrixWorld(true);
+    lag.update(sim, 2000, 0.016, space);
+    lg0.push(P.lampSets.filter(Boolean)[0].material.uniforms.uGain.value);
+    ok(P.chords.visible === wantChords && P.trussLine.visible === wantLine, `truss hand-over at ${d} km: chords ${P.chords.visible ? 'shown' : 'hidden'}, thread ${P.trussLine.visible ? 'shown' : 'hidden'}`);
+  }
+  const g = P.trussLine.geometry;
+  ok(g.index && Math.max(...g.index.array) < g.attributes.position.count, 'truss thread buffers sane');
+  ok(lg0[1] < 0.1 && lg0[0] > 0.9, `hull lamps for the close view: gain ${lg0[0].toFixed(2)} at 8 km, ${lg0[1].toFixed(2)} at 60 km`);
+}
 ok(perFrame < 0.6, `update ${perFrame.toFixed(3)} ms per frame (target 0.3, traffic included)`);
 let bad = 0, inst = 0, meshes = 0;
 for (const r of roots) {
