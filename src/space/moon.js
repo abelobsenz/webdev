@@ -12,6 +12,11 @@ import { MoonSurface } from './moonSurface.js';
 import { buildMediiLanding } from './lunarLanding.js';
 import { lunarMesh, LUNAR_FRAME, LK, createLunarMaterial } from './lunarMaterial.js';
 import { CB } from '../craft/craftGeometry.js';
+import { LunarTraffic } from './lunarTraffic.js';
+import { buildMediiWorks } from './lunarWorks.js';
+import { LunarOutposts } from './lunarOutposts.js';
+import { LunarHops } from './lunarHops.js';
+import { LunarRingTrains } from './lunarRing.js';
 
 // The terraformed Moon: seas in the old maria, green highlands softened craters,
 // polar ice, clouds, city lights, a thin blue atmosphere and an equatorial ring.
@@ -207,6 +212,8 @@ export function buildBand(R, w, segs) {
 }
 
 const _lp = new THREE.Vector3();
+const _lq = new THREE.Quaternion();
+const _sunSite = new THREE.Vector3();
 
 export class Moon {
   constructor(space) {
@@ -307,6 +314,20 @@ export class Moon {
     }
     this.group.add(this.landing);
     this.group.traverse((o) => { o.frustumCulled = false; });
+    // the Works and the town's life (lunarTraffic.js) are built on first approach, the other
+    // settlements (lunarOutposts.js) one at a time as the camera nears each
+    this.life = null;
+    this.outposts = new LunarOutposts(this.group);
+    this.ringTrains = new LunarRingTrains(this.group);   // expresses on the ring's transit rails (lunarRing.js)
+    this.hops = new LunarHops(this.group);           // hoppers between Medii and the outposts (lunarHops.js)
+  }
+
+  /** Build Medii Works and the Landing's traffic now (normally done on approach). */
+  ensureLife() {
+    if (this.life) return this.life;
+    this.life = new LunarTraffic(this.landingData, { works: this._works || null });
+    this.landing.add(this.life.group);
+    return this.life;
   }
 
   setSize(w, h) { this.farMat.uniforms.uResolution.value.set(w, h); this.liftMat.uniforms.uResolution.value.set(w, h); }
@@ -366,6 +387,23 @@ export class Moon {
         car.getWorldPosition(_lp);
         car.visible = pixelRadius(cam, _lp, 0.016, this.space.size.y) > 0.6;
       }
+    }
+    if (this.space.camera) {
+      const cam = this.space.camera.position;
+      this.landing.getWorldPosition(_lp);
+      // (built over two frames on approach: the Works' geometry, then the traffic that uses it)
+      if (!this.life && _lp.distanceTo(cam) < 2500) {
+        if (!this._works) this._works = buildMediiWorks(this.landingData.plan, this.landingData.driver, this.landingData.S.PADS);
+        else this.ensureLife();
+      }
+      if (this.life) {
+        this.landing.getWorldQuaternion(_lq).invert();
+        _sunSite.copy(sim.sunDir).applyQuaternion(_lq);
+        this.life.update(realTime, cam, this.landing, _sunSite);
+      }
+      this.outposts.update(realTime, cam, this.space.camera, this.space.size.y);
+      this.hops.update(realTime);
+      this.ringTrains.update(realTime, cam);
     }
     this.atmoU.uCenter.value.copy(sim.moonPos);
     // the air shell is seen from within below 229 km: draw its inner face then (the sky over the
