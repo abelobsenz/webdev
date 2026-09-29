@@ -6,6 +6,7 @@ import { CRAFT_FRAME } from './craftMesh.js';
 import { createLamps, LAMP } from './lamps.js';
 import { HALO_PORTS } from './earthData.js';
 import { createHaloMaterial } from './haloMaterial.js';
+import { HB } from './haloBuilder.js';
 import { canalCell, buildCraneJib, CRANE_JIB, buildPerson, buildDrone, DISTRICT_STYLE, standBox, vault, ribArc, cliffs, townCell, parkCell, farmCell, civicCell, worksCell, stadiumCell, marketCell, buildVaultFrame, harbourTown, HARBOUR, buildHarbourBoat, portQuarter } from './haloArchitecture.js';
 import { bodyDir, MERIDIAN_LON } from './sim.js';
 
@@ -289,7 +290,7 @@ const MAST_X = 16340;                        // crest lamp masts, outboard of th
 
 /** One district variant (metres, x across the ring, y up from its radius, z along it). */
 export function buildDistrictTile(variant, S, bay, seed = 1) {
-  const B = new CB(), M = new CB(), N = new CB(), F = new CB(), lamps = [], flamps = [];
+  const B = new HB(), M = new HB(), N = new HB(), F = new HB(), lamps = [], flamps = [];
   const r = mulberry(seed * 7919 + variant * 104729 + 17);
   const C = { B, M, N, F, lamps, flamps, S, r, style: DISTRICT_STYLE[variant], tileL: TILE_L, walks: [], cranes: [] };
   const steps = buildDistrictSteps(C, bay, variant);
@@ -299,7 +300,7 @@ export function buildDistrictTile(variant, S, bay, seed = 1) {
 }
 /** The same tile built a slice per call (the terraces and services, then six columns of cells at a time). */
 export function* buildDistrictTileSteps(variant, S, bay, seed = 1) {
-  const B = new CB(), M = new CB(), N = new CB(), F = new CB(), lamps = [], flamps = [];
+  const B = new HB(), M = new HB(), N = new HB(), F = new HB(), lamps = [], flamps = [];
   const r = mulberry(seed * 7919 + variant * 104729 + 17);
   const C = { B, M, N, F, lamps, flamps, S, r, style: DISTRICT_STYLE[variant], tileL: TILE_L, walks: [], cranes: [] };
   const steps = buildDistrictSteps(C, bay, variant);
@@ -411,7 +412,7 @@ export function cellPlanTextures(tileVariant, tileGround = null) {
 
 /** Crest furniture for a tile: plain, or dressed for an arch foot at the tile's centre. */
 export function buildCrest(S, hubArch) {
-  const B = new CB(), M = new CB(), lamps = [];
+  const B = new HB(), M = new HB(), lamps = [];
   crest(B, M, lamps, S, hubArch);
   return { major: B.geometry(), minor: M.geometry(), lamps };
 }
@@ -697,7 +698,7 @@ export class HaloDistricts {
    * material, which knows none of the Halo's facade kinds).
    */
   _buildJunction() {
-    const B = new CB(), lamps = [];
+    const B = new HB(), lamps = [];
     B.push(ROT_YM90);                           // portQuarter turns its builder frame into a station's
     portQuarter(B, this.S, lamps, 157);
     B.pop();
