@@ -396,11 +396,13 @@ function buildShipyard(c) {
   const zs = Array.from({ length: nF }, (_, i) => -L / 2 + i * pitch);
   for (const z of zs) {
     const a = V(-Wd / 2, -Hd / 2, z), b = V(Wd / 2, -Hd / 2, z), cc = V(Wd / 2, Hd / 2, z), d = V(-Wd / 2, Hd / 2, z);
-    truss(B, a, b, 4, 10, 0.3); truss(B, b, cc, 4, 10, 0.3); truss(B, cc, d, 4, 10, 0.3); truss(B, d, a, 4, 10, 0.3);
+    // deep portal trusses painted in the owner's livery (each slipway known by its colour)
+    truss(B, a, b, 6.5, 11, 0.5, DK.LIVERY); truss(B, b, cc, 6.5, 11, 0.5, DK.LIVERY); truss(B, cc, d, 6.5, 11, 0.5, DK.LIVERY); truss(B, d, a, 6.5, 11, 0.5, DK.LIVERY);
+    for (const p of [a, b, cc, d]) B.box(p.x, p.y, p.z, 9, 9, 9, CK.BRONZE);
   }
-  for (const [x, y] of [[-Wd / 2, -Hd / 2], [Wd / 2, -Hd / 2], [Wd / 2, Hd / 2], [-Wd / 2, Hd / 2]]) truss(B, V(x, y, -L / 2), V(x, y, L / 2), 4, 12, 0.3);
+  for (const [x, y] of [[-Wd / 2, -Hd / 2], [Wd / 2, -Hd / 2], [Wd / 2, Hd / 2], [-Wd / 2, Hd / 2]]) truss(B, V(x, y, -L / 2), V(x, y, L / 2), 5, 12, 0.42, DK.GRIME);
   // crane rails along the top stringers
-  for (const s of [-1, 1]) B.box(s * Wd / 2, Hd / 2 + 2.6, 0, 2.4, 1.2, L, CK.BRONZE);
+  for (const s of [-1, 1]) B.box(s * Wd / 2, Hd / 2 + 3.4, 0, 2.4, 2.2, L, CK.BRONZE);     // (on the stringers, under the bridges' bogies)
   // the hull on the slip: plated astern in livery with ports, ribs and stringers forward
   const hl = L * 0.9, hw = Wd * 0.3, hh = Hd * 0.3;
   const plated = r.range(0.35, 0.7);
@@ -471,7 +473,7 @@ function buildShipyard(c) {
   const nc = r.int(1, 2);
   for (let i = 0; i < nc; i++) {
     const z0 = -L / 2 + L * (0.25 + 0.5 * i);
-    c.part(V(0, Hd / 2 + 4, z0), new THREE.Quaternion(), 'rail', 0, (Bp, lamps) => {
+    c.part(V(0, Hd / 2 + 6, z0), new THREE.Quaternion(), 'rail', 0, (Bp, lamps) => {   // (clear over the portal trusses)
       truss(Bp, V(-Wd / 2, 0, 0), V(Wd / 2, 0, 0), 5, 8, 0.35, CK.BRONZE);
       Bp.box(0, -4, 0, 10, 4, 8, DK.HAZARD);
       Bp.box(0, -2, 0, 7, 3, 7, CK.GLASS);
