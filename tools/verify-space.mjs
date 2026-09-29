@@ -358,6 +358,15 @@ const runtime={scene:new THREE.Scene(),earthFixed:new THREE.Group(),bodies:[],ca
 runtime.scene.add(runtime.earthFixed);runtime.elevator=el;runtime.earthFixed.add(el.group);
 runtime.fleet=new Fleet(runtime);runtime.works=new WorkingStations(runtime);
 runtime.moon=lunarCourtRuntime;runtime.scene.add(runtime.moon.group);runtime.moon.update(sim,120);
+// The lunar air is drawn from within below its 229 km shell (the sky and the haze over the Landing
+// and the highlands), from without above it: the shell must never vanish to an eye inside it.
+{
+  const cam=new THREE.PerspectiveCamera(50,16/9,.001,1e7),air=new Moon({camera:cam,size:V(1280,720,0)});
+  for(const [alt,side] of [[.4,THREE.BackSide],[15,THREE.BackSide],[228,THREE.BackSide],[240,THREE.FrontSide],[7400,THREE.FrontSide]]) {
+    cam.position.set(1737+alt,0,0).applyQuaternion(sim.moonQuat).add(sim.moonPos);cam.updateMatrixWorld();
+    air.update(sim,120);assert.equal(air.atmo.material.side,side,`lunar air seen from ${alt} km draws its ${side===THREE.BackSide?'inner':'outer'} face`);
+  }
+}
 runtime.earthFixed.quaternion.copy(sim.earthQuat);runtime.earthFixed.updateMatrixWorld(true);
 runtime.fleet.update(sim,120,0,runtime);runtime.works.update(sim);runtime.scene.updateMatrixWorld(true);
 const focusHarness={sim,targets:{},fleet:runtime.fleet};SpaceMode.prototype._defineTargets.call(focusHarness);

@@ -37,7 +37,24 @@ void main() {
   float chord = sqrt(6.2831853 * R * H);   // Chapman: grazing column through the shell
   vec3 up;
   float path;
-  if (disc > 0.0 && tHit > 0.0) {
+  float rc = length(ro);
+  if (rc < R + 229.0) {
+    // inside the air (the shell is drawn from within): the column from the eye along the ray,
+    // density falling as exp(-h / H). Toward the ground it ends at the surface; toward the sky
+    // it is the one-way Chapman column, longest at the horizon, dipping below it from altitude
+    vec3 upc = ro / max(rc, 1e-3);
+    float muv = dot(upc, rd);
+    float dc = exp(-max(rc - R, 0.0) / H);
+    float halfC = 0.5 * chord;
+    if (disc > 0.0 && tHit > 0.0) {
+      up = normalize(ro + rd * tHit);
+      path = min(H * (1.0 - dc) / max(-muv, 1e-4), tHit);
+    } else {
+      float rt = rc * sqrt(max(1.0 - muv * muv, 0.0));
+      path = muv >= 0.0 ? dc * min(H / max(muv, 1e-3), halfC) : max(chord * exp(-max(rt - R, 0.0) / H) - halfC * dc, halfC * dc);
+      up = upc;
+    }
+  } else if (disc > 0.0 && tHit > 0.0) {
     // looking down onto the surface: the column above the hit point
     up = normalize(ro + rd * tHit);
     path = min(H / max(dot(up, -rd), 1e-3), chord);
@@ -351,6 +368,9 @@ export class Moon {
       }
     }
     this.atmoU.uCenter.value.copy(sim.moonPos);
+    // the air shell is seen from within below 229 km: draw its inner face then (the sky over the
+    // Landing and the haze toward every horizon), its outer face from space
+    if (this.space.camera) this.atmo.material.side = this.space.camera.position.distanceTo(sim.moonPos) < R_MOON + 229 ? THREE.BackSide : THREE.FrontSide;
     const fu = this.farMat.uniforms;
     fu.uSunDir.value.copy(sim.sunDir);
     fu.uBandAxis.value.set(0, 1, 0).applyQuaternion(sim.moonQuat);
