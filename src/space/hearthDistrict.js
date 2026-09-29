@@ -25,6 +25,8 @@ import { RS } from './hearthLens.js';
 //   hamlets   a crew hamlet hangs under the ring midway along every arc: a spindle on a hanger
 //             from the ring tube, a habitat wheel spun for a full gravity at its floor turning on
 //             a bearing collar, radiators below it and a courier berthed at its foot
+//   ferries   crew ferries run from over the Refuge to the free port of the two nearest
+//             collector stations, side-on into the port, and back
 //   patrol    inspection tugs circle the collector line high above the dishes and the Refuge,
 //             three each way at their own heights, working round the whole ring
 //   racks     in the Refuge's mirror-servicing yard, two inspection gantries ride the frame of
@@ -122,6 +124,49 @@ export function buildDishTruss() {
     if (k % 2 === 0) for (const r of [3.7, 5.9, 8.1]) { B.at(X(r) - 0.02, c * r, sn * r); B.box(0, 0, 0, 0.1, 0.16, 0.16, CK.BRONZE); B.pop(); }
   }
   return toHullKinds(B.geometry(), null, 1);
+}
+
+// ----------------------------------------------------------------- ferries ----
+// A ferry (the berthed ferries' class) holds over the Refuge, runs to a point 6 km off its station's
+// free (-z) port, closes side-on until its dorsal face meets the port, dwells, and returns.
+export const FERRY = { stations: [1, 2], hold: 30, stand: 6, T: 520, S: 7 };
+let _ferryShip = null;
+export function ferryShip() {
+  if (!_ferryShip) { const sh = buildShuttle(110); _ferryShip = { sh, bb: new THREE.Box3().setFromBufferAttribute(sh.geo.attributes.position) }; }
+  return _ferryShip;
+}
+/** The ferry's docked frame in its collector's local frame: dorsal (+y) toward +z, bow along -x. */
+export function ferryDockLocal(out = new THREE.Matrix4()) {
+  const { bb } = ferryShip(), top = bb.max.y * FERRY.S * 0.001;
+  const up = V(0, 0, 1), fwd = V(-1, 0, 0), side = new THREE.Vector3().crossVectors(up, fwd);
+  return out.makeBasis(side, up, fwd).setPosition(MODULE.node, 0, -1.07 - top);
+}
+/** Route points (stations frame): hold over the Refuge, the stand-off point, the docked position. */
+export function ferryRoute(k, collectorMatrix, refugePos) {
+  const dock = ferryDockLocal().premultiply(collectorMatrix);
+  const D = V().setFromMatrixPosition(dock), A = V(MODULE.node, 0, -FERRY.stand - 1.2).applyMatrix4(collectorMatrix);
+  const H = refugePos.clone().add(V(k ? 3 : -3, FERRY.hold, 0));
+  return { H, A, D, dockQ: new THREE.Quaternion().setFromRotationMatrix(dock), offset: k * 0.5 };
+}
+/** Pose at time t: position and attitude (quaternion); returns the throttle. */
+const _fq = new THREE.Quaternion(), _fm = new THREE.Matrix4(), _fx = V(), _fy = V(0, 1, 0), _ff = V();
+export function ferryPose(r, t, outP, outQ) {
+  const u = (((t / FERRY.T) + r.offset) % 1 + 1) % 1;
+  // hold .00-.08, run out .08-.33, close .33-.43, docked .43-.60, back off .60-.70, run home .70-.95, hold
+  let a, b, s, attitude = 0, thr = 0.02;
+  if (u < 0.08 || u >= 0.95) { outP.copy(r.H); s = 0; a = r.H; b = r.A; attitude = 0; }
+  else if (u < 0.33) { s = smooth(0.08, 0.33, u); a = r.H; b = r.A; outP.copy(a).lerp(b, s); attitude = smooth(0.8, 1, s); thr = 0.4; }
+  else if (u < 0.43) { s = smooth(0.33, 0.43, u); outP.copy(r.A).lerp(r.D, s); attitude = 1; thr = 0.08; }
+  else if (u < 0.6) { outP.copy(r.D); attitude = 1; thr = 0; }
+  else if (u < 0.7) { s = smooth(0.6, 0.7, u); outP.copy(r.D).lerp(r.A, s); attitude = 1; thr = 0.08; }
+  else { s = smooth(0.7, 0.95, u); a = r.A; b = r.H; outP.copy(a).lerp(b, s); attitude = 1 - smooth(0, 0.2, s); thr = 0.4; }
+  // travel attitude: level, bow toward the stand-off point (outbound) or home (inbound)
+  const home = u >= 0.6;
+  _ff.copy(home ? r.H : r.A).sub(home ? r.A : r.H).setY(0).normalize();
+  _fx.crossVectors(_fy, _ff).normalize();
+  _fq.setFromRotationMatrix(_fm.makeBasis(_fx, _fy, _ff));
+  outQ.copy(_fq).slerp(r.dockQ, attitude);
+  return thr;
 }
 
 // ------------------------------------------------------------------ patrol ----
@@ -333,6 +378,19 @@ export class HearthDistrict {
     this.droneLamps = createLamps(Array.from({ length: mats.length * DISH.radii.length }, (_, k) => ({ p: V(0, 0, 0), r: 0.012, color: k % 3 ? LAMP.TEAL : LAMP.AMBER, i: 3, breathe: 0.5, phase: (k * 0.37) % 1 })), { minPx: 1.1, mask });
     this.droneAttr = this.droneLamps.geometry.getAttribute('iLamp');
     hearth.stations.add(this.droneLamps);
+    // ---- the crew ferries
+    const fs = ferryShip(), fsm = new THREE.Matrix4().makeScale(FERRY.S, FERRY.S, FERRY.S);
+    const fGeo = toHullKinds(fs.sh.geo, fsm);
+    const fLamps = placeLamps(fs.sh.lamps || [], fsm, 4).map((l) => ({ ...l, p: l.p.clone().multiplyScalar(0.001), r: l.r * 0.001 }));
+    this.ferryRoutes = FERRY.stations.map((i, k) => ferryRoute(k, mats[i], hearth.refugePosition));
+    this.ferries = this.ferryRoutes.map(() => {
+      const fm = new THREE.Mesh(fGeo, mat);
+      fm.add(createLamps(fLamps, { minPx: 1.2, mask }));
+      const glows = fs.sh.glows.map((g) => ({ ...g, p: g.p.clone().multiplyScalar(FERRY.S * 0.001), r: g.r * FERRY.S * 0.001 }));
+      fm.userData.engines = addEngines(fm, glows, { scale: 0.7, length: 10, throttle: 0 });
+      hearth.stations.add(fm);
+      return fm;
+    });
     // ---- the patrol tugs round the collector line
     const tug = buildTug(80), ts = PATROL.scale, tm = new THREE.Matrix4().makeScale(ts, ts, ts);
     const tugGeo = toHullKinds(tug.geo, tm);
@@ -413,7 +471,7 @@ export class HearthDistrict {
       rotor.add(rl);
     });
     // everything this district adds, for its distance LOD (its lamps ride these or the wheels)
-    this.objects = [...this.patrol, this.gantries, this.fittings, this.trusses, this.drones, this.hamlets, this.wheels, this.platforms, this.trams, this.coils, ...this.tankers.map((t) => t.mesh)];
+    this.objects = [...this.ferries, ...this.patrol, this.gantries, this.fittings, this.trusses, this.drones, this.hamlets, this.wheels, this.platforms, this.trams, this.coils, ...this.tankers.map((t) => t.mesh)];
     for (const o of this.objects) { o.frustumCulled = false; o.renderOrder = 3; }
     this._m = new THREE.Matrix4(); this._q = new THREE.Quaternion(); this._p = V(0, 0, 0); this._s = V(1, 1, 1); this._t = V(0, 0, 0); this._y = V(0, 1, 0); this._z = V(0, 0, 0);
     this.shown = true;
@@ -477,6 +535,10 @@ export class HearthDistrict {
     }
     this.gantries.instanceMatrix.needsUpdate = true;
     this.gantryAttr.needsUpdate = true;
+    for (let k = 0; k < this.ferries.length; k++) {
+      const fm = this.ferries[k], thr = ferryPose(this.ferryRoutes[k], t, fm.position, fm.quaternion);
+      for (const e of fm.userData.engines) e.setThrottle(thr);
+    }
     for (let k = 0; k < this.patrol.length; k++) {
       const pm = this.patrol[k];
       patrolPose(k, t, pm.position, this._f);

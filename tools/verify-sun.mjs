@@ -14,7 +14,7 @@ import {
 import { FoundryYard, tenderVisit, VISIT, buildWheelCar, wheelCar, WHEEL, buildCraneWorks, cranePose, cartPose, droneOrbits, dronePos, crewPos, COURT, CRANE, CART, QUEUE } from '../src/space/foundryYard.js';
 import { buildTender } from '../src/craft/craftGeometry.js';
 import { Hearth, buildCollector } from '../src/space/hearth.js';
-import { PATROL, patrolPose, buildRackGantry, rackGantry, RACK, buildDishTruss, backX, BACK, HAMLET, hamletMatrix, hamletAngle, buildHamletFixed, buildHamletWheel, buildStationFittings, dishDrone, dishSag, DISH, buildDishDrone, tramArc, tramAngle, RING, TRAM, tankerSlots, tankerPose, TANKER, MODULE, HearthDistrict } from '../src/space/hearthDistrict.js';
+import { FERRY, ferryShip, ferryDockLocal, ferryRoute, ferryPose, PATROL, patrolPose, buildRackGantry, rackGantry, RACK, buildDishTruss, backX, BACK, HAMLET, hamletMatrix, hamletAngle, buildHamletFixed, buildHamletWheel, buildStationFittings, dishDrone, dishSag, DISH, buildDishDrone, tramArc, tramAngle, RING, TRAM, tankerSlots, tankerPose, TANKER, MODULE, HearthDistrict } from '../src/space/hearthDistrict.js';
 import { buildFeeder } from '../src/space/hearthWorks.js';
 import { SunSwarm } from '../src/space/sun.js';
 import { SpaceSim } from '../src/space/sim.js';
@@ -398,6 +398,40 @@ const stT = tree(tris(sc.geo));
   assert.ok(Math.abs(zmin - 1.07) < 1e-6, `ferry seated on its port (${((zmin - 1.07) * 1000).toFixed(2)} m)`);
   const portD = Math.min(...fv2.map((p) => p.distanceTo(V(MODULE.node, 0, 1.07))));
   assert.ok(portD < 0.12, `ferry hull over the port (${(portD * 1000).toFixed(0)} m)`);
+  // ferries: seated on the free port when docked; under way, clear of the collectors (dish, trusses,
+  // fittings, the other ferry), their supports and the Refuge
+  {
+    const fs = ferryShip(), sm = new THREE.Matrix4().makeScale(FERRY.S, FERRY.S, FERRY.S);
+    const fv = verts(fs.sh.geo, sm, 9).map((p) => p.multiplyScalar(0.001));
+    const dl = ferryDockLocal();
+    assert.ok(Math.abs(dl.determinant() - 1) < 1e-9, 'ferry dock frame proper');
+    const docked = fv.map((p) => p.clone().applyMatrix4(dl));
+    assert.ok(Math.abs(Math.max(...docked.map((p) => p.z)) + 1.07) < 1e-6, 'docked ferry dorsal face on the free port');
+    const f = buildStationFittings();
+    const stT = tree([...tris(buildCollector()), ...tris(f.geo), ...tris(f.ferry.geo, f.ferry.m, 0.001), ...tris(buildDishTruss())]);
+    const refT = tree(tris(hearth.refugeFixed.geometry, new THREE.Matrix4().makeTranslation(hearth.refugePosition.x, hearth.refugePosition.y, hearth.refugePosition.z)));
+    const P = V(), Q = new THREE.Quaternion(), inv = new THREE.Matrix4();
+    let wayClear = Infinity, refClear = Infinity, supClear = Infinity;
+    for (const [k, i] of FERRY.stations.entries()) {
+      const M = hearth.collectorMounts[i].collector.matrix, r = ferryRoute(k, M, hearth.refugePosition);
+      inv.copy(M).invert();
+      for (let t = 0; t < FERRY.T; t += 1) {
+        const thr = ferryPose(r, t, P, Q);
+        assert.ok(Number.isFinite(P.x + P.y + P.z + thr) && Math.abs(Q.length() - 1) < 1e-6, 'finite ferry pose');
+        const near = P.distanceTo(r.D) < 0.02;
+        const pts = fv.map((p) => p.clone().applyQuaternion(Q).add(P));
+        for (const p of pts) {
+          if (!near && P.distanceTo(r.A) > 0.05 && P.distanceTo(r.D) > 0.05) wayClear = Math.min(wayClear, dist(stT, p.clone().applyMatrix4(inv), wayClear + 1));
+          refClear = Math.min(refClear, dist(refT, p, refClear + 1));
+          for (const m of hearth.collectorMounts) supClear = Math.min(supClear, segDist(p, m.root, m.mount) - 0.55);
+        }
+      }
+    }
+    assert.ok(wayClear > 0.1, `ferries under way clear their collector by ${(wayClear * 1000).toFixed(0)} m`);
+    assert.ok(refClear > 3, `ferries clear the Refuge by ${refClear.toFixed(1)} km`);
+    assert.ok(supClear > 0.3, `ferries clear every support by ${supClear.toFixed(2)} km`);
+    results.ferryWayClearanceMetres = +(wayClear * 1000).toFixed(0); results.ferryRefugeClearanceKm = +refClear.toFixed(1);
+  }
   // patrol tugs: high over every collector (dish, fittings, supports) and the Refuge, never meeting
   {
     const P = V(), Q = V();
