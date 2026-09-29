@@ -12,7 +12,13 @@ import { DESIGNS, design } from '../src/space/shipDesigns.js';
 import { geoBeltTargets } from '../src/space/geoBelt.js';
 import { createPortMaterial, PORT_GLSL, PK, bakeCavity, portShaders } from '../src/space/portMaterial.js';
 import { buildEmbarkationTerrace } from '../src/space/interfaces.js';
-import { buildConcordYard } from '../src/space/geoRoads.js';
+import { buildConcordYard, buildWaterStore, STORE, YARD, sectionPoint, ribDepth } from '../src/space/geoRoads.js';
+import { buildHarbour, HarbourStation, HS } from '../src/space/harbour.js';
+import { YardWorks, WORKS } from '../src/space/yardWorks.js';
+import { StoreWorks } from '../src/space/storeWorks.js';
+import { craftMesh, DK } from '../src/space/craftMesh.js';
+import { CK } from '../src/craft/craftGeometry.js';
+import { wave4Checks } from './verify-port-w4.mjs';
 
 const fail = [];
 const check = (ok, msg) => { if (!ok) fail.push(msg); };
@@ -515,6 +521,7 @@ const bufferSane = (geo, name) => {
     out[`${key}Framing`] = +ratio.toFixed(2);
   }
 }
+wave4Checks({ check, out, bufferSane, THREE, PK, CK, DK, PORT_GLSL, portShaders, createPortMaterial, createDressedMaterial, buildEmbarkationTerrace, buildConcordYard, buildWaterStore, STORE, YARD, sectionPoint, ribDepth, buildHarbour, HarbourStation, HS, YardWorks, WORKS, StoreWorks, craftMesh, buildBeltStation, belt });
 console.log(JSON.stringify(out));
 if (fail.length) { console.error('FAIL:\n  ' + fail.join('\n  ')); process.exit(1); }
 console.log('PORT_VERIFIED');
