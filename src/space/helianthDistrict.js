@@ -1,0 +1,700 @@
+import * as THREE from 'three';
+import { CB, CK, sectionEllipse, buildTender } from '../craft/craftGeometry.js';
+import { buildShuttle, buildTug, lathe } from '../craft/craftClasses.js';
+import { createCraftMaterial, updateCraftMaterial } from '../craft/craftMaterial.js';
+import { craftMesh, addEngines, addLamps, placeMerge, placeLamps, KM, CRAFT_FRAME } from './craftMesh.js';
+import { createLamps, LAMP } from './lamps.js';
+
+// THE HELIANTH DISTRICT (metres, the collector's frame: +Y away from the Sun, the twelve petals
+// near y = 0 reaching 14.5 km out, the hub and its crown above them).
+//
+//   petals    every petal's mirror is laid in bronze-seamed facets and held by a back truss; it
+//             carries a crawler catwalk along its spine (deck, railings and stanchions
+//             every 50 m), two coolant lines on its mirror skin, six thermal receiver cassettes
+//             glowing with the heat they drink, a tip mast, and lamp strings down both edges.
+//             Built once and instanced twelve times (one InstancedMesh per piece)
+//   crawlers  two maintenance crawlers per petal run the catwalk, pausing at the receivers; the
+//             suited crews walk the decks with helmet lamps (moving lamps, no allocation)
+//   hub       coolant risers and headers on the six radiator fins, a glazed promenade gallery in
+//             every bay of the habitat wheel
+//   berths    six docking arms off the hub below the habitat wheel, a shuttle seated on each
+//             cradle (seated by its surveyed lowest point)
+//   flotilla  the Helianth's own neighbourhood of the swarm (km): forty-eight concentrator
+//             statites and relay platforms hovering 60-400 km round the station, every one
+//             turned to the Sun and slewing slowly, and couriers working between them; swarm
+//             tenders hold at some of them, a spare facet on their booms, replacing mirrors
+//   gates     each courier run leaves the working field through a lit gate ring
+//   crown     suited crews walk the service crown's EVA lanes under its floodlights
+//
+// Heavy geometry is built lazily on first approach (build()), spread across frames; beyond
+// range the district and the flotilla are hidden. The verifier (tools/verify-sun.mjs) builds
+// everything synchronously and checks seating, clearances and the traffic.
+
+const V = (x, y, z) => new THREE.Vector3(x, y, z), TAU = Math.PI * 2;
+const TO_Y = new THREE.Matrix4().makeRotationX(-Math.PI / 2);
+const smooth = (a, b, x) => { const t = Math.min(Math.max((x - a) / (b - a), 0), 1); return t * t * (3 - 2 * t); };
+
+// ------------------------------------------------------------ petal survey ----
+// (the petal lofts and spines of buildSolarCollector, reproduced analytically)
+export const PETAL = { inner: 1550, outer: 14500, spineR: 55, spine0: 1500, spineL: 13000, count: 12 };
+const petalT = (z) => (z - PETAL.inner) / (PETAL.outer - PETAL.inner);
+export const petalY = (z) => 420 * Math.sin(Math.PI * THREE.MathUtils.clamp(petalT(z), 0, 1));
+export const petalW = (z) => 100 + 1450 * Math.pow(Math.sin(Math.PI * THREE.MathUtils.clamp(petalT(z), 0, 1)), 0.8);
+export const spineY = (z) => 460 * Math.sin(Math.PI * THREE.MathUtils.clamp((z - PETAL.spine0) / PETAL.spineL, 0, 1)) + 80;
+export const spineSlope = (z) => 460 * Math.PI / PETAL.spineL * Math.cos(Math.PI * THREE.MathUtils.clamp((z - PETAL.spine0) / PETAL.spineL, 0, 1));
+const SECTION = sectionEllipse(1, 35, 12, 3);        // unit half-width, true thickness
+/** Height of the petal's upper skin at lateral x (the faceted section's chord, exactly). */
+export function petalTop(x, z) {
+  const w = petalW(z), u = Math.abs(x) / w;
+  // upper chain of the 12-gon: vertices 0..6 run from +x over the top to -x
+  const up = SECTION.slice(0, 7).map(([px, py]) => [Math.abs(px), py]).sort((a, b) => a[0] - b[0]);
+  for (let i = 0; i < up.length - 1; i++) if (u <= up[i + 1][0] + 1e-9) {
+    const [x0, y0] = up[i], [x1, y1] = up[i + 1], t = (u - x0) / Math.max(x1 - x0, 1e-9);
+    return petalY(z) + y0 + (y1 - y0) * t;
+  }
+  return petalY(z);
+}
+/** Height of the petal's lower skin at lateral x (the faceted section's lower chord). */
+export function petalBottom(x, z) {
+  const w = petalW(z), u = Math.abs(x) / w;
+  const lo = [SECTION[0], ...SECTION.slice(6), SECTION[0]].map(([px, py]) => [Math.abs(px), py <= 0 ? py : -py]).sort((a, b) => a[0] - b[0]);
+  for (let i = 0; i < lo.length - 1; i++) if (u <= lo[i + 1][0] + 1e-9) {
+    const [x0, y0] = lo[i], [x1, y1] = lo[i + 1], t = (u - x0) / Math.max(x1 - x0, 1e-9);
+    return petalY(z) + y0 + (y1 - y0) * t;
+  }
+  return petalY(z);
+}
+/** Petal k's frame: local +Z along the petal (makeRotationY(k/12 turn), as the station builds it). */
+export const petalMatrix = (k, out = new THREE.Matrix4()) => out.makeRotationY((k / PETAL.count) * TAU);
+
+export const CATWALK = { z0: 1750, z1: 14200, half: 7, deck: 2, rail: 1.1 };
+export const DECK_TOP = (z) => spineY(z) + PETAL.spineR * Math.cos(Math.PI / 8) - 1 + CATWALK.deck;   // (deck seated a metre into the octagonal spine's flats)
+export const RECEIVERS = [0.2, 0.32, 0.44, 0.56, 0.68, 0.8];
+
+/** One petal's fittings (petal-local metres). Returns the geometry and its lamps. */
+export function buildPetalFittings() {
+  const B = new CB(), lamps = [], receivers = [];
+  // catwalk: sloped deck segments following the spine, railings and stanchions
+  const N = 64, dz = (CATWALK.z1 - CATWALK.z0) / N;
+  for (let j = 0; j < N; j++) {
+    const z = CATWALK.z0 + (j + 0.5) * dz, s = spineSlope(z), len = dz * Math.hypot(1, s) + 1.5;
+    B.at(0, DECK_TOP(z) - CATWALK.deck / 2, z, -Math.atan(s));
+    B.box(0, 0, 0, CATWALK.half * 2, CATWALK.deck, len, CK.DECK);
+    // side kerbs: a bronze toe-board each side
+    for (const sd of [-1, 1]) B.box(sd * (CATWALK.half - 0.25), CATWALK.deck / 2 + 0.15, 0, 0.5, 0.4, len, CK.BRONZE);
+    B.pop();
+  }
+  for (const sd of [-1, 1]) {
+    const rail = [];
+    for (let j = 0; j <= N; j++) { const z = CATWALK.z0 + j * dz; rail.push(V(sd * (CATWALK.half - 0.3), DECK_TOP(z) + CATWALK.rail, z)); }
+    B.tube(rail, 0.12, 4, CK.BRONZE);
+    const mid = rail.map((p) => p.clone().setY(p.y - CATWALK.rail * 0.5));
+    B.tube(mid, 0.08, 4, CK.HULL);
+    for (let z = CATWALK.z0 + 25; z < CATWALK.z1; z += 50) B.box(sd * (CATWALK.half - 0.3), DECK_TOP(z) + CATWALK.rail / 2, z, 0.18, CATWALK.rail + 0.3, 0.18, CK.HULL);
+  }
+  // coolant lines on the skin, seated two metres into the faceted surface, glowing with flow
+  for (const sd of [-1, 1]) {
+    const pts = [];
+    for (let z = 1650; z <= 14400; z += 250) {
+      const w = petalW(z), x = sd * (70 + 0.25 * (w - 100));
+      pts.push(V(x, petalTop(x, z) + 12 - 2, z));
+    }
+    B.tube(pts, 12, 8, CK.CONDUIT);
+    // pipe saddles every 750 m
+    for (let z = 2000; z < 14200; z += 750) {
+      const w = petalW(z), x = sd * (70 + 0.25 * (w - 100));
+      B.box(x, petalTop(x, z) + 6, z, 34, 14, 10, CK.BRONZE);
+    }
+  }
+  // thermal receiver cassettes: dark housings astride the petal skin, their apertures glowing
+  for (const t of RECEIVERS) for (const sd of [-1, 1]) {
+    const z = PETAL.inner + t * (PETAL.outer - PETAL.inner), w = petalW(z), x = sd * w * 0.55;
+    const y0 = Math.min(petalTop(x - 40, z), petalTop(x + 40, z), petalTop(x, z - 55), petalTop(x, z + 55), petalTop(x, z)) - 2;   // (seated on the low side)
+    B.box(x, y0 + 16, z, 80, 32, 110, CK.DARK);
+    B.box(x, y0 + 33, z, 64, 4, 90, CK.LANTERN);                       // the hot aperture
+    B.box(x, y0 + 26, z + 56, 50, 10, 3, CK.GLASS);                    // inspection ports
+    for (const dx of [-38, 38]) B.box(x + dx, y0 + 20, z, 6, 30, 118, CK.BRONZE);
+    receivers.push({ x, z, top: y0 + 35, base: y0 });
+    lamps.push({ p: V(x, y0 + 38, z), r: 6, color: LAMP.AMBER, i: 1.4, breathe: 0.5, phase: t + (sd > 0 ? 0.5 : 0) });
+  }
+  // the mirror's facets: bronze seam strips on the skin (240 m across, 400 m along), each strip a
+  // chord of the curved skin seated most of a metre into it; the spine line is left clear
+  for (let z = 1800; z < 14300; z += 400) {
+    const z1 = Math.min(z + 400, 14350);
+    for (let x = 180; x < 1500; x += 240) for (const sd of [-1, 1]) {
+      const xs = sd * x, zm = (z + z1) / 2;
+      if (x > petalW(z) - 40 || x > petalW(z1) - 40) continue;
+      const y0 = petalTop(xs, z), y1 = petalTop(xs, z1), len = Math.hypot(z1 - z, y1 - y0);
+      B.at(xs, (y0 + y1) / 2 + 0.6 - 0.9, zm, -Math.atan2(y1 - y0, z1 - z)); B.box(0, 0, 0, 3, 1.2, len + 1.5, CK.BRONZE); B.pop();
+    }
+    // the transverse seam at z: chords across the section
+    const w = petalW(z) - 40;
+    for (let x = 60; x < w; x += 240) for (const sd of [-1, 1]) {
+      const xa = sd * x, xb = sd * Math.min(x + 240, w), ya = petalTop(xa, z), yb = petalTop(xb, z), len = Math.hypot(xb - xa, yb - ya);
+      B.at((xa + xb) / 2, (ya + yb) / 2 + 0.6 - 0.9, z, 0, 0, Math.atan2(yb - ya, xb - xa)); B.box(0, 0, 0, len + 1.5, 1.2, 3, CK.BRONZE); B.pop();
+    }
+  }
+  // the back structure: a Warren truss under each half of the petal, its two chords hanging
+  // 60 m below the skin, the diagonals anchored two metres into the underside (the mirror's
+  // figure is held by this truss, not by the thin skin)
+  for (const sd of [-1, 1]) {
+    const chord = [], anchors = [];
+    const lat = (z) => sd * (0.32 * petalW(z));
+    for (let z = 1800, j = 0; z <= 14200; z += 155, j++) {
+      const x = lat(z);
+      if (j % 2 === 0) chord.push(V(x, petalBottom(x, z) - 60, z)); else anchors.push(V(x, petalBottom(x, z) + 2, z));
+    }
+    B.tube(chord, 7, 6, CK.DARK);
+    for (let j = 0; j < anchors.length; j++) {
+      const a = anchors[j];
+      for (const c of [chord[j], chord[j + 1]]) if (c) B.tube([c.clone().add(V(0, 5, 0)), a], 3.2, 5, CK.HULL);
+      B.box(a.x, a.y - 3, a.z, 16, 5, 16, CK.BRONZE);                 // anchor pads under the skin
+    }
+    // cross ties to the spine line every fourth bay
+    for (let j = 0; j < chord.length; j += 4) { const c = chord[j]; B.tube([c.clone().add(V(-sd * 6, 0, 0)), V(0, petalBottom(0, c.z) + 2, c.z)], 3.2, 5, CK.HULL); }
+  }
+  // the tip mast: a lattice post with a lamp head (the tip lamp itself is the station's)
+  {
+    const z = 14300, y = spineY(z) + PETAL.spineR - 4;
+    for (const [dx, dz] of [[-6, -6], [6, -6], [6, 6], [-6, 6]]) B.tube([V(dx, y, z + dz), V(dx * 0.4, y + 140, z + dz * 0.4)], 1.4, 5, CK.HULL);
+    B.box(0, y + 146, z, 14, 12, 14, CK.BRONZE);
+    B.box(0, y + 156, z, 8, 8, 8, CK.LANTERN);
+    lamps.push({ p: V(0, y + 166, z), r: 7, color: LAMP.WHITE, i: 2.2, breathe: 0.3 });
+  }
+  // edge lamp strings
+  for (let j = 1; j < 16; j++) {
+    const z = PETAL.inner + (j / 16) * (PETAL.outer - PETAL.inner);
+    for (const sd of [-1, 1]) lamps.push({ p: V(sd * (petalW(z) + 6), petalY(z), z), r: 4, color: j % 4 === 0 ? LAMP.WHITE : LAMP.AMBER, i: 1.2 });
+  }
+  return { geo: B.geometry(), lamps, receivers };
+}
+
+/** A maintenance crawler (metres, its deck contact at y = 0, facing +z). */
+export function buildCrawler() {
+  const B = new CB();
+  for (const sd of [-1, 1]) for (const z of [-5, 5]) B.tube([V(sd * 2.6, 1.6, z), V(sd * 4, 1.6, z)], 1.6, 10, CK.DARK);
+  B.box(0, 4.4, 0, 5.4, 3.6, 15, CK.HULL);
+  B.box(0, 6.6, -1, 5, 0.8, 12, CK.BRONZE);
+  B.box(0, 8.2, 4.8, 4.4, 2.6, 4, CK.GLASS);
+  B.box(0, 5, 7.7, 4, 1.2, 0.6, CK.LANTERN);
+  B.tube([V(0, 6.8, -4), V(0, 14, -8), V(0, 11.5, -14)], 0.6, 6, CK.BRONZE);
+  B.box(0, 11, -14.6, 2.6, 2, 2.2, CK.DARK);
+  // (the faceted wheels' lowest points on the deck, exactly)
+  const g = B.geometry(); g.computeBoundingBox(); g.translate(0, -g.boundingBox.min.y, 0); g.computeBoundingBox();
+  return g;
+}
+
+/** Crawler pose on its catwalk: z along the petal, pausing at each receiver station. */
+const STOPS = RECEIVERS.map((r) => PETAL.inner + r * (PETAL.outer - PETAL.inner));
+export function crawlerZ(t, i) {
+  const stops = STOPS;
+  const legs = stops.length - 1, T = 900, u = (((t / T + i * 0.37) % 1) + 1) % 1;
+  // out along the stations and back: a ping-pong over legs, dwelling 40 % of each leg
+  const x = u < 0.5 ? u * 2 * legs : (1 - u) * 2 * legs;
+  const k = Math.min(Math.floor(x), legs - 1), f = x - k;
+  return stops[k] + (stops[k + 1] - stops[k]) * smooth(0.2, 0.8, f);
+}
+
+/** +1 while the crawler runs outward, -1 homeward. */
+export function crawlerDir(t, i) { const u = (((t / 900 + i * 0.37) % 1) + 1) % 1; return u < 0.5 ? 1 : -1; }
+
+// -------------------------------------------------------------- spoke cars ----
+// Lift cars ride the tops of the habitat wheel's six spokes (tubes of radius 120 m at y 2200 from
+// the hub at 1200 m to the wheel at 4000 m), carrying crews between the hub and the wheel.
+export const SPOKE = { y: 2200, r: 120, seg: 12, from: 1450, to: 3640, T: 150 };
+export const spokeTop = () => SPOKE.y + SPOKE.r * Math.cos(Math.PI / SPOKE.seg) - 0.5;   // (seated half a metre into the flats)
+export function spokeCarR(k, t) {
+  const u = (((t / SPOKE.T) + k * 0.31) % 1 + 1) % 1;
+  const s = u < 0.2 ? 0 : u < 0.5 ? smooth(0.2, 0.5, u) : u < 0.7 ? 1 : 1 - smooth(0.7, 1, u);
+  return SPOKE.from + (SPOKE.to - SPOKE.from) * s;
+}
+export function buildSpokeCar() {
+  const B = new CB();
+  for (const sd of [-1, 1]) B.box(sd * 11, 3, 0, 6, 6, 52, CK.DARK);              // running gear, astride the crown
+  B.box(0, 13, 0, 34, 16, 58, CK.HULL);
+  B.box(0, 15, 0, 35, 6, 50, CK.GLASS);
+  B.box(0, 22.5, 0, 30, 3, 54, CK.BRONZE);
+  for (const sd of [-1, 1]) B.box(0, 12, sd * 29.4, 12, 10, 1, CK.LANTERN);
+  return B.geometry();
+}
+
+// --------------------------------------------------------------- hub works ----
+// The radiator fins (radial plates 3000 x 1500 x 45 m at 6.4-9.4 km, centred at y 3800, every
+// 60 degrees) carry glowing coolant risers on both faces between header pipes; the habitat wheel
+// (a torus of 4100 m, tube 380 m, at y 2200) carries a glazed promenade gallery in every bay
+// between its hoops, on the outer equator, seated into the pressure hull.
+export const FIN = { r: 7900, y: 3800, len: 3000, h: 1500, t: 45 };
+export const GALLERY = { R: 4100, tube: 380, y: 2200, count: 24, half: 330, proud: 60, seat: 25 };
+export function buildHubWorks() {
+  const B = new CB(), lamps = [];
+  for (let k = 0; k < 6; k++) {
+    const a = (k / 6) * TAU;
+    B.at(Math.cos(a) * FIN.r, FIN.y, Math.sin(a) * FIN.r, 0, -a, 0);
+    for (const sd of [-1, 1]) {
+      const zf = sd * (FIN.t / 2 + 4);
+      for (let x = -FIN.len / 2 + 100; x <= FIN.len / 2 - 100; x += 140) B.box(x, 0, zf, 12, FIN.h - 80, 10, CK.CONDUIT);
+      for (const y of [-(FIN.h / 2 - 40), FIN.h / 2 - 40]) B.tube([V(-FIN.len / 2 + 40, y, sd * (FIN.t / 2 + 12)), V(FIN.len / 2 - 40, y, sd * (FIN.t / 2 + 12))], 14, 8, CK.BRONZE);
+    }
+    // the fin's root manifold, where the coolant comes in from the strut
+    B.box(-FIN.len / 2 + 60, 0, 0, 120, FIN.h * 0.6, FIN.t + 60, CK.HULL);
+    B.pop();
+    lamps.push({ p: V(Math.cos(a) * (FIN.r + FIN.len / 2 + 20), FIN.y + FIN.h / 2, Math.sin(a) * (FIN.r + FIN.len / 2 + 20)), r: 14, color: LAMP.RED, i: 2.6, breathe: 0.5, phase: k / 6 });
+  }
+  const sec = [[-GALLERY.seat, -95], [30, -84], [52, -46], [GALLERY.proud, 0], [52, 46], [30, 84], [-GALLERY.seat, 95]];
+  for (let k = 0; k < GALLERY.count; k++) {
+    const a = ((k + 0.5) / GALLERY.count) * TAU, d = V(Math.cos(a), 0, Math.sin(a)), t = V(-d.z, 0, d.x);
+    const outer = GALLERY.R + GALLERY.tube;
+    // gallery frame: +x outward (radial), +y up, +z along the wheel
+    B.push(new THREE.Matrix4().makeBasis(d, V(0, 1, 0), t.clone().negate()).setPosition(d.clone().multiplyScalar(outer).setY(GALLERY.y)));
+    const rings = [];
+    for (let j = 0; j <= 10; j++) {
+      const u = j / 10, z = -GALLERY.half + 2 * GALLERY.half * u, taper = Math.min(1, Math.sin(Math.PI * u) * 3);
+      rings.push({ z, pts: sec.map(([x, y]) => [x < 0 ? x : x * (0.35 + 0.65 * taper), y * (0.55 + 0.45 * taper)]) });
+    }
+    B.loft(rings, (i) => (i === 0 || i === sec.length - 1 ? CK.HULL : CK.GLASS), { capStart: CK.HULL, capEnd: CK.HULL });
+    for (let z = -GALLERY.half + 40; z <= GALLERY.half - 40; z += 36) {
+      const u = (z + GALLERY.half) / (2 * GALLERY.half), taper = Math.min(1, Math.sin(Math.PI * u) * 3);
+      B.box(GALLERY.proud * (0.35 + 0.65 * taper) - 4, 0, z, 10, 150 * (0.55 + 0.45 * taper), 3, CK.BRONZE);
+    }
+    B.pop();
+    lamps.push({ p: d.clone().multiplyScalar(outer + GALLERY.proud + 6).setY(GALLERY.y), r: 8, color: [1.0, 0.8, 0.55], i: 1.6 });
+  }
+  return { geo: B.geometry(), lamps };
+}
+
+// ------------------------------------------------------------------ berths ----
+export const BERTH = { y: 1950, root: 1150, end: 2550, count: 6, ship: 160 };
+/** Hub docking arms and their seated shuttles (station metres). */
+export function buildBerths() {
+  const B = new CB(), lamps = [], cradles = [];
+  const sh = buildShuttle(BERTH.ship), bb = new THREE.Box3().setFromBufferAttribute(sh.geo.attributes.position);
+  const ships = [];
+  for (let k = 0; k < BERTH.count; k++) {
+    const a = ((k + 0.5) / BERTH.count) * TAU, d = V(Math.cos(a), 0, Math.sin(a)), t = V(-d.z, 0, d.x);
+    const root = d.clone().multiplyScalar(BERTH.root).setY(BERTH.y), end = d.clone().multiplyScalar(BERTH.end).setY(BERTH.y);
+    B.tube([root, end], 28, 12, CK.HULL);
+    for (let j = 1; j < 5; j++) { const p = root.clone().lerp(end, j / 5); B.push(new THREE.Matrix4().compose(p, new THREE.Quaternion().setFromUnitVectors(V(0, 0, 1), d), V(1, 1, 1))); B.torus(31, 4, 24, 6, CK.BRONZE); B.pop(); }
+    // cradle platform at the arm's end, a glazed control cab under it
+    const top = BERTH.y + 32;
+    const m = new THREE.Matrix4().makeBasis(t, V(0, 1, 0), d.clone().negate()).setPosition(end.clone().setY(top - 6));
+    B.push(m);
+    B.box(0, 0, 0, 190, 12, 70, CK.DARK);
+    for (const x of [-80, 80]) B.box(x, 6.5, 0, 16, 1, 60, CK.LANTERN);
+    B.box(0, -16, 0, 44, 20, 40, CK.GLASS);
+    B.box(0, -27, 0, 50, 3, 46, CK.BRONZE);
+    B.pop();
+    // the shuttle lies tangentially on the cradle, its lowest point on the deck
+    const sm = new THREE.Matrix4().makeBasis(d.clone(), V(0, 1, 0), t).setPosition(end.clone().setY(top - bb.min.y));
+    ships.push({ geo: sh.geo, m: sm });
+    cradles.push({ deck: top, center: end.clone().setY(top), ship: sm });
+    lamps.push(...placeLamps(sh.lamps || [], sm), { p: end.clone().setY(top + 2).addScaledVector(t, 100), r: 5, color: LAMP.GREEN, i: 2 }, { p: end.clone().setY(top + 2).addScaledVector(t, -100), r: 5, color: LAMP.RED, i: 2 });
+  }
+  const geo = placeMerge([{ geo: B.geometry(), m: new THREE.Matrix4() }, ...ships]);
+  return { geo, lamps, cradles, shipGeo: sh.geo };
+}
+
+// ---------------------------------------------------------------- flotilla ----
+export const FLOTILLA = { count: 90, rMin: 60000, rMax: 400000, yMin: -24000, yMax: 24000, range: 2.5e3 };
+function rng(seed) { let s = seed >>> 0; return () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; }; }
+
+/** Statite placements (station metres): position, kind (0 concentrator, 1 relay), slew phase. */
+export function flotillaLayout() {
+  const r = rng(90210), out = [];
+  for (let i = 0; i < FLOTILLA.count; i++) {
+    // golden-angle spiral, so they fill the disc without clumping
+    const u = (i + 0.5) / FLOTILLA.count, R = FLOTILLA.rMin + (FLOTILLA.rMax - FLOTILLA.rMin) * Math.sqrt(u);
+    const a = i * 2.39996 + (r() - 0.5) * 0.3;
+    out.push({ p: V(Math.cos(a) * R, FLOTILLA.yMin + (FLOTILLA.yMax - FLOTILLA.yMin) * r(), Math.sin(a) * R), kind: i % 4 === 3 ? 1 : 0, phase: r() * TAU, spin: r() * TAU, size: 0.8 + 0.5 * r() });
+  }
+  return out;
+}
+
+/** A concentrator statite: seven hexagonal mirror facets toed in to a hot receiver (metres, sun at -Y). */
+export function buildConcentrator() {
+  const B = new CB(), lamps = [];
+  const facet = (cx, cz, r, tilt, ay) => {
+    B.at(cx, 0, cz, 0, ay, 0); B.push(new THREE.Matrix4().makeRotationX(tilt)); B.push(TO_Y);
+    lathe(B, [[0, -3, CK.PANEL], [r, -3, CK.PANEL], [r, 3, CK.BRONZE], [0, 3, CK.DARK]], 6, Math.PI / 6);
+    B.pop();
+    const ring = [];
+    for (let i = 0; i <= 6; i++) { const q = Math.PI / 6 + (i / 6) * TAU; ring.push(V(Math.cos(q) * (r + 4), 5, Math.sin(q) * (r + 4))); }
+    ring[6] = ring[0].clone();
+    B.tube(ring, 5, 5, CK.HULL);
+    // three actuator legs behind the facet
+    for (let i = 0; i < 3; i++) { const q = (i / 3) * TAU; B.tube([V(Math.cos(q) * r * 0.5, 4, Math.sin(q) * r * 0.5), V(Math.cos(q) * r * 0.2, 60, Math.sin(q) * r * 0.2)], 4, 5, CK.DARK); }
+    B.pop(); B.pop();
+  };
+  facet(0, 0, 440, 0, 0);
+  for (let k = 0; k < 6; k++) { const a = (k / 6) * TAU; facet(Math.cos(a) * 800, Math.sin(a) * 800, 430, 0.2, -a + Math.PI / 2); }
+  // the outer ring of twelve, toed in harder toward the receiver on its boom
+  for (let k = 0; k < 12; k++) { const a = ((k + 0.5) / 12) * TAU; facet(Math.cos(a) * 1560, Math.sin(a) * 1560, 400, 0.38, -a + Math.PI / 2); }
+  for (let k = 0; k < 12; k++) { const a = ((k + 0.5) / 12) * TAU; B.tube([V(Math.cos(a) * 800, 110, Math.sin(a) * 800), V(Math.cos(a) * 1560, 150, Math.sin(a) * 1560)], 9, 6, CK.DARK); }
+  // backing truss and the spine to the receiver
+  for (let k = 0; k < 6; k++) { const a = (k / 6) * TAU; B.tube([V(Math.cos(a) * 90, 130, Math.sin(a) * 90), V(Math.cos(a) * 800, 110, Math.sin(a) * 800)], 12, 6, CK.DARK); }
+  B.at(0, 110, 0); B.push(TO_Y); B.torus(800, 9, 36, 6, CK.HULL); B.pop(); B.pop();
+  B.tube([V(0, -3, 0), V(0, -1350, 0)], 16, 8, CK.HULL);
+  for (let k = 0; k < 3; k++) { const a = (k / 3) * TAU + 0.5; B.tube([V(Math.cos(a) * 800, 0, Math.sin(a) * 800), V(0, -1300, 0)], 6, 5, CK.DARK); }
+  B.at(0, -1400, 0); B.push(TO_Y);
+  lathe(B, [[40, -60, CK.HULL], [70, 0, CK.BRONZE], [70, 40, CK.LANTERN], [30, 70, CK.LANTERN], [0, 80, CK.LANTERN]], 16);
+  B.pop(); B.pop();
+  lamps.push({ p: V(0, -1500, 0), r: 40, color: [1.0, 0.72, 0.4], i: 3.0, breathe: 0.2 });
+  // the service bus behind the mirror: a drum, radiators edge-on to the Sun, a transmitter dish
+  B.at(0, 110, 0); B.push(TO_Y);
+  lathe(B, [[120, 0, CK.BRONZE], [150, 20, CK.HULL], [150, 180, CK.HULL], [110, 220, CK.BRONZE], [0, 240, CK.HULL]], 20);
+  B.pop(); B.pop();
+  for (const sd of [-1, 1]) { B.box(sd * 700, 240, 0, 1000, 280, 5, CK.RADIATOR); B.box(sd * 230, 240, 0, 170, 20, 20, CK.BRONZE); B.box(sd * 700, 105, 0, 1000, 8, 12, CK.BRONZE); }
+  B.at(0, 400, 0, 0.6, 0, 0); B.push(TO_Y);
+  lathe(B, [[20, -60, CK.HULL], [160, 0, CK.BRONZE], [180, 30, CK.BRONZE], [0, 10, CK.DARK]], 20);
+  B.pop(); B.pop();
+  B.tube([V(0, 340, 0), V(0, 400, 0)], 14, 6, CK.HULL);
+  lamps.push({ p: V(0, 470, 0), r: 18, color: LAMP.RED, i: 2.6, breathe: 0.5 }, { p: V(1200, 240, 0), r: 14, color: LAMP.WHITE, i: 2 }, { p: V(-1200, 240, 0), r: 14, color: LAMP.WHITE, i: 2 });
+  return { geo: B.geometry(), lamps };
+}
+
+/** A crewed relay platform: a pressure drum with lit decks, a slewing beam dish and a berth. */
+export function buildRelayPlatform() {
+  const B = new CB(), lamps = [];
+  B.push(TO_Y);
+  lathe(B, [[0, -420, CK.BRONZE], [180, -400, CK.HULL], [260, -300, CK.HULL], [260, -180, CK.BRONZE], [260, -160, CK.GLASS], [260, 60, CK.GLASS], [260, 80, CK.BRONZE], [230, 200, CK.HULL], [120, 300, CK.HULL], [0, 320, CK.BRONZE]], 32);
+  B.pop();
+  // a counter-rotating habitat ring (kept static here: it is the drum's pressure torus)
+  B.push(TO_Y); B.torus(620, 60, 64, 12, CK.GLASS); B.pop();
+  for (let k = 0; k < 4; k++) { const a = (k / 4) * TAU; B.tube([V(Math.cos(a) * 250, 0, Math.sin(a) * 250), V(Math.cos(a) * 570, 0, Math.sin(a) * 570)], 22, 8, CK.HULL); }
+  // the beam dish on a yoke over the drum
+  B.tube([V(0, 310, 0), V(0, 520, 0)], 30, 10, CK.BRONZE);
+  B.at(0, 560, 0, Math.PI / 2 - 0.35, 0, 0);
+  lathe(B, [[30, -40, CK.HULL], [480, 60, CK.BRONZE], [500, 80, CK.BRONZE], [40, 20, CK.DARK]], 36);
+  B.tube([V(0, 0, 0), V(0, 0, 360)], 10, 6, CK.DARK);
+  B.box(0, 0, 370, 40, 40, 30, CK.LANTERN);
+  B.pop();
+  // PV wings (sun at -Y: wings face it)
+  for (const sd of [-1, 1]) {
+    B.tube([V(sd * 260, -250, 0), V(sd * 1900, -250, 0)], 14, 6, CK.DARK);
+    for (let j = 0; j < 4; j++) B.box(sd * (500 + j * 380), -262, 0, 340, 4, 520, CK.PANEL);
+  }
+  // berth: a docking tube down the -z side with a lit collar
+  B.tube([V(0, -250, -240), V(0, -250, -560)], 40, 12, CK.HULL);
+  B.at(0, -250, -560); lathe(B, [[46, -10, CK.BRONZE], [52, 0, CK.BRONZE], [40, 8, CK.DARK]], 16); B.pop();
+  lamps.push({ p: V(0, -250, -580), r: 16, color: LAMP.GREEN, i: 2.4, breathe: 0.4 }, { p: V(0, 940, 0), r: 20, color: LAMP.RED, i: 2.4, breathe: 0.5 },
+    { p: V(1920, -250, 0), r: 12, color: LAMP.WHITE, i: 2 }, { p: V(-1920, -250, 0), r: 12, color: LAMP.WHITE, i: 2 });
+  return { geo: B.geometry(), lamps };
+}
+
+const _eul = new THREE.Euler();
+/** Slew of statite i at time t: a small, slow wander about Sun-pointing (radians). */
+export function statiteSlew(s, t, out = new THREE.Quaternion()) {
+  return out.setFromEuler(_eul.set(0.04 * Math.sin(t * 0.011 + s.phase), s.spin + 0.02 * t * (s.kind ? 0.2 : 0.05), 0.04 * Math.cos(t * 0.013 + s.phase * 1.7)));
+}
+
+// ----------------------------------------------------------- swarm tenders ----
+// A tender holds off a concentrator's rim on its anti-Sun side, a replacement facet on a boom
+// reaching over the outer ring (statite frame, metres, before the statite's own scale).
+export const TENDER_AT = { every: 9, r: 2350, y: 520, len: 300, scale: 2 };
+export function buildSwarmTender() {
+  const te = buildTender(TENDER_AT.len), I = new THREE.Matrix4();
+  const B = new CB();
+  // the boom from the tender's flank toward the rim, a spreader and the facet it carries
+  B.tube([V(40, 0, 60), V(260, -60, 160), V(420, -140, 160)], 7, 8, CK.BRONZE);
+  B.at(430, -150, 160); B.box(0, 0, 0, 30, 20, 60, CK.DARK); B.pop();
+  B.at(560, -170, 160, 0, 0, Math.PI / 2 - 0.2); B.push(new THREE.Matrix4().makeRotationX(Math.PI / 2));
+  lathe(B, [[0, -2, CK.PANEL], [150, -2, CK.PANEL], [150, 2, CK.BRONZE], [0, 2, CK.DARK]], 6, Math.PI / 6);
+  B.pop(); B.pop();
+  const parts = [{ geo: te.geo, m: I }, ...te.arms.map((A) => ({ geo: A.geo, m: I })), { geo: B.geometry(), m: I }];
+  return { geo: placeMerge(parts), lamps: [{ p: V(0, 30, 0), r: 6, color: LAMP.AMBER, i: 2.6, breathe: 0.5 }, { p: V(560, -150, 160), r: 5, color: LAMP.WHITE, i: 2.2 }] };
+}
+/** The tender's frame relative to its statite (+z toward the statite's axis, +y away from the Sun). */
+export function tenderLocal(out = new THREE.Matrix4()) {
+  const S = TENDER_AT.scale;
+  return out.makeBasis(V(0, 0, 1), V(0, 1, 0), V(-1, 0, 0)).scale(V(S, S, S)).setPosition(TENDER_AT.r, TENDER_AT.y, 0);
+}
+export const tenderStatites = (layout) => layout.map((s, i) => (s.kind === 0 && i % TENDER_AT.every === 0 ? i : -1)).filter((i) => i >= 0);
+
+/** EVA crews on the service crown's lanes (station metres): lane boxes from the crown's survey. */
+export function crownCrew(j, t, lanes, out) {
+  const L = lanes[j % lanes.length], u = (((t / (240 + 30 * (j % 3))) + j * 0.29) % 1 + 1) % 1, s = u < 0.5 ? u * 2 : 2 - u * 2;
+  const x = (L.min.x + L.max.x) / 2 + ((j >> 1) % 2 ? 5 : -5);
+  return out.set(x, L.min.y + 1.7, L.min.z + 10 + (L.max.z - L.min.z - 20) * s);
+}
+
+// ---------------------------------------------------------------- couriers ----
+export const COURIER = { count: 6, holdR: 2600, holdY: 8200, exitR: 24000, exitY: 6500, T: 520, dwell: 0.14, len: 90 };
+/** Courier c's run (station metres): hold over the crown, out through the exit gate, to its statite's berth. */
+export function courierRoute(c, layout) {
+  // one run per sector of the sky: the concentrator nearest the sector's bearing, inside 260 km
+  const want = (c / COURIER.count) * TAU + 0.4, gap = (a) => Math.abs(Math.atan2(Math.sin(a - want), Math.cos(a - want)));
+  let target = null;
+  const clearRun = (s) => { const a = s.p.clone().setY(0).normalize().multiplyScalar(COURIER.exitR).setY(COURIER.exitY), ab = s.p.clone().sub(a), L2 = ab.lengthSq(); return layout.every((o) => { if (o === s) return true; const t = Math.min(Math.max(o.p.clone().sub(a).dot(ab) / L2, 0), 1); return a.clone().addScaledVector(ab, t).distanceTo(o.p) > 2600 * o.size + 3000; }); };
+  for (const s of layout) if (s.kind === 0 && Math.hypot(s.p.x, s.p.z) < 260000 && clearRun(s) && (!target || gap(Math.atan2(s.p.z, s.p.x)) < gap(Math.atan2(target.p.z, target.p.x)))) target = s;
+  const az = Math.atan2(target.p.z, target.p.x);
+  const hold = V(Math.cos(az) * COURIER.holdR, COURIER.holdY + c * 180, Math.sin(az) * COURIER.holdR);
+  const exit = V(Math.cos(az) * COURIER.exitR, COURIER.exitY + c * 180, Math.sin(az) * COURIER.exitR);
+  // berth: short of the statite on the anti-Sun side (behind its bus)
+  const berth = target.p.clone().add(V(0, 2600 * target.size, 0)).addScaledVector(target.p.clone().setY(0).normalize(), -1800);
+  return { hold, exit, berth, target, offset: c / COURIER.count };
+}
+/** Pose on a courier route at time t. Returns the throttle. */
+export function courierPose(r, t, outPos, outFwd) {
+  const u = (((t / COURIER.T) + r.offset) % 1 + 1) % 1, D = COURIER.dwell, run = (1 - 2 * D) / 2;
+  let a, b, s, fwdSign = 1;
+  if (u < D) { outPos.copy(r.hold); outFwd.copy(r.exit).sub(r.hold).setY(0).normalize(); return 0.02; }
+  if (u < D + run) { s = (u - D) / run; fwdSign = 1; }
+  else if (u < 2 * D + run) { outPos.copy(r.berth); outFwd.copy(r.berth).sub(r.exit).normalize(); return 0.02; }
+  else { s = 1 - (u - 2 * D - run) / run; fwdSign = -1; }
+  // two legs: hold to exit takes the first fifth of the run
+  const e = smooth(0, 1, s);
+  if (e < 0.2) { a = r.hold; b = r.exit; s = e / 0.2; } else { a = r.exit; b = r.berth; s = (e - 0.2) / 0.8; }
+  outPos.copy(a).lerp(b, s);
+  outFwd.copy(b).sub(a).normalize().multiplyScalar(fwdSign);
+  const sp = Math.abs(Math.sin(Math.PI * smooth(0, 1, (u < 0.5 ? (u - D) : (u - 2 * D - run)) / run)));
+  return 0.15 + 0.6 * sp;
+}
+
+// ------------------------------------------------------------------ gates ----
+// Every courier run leaves the station's working field through a lit gate: a ring on three stays
+// round the exit point, square to the outbound leg, its lamps chasing outward.
+export const GATE = { R: 420, tube: 16, lamps: 12 };
+export function gateFrame(r, out = new THREE.Matrix4()) {
+  const f = r.berth.clone().sub(r.exit).normalize(), x = V(0, 1, 0).cross(f).normalize(), y = f.clone().cross(x);
+  return out.makeBasis(x, y, f).setPosition(r.exit);
+}
+export function buildGate() {
+  const B = new CB(), lamps = [];
+  B.torus(GATE.R, GATE.tube, 64, 8, CK.HULL);
+  B.torus(GATE.R + GATE.tube * 0.8, 5, 64, 6, CK.CONDUIT);
+  for (let k = 0; k < 3; k++) { const a = (k / 3) * TAU + Math.PI / 2; B.tube([V(Math.cos(a) * (GATE.R + 10), Math.sin(a) * (GATE.R + 10), 0), V(Math.cos(a) * (GATE.R + 160), Math.sin(a) * (GATE.R + 160), -60)], 7, 6, CK.DARK); B.at(Math.cos(a) * (GATE.R + 170), Math.sin(a) * (GATE.R + 170), -64); B.box(0, 0, 0, 40, 40, 30, CK.BRONZE); B.pop(); }
+  for (let k = 0; k < GATE.lamps; k++) { const a = (k / GATE.lamps) * TAU; lamps.push({ p: V(Math.cos(a) * (GATE.R + 26), Math.sin(a) * (GATE.R + 26), 0), r: 10, color: k % 3 ? LAMP.AMBER : LAMP.WHITE, i: 2.4, breathe: 0.8, phase: k / GATE.lamps }); }
+  return { geo: B.geometry(), lamps };
+}
+
+// ------------------------------------------------------------- instancing ----
+/** An InstancedMesh with the space craft material and its per-frame update (metres, scaled to km). */
+export function craftInstances(geo, matrices, opts = {}, mat = null) {
+  const m = mat || createCraftMaterial(opts);
+  const im = new THREE.InstancedMesh(geo, m, Math.max(matrices.length, 1));
+  im.count = matrices.length;
+  matrices.forEach((mm, i) => im.setMatrixAt(i, mm));
+  im.instanceMatrix.needsUpdate = true;
+  im.scale.setScalar(opts.scale ?? KM);
+  im.frustumCulled = false;
+  im.renderOrder = 3;
+  im.userData.world = new THREE.Vector3();
+  im.onBeforeRender = (r, s, cam) => {
+    im.getWorldPosition(im.userData.world);
+    updateCraftMaterial(m, cam, im.userData.sunDir || CRAFT_FRAME.sunDir, im.userData.world, CRAFT_FRAME.time);
+    m.uniformsNeedUpdate = true;
+  };
+  return im;
+}
+
+/** Lamps whose positions are rewritten each frame (object units). */
+export class MovingLamps {
+  constructor(count, { r, color, i = 2, minPx = 1.2, breathe = 0 }) {
+    this.mesh = createLamps(Array.from({ length: count }, (_, k) => ({ p: V(0, 0, 0), r, color, i, breathe, phase: (k * 0.618) % 1 })), { minPx });
+    this.attr = this.mesh.geometry.getAttribute('iLamp');
+    this.count = count;
+  }
+  set(k, p) { const a = this.attr.array; a[k * 4] = p.x; a[k * 4 + 1] = p.y; a[k * 4 + 2] = p.z; }
+  commit() { this.attr.needsUpdate = true; }
+}
+
+export const CREW_LANE = 5.5;
+/** Walkers on the petal catwalks: position of crew j at time t (petal-local), and its petal. */
+export function crewOnCatwalk(j, t, out) {
+  const petal = j % PETAL.count, lane = j % 2 ? 1 : -1, T = 1400 + (j % 5) * 90;
+  const u = (((t / T) + j * 0.137) % 1 + 1) % 1, s = u < 0.5 ? u * 2 : 2 - u * 2;
+  const z = CATWALK.z0 + 200 + (CATWALK.z1 - CATWALK.z0 - 400) * (0.1 + 0.8 * s);
+  out.set(lane * CREW_LANE, DECK_TOP(z) + 1.7, z);
+  return petal;
+}
+
+// ---------------------------------------------------------------- district ----
+export class HelianthDistrict {
+  /** station: the collector's group (km); sunDir: its light direction; scene: where the flotilla lives. */
+  constructor(station, sunDir, space, lanes = []) {
+    this.lanes = lanes;
+    this.station = station; this.sunDir = sunDir; this.space = space; this._center = new THREE.Vector3();
+    this.built = false; this.queue = null;
+    this.near = new THREE.Group(); this.near.visible = false; station.add(this.near);
+    this.flotilla = new THREE.Group(); this.flotilla.visible = false;
+    if (space?.scene) space.scene.add(this.flotilla);
+    this.layout = flotillaLayout();
+    this.routes = Array.from({ length: COURIER.count }, (_, c) => courierRoute(c, this.layout));
+    this.crawlers = null; this.couriers = [];
+    this._m = new THREE.Matrix4(); this._q = new THREE.Quaternion(); this._p = V(0, 0, 0); this._f = V(0, 0, 1); this._x = V(0, 0, 0); this._y = V(0, 0, 0);
+    this._pm = new THREE.Matrix4(); this._s = V(1, 1, 1); this._flip = new THREE.Quaternion().setFromAxisAngle(V(0, 1, 0), Math.PI);
+    if (space?.addBody) this.body = space.addBody('helianthFlotilla', [this.flotilla], (v) => (v || this._center).copy(this.flotilla.position), FLOTILLA.rMax * 0.001 + 5, {});
+  }
+
+  /** Build steps (each a few tens of ms at most), run one per frame on approach. */
+  steps() {
+    const opt = { accent: [1, 0.72, 0.4], lit: 0.55, fill: 0.075 };
+    const sd = this.sunDir;
+    const mk = (geo, mats) => { const m = craftInstances(geo, mats, opt); m.userData.sunDir = sd; return m; };
+    return [
+      () => {
+        const f = buildPetalFittings();
+        this.petalData = f;
+        const mats = Array.from({ length: PETAL.count }, (_, k) => petalMatrix(k));
+        this.petals = mk(f.geo, mats);
+        this.near.add(this.petals);
+        const L = [];
+        for (const m of mats) L.push(...placeLamps(f.lamps, m));
+        addLamps(this.petals, L, { minPx: 1.1 });
+      },
+      () => {
+        const g = buildCrawler();
+        this.crawlers = mk(g, Array.from({ length: PETAL.count }, () => new THREE.Matrix4()));
+        this.near.add(this.crawlers);
+        this.crawlerLamps = new MovingLamps(PETAL.count, { r: 2.2, color: LAMP.AMBER, i: 3, breathe: 0.6 });
+        this.crawlerLamps.mesh.scale.setScalar(0.001);
+        this.near.add(this.crawlerLamps.mesh);
+        this.spokeCars = mk(buildSpokeCar(), Array.from({ length: 6 }, () => new THREE.Matrix4()));
+        this.near.add(this.spokeCars);
+        this.spokeLamps = new MovingLamps(6, { r: 4, color: LAMP.TEAL, i: 2.6, breathe: 0.4 });
+        this.spokeLamps.mesh.scale.setScalar(0.001);
+        this.near.add(this.spokeLamps.mesh);
+        this.crew = new MovingLamps(PETAL.count * 4, { r: 1.2, color: LAMP.WHITE, i: 2.4 });
+        this.crew.mesh.scale.setScalar(0.001);
+        this.near.add(this.crew.mesh);
+      },
+      () => {
+        const b = buildBerths(), h = buildHubWorks();
+        this.berthData = b;
+        const m = craftMesh(placeMerge([{ geo: b.geo, m: new THREE.Matrix4() }, { geo: h.geo, m: new THREE.Matrix4() }]), opt);
+        m.userData.sunDir = sd;
+        addLamps(m, [...b.lamps, ...h.lamps], { minPx: 1.2 });
+        this.near.add(m);
+      },
+      () => {
+        const c = buildConcentrator(), r = buildRelayPlatform();
+        this.statiteGeo = [c, r];
+        this.statites = [0, 1].map((kind) => {
+          const idx = this.layout.map((s, i) => (s.kind === kind ? i : -1)).filter((i) => i >= 0);
+          const im = mk((kind ? r : c).geo, idx.map(() => new THREE.Matrix4()));
+          im.userData.idx = idx;
+          this.flotilla.add(im);
+          // lamps: one lamp set per statite (static in the statite's frame: placed at build time,
+          // the slew is a few degrees, so their small drift is invisible at these ranges)
+          const L = [];
+          for (const i of idx) { const s = this.layout[i]; const mm = new THREE.Matrix4().compose(s.p, statiteSlew(s, 0), this._s.set(s.size, s.size, s.size)); L.push(...placeLamps((kind ? r : c).lamps, mm, 1.6)); }
+          addLamps(im, L, { minPx: 1.3 });
+          return im;
+        });
+      },
+      () => {
+        const gate = buildGate(), gm = this.routes.map((r) => gateFrame(r));
+        const gi = mk(gate.geo, gm);
+        const GL = [];
+        for (const m of gm) GL.push(...placeLamps(gate.lamps, m));
+        addLamps(gi, GL, { minPx: 1.2 });
+        this.flotilla.add(gi);
+        const tug = buildTug(COURIER.len);
+        const opt2 = { ...opt, lit: 0.6 };
+        const mat = createCraftMaterial(opt2);
+        for (const r of this.routes) {
+          const m = craftMesh(tug.geo, opt2, mat);
+          m.userData.sunDir = sd;
+          const engines = addEngines(m, tug.glows, { scale: 0.8, length: 10, color: 0xffb070, core: 0xfff0d8, throttle: 0 });
+          addLamps(m, tug.lamps, { minPx: 1.2 });
+          this.flotilla.add(m);
+          this.couriers.push({ mesh: m, r, engines });
+        }
+      },
+      () => {
+        const st = buildSwarmTender();
+        this.tenderIdx = tenderStatites(this.layout);
+        this.tenderLocal = tenderLocal();
+        this.tenders = mk(st.geo, this.tenderIdx.map(() => new THREE.Matrix4()));
+        this.flotilla.add(this.tenders);
+        this.tenderLamps = new MovingLamps(this.tenderIdx.length * 2, { r: 12, color: LAMP.AMBER, i: 2.6, breathe: 0.5 });
+        this.tenderLamps.mesh.scale.setScalar(0.001);
+        this.tenderLampLocal = st.lamps.map((l) => l.p.clone());
+        this.flotilla.add(this.tenderLamps.mesh);
+        if (this.lanes.length) {
+          this.crownCrew = new MovingLamps(this.lanes.length * 4, { r: 1.2, color: LAMP.WHITE, i: 2.4 });
+          this.crownCrew.mesh.scale.setScalar(0.001);
+          this.near.add(this.crownCrew.mesh);
+          const flood = [];
+          for (const L of this.lanes) for (const z of [L.min.z, L.max.z]) flood.push({ p: V((L.min.x + L.max.x) / 2, L.max.y + 14, z), r: 5, color: LAMP.WHITE, i: 2.2, dir: V(0, -1, 0) });
+          const fl = createLamps(flood, { minPx: 1.1 });
+          fl.scale.setScalar(0.001);
+          this.near.add(fl);
+        }
+      },
+    ];
+  }
+
+  /** Build everything now (headless tests). */
+  build() { if (this.built) return; for (const s of this.queue || this.steps()) s(); this.queue = []; this.built = true; this.animate(0); }
+
+  update(realTime, camWorld) {
+    this.flotilla.position.copy(this.station.position);
+    this.flotilla.quaternion.copy(this.station.quaternion);
+    if (!camWorld) return;
+    const d = camWorld.distanceTo(this.station.position);
+    // lazily: start building inside 6,000 km, one step a frame
+    if (!this.built && d < 6000) {
+      if (!this.queue) this.queue = this.steps();
+      const s = this.queue.shift();
+      if (s) s();
+      if (!this.queue.length) this.built = true;
+    }
+    this.near.visible = this.built && d < 140;
+    this.flotilla.visible = this.built && d < FLOTILLA.range;
+    if (this.body) this.body.visible = this.flotilla.visible;
+    if (this.built && (this.near.visible || this.flotilla.visible)) this.animate(realTime);
+  }
+
+  animate(t) {
+    const P = this._p, F = this._f;
+    if (this.crawlers) {
+      for (let k = 0; k < PETAL.count; k++) {
+        const z = crawlerZ(t, k), dir = crawlerDir(t, k);
+        petalMatrix(k, this._pm);
+        this._q.setFromAxisAngle(this._x.set(1, 0, 0), -Math.atan(spineSlope(z)));
+        if (dir < 0) this._q.multiply(this._flip);
+        this._m.compose(P.set(0, DECK_TOP(z), z), this._q, this._s.set(1, 1, 1)).premultiply(this._pm);
+        this.crawlers.setMatrixAt(k, this._m);
+        this.crawlerLamps.set(k, P.set(0, DECK_TOP(z) + 16, z).applyMatrix4(this._pm));
+      }
+      this.crawlers.instanceMatrix.needsUpdate = true;
+      this.crawlerLamps.commit();
+      for (let j = 0; j < this.crew.count; j++) { const petal = crewOnCatwalk(j, t, P); this.crew.set(j, P.applyMatrix4(petalMatrix(petal, this._pm))); }
+      this.crew.commit();
+      for (let k = 0; k < 6; k++) {
+        const a = (k / 6) * TAU, r = spokeCarR(k, t);
+        // car frame: +z along the spoke (outward), +y up
+        this._pm.makeBasis(this._x.set(Math.sin(a), 0, -Math.cos(a)), this._y.set(0, 1, 0), P.set(Math.cos(a), 0, Math.sin(a))).setPosition(Math.cos(a) * r, spokeTop(), Math.sin(a) * r);
+        this.spokeCars.setMatrixAt(k, this._pm);
+        this.spokeLamps.set(k, P.set(Math.cos(a) * r, spokeTop() + 30, Math.sin(a) * r));
+      }
+      this.spokeCars.instanceMatrix.needsUpdate = true;
+      this.spokeLamps.commit();
+    }
+    if (this.statites) for (let k = 0; k < 2; k++) {
+      const im = this.statites[k], idx = im.userData.idx;
+      for (let n = 0; n < idx.length; n++) { const s = this.layout[idx[n]]; im.setMatrixAt(n, this._m.compose(s.p, statiteSlew(s, t, this._q), this._s.set(s.size, s.size, s.size))); }
+      im.instanceMatrix.needsUpdate = true;
+    }
+    if (this.tenders) {
+      for (let n = 0; n < this.tenderIdx.length; n++) {
+        const s = this.layout[this.tenderIdx[n]];
+        this._m.compose(s.p, statiteSlew(s, t, this._q), this._s.set(s.size, s.size, s.size)).multiply(this.tenderLocal);
+        this.tenders.setMatrixAt(n, this._m);
+        for (let j = 0; j < 2; j++) this.tenderLamps.set(n * 2 + j, P.copy(this.tenderLampLocal[j]).applyMatrix4(this._m));
+      }
+      this.tenders.instanceMatrix.needsUpdate = true;
+      this.tenderLamps.commit();
+      if (this.crownCrew) { for (let j = 0; j < this.crownCrew.count; j++) this.crownCrew.set(j, crownCrew(j, t, this.lanes, P)); this.crownCrew.commit(); }
+    }
+    for (const c of this.couriers) {
+      const thr = courierPose(c.r, t, P, F);
+      c.mesh.position.copy(P).multiplyScalar(0.001);
+      this._x.crossVectors(this._y.set(0, 1, 0), F);
+      if (this._x.lengthSq() < 1e-6) this._x.set(1, 0, 0);
+      this._x.normalize(); this._y.crossVectors(F, this._x);
+      c.mesh.quaternion.setFromRotationMatrix(this._m.makeBasis(this._x, this._y, F));
+      for (const e of c.engines) e.setThrottle(thr);
+    }
+  }
+}

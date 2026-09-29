@@ -17,7 +17,10 @@ import { U } from '../core/uniforms.js';
 // white, and everything else is set relative to it.
 // The swarm: collector mirrors on four inclined rings and the polar statite discs, each an
 // instanced mirror panel turned to the Sun, glinting as it reflects the Sun toward you and
-// never smaller than a pixel and a bit (its light then spread to keep its energy).
+// never smaller than a pixel and a bit (its light then spread to keep its energy). Resolved,
+// a mirror shows its facets (each glinting on its own), their seams, the receiver's struts and
+// the receiver hot at the focus. The Helianth's own neighbourhood of the swarm is built in 3D
+// (src/space/helianthDistrict.js).
 
 const R_SUN = 696000;
 const AU = 1.496e8;
@@ -248,6 +251,8 @@ varying float vSheen;
 varying float vBody;
 varying float vUnres;
 varying float vFade;
+varying float vPx;
+varying vec3 vFacet;
 ${NOISE_GLSL}
 void main() {
   int k = int(aS.x + 0.5);
@@ -296,8 +301,11 @@ void main() {
   float minS = uPixAng * dist * 0.7;
   float sz = max(S, minS);
   vUnres = smoothstep(0.7, 1.4, minS / S);
+  vPx = S / max(uPixAng * dist, 1e-9);           // half-width, pixels
   vec3 bt1 = normalize(cross(nrm, abs(nrm.y) < 0.9 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0)));
   vec3 bt2 = cross(nrm, bt1);
+  // per-mirror seed and the direction of its reflected Sun across the face (for the facets)
+  vFacet = vec3(h, dot(refl - toCam, bt1), dot(refl - toCam, bt2));
   // unresolved, the quad turns to face the camera so it never thins to a sliver
   vec3 ct1 = normalize(cross(toCam, abs(toCam.y) < 0.9 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0)));
   vec3 ct2 = cross(toCam, ct1);
@@ -318,6 +326,10 @@ varying float vSheen;
 varying float vBody;
 varying float vUnres;
 varying float vFade;
+varying float vPx;
+varying vec3 vFacet;
+float hexDist(vec2 p) { p = abs(p); return max(dot(p, vec2(0.5, 0.8660254)), p.x); }
+float hash21(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
 void main() {
   // resolved: a hexagonal mirror, dark but for the Sun it reflects, its frame catching a
   // little light; unresolved: a steady point with a soft sheen and the sharp glint
@@ -325,7 +337,35 @@ void main() {
   float hex = max(q.x * 0.866 + q.y * 0.5, q.y);
   float mask = 1.0 - smoothstep(0.92, 1.0, hex);
   float g = exp(-dot(vUv, vUv) * 2.5);
-  vec3 res = vCol * vGlint * uDiscL * 0.9 + vec3(0.5, 0.52, 0.55) * uSunE * 0.012 * vBody;
+  // Close in, a mirror resolves into its build: a flower of hexagonal facets on a flat-topped grid,
+  // each set a hair off the others so the Sun's glint breaks across them, dark seams between,
+  // three struts to the receiver at the focus glowing with the heat it takes. Every piece
+  // settles to the plain mirror while it still spans a few pixels.
+  vec2 hp = vUv * 2.35;
+  vec2 hs = vec2(1.7320508, 1.0);
+  vec2 hh = hs * 0.5;
+  vec2 ha = mod(hp, hs) - hh, hb = mod(hp - hh, hs) - hh;
+  vec2 hg = dot(ha, ha) < dot(hb, hb) ? ha : hb;
+  vec2 hid = hp - hg;
+  float fwh = fwidth(hp.x) + fwidth(hp.y) + 1e-4;
+  float detail = smoothstep(18.0, 60.0, vPx) * (1.0 - vUnres);
+  float seam = smoothstep(0.5 - 0.02 - fwh, 0.5 - 0.02, hexDist(hg.yx)) * detail;
+  float fh = hash21(hid + vFacet.x * 17.0);
+  // each facet's glint: the reflected Sun offset by the facet's own small tilt
+  float tilt = dot(vFacet.yz, vec2(fh - 0.5, fract(fh * 7.3) - 0.5)) * 6.0;
+  float facetG = mix(1.0, clamp(0.35 + 1.3 * fh + tilt, 0.0, 2.0), detail);
+  vec2 uvr = vUv;
+  float strut = 0.0;
+  for (int k = 0; k < 3; k++) {
+    float sa = 1.5707963 + float(k) * 2.0943951;
+    vec2 d = vec2(cos(sa), sin(sa));
+    float along = dot(uvr, d), off = abs(uvr.x * d.y - uvr.y * d.x);
+    strut = max(strut, (1.0 - smoothstep(0.012, 0.012 + fwh * 0.5, off)) * step(0.0, along) * step(along, 0.9));
+  }
+  strut *= detail;
+  float rec = exp(-dot(vUv, vUv) * 900.0) * detail;
+  vec3 res = vCol * vGlint * uDiscL * 0.9 * facetG * (1.0 - 0.85 * seam) * (1.0 - 0.8 * strut) + vec3(0.5, 0.52, 0.55) * uSunE * 0.012 * vBody * (1.0 + 0.6 * seam);
+  res += vec3(1.0, 0.62, 0.3) * rec * uSunE * 0.4;
   vec3 pt = vCol * (0.2 + 1.3 * vSheen + 6.0 * vGlint) * 6.0;
   vec3 col = mix(res * mask, pt * g, vUnres) * vFade;
   float a = (1.0 - vUnres) * mask * 0.95 * vFade;

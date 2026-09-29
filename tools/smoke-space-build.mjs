@@ -13,6 +13,7 @@ import { Moon } from '../src/space/moon.js';
 import { Rings } from '../src/space/rings.js';
 import { HaloPorts } from '../src/space/stations.js';
 import { HALO_PORTS } from '../src/space/earthData.js';
+import { SunSwarm } from '../src/space/sun.js';
 
 const sim = new SpaceSim();
 sim.syncFromHours(12);
@@ -29,6 +30,8 @@ space.elevator = new Elevator(space, { climbers: 60 });
 space.earthFixed.add(space.elevator.group);
 space.hearth = new Hearth(space, { bhSteps: 110, bhScale: 0.6 });
 space.scene.add(space.hearth.group);
+space.sunSwarm = new SunSwarm(space, { swarm: 4000 });
+space.scene.add(space.sunSwarm.group);
 space.moon = new Moon(space);
 space.scene.add(space.moon.group);
 space.moon.ensureLife();            // Medii Works and the Landing's traffic (built on approach in the app)
@@ -37,6 +40,8 @@ const mods = [];
 for (const [k, C] of [['fleet', Fleet], ['works', WorkingStations], ['geoRoads', GeoRoads], ['lanes', Lanes], ['releaseYard', ReleaseYard]]) { space[k] = new C(space); mods.push(space[k]); }
 // the fleet's lazily built near detail (liners, Selene, tenders), forced so it is exercised too
 space.fleet._linerDetail(null, true); space.fleet._seleneDetail(null, 0, true); space.fleet._tenderDetail(null, true);
+// the lazily built near detail (Helianth district and flotilla, foundry yard): force it, then animate it below
+space.works.district.build(); space.works.yard.build();
 let tri = 0;
 space.scene.traverse((o) => { if (o.isMesh && o.geometry?.index && !o.geometry.isInstancedBufferGeometry) tri += o.geometry.index.count / 3; });
 for (const t of [0, 60, 400, 900, 1500]) {
@@ -47,6 +52,7 @@ for (const t of [0, 60, 400, 900, 1500]) {
   space.ports.update(sim, t, 0.016, space);
   space.hearth.update(sim, t, 0.016, space);
   space.moon.update(sim, t);
+  space.sunSwarm.update(sim, t, 0.016, space);
   for (const m of mods) if (m.update) m.update(sim, t, 0.016, space);
   space.scene.updateMatrixWorld(true);
 }
