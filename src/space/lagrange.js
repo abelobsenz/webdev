@@ -8,6 +8,7 @@ import { COL, WINDOW_CENTRES, buildRotor, buildWindows, buildMirror, buildStator
 import { createWindowMaterial, createMirrorMaterial, bindWindow, bindMirror } from './lagrangeShaders.js';
 import { GATE, buildGateway, buildGatewayWheel } from './lagrangeGateway.js';
 import { StationTraffic, makeRoute, buildFamilies } from './fleetTraffic.js';
+import { LagrangeLife } from './lagrangeLife.js';
 
 // THE LAGRANGE COLONIES: the Concord's oldest suburbs, riding the Moon's orbit.
 //
@@ -28,6 +29,7 @@ import { StationTraffic, makeRoute, buildFamilies } from './fleetTraffic.js';
 const L1_FRAC = 1 - 58020 / MOON_DIST;
 const NEAR_KM = 25000;          // meshes drawn inside this
 const DETAIL_KM = 900;          // lamps, stations' fine parts
+const LIFE_KM = 400;            // trams, fittings, docked ships, cranes
 const _n = new THREE.Vector3(), _a = new THREE.Vector3(), _b = new THREE.Vector3(), _c = new THREE.Vector3(), _d = new THREE.Vector3();
 const _x = new THREE.Vector3(), _y = new THREE.Vector3(), _z = new THREE.Vector3(), _m = new THREE.Matrix4();
 const TAU = Math.PI * 2;
@@ -100,6 +102,9 @@ export class LagrangeColonies {
     this.gateway = this._gateway();
     // local traffic
     const fam = buildFamilies();
+    this.families = fam;
+    this.life = new LagrangeLife(this);
+    this._near = [false, false];
     const pick = (cls, i) => fam[cls][((i % fam[cls].length) + fam[cls].length) % fam[cls].length];
     for (const P of this.pairs) {
       const ro = [];
@@ -303,6 +308,10 @@ export class LagrangeColonies {
     G.m.visible = cp.distanceTo(G.pos) < NEAR_KM * 0.4;
     for (const w of G.wheels) w.g.rotation.z = (w.spin * t) % TAU;
     this.pairs[0].group.updateMatrixWorld(true); this.pairs[1].group.updateMatrixWorld(true); G.group.updateMatrixWorld(true);
+    // near detail: built on the first close approach, shown while close
+    this._near[0] = cp.distanceTo(this.pairs[0].pos) < LIFE_KM; this._near[1] = cp.distanceTo(this.pairs[1].pos) < LIFE_KM;
+    if (!this.life.built && (this._near[0] || this._near[1])) this.life.build(this.families);
+    this.life.update(t, cam, this._near);
     // local traffic
     for (const tr of this.traffic) tr.update(t, dt, cam);
     // long lanes
@@ -390,6 +399,7 @@ export class LagrangeColonies {
     const unique = tri(pt.rotor.geo) + tri(pt.windows) + tri(pt.mirror.sheet) + tri(pt.mirror.back) + tri(pt.stator.geo) + tri(pt.agri.geo) + tri(pt.frame.geo) + gate;
     let traffic = 0;
     for (const st of this.traffic) for (const s of st.sets) traffic += (s.design.geo.index.count / 3) * s.n;
-    return { pair, gate, unique, traffic, total: 2 * pair + gate + traffic };
+    const life = this.life.triangles();
+    return { pair, gate, unique, traffic, life, total: 2 * pair + gate + traffic + life };
   }
 }

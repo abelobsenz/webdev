@@ -143,6 +143,31 @@ export function buildRotor(seed = 7) {
     band(B, R, c - Math.PI / 6 + dA, c + Math.PI / 6 - dA, -HL, HL, 18, 64, (a, z) => (Math.floor((z + HL) / 2000) % 5 === 3 ? CK.DARK : CK.HULL));
     // hoop frames every kilometre, crowned with deck plating
     for (let z = -HL + 500; z < HL; z += 1000) arcBeam(B, R - 5, R + 42, c - Math.PI / 6 + dA, c + Math.PI / 6 - dA, z, 56, 16, CK.HULL, CK.DECK);
+    // the shielding mosaic: each kilometre bay between hoops has its own programme of tiles
+    // (lit outer decks, plated shield blocks of two tones, solar skirts, radiator beds, hull
+    // greenhouses), three rows along and fourteen across, so the hull reads in bays from
+    // a hundred kilometres and in tiles from ten
+    const span = Math.PI / 3 - 2 * dA - 0.004, across = 14, tileA = span / across;
+    const tileW = tileA * R - 16;
+    for (let bay = 0; bay < 31; bay++) {
+      const zc = -HL + 1000 + bay * 1000;
+      const prog = r();
+      for (let row = 0; row < 3; row++) for (let q = 0; q < across; q++) {
+        const h = r();
+        if (h < 0.08) continue;                                    // bare hull: a service apron
+        const a = c - span / 2 + (q + 0.5) * tileA;
+        const z = zc + (row - 1) * 314;
+        let k = CK.HULL, ht = 4 + 8 * r();
+        if (prog < 0.3) { k = (q + row) % 5 === 2 ? CK.DECK : CK.GLASS; ht = 10 + 6 * r(); }
+        else if (prog < 0.62) k = h < 0.55 ? CK.HULL : CK.DARK;
+        else if (prog < 0.77) { k = CK.PANEL; ht = 3; }
+        else if (prog < 0.88) { k = CK.RADIATOR; ht = 5; }
+        else { k = (q % 3 === 1) ? CK.DECK : CK.CONSERVATORY; ht = 12; }
+        radial(B, a, R, z);
+        B.box(0, (ht - 4) / 2, 0, tileW, ht + 4, 290, k);
+        B.pop();
+      }
+    }
     // outer works between the hoops
     for (let bay = 0; bay < 31; bay++) {
       const zc = -HL + 1000 + bay * 1000;

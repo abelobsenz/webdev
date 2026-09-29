@@ -149,6 +149,35 @@ ok(rMax <= COL.ROTOR_MAX_R, `rotor's outer works within ${COL.ROTOR_MAX_R} m of 
   ok(gw > 0.03, `gateway traffic clears the station (${(gw * 1000).toFixed(0)} m)`);
 }
 
+// ---- near detail (built on approach): force it, time it, check what it seats
+lag.life.build(lag.families);
+ok(lag.life.buildMs < 400, `near detail built in ${lag.life.buildMs.toFixed(0)} ms (on first approach)`);
+{
+  // trams ride the longeron tops; crawlers the hoop crests; fittings stand on the tiles
+  lag.life.update(1234, space.camera, [true, true]);
+  const TA = lag.life.shared.trams.array; let bad = 0;
+  for (let i = 0; i < lag.life.trams.length; i++) {
+    const x = TA[i * 16 + 12], y = TA[i * 16 + 13], z = TA[i * 16 + 14];
+    const r = Math.hypot(x, y);
+    if (Math.abs(r - (COL.R + 140)) > 3 || Math.abs(z) > COL.HL) bad++;
+  }
+  ok(bad === 0, 'trams run on the longeron crests, within the cylinder\'s length');
+  const CA = lag.life.shared.crawl.array; let bc = 0;
+  for (let i = 0; i < lag.life.crawlers.length; i++) {
+    const x = CA[i * 16 + 12], y = CA[i * 16 + 13], z = CA[i * 16 + 14];
+    const a = Math.atan2(y, x), m = ((a % (2 * Math.PI / 3)) + 2 * Math.PI / 3) % (2 * Math.PI / 3);
+    if (Math.abs(Math.hypot(x, y) - (COL.R + 43)) > 1 || !(m < Math.PI / 6 - 0.02 || m > 2 * Math.PI / 3 - Math.PI / 6 + 0.02) || ((z + COL.HL - 500) % 1000 + 1000) % 1000 > 1) bc++;
+  }
+  ok(bc === 0, 'crawlers walk the hoop crests of the land strips');
+  // jibs: orthonormal, and the crane clear of the lane ships' hold points (0.22 km off each collar)
+  const JA = lag.life.shared.jib.array; let bj = 0;
+  const m4 = new THREE.Matrix4();
+  for (let i = 0; i < lag.life.cranes.length; i++) { m4.fromArray(JA, i * 16); if (Math.abs(m4.determinant() - 1) > 1e-6) bj++; }
+  ok(bj === 0, 'crane jibs are rigid rotations');
+  const reach = Math.hypot(COL.BERTH_R - 220 + 120, 20);
+  ok(COL.BERTH_R - reach > 60, `crane jibs stay ${(COL.BERTH_R - reach).toFixed(0)} m inboard of the berthing axis`);
+}
+
 // ---- animate, then buffer sanity over everything the module draws
 const roots = [...lag.pairs.map((q) => q.group), lag.gateway.group, lag.laneGroup, ...lag.traffic.map((s) => s.group)];
 const cams = [L4.clone().add(new THREE.Vector3(0, 30, 90)), L5.clone().add(new THREE.Vector3(60, 0, -60)), L1.clone().add(new THREE.Vector3(0, 2, 3)), new THREE.Vector3(0, 0, 40000)];
