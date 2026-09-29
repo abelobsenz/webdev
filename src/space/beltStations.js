@@ -595,10 +595,17 @@ function buildRelay(c) {
   }
   // the collector: a cross of photovoltaic blankets on a mast above, turning to face the Sun
   const span = r.range(260, 480), chord = r.range(60, 110);
-  c.part(V(0, 60, 0), new THREE.Quaternion(), 'sun', 0, (Bp, lamps) => {
-    Bp.push(TO_Y);
+  // The blankets lie along the turning axis (z, the orbit normal), as on real power satellites, so
+  // tracking the Sun turns them in place about their boom; laid across it they swept a 900 m disc
+  // straight down through the emitter. The pivot stands high enough that even the king posts'
+  // sweep clears the core and its berths.
+  const RZ = new THREE.Matrix4().makeRotationY(-Math.PI / 2);   // the builder's x (blanket span) -> the axis
+  c.part(V(0, 160, 0), new THREE.Quaternion(), 'sun', 0, (Bp, lamps) => {
+    Bp.push(new THREE.Matrix4().makeRotationX(Math.PI / 2));     // the slip-ring drum on the axis
     Bp.lathe([[6, -30, CK.BRONZE], [8, -26, CK.DARK], [8, 6, CK.DARK], [10, 8, CK.BRONZE], [0.02, 10, CK.BRONZE]], 16);
     Bp.pop();
+    const l0 = lamps.length;
+    Bp.push(RZ);
     for (const s of [-1, 1]) {
       // blankets spread along x in the pivot frame, their faces along the pivot's +y... turned about z
       truss(Bp, V(s * 8, 0, 0), V(s * (span + 8), 0, 0), 5, 14, 0.35);
@@ -625,8 +632,10 @@ function buildRelay(c) {
       Bp.tube([V(s * 10, -3.6, 0), V(s * (span + 4), -3.6, 0)], 1.1, 6, CK.CONDUIT);
       for (let i = 1; i < nb; i++) { const x = s * (12 + (span - 4) * (i / nb) - 1.5); Bp.box(x, 0.2, 0, 3.4, 6.6, 5, CK.BRONZE); }   // hinge frames
     }
+    Bp.pop();
+    for (let i = l0; i < lamps.length; i++) lamps[i].p.applyMatrix4(RZ);
   }, { axis: 'z' });
-  truss(B, V(0, 32, 0), V(0, 55, 0), 6, 6, 0.4);
+  truss(B, V(0, 32, 0), V(0, 150, 0), 6, 6, 0.4);
   greebles(c, V(0, 32, 0), X, Z, Y, 12, 12, 8, 1.2);
 }
 

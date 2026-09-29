@@ -177,8 +177,8 @@ export class SpaceMode {
     });
     // the Moon's orbital stations (src/space/lunarOrbitals.js), followed along their orbits
     for (const [key, name, d, view] of [['endymionWheel', 'wheel', 2.3, { az: 0.55, el: 0.3 }], ['aitkenDepot', 'depot', 1.75, { az: 0.9, el: 0.25 }], ['heveliusYard', 'yard', 1.55, { az: 0.75, el: 0.42 }]]) T(key, {
-      position: (o) => (self.moon ? o.copy(self.moon.orbitals[name].group.position).applyQuaternion(sim.moonQuat).add(sim.moonPos) : o.copy(sim.moonPos)),
-      frame: (q) => (self.moon ? q.copy(sim.moonQuat).multiply(self.moon.orbitals[name].group.quaternion) : q.copy(sim.moonQuat)),
+      position: (o) => (self.moon ? (self.moon.orbitals.place(self.realTime), o.copy(self.moon.orbitals[name].group.position).applyQuaternion(sim.moonQuat).add(sim.moonPos)) : o.copy(sim.moonPos)),
+      frame: (q) => (self.moon ? (self.moon.orbitals.place(self.realTime), q.copy(sim.moonQuat).multiply(self.moon.orbitals[name].group.quaternion)) : q.copy(sim.moonQuat)),
       minDist: 0.4, maxDist: 40000, defaultDist: d, view,
     });
     const foundryUp=bodyDir(0,NAURU_LON+.009);

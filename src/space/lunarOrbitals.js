@@ -1091,13 +1091,27 @@ export class LunarOrbitals {
    * t: seconds; sunM: toward the Sun in the Moon frame (or null); cam: camera world position.
    * Moves every orbiter, spins the rings, turns the wings, and hides near detail beyond range.
    */
+  /**
+   * The stations' orbital placement at time t. The camera follows them from their target
+   * functions before the modules update, so those call this with the frame's time first: read
+   * from last frame's transforms, the view lagged a frame of orbital motion (tens of metres at
+   * 1.6 km/s) and jumped whenever a frame ran long.
+   */
+  place(t) {
+    if (this._placedAt === t) return;
+    this._placedAt = t;
+    orbitPos(this.yard.orbit, t, 0, this.yard.group.position);
+    orbitPos(this.wheel.orbit, t, 0, this.wheel.group.position);
+    const D = this.depot;
+    orbitPos(D.orbit, t, 0, D.group.position);
+    _x.copy(D.group.position).normalize(); _z.copy(D.orbit.n); _y.crossVectors(_z, _x);
+    D.group.quaternion.setFromRotationMatrix(_m.makeBasis(_x, _y, _z));
+  }
+
   update(t, sunM, cam = null, camera = null, viewH = 1080) {
     if (sunM) this._sun.copy(sunM);
-    // --- Yard ---
-    orbitPos(this.yard.orbit, t, 0, this.yard.group.position);
-    // --- Wheel ---
+    this.place(t);
     const W = this.wheel;
-    orbitPos(W.orbit, t, 0, W.group.position);
     const spin = WHEEL.spin * t;
     for (const r of W.rings) r.group.rotation.z = r.sign * spin;
     _qi.copy(W.group.quaternion).invert();
@@ -1107,9 +1121,6 @@ export class LunarOrbitals {
     W.solG.rotation.z = sa - Math.PI / 2;         // local y (the panels' normal) toward the Sun
     // --- Depot: spine along the local vertical, turning with its orbit ---
     const D = this.depot;
-    orbitPos(D.orbit, t, 0, D.group.position);
-    _x.copy(D.group.position).normalize(); _z.copy(D.orbit.n); _y.crossVectors(_z, _x);
-    D.group.quaternion.setFromRotationMatrix(_m.makeBasis(_x, _y, _z));
     _qi.copy(D.group.quaternion).invert();
     _s.copy(this._sun).applyQuaternion(_qi);
     D.solG.rotation.x = Math.atan2(_s.z, _s.y);   // the panels' normal (y) toward the Sun
