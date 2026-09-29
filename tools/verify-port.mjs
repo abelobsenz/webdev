@@ -9,6 +9,10 @@ import { buildFittings } from '../src/space/beltLife.js';
 import { createDressedMaterial, DRESS_GLSL, KM } from '../src/space/craftMesh.js';
 import { shipPose } from '../src/space/fleetTraffic.js';
 import { DESIGNS, design } from '../src/space/shipDesigns.js';
+import { geoBeltTargets } from '../src/space/geoBelt.js';
+import { createPortMaterial, PORT_GLSL, PK, bakeCavity } from '../src/space/portMaterial.js';
+import { buildEmbarkationTerrace } from '../src/space/interfaces.js';
+import { buildConcordYard } from '../src/space/geoRoads.js';
 
 const fail = [];
 const check = (ok, msg) => { if (!ok) fail.push(msg); };
@@ -403,6 +407,109 @@ check(nonFinite === 0, `${nonFinite} non-finite transforms`);
   }
   out.heaviestStation = { name: who, triangles: worst };
   check(worst < 12e6, 'a station over the 12M near budget');
+}
+
+// ------------------------------------------------ wave 3: the port finishes ----
+{
+  // the port shader: spliced once, in order, GLSL ES 3.0 safe
+  const m = createPortMaterial({});
+  const fs = m.fragmentShader, vs = m.vertexShader, body = PORT_GLSL;
+  let depth = 0, pd = 0;
+  for (const ch of body) { if (ch === '{') depth++; if (ch === '}') depth--; if (ch === '(') pd++; if (ch === ')') pd--; check(depth >= 0 && pd >= 0, 'port GLSL: unbalanced'); }
+  check(depth === 0 && pd === 0, 'port GLSL: braces/parens unbalanced');
+  check(!/\bpow\s*\(/.test(body), 'port GLSL: pow() used');
+  check(!/\b(fwidth|dFdx|dFdy|texture)\s*\(/.test(body), 'port GLSL: derivatives or texture reads in the kinds');
+  const ints = body.replace(/\/\/.*$/gm, '').match(/(?<![\w.])\d+(?![\w.])/g) || [];
+  check(ints.length === 0, `port GLSL: integer literals ${ints.slice(0, 5)}`);
+  const iMain = fs.lastIndexOf('void main() {'), iBelt = fs.indexOf('beltKinds(k, f, fw, px, alb, rough, metal, em, bump);'), iPort = fs.indexOf('portKinds(k, f, fw, px, alb, rough, metal, em, bump);');
+  check(fs.indexOf('void portKinds(') > 0 && fs.indexOf('void portKinds(') < iMain, 'port GLSL: portKinds defined before main');
+  check(iPort > iBelt && iBelt > iMain && iPort < fs.indexOf('N = normalize(N + T * bump.x'), 'port GLSL: portKinds called after the belt kinds, before the bump');
+  check((fs.match(/void portKinds\(/g) || []).length === 1 && (fs.match(/varying float vOcc;/g) || []).length === 1, 'port GLSL: spliced once');
+  check(/attribute float aOcc;/.test(vs) && /varying float vOcc;/.test(vs) && /vOcc = aOcc;/.test(vs), 'port vertex shader: aOcc -> vOcc');
+  check(fs.includes('col = col * (1.0 - 0.82 * clamp(vOcc, 0.0, 1.0)) + alb * 0.004 + em;'), 'port GLSL: occlusion darkens the lit terms only');
+  check(Array.isArray(m.defaultAttributeValues.aOcc) && m.defaultAttributeValues.aOcc[0] === 0, 'aOcc default supplied for meshes without it');
+  check(m.userData.dressed && m.uniforms.uLivery && m.uniforms.uLivery2, 'port material keeps the dressed uniforms');
+  const kinds = Object.values(PK);
+  check(Math.min(...kinds) > 26.5 && Math.max(...kinds) < 36.5, 'port kinds collide with the dressed kinds');
+  out.portFragChars = fs.length;
+}
+/** index max < vertex count, finite positions, aOcc (when present) finite in 0..1 and full length. */
+const bufferSane = (geo, name) => {
+  const n = geo.attributes.position.count, P = geo.attributes.position.array;
+  let bad = 0;
+  for (let i = 0; i < P.length; i++) if (!Number.isFinite(P[i])) { bad++; break; }
+  check(!bad, `${name}: non-finite position`);
+  if (geo.index) { let mx = 0; const ix = geo.index.array; for (let i = 0; i < ix.length; i++) if (ix[i] > mx) mx = ix[i]; check(mx < n, `${name}: index ${mx} >= ${n} vertices`); }
+  for (const [k, a] of Object.entries(geo.attributes)) check(a.count >= n, `${name}: attribute ${k} short (${a.count} < ${n})`);
+  const o = geo.attributes.aOcc;
+  if (o) { check(o.count === n, `${name}: aOcc length`); let ok = true; for (const v of o.array) if (!(v >= 0 && v <= 1)) { ok = false; break; } check(ok, `${name}: aOcc outside 0..1`); }
+};
+{
+  // the terrace: port kinds on the deck, paving and rooms; contact shade baked; closed sheets
+  const td = buildEmbarkationTerrace(), g = td.geo;
+  bufferSane(g, 'terrace');
+  check(!!g.attributes.aOcc, 'terrace has no baked occlusion');
+  const f = g.attributes.aFacade.array, o = g.attributes.aOcc.array, P = g.attributes.position.array;
+  const count = {};
+  for (let i = 2; i < f.length; i += 3) { const k = Math.round(f[i]); count[k] = (count[k] || 0) + 1; }
+  for (const k of Object.values(PK)) check(count[k] > 0, `terrace uses no kind ${k}`);
+  // the deck is darkened round the rooms and open in the clear: a vertex on the paving at a
+  // hall's foot is shaded, one mid-forecourt is not
+  let nearHall = 0, open = 1;
+  for (let v = 0; v < o.length; v++) {
+    if (Math.abs(P[v * 3 + 1] - td.floor) > 0.01 || Math.round(f[v * 3 + 2]) !== PK.PAVING) continue;
+    const x = P[v * 3], z = P[v * 3 + 2];
+    if (Math.abs(x + 230) < 3 && Math.abs(z - 31) < 2.5) nearHall = Math.max(nearHall, o[v]);     // at the concourse hall's north plinth
+    if (Math.abs(x + 20) < 3 && Math.abs(z + 190) < 3) open = Math.min(open, o[v]);                // the open forecourt
+  }
+  check(nearHall > 0.3, `terrace paving at a hall's foot not shaded (${nearHall})`);
+  check(open < 0.05, `terrace forecourt shaded (${open})`);
+  let occSum = 0; for (const v of o) occSum += v;
+  out.terrace = { triangles: g.index.count / 3, lamps: td.lamps.length, occMean: +(occSum / o.length).toFixed(3), hallFootOcc: +nearHall.toFixed(2) };
+  check(g.index.count / 3 < 400000, 'terrace over its triangle budget');
+}
+{
+  // Concord Yard: every hull plate one kind (no interpolated kinds across the skin), frames trussed
+  const yd = buildConcordYard(), g = yd.hullGeo, f = g.attributes.aFacade.array, ix = g.index.array;
+  let mixed = 0;
+  for (let t = 0; t < ix.length; t += 3) { const a = f[ix[t] * 3 + 2], b = f[ix[t + 1] * 3 + 2], c = f[ix[t + 2] * 3 + 2]; if (Math.round(a) >= 20 && (Math.round(a) !== Math.round(b) || Math.round(a) !== Math.round(c))) mixed++; }
+  check(mixed === 0, `yard hull: ${mixed} triangles blend dressed kinds`);
+  bufferSane(g, 'yard hull'); bufferSane(yd.dockGeo, 'yard dock'); bufferSane(yd.wheelGeo, 'yard wheel');
+  const t0 = performance.now();
+  bakeCavity(yd.dockGeo, { minCell: 6 }); bakeCavity(g, { minCell: 6 });
+  out.yardBakeMs = +(performance.now() - t0).toFixed(1);
+  bufferSane(yd.dockGeo, 'yard dock (baked)'); bufferSane(g, 'yard hull (baked)');
+  out.yard = { hullTriangles: ix.length / 3, dockTriangles: yd.dockGeo.index.count / 3 };
+  check(yd.dockGeo.index.count / 3 < 600000, 'yard dock over its budget');
+}
+{
+  // belt stations: cavity-shaded, port-dressed, sane buffers; instanced fittings within bounds
+  let stations = 0, inst = 0;
+  for (const st of belt.stations) {
+    const b = st.built;
+    if (!b) continue;
+    stations++;
+    check(b.mesh.material.userData.port, `${st.desc.name}: not drawn with the port material`);
+    bufferSane(b.data.geo, st.desc.name);
+    check(!!b.data.geo.attributes.aOcc, `${st.desc.name}: no cavity shade`);
+    for (const p of b.parts) { bufferSane(p.geo, `${st.desc.name} part`); check(!!p.geo.attributes.aOcc, `${st.desc.name}: part without cavity shade`); }
+    b.mesh.traverse((m) => {
+      if (!m.isInstancedMesh) return;
+      inst++;
+      check(m.count <= m.instanceMatrix.count, `${st.desc.name}: instanced count ${m.count} > ${m.instanceMatrix.count}`);
+      for (const [k, a] of Object.entries(m.geometry.attributes)) if (a.isInstancedBufferAttribute) check(a.count >= m.count, `${st.desc.name}: instanced ${k} short`);
+      if (m.geometry.index) { let mx = 0; for (const v of m.geometry.index.array) if (v > mx) mx = v; check(mx < m.geometry.attributes.position.count, `${st.desc.name}: instanced index out of range`); }
+    });
+  }
+  out.beltShaded = { stations, instancedMeshes: inst };
+  // the belt targets framed at 2 - 3.5 station radii
+  const T = geoBeltTargets({ sim });
+  for (const [key, tg] of Object.entries(T)) {
+    const s = tg.station, d = buildBeltStation(s.kind, s.seed, s.livery);
+    const ratio = tg.defaultDist / (d.radius * KM);
+    check(ratio > 2 && ratio < 3.5, `${key}: framed at ${ratio.toFixed(2)} radii`);
+    out[`${key}Framing`] = +ratio.toFixed(2);
+  }
 }
 console.log(JSON.stringify(out));
 if (fail.length) { console.error('FAIL:\n  ' + fail.join('\n  ')); process.exit(1); }
