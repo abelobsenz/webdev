@@ -4,7 +4,7 @@
 // Run: node tools/verify-lagrange.mjs
 import * as THREE from 'three';
 import { SpaceSim, MOON_DIST } from '../src/space/sim.js';
-import { COL, WINDOW_CENTRES, buildRotor, buildStator, buildAgriRing, buildPairFrame, buildMirror } from '../src/space/lagrangeColony.js';
+import { COL, WINDOW_CENTRES, capTerraces, buildRotor, buildStator, buildAgriRing, buildPairFrame, buildMirror } from '../src/space/lagrangeColony.js';
 import { GATE, buildGateway, buildGatewayWheel } from '../src/space/lagrangeGateway.js';
 import { LagrangeColonies, lagrangePoint } from '../src/space/lagrange.js';
 import { shipPose } from '../src/space/fleetTraffic.js';
@@ -339,6 +339,36 @@ ok(tri.total < 12e6, `rendered at closest: pair ${(tri.pair / 1e3).toFixed(0)}k,
   ok(!/dFdx|dFdy/.test(src), 'no raw derivatives (fwidth only, at the top of main); loops only in the shared noise chunk');
   const fwAt = [...frag.matchAll(/fwidth/g)].length;
   ok(fwAt === 2, 'fwidth used once per shader, in uniform control flow');
+}
+
+// ---- the end caps: a closed stair of terraces, and a sunward face that cannot blow out
+{
+  const st = capTerraces();
+  let mono = true;
+  for (let i = 1; i < st.length; i++) if (!(st[i][0] < st[i - 1][0] && st[i][1] > st[i - 1][1])) mono = false;
+  ok(st.length >= 17 && mono, `cap stair: ${st.length - 1} terraces, radii falling and rising outward monotonically`);
+  ok(st[st.length - 1][1] < COL.CAP && st[st.length - 1][0] > 520, 'the stair meets the hub collar below its bearing face');
+  // mean albedo of the sunward cap as the Sun sees it (projected area x kind's mean albedo):
+  // the old pearl-and-glass cap was ~0.45 over an 8 km disc facing the Sun head-on and bloomed
+  const ALB = { 0: 0.08, 1: 0.72, 2: 0.8, 3: 0.14, 4: 0.08, 7: 0.1, 8: 0.6, 9: 0.6, 10: 0.13, 11: 0.1, 12: 0.15, 13: 0.2, 20: 0.6, 21: 0.66, 22: 0.7, 23: 0.45, 24: 0.38, 25: 0.2, 26: 0.1 };
+  for (const [ri, rot] of rotors.entries()) {
+    const g = rot.geo, p = g.getAttribute('position').array, f = g.getAttribute('aFacade').array, idx = g.index.array;
+    let A = 0, AA = 0, hull = 0;
+    const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3(), n = new THREE.Vector3();
+    for (let t = 0; t < idx.length; t += 3) {
+      const i0 = idx[t], i1 = idx[t + 1], i2 = idx[t + 2];
+      a.fromArray(p, i0 * 3); b.fromArray(p, i1 * 3); c.fromArray(p, i2 * 3);
+      if (Math.min(a.z, b.z, c.z) < COL.HL + 35) continue;
+      n.crossVectors(b.clone().sub(a), c.clone().sub(a));
+      const proj = n.z * 0.5;                // (faces turned to the Sun: the builder winds them to their normals)
+      if (proj <= 0) continue;
+      const k = Math.round(f[i0 * 3 + 2]);
+      if (k === 1) hull += proj;
+      A += proj; AA += proj * (ALB[k] ?? 0.5);
+    }
+    ok(A > 0.8 * Math.PI * (COL.R ** 2), `rotor ${ri}: the sunward cap covers the disc (${(A / 1e6).toFixed(1)} km2 projected)`);
+    ok(AA / A < 0.28 && hull / A < 0.02, `rotor ${ri}: sunward cap mean albedo ${(AA / A).toFixed(2)} (< 0.28), pearl plate ${(100 * hull / A).toFixed(1)}%`);
+  }
 }
 
 console.log(fails ? `LAGRANGE_VERIFY_FAILED (${fails})` : 'LAGRANGE_VERIFY_OK');

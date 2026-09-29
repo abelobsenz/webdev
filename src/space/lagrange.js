@@ -1,6 +1,5 @@
 import * as THREE from 'three';
-import { createCraftMaterial } from '../craft/craftMaterial.js';
-import { craftMesh, addLamps, KM } from './craftMesh.js';
+import { craftMesh, addLamps, KM, createDressedMaterial } from './craftMesh.js';
 import { LAMP, createLamps } from './lamps.js';
 import { DynLamps, smooth, instancedPart, spanMatrix } from './lifeKit.js';
 import { CB, CK } from '../craft/craftGeometry.js';
@@ -228,7 +227,9 @@ export class LagrangeColonies {
     group.add(m);
     // fill kept low: the land strips lie along the sunlight (the axis is on the Sun), so the hull is
     // lit only by the Earth and Moon and the windows' daylight must read brighter than it
-    const mat = createCraftMaterial({ accent: name === 'L4' ? [0.55, 0.9, 1.0] : [1.0, 0.78, 0.45], lit: 0.5, fill: 0.05, flood: 1 });
+    // dressed: regolith plate, painted bands and marks, lit ports, gold foil tanks (see lagrangeColony.js)
+    const mat = createDressedMaterial({ accent: name === 'L4' ? [0.55, 0.9, 1.0] : [1.0, 0.78, 0.45], lit: 0.5, fill: 0.05, flood: 1,
+      livery: name === 'L4' ? [0.56, 0.58, 0.6] : [0.62, 0.58, 0.52], livery2: name === 'L4' ? [0.16, 0.34, 0.56] : [0.78, 0.5, 0.16] });
     const winMat = createWindowMaterial(seed);
     const frame = craftMesh(pt.frame.geo, { scale: 1 }, mat);
     m.add(frame);
@@ -335,7 +336,7 @@ export class LagrangeColonies {
     const m = new THREE.Group();
     m.scale.setScalar(KM);
     group.add(m);
-    const mat = createCraftMaterial({ accent: [1.0, 0.8, 0.5], lit: 0.65, fill: 0.03, flood: 1 });
+    const mat = createDressedMaterial({ accent: [1.0, 0.8, 0.5], lit: 0.65, fill: 0.03, flood: 1, livery: [0.66, 0.64, 0.6], livery2: [0.56, 0.2, 0.14] });
     const hull = craftMesh(pt.gate.geo, { scale: 1 }, mat);
     m.add(hull);
     addLamps(hull, pt.gate.lamps, { minPx: 1.2 });
