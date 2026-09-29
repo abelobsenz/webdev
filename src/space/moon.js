@@ -17,6 +17,7 @@ import { buildMediiWorks } from './lunarWorks.js';
 import { LunarOutposts } from './lunarOutposts.js';
 import { LunarHops } from './lunarHops.js';
 import { LunarRingTrains } from './lunarRing.js';
+import { LunarOrbitals } from './lunarOrbitals.js';
 
 // The terraformed Moon: seas in the old maria, green highlands softened craters,
 // polar ice, clouds, city lights, a thin blue atmosphere and an equatorial ring.
@@ -214,6 +215,7 @@ export function buildBand(R, w, segs) {
 const _lp = new THREE.Vector3();
 const _lq = new THREE.Quaternion();
 const _sunSite = new THREE.Vector3();
+const _sunM = new THREE.Vector3();
 
 export class Moon {
   constructor(space) {
@@ -320,6 +322,7 @@ export class Moon {
     this.outposts = new LunarOutposts(this.group);
     this.ringTrains = new LunarRingTrains(this.group);   // expresses on the ring's transit rails (lunarRing.js)
     this.hops = new LunarHops(this.group);           // hoppers between Medii and the outposts (lunarHops.js)
+    this.orbitals = new LunarOrbitals(this.group);    // Selene Wheel, Aitken Depot, relays and ferries in lunar orbit (lunarOrbitals.js)
   }
 
   /** Build Medii Works and the Landing's traffic now (normally done on approach). */
@@ -404,6 +407,8 @@ export class Moon {
       this.outposts.update(realTime, cam, this.space.camera, this.space.size.y);
       this.hops.update(realTime);
       this.ringTrains.update(realTime, cam);
+      _sunM.copy(sim.sunDir).applyQuaternion(_lq.copy(sim.moonQuat).invert());
+      this.orbitals.update(realTime, _sunM, cam, this.space.camera, this.space.size.y);
     }
     this.atmoU.uCenter.value.copy(sim.moonPos);
     // the air shell is seen from within below 229 km: draw its inner face then (the sky over the
