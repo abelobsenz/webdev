@@ -146,8 +146,8 @@ TARGET_INFO.lunarFields = {
 TARGET_ORDER.push('mediiWorks', 'lunarFields');
 
 // The Moon's orbital stations (src/space/lunarOrbitals.js)
-TARGET_INFO.seleneWheel = {
-  key:'',name:'Selene Wheel',district:'The Moon · low lunar orbit, 110 km',
+TARGET_INFO.endymionWheel = {
+  key:'',name:'Endymion Wheel',district:'The Moon · low lunar orbit, 110 km',
   lore:'The Moon\'s orbital town, circling every two hours below the ring. Two habitat rings a kilometre across turn in opposite directions once every 43 seconds, a full Earth gravity on their floors, twelve decks of lit windows under glazed roofs over parkland; lift cars run the spokes to the despun hub, where the ferries from the surface berth at the docking arms. Its radiators turn edge-on to the Sun, its arrays face it.',
   facts:[['Orbit','110 km, 119 min'],['Rings','2 x 964 m, 1 g'],['Spin','43 s a turn']],
 };
@@ -156,4 +156,4 @@ TARGET_INFO.aitkenDepot = {
   lore:'A kilometre of truss hanging plumb over the Moon, gravity-gradient steady, with gold-foiled clusters of propellant tanks along it and the crew hangar at its outer end. Tankers lie alongside while the robot arm swings hoses between them; from here the far-side and polar settlements are refuelled.',
   facts:[['Orbit','polar, 293 km'],['Tanks','12'],['Spine','1.04 km']],
 };
-TARGET_ORDER.push('seleneWheel', 'aitkenDepot');
+TARGET_ORDER.push('endymionWheel', 'aitkenDepot');

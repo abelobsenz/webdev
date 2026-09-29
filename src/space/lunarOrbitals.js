@@ -10,7 +10,7 @@ import { R_MOON } from './sim.js';
 // (GM 4902.8 km^3/s^2), each station-kept in a plane that never crosses the Lift's tether or
 // the Exchange, at a height that never meets the ring.
 //
-//   Selene Wheel   110 km up, 32 degrees inclined: the Moon's orbital town. Two counter-
+//   Endymion Wheel   110 km up, 32 degrees inclined: the Moon's orbital town. Two counter-
 //                  rotating habitat rings 964 m across (1 g on the floor at 0.146 rad/s, one
 //                  turn in 43 s, their spins cancelling), each twelve decks of lit windows
 //                  under a glazed roof over parkland, on spokes with lift cars running them; a
@@ -115,7 +115,7 @@ function dockArm(B, a, z, r0, r1, lamps) {
   lamps.push({ p: V(c * (r1 - 2), s * (r1 - 2), z + 6), r: 2.4, color: LAMP.WHITE, i: 1.6, breathe: 0.6 });
 }
 
-// --------------------------------------------------------------------- Selene Wheel --
+// --------------------------------------------------------------------- Endymion Wheel --
 
 export const WHEEL = { Ri: 436, Ro: 482, hz: 26, ringZ: 96, spokes: 6, hubR: 44, hubL: 345, spin: Math.sqrt(9.81 / 482) };
 
@@ -422,12 +422,12 @@ export class LunarOrbitals {
     // --- the Wheel ---
     {
       const g = new THREE.Group();
-      g.name = 'Selene Wheel';
+      g.name = 'Endymion Wheel';
       const o = ORBITS.wheel;
       g.quaternion.setFromRotationMatrix(_m.makeBasis(o.u, o.v, o.n));
       const hub = buildWheelHub();
       const hubMesh = lunarMesh(hub.geo, {}, this.mat);
-      hubMesh.name = 'Selene Wheel hub, docking arms and masts';
+      hubMesh.name = 'Endymion Wheel hub, docking arms and masts';
       addLamps(hubMesh, hub.lamps, { minPx: 1.1 });
       g.add(hubMesh);
       const ringData = buildWheelRing(1);
@@ -436,7 +436,7 @@ export class LunarOrbitals {
         const rg = new THREE.Group();
         rg.position.z = s * WHEEL.ringZ * 1e-3;
         const rm = lunarMesh(ringData.geo, {}, this.mat);
-        rm.name = `Selene Wheel ${s > 0 ? 'north' : 'south'} ring`;
+        rm.name = `Endymion Wheel ${s > 0 ? 'north' : 'south'} ring`;
         addLamps(rm, ringData.lamps, { minPx: 1.0 });
         rg.add(rm);
         g.add(rg);
@@ -452,7 +452,7 @@ export class LunarOrbitals {
       for (const r of rings) {
         r.cars = lunarInstanced(carGeo, WHEEL.spokes * 2, {}, this.mat);
         r.cars.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-        r.cars.name = 'Selene Wheel spoke lift cars';
+        r.cars.name = 'Endymion Wheel spoke lift cars';
         r.group.add(r.cars);
       }
       // radiators turned edge-on to the Sun, solar arrays turned to face it
@@ -475,7 +475,7 @@ export class LunarOrbitals {
         docked.setMatrixAt(i, _m);
         docked.instanceColor.setXYZ(i, ...[[0.86, 0.3, 0.16], [0.18, 0.34, 0.62], [0.9, 0.84, 0.7]][i]);
       });
-      docked.name = 'Selene Wheel berthed ferries';
+      docked.name = 'Endymion Wheel berthed ferries';
       g.add(docked);
       g.visible = false;
       parent.add(g);

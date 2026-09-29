@@ -322,7 +322,7 @@ export class Moon {
     this.outposts = new LunarOutposts(this.group);
     this.ringTrains = new LunarRingTrains(this.group);   // expresses on the ring's transit rails (lunarRing.js)
     this.hops = new LunarHops(this.group);           // hoppers between Medii and the outposts (lunarHops.js)
-    this.orbitals = new LunarOrbitals(this.group);    // Selene Wheel, Aitken Depot, relays and ferries in lunar orbit (lunarOrbitals.js)
+    this.orbitals = new LunarOrbitals(this.group);    // Endymion Wheel, Aitken Depot, relays and ferries in lunar orbit (lunarOrbitals.js)
   }
 
   /** Build Medii Works and the Landing's traffic now (normally done on approach). */
