@@ -56,7 +56,12 @@ vec3 sk_starColor(float t, float bright) {
   return sk_pal(mix(xf, xb, bright));
 }
 
-vec3 sk_starLayer(vec3 d, float scale, float density, float bright, float px, float crowd) {
+// One layer of the faint crowd: stars between magnitudes m0 and m1, drawn from the counts of the
+// real sky (the number brighter than m grows about threefold per magnitude, N ~ 10^(0.5 m)); the
+// stars brighter than ~3.5 are the catalogue's (skyStars.js), so the constellations are the true
+// ones. The drawn energy follows Pogson's scale with the same zero point as the catalogue's
+// sprites: a magnitude 1 star integrates to ~2.9.
+vec3 sk_starLayer(vec3 d, float scale, float density, float m0, float m1, float px, float crowd) {
   vec3 p = d * scale;
   vec3 cell = floor(p);
   vec3 h = hash33(cell);
@@ -66,10 +71,13 @@ vec3 sk_starLayer(vec3 d, float scale, float density, float bright, float px, fl
   float c = clamp(dot(sd, d), -1.0, 1.0);
   float ang2 = 2.0 * (1.0 - c);
   float sigma = max(px * 0.55, 0.00008);
-  float mag = pow(h.y, 7.0);
+  // inverse of the cumulative count between m0 and m1
+  float a0 = exp2(1.660964 * m0), a1 = exp2(1.660964 * m1);
+  float m = 0.602060 * log2(a0 + h.y * (a1 - a0));
+  float amp = 0.35 * exp2(-1.328771 * (m - 1.0));
   float core = exp(-ang2 / (2.0 * sigma * sigma)) * (px * px) / (sigma * sigma) * 1.3;
-  vec3 col = sk_starColor(h.z, smoothstep(0.02, 0.4, mag * bright));
-  return col * core * (0.006 + 0.35 * mag) * bright;
+  vec3 col = sk_starColor(h.z, smoothstep(5.8, 3.5, m));
+  return col * core * amp;
 }
 
 // Milky Way surface brightness in galactic coordinates (l, b radians), linear, ~1 in the band
@@ -269,10 +277,10 @@ vec3 sk_background(vec3 d, float px) {
   float gcos = dot(c, SK_GC);
   float crowd = 0.45 + 1.3 * exp(-gz * gz / 0.04) + 1.2 * exp(-(gz * gz + pow(1.0 - gcos, 2.0) * 4.0) / 0.05);
   vec3 col = vec3(0.0);
-  col += sk_starLayer(c, 170.0, 0.012, 1.0, px, 1.0);
-  col += sk_starLayer(c, 380.0, 0.005, 0.3, px, crowd * 0.8);
-  col += sk_starLayer(c, 800.0, 0.003, 0.12, px, crowd);
-  col += sk_starLayer(c, 1500.0, 0.0022, 0.05, px, crowd * 1.3) * (1.0 - smoothstep(0.0012, 0.003, px));
+  col += sk_starLayer(c, 170.0, 0.0032, 3.5, 5.0, px, 0.6 + 0.4 * crowd);
+  col += sk_starLayer(c, 380.0, 0.0024, 4.6, 6.0, px, crowd * 0.8);
+  col += sk_starLayer(c, 800.0, 0.003, 5.6, 7.0, px, crowd);
+  col += sk_starLayer(c, 1500.0, 0.0022, 6.6, 8.0, px, crowd * 1.3) * (1.0 - smoothstep(0.0012, 0.003, px));
   col += sk_milkyWay(c, px) * 0.025;
   col += sk_extragalactic(c, px) * 0.04;
   col += sk_planets(d, px);

@@ -12,6 +12,7 @@ import { Earth, R_TOP } from './earth.js';
 import { createSpaceSky, SKY_UNIFORMS } from './sky.js';
 import { SkyLife } from './skyStars.js';
 import { Aurora } from './aurora.js';
+import { Meteors } from './meteors.js';
 import { OrbitRig } from './controls.js';
 import { spaceQuality } from './quality.js';
 import { SpaceHud } from './hud.js';
@@ -263,6 +264,8 @@ export class SpaceMode {
     this.modules.push(this.skyLife);
     this.aurora = new Aurora(this, q);
     this.modules.push(this.aurora);
+    this.meteors = new Meteors(this);
+    this.modules.push(this.meteors);
     for (const b of this.bodies) if (!b.local) b.remote = true;
     // post: crossfade helper
     this.fadeRT = new THREE.WebGLRenderTarget(1, 1, { type: THREE.UnsignedByteType, depthBuffer: false });

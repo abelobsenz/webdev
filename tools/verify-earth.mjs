@@ -13,6 +13,7 @@ const { createSpaceSky, SKY_UNIFORMS } = await import('../src/space/sky.js');
 const { SkyLife, starEnergy } = await import('../src/space/skyStars.js');
 const { Aurora, H_TOP_MAX, H_BOTTOM } = await import('../src/space/aurora.js');
 const { Earth } = await import('../src/space/earth.js');
+const { Meteors, H_START, H_END_MIN, MET_SLOTS } = await import('../src/space/meteors.js');
 const earthDetail = await import('../src/space/earthDetail.js').catch(() => null);
 
 let fails = 0;
@@ -159,6 +160,43 @@ ok(space.bodies.some((b) => b.name === 'aurora'), 'aurora body registered');
   }
 }
 
+let metMat = null;
+// ---- meteors -----------------------------------------------------------------------------------
+{
+  const met = new Meteors(space, { rate: 40 });
+  metMat = met.material;
+  ok(space.bodies.some((b) => b.name === 'meteors'), 'meteors body registered');
+  // a camera in low orbit over the night side
+  const night = sim.sunDir.clone().negate();
+  const perp = new THREE.Vector3(0, 1, 0).cross(night).normalize();
+  space.camera.position.copy(night).multiplyScalar(R_EARTH + 420).addScaledVector(perp, 900);
+  let worst = 0, live = 0, maxLive = 0, bad = 0;
+  const P = met.posAttr.array, I = met.iAttr.array;
+  for (let f = 0; f < 1200; f++) {
+    const ta2 = performance.now();
+    met.update(sim, f / 60, 1 / 60, space);
+    worst = Math.max(worst, performance.now() - ta2);
+    live = 0;
+    for (let i = 0; i < MET_SLOTS; i++) {
+      if (!met.slots[i].live) continue;
+      live++;
+      for (const k of [i * 6, i * 6 + 3]) {
+        const r = Math.hypot(P[k], P[k + 1], P[k + 2]) - R_EARTH;
+        if (!(r > H_END_MIN - 1 && r < H_START + 1)) bad++;
+        const dn = (P[k] * sim.sunDir.x + P[k + 1] * sim.sunDir.y + P[k + 2] * sim.sunDir.z) / (r + R_EARTH);
+        if (dn > -0.1) bad++;
+      }
+      if (!(I[i * 2] >= 0 && Number.isFinite(I[i * 2]))) bad++;
+    }
+    maxLive = Math.max(maxLive, live);
+  }
+  ok(bad === 0, `meteor paths within 72-115 km on the night side (${bad} bad)`);
+  ok(met.spawned > 300, `meteors spawned ${met.spawned}`);
+  ok(maxLive < MET_SLOTS, 'meteor slots never exhausted');
+  ok(worst < 1.0, `meteor update worst ${worst.toFixed(3)} ms`);
+  space.camera.position.set(0, 0, 20000);
+}
+
 // ---- Earth ------------------------------------------------------------------------------------
 const tex = () => ({ texture: new THREE.Texture() });
 const fakeBake = { surfA: tex(), surfB: tex(), clouds: { ...tex(), width: 1024 }, lights: tex(), ready: true };
@@ -177,7 +215,7 @@ ok(earthBuild < 150, `earth build ${earthBuild.toFixed(1)} ms`);
 const BUILTIN_UNIFORMS = new Set(['modelMatrix', 'viewMatrix', 'projectionMatrix', 'modelViewMatrix', 'normalMatrix', 'cameraPosition', 'isOrthographic']);
 const GLSL_FUNCS = new Set(('radians degrees sin cos tan asin acos atan sinh cosh tanh pow exp log exp2 log2 sqrt inversesqrt abs sign floor trunc round roundEven ceil fract mod modf min max clamp mix step smoothstep isnan isinf length distance dot cross normalize faceforward reflect refract matrixCompMult outerProduct transpose determinant inverse lessThan lessThanEqual greaterThan greaterThanEqual equal notEqual any all not texture textureLod textureGrad texelFetch textureSize dFdx dFdy fwidth floatBitsToInt intBitsToFloat packHalf2x16 unpackHalf2x16 ' +
   'float int uint bool vec2 vec3 vec4 ivec2 ivec3 ivec4 uvec2 uvec3 uvec4 bvec2 bvec3 bvec4 mat2 mat3 mat4 if for while return switch texture2D textureCube').split(/\s+/));
-const STRICT_POW = new Set(['stars', 'aurora-arcs', 'aurora-oval']);
+const STRICT_POW = new Set(['stars', 'aurora-arcs', 'aurora-oval', 'meteors']);
 function stripComments(s) { return s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, ''); }
 function lint(name, mat) {
   const vs = stripComments(mat.vertexShader), fs = stripComments(mat.fragmentShader);
@@ -219,6 +257,7 @@ lint('stars', skyStars.material);
 lint('aurora-arcs', aurora.arcMat);
 lint('aurora-oval', aurora.ovalMat);
 lint('earth', earth.material);
+lint('meteors', metMat);
 {
   const { EarthBake } = await import('../src/space/earthBake.js');
   const tb = performance.now();
