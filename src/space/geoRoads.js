@@ -11,7 +11,7 @@ import { StoreWorks } from './storeWorks.js';
 import { WaterRun } from './waterRun.js';
 import { DynLamps } from './lifeKit.js';
 import { HS } from './harbour.js';
-import { quadLoft, smoothRange, createPortMaterial, bakeCavity, stamp } from './portMaterial.js';
+import { quadLoft, smoothRange, createPortMaterial, bakeCavity, stamp, PK } from './portMaterial.js';
 
 // THE GEOSTATIONARY ROADS: the Harbour's neighbourhood along the geostationary arc.
 //
@@ -396,6 +396,17 @@ export function buildWaterStore() {
       storeSide.tube([at(a0, m / SP + 0.005, dy), at(a1, (m + 1) / SP - 0.005, dy)], 1.3, 6, DK.GRIME);
     }
     for (let m = 1; m < SP; m++) for (const a of [SA, SA + SD]) storeSide.tube([at(a, m / SP, -SY), at(a, m / SP, SY)], 1, 6, DK.GRIME);
+    // knee plates boxing the truss in at each corner of the side, and a teal-banded name panel
+    // at its middle: the ring frames read as solid octagons broken by open lacing
+    const mid = SA + SD / 2, nrm = V(Math.cos(Math.PI / 4), 0, Math.sin(Math.PI / 4));
+    const dir = sc(1, mid, 0).sub(sc(0, mid, 0)), sideLen = dir.length();
+    dir.normalize();
+    for (const [u0, u1, k] of [[0.02, 1.3 / SP, DK.GRIME], [1 - 1.3 / SP, 0.98, DK.GRIME], [3.2 / SP, 4.8 / SP, DK.LIVERY]]) {
+      const c = sc(0, mid, 0).lerp(sc(1, mid, 0), (u0 + u1) / 2);
+      storeSide.push(new THREE.Matrix4().makeBasis(dir, V(0, 1, 0), nrm).setPosition(c));
+      storeSide.box(0, 0, 0, sideLen * (u1 - u0), 2 * SY - 1.6, SD - 3, k);
+      storeSide.pop();
+    }
   }
   for (const y of F) {
     for (const a of [SA, SA + SD]) for (const dy of [-SY, SY]) {
@@ -439,10 +450,32 @@ export function buildWaterStore() {
   B.push(new THREE.Matrix4().makeTranslation(0, yw, 0).multiply(TO_Y));
   lathe(B, [[262, -45, CK.BRONZE], [306, -40, CK.HULL], [306, 40, CK.GLASS], [262, 45, CK.BRONZE]], 48, 0, { closedProfile: true });
   B.pop();
-  B.push(new THREE.Matrix4().makeTranslation(0, yw, 0).multiply(new THREE.Matrix4().makeRotationX(Math.PI / 2)));
-  B.torus(STORE.wheelR, 30, 96, 12, CK.GLASS);
-  B.torus(STORE.wheelR + 30, 5, 96, 6, CK.BRONZE);
-  B.pop();
+  // the wheel's rim a habitat section, not a glass tube: livery floor plate outward, ported walls,
+  // glazed shoulders, the lit concourse roof toward the tether, a bronze belt and eight pressure
+  // bulkheads (the 30 m glass torus read as a thin pale hoop at the store's framing)
+  {
+    const R = STORE.wheelR;
+    B.push(new THREE.Matrix4().makeTranslation(0, yw, 0).multiply(TO_Y));
+    lathe(B, [[R + 36, -40, DK.PORTS], [R + 36, 40, DK.LIVERY], [R + 12, 40, DK.PORTS], [R - 34, 24, CK.GLASS], [R - 34, -24, DK.CONCOURSE], [R + 12, -40, CK.GLASS]], 128, 0, { closedProfile: true });
+    B.pop();
+    B.push(new THREE.Matrix4().makeTranslation(0, yw, 0).multiply(new THREE.Matrix4().makeRotationX(Math.PI / 2)));
+    B.torus(R + 38, 4.5, 128, 6, CK.BRONZE);
+    B.pop();
+    for (let k = 0; k < 8; k++) {
+      const a = ((k + 0.5) / 8) * TAU;
+      B.at(Math.cos(a) * R, yw, Math.sin(a) * R, 0, -a, 0);
+      B.box(0, 0, 0, 78, 86, 10, DK.GRIME);
+      B.pop();
+    }
+  }
+  // the tank galleries: an octagonal box girder round the cage under every tank ring, its outer
+  // face a lit gallery, a zinc walk on top, standing between the longerons and the tanks (clear
+  // of the saddles above it, the mains and the drones' orbits higher still)
+  for (const y of STORE.rings) {
+    B.push(new THREE.Matrix4().makeTranslation(0, y, 0).multiply(TO_Y));
+    lathe(B, [[312, -36, DK.GRIME], [340, -36, DK.GRIME], [340, -16, DK.CONCOURSE], [312, -16, PK.ROOF]], 8, Math.PI / 8, { closedProfile: true });
+    B.pop();
+  }
   for (let k = 0; k < 6; k++) {
     const a = (k / 6) * TAU + Math.PI / 6, d = V(Math.cos(a), 0, Math.sin(a));
     B.tube([d.clone().multiplyScalar(300).setY(yw), d.clone().multiplyScalar(STORE.wheelR - 24).setY(yw)], 10, 8, CK.HULL);
