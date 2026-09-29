@@ -350,18 +350,20 @@ export class Aurora {
   }
 
   /** Substorm cycle (~7 min real time): growth, a quick onset, the surge westward, recovery. */
-  static activity(t) {
+  static activity(t, out = { act: 0, surge: 0 }) {
     const P = 420, x = ((t % P) + P) % P / P;
     const onset = 0.55;
-    if (x < onset) return { act: 0.25 + 0.2 * (x / onset), surge: 0 };
+    if (x < onset) { out.act = 0.25 + 0.2 * (x / onset); out.surge = 0; return out; }
     const y = (x - onset) / (1 - onset);
-    return { act: 0.45 + 0.55 * Math.exp(-y * 3.0) * Math.min(1, y * 25), surge: -2.2 * Math.sqrt(y) };
+    out.act = 0.45 + 0.55 * Math.exp(-y * 3.0) * Math.min(1, y * 25);
+    out.surge = -2.2 * Math.sqrt(y);
+    return out;
   }
 
   update(sim, realTime, dt, space) {
     const u = this.uniforms;
     u.uTime.value = realTime;
-    const a = Aurora.activity(realTime);
+    const a = Aurora.activity(realTime, this._act || (this._act = { act: 0, surge: 0 }));
     u.uActivity.value = a.act;
     u.uSurge.value = a.surge;
     u.uSunDir.value.copy(sim.sunDir);

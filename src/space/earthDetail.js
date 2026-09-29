@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { SEA_LANES, ARCOLOGIES } from './earthData.js';
 import { bodyDir } from './sim.js';
+import { MAG_POLE_LAT, MAG_POLE_LON } from './aurora.js';
 
 // Detail the orbital Earth draws on top of its bakes, each scale resolved only while it spans a
 // few pixels and otherwise replaced by its mean (so nothing sparkles as the planet turns):
@@ -95,6 +96,9 @@ uniform float uShipWrap;
 uniform vec4 uArco[${ARCOLOGIES.length}];
 uniform vec4 uArcoK[${ARCOLOGIES.length}];
 uniform float uNlcGain;
+uniform float uAuroraAct;
+const vec3 MAG_POLE = vec3(${bodyDir(MAG_POLE_LAT, MAG_POLE_LON, new THREE.Vector3()).toArray().map((v) => v.toFixed(5)).join(', ')});
+const vec3 KILAUEA = vec3(${bodyDir(19.41 * D2R, -155.28 * D2R, new THREE.Vector3()).toArray().map((v) => v.toFixed(6)).join(', ')});
 const float SHIP_V = ${SHIP_V.toFixed(4)};
 const float SHIP_SP = ${SHIP_SPACING.toFixed(1)};
 
@@ -287,6 +291,62 @@ vec4 od_arcology(vec3 b, float fp, out vec3 night) {
     day = mix(day, vec4(alb, 1.0), cov);
   }
   return day;
+}
+
+// City districts switch their lights on at their own moment of dusk (each ~9 km district its own
+// threshold), so the terminator crossing a resolved city is a ragged wave of lights, not a line.
+float od_switchOn(vec3 b, float mu, float fp) {
+  float lat = asin(clamp(b.y, -1.0, 1.0));
+  float lon = atan(-b.z, b.x);
+  vec2 q = vec2(lon * cos(lat), lat) * (6371.0 / 9.0);
+  float h = hash12(floor(q) + 71.0);
+  float off = (h - 0.5) * 0.07 * (1.0 - smoothstep(4.0, 12.0, fp));
+  return 1.0 - smoothstep(-0.12 + off, 0.05 + off, mu);
+}
+
+// The aurora's light on the cloud tops and snow beneath the ovals (sB: the Sun in the body
+// frame); the same oval as aurora.js: 18 deg from the magnetic pole, 5 deg further at midnight.
+float od_auroraGround(vec3 b, vec3 sB) {
+  float g = 0.0;
+  for (int k = 0; k < 2; k++) {
+    vec3 z = MAG_POLE * (k == 0 ? 1.0 : -1.0);
+    float cz = dot(b, z);
+    if (cz < 0.75) continue;
+    float th = acos(clamp(cz, -1.0, 1.0));
+    vec3 xm = normalize(-sB + z * dot(sB, z) + 1e-5);
+    vec3 ym = cross(z, xm);
+    float phi = atan(dot(b, ym), dot(b, xm));
+    float zz = (th - (0.314 + 0.087 * cos(phi) + 0.02)) / 0.045;
+    g += exp(-zz * zz) * (0.35 + 0.65 * exp(-phi * phi / 1.2));
+  }
+  return g * (0.3 + 0.7 * uAuroraAct);
+}
+
+// Kilauea, Meridian's volcanic neighbour: a lava lake and a flow channel to the sea glowing at
+// night, the sulphurous haze (vog) trailing downwind by day. day: (tint rgb, amount).
+vec4 od_volcano(vec3 b, float fp, out vec3 night) {
+  night = vec3(0.0);
+  vec3 dv = b - KILAUEA;
+  float dk = length(dv) * 6371.0;
+  if (dk > 260.0) return vec4(0.0);
+  vec3 e = normalize(cross(vec3(0.0, 1.0, 0.0), KILAUEA));
+  vec3 nn = cross(KILAUEA, e);
+  vec2 P = vec2(dot(dv, e), dot(dv, nn)) * 6371.0;
+  vec3 lava = vec3(1.0, 0.32, 0.06);
+  night += lava * od_blob(P.x, P.y, 0.6, 0.45, fp) * 60.0;
+  // the flow: a channel of crusted lava breaking out in glowing tongues down to the coast (SE)
+  vec2 a = vec2(0.0), bb = vec2(9.0, -14.0);
+  vec2 ab = bb - a;
+  float t = clamp(dot(P - a, ab) / dot(ab, ab), 0.0, 1.0);
+  float dl = length(P - a - ab * t);
+  float tongues = 0.5 + 0.5 * sin(t * 40.0 + 3.0 * snoise(vec3(P * 0.4, 1.0)));
+  night += lava * od_line(dl, 0.12, fp) * (0.4 + 0.6 * tongues) * 6.0 * (0.4 + 0.6 * t);
+  // vog: blown south-west by the trades, widening and thinning
+  vec2 w = normalize(vec2(-0.7, -0.7));
+  float x = dot(P, w), y = w.x * P.y - w.y * P.x;
+  float yw = y / (4.0 + 0.3 * max(x, 0.0));
+  float vog = exp(-yw * yw) * smoothstep(-2.0, 4.0, x) * exp(-max(x, 0.0) / 120.0) * (0.6 + 0.4 * snoise(vec3(P * 0.05, 7.0)));
+  return vec4(0.34, 0.35, 0.36, clamp(vog, 0.0, 1.0) * 0.35);
 }
 
 // Noctilucent clouds (added in front of the planet and its limb).

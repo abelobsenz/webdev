@@ -178,3 +178,13 @@ export const RIVERS = [
   [69.4, -134.5, 0.35],       // Mackenzie
   [67.0, 72.5, 0.4],          // Ob
 ];
+
+// Islands that shed von Karman vortex streets into the marine cloud decks downwind:
+// [lat, lon, radius km, azimuth the wind blows toward (deg from north)]
+export const VORTEX_ISLES = [
+  [29.0, -118.3, 14, 160],    // Guadalupe, in the California deck
+  [28.3, -16.6, 22, 215],     // Tenerife, in the Canaries trades
+  [-33.6, -78.8, 9, 5],       // Juan Fernandez, in the Peru deck
+  [32.7, -17.0, 16, 200],     // Madeira
+  [71.0, -8.4, 18, 235],      // Jan Mayen
+];

@@ -3,13 +3,13 @@ import { FullscreenPass, FS_VERT } from '../core/fullscreen.js';
 import { SNOISE_GLSL } from './glsl.js';
 import { NOISE_GLSL } from '../shaders/noise.glsl.js';
 import { LAND_MASK_PNG } from './landmask.js';
-import { CITIES, RANGES, DESERTS, HALO_PORTS, WILDS, FISHING, RIVERS } from './earthData.js';
+import { CITIES, RANGES, DESERTS, HALO_PORTS, WILDS, FISHING, RIVERS, VORTEX_ISLES } from './earthData.js';
 import { LANE_BAKE_GLSL, buildLaneTexture } from './earthDetail.js';
 import { bodyDir } from './sim.js';
 
 // GPU bake of the planet's surface and weather into cube maps (body frame).
 //   surfA: rgb = sqrt(albedo), a = height (0.5 = sea level)
-//   surfB: r = night-light density, g = ice, b = aridity, a = shallow shelf
+//   surfB: r = mineral dust optical depth / 1.2, g = ice, b = aridity, a = shallow shelf
 //   clouds (half float): r = cloud potential, g = stratiform share, b = open cells, a = cirrus
 
 const D2R = Math.PI / 180;
@@ -31,6 +31,7 @@ uniform vec4 uWild[10];
 uniform vec4 uSc[5];
 uniform float uTexelKm;
 uniform vec4 uFish[5];
+uniform vec4 uIsles[${VORTEX_ISLES.length}];
 uniform vec4 uRivers[${RIVERS.length}];
 varying vec2 vUv;
 ${NOISE_GLSL}
@@ -75,6 +76,51 @@ vec3 rotAround(vec3 p, vec3 axis, float a) {
 // warm-front shield, hooked head, dry slot) with open cells in the cold air behind them,
 // tropical cyclones (eye, eyewall, central dense overcast, broken rainbands, ice canopy), polar
 // stratus, and cirrus streaming along the jets.
+// Von Karman vortex streets: a mountainous island in a shallow marine deck under an inversion
+// sheds eddies alternately from either flank, and they march downwind in two staggered rows,
+// each a clear-hearted spiral in the cloud, ~5 island diameters apart, growing as they go.
+const float ISLE_AZ[${VORTEX_ISLES.length}] = float[${VORTEX_ISLES.length}](${VORTEX_ISLES.map((v) => (v[3] * Math.PI / 180).toFixed(4)).join(', ')});
+float vortexStreets(vec3 d) {
+  float dp = 0.0;
+  for (int i = 0; i < ${VORTEX_ISLES.length}; i++) {
+    vec3 c = uIsles[i].xyz;
+    float R = uIsles[i].w;
+    vec3 dv = d - c;
+    float dk = length(dv) * 6371.0;
+    if (dk > R * 70.0) continue;
+    vec3 e = normalize(cross(vec3(0.0, 1.0, 0.0), c));
+    vec3 nn = cross(c, e);
+    vec2 P2 = vec2(dot(dv, e), dot(dv, nn)) * 6371.0;
+    float az = ISLE_AZ[i];
+    vec2 w = vec2(sin(az), cos(az));
+    float x = dot(P2, w), y = w.x * P2.y - w.y * P2.x;
+    if (x < -R * 2.0) continue;
+    float a = 9.0 * R;                                   // spacing along the street
+    float fade = exp(-max(x, 0.0) / (a * 6.0));
+    // the lee: clear just behind the island, the rows of eddies beyond
+    float yl = y / (R * 1.1 + 0.08 * max(x, 0.0));
+    float lee = exp(-yl * yl) * exp(-max(x, 0.0) / (R * 5.0)) * step(0.0, x);
+    dp -= 0.22 * lee;
+    for (int k = 0; k < 7; k++) {
+      float fk = float(k);
+      float side = mod(fk, 2.0) < 0.5 ? 1.0 : -1.0;
+      vec2 vc = vec2(R * 2.5 + (fk + 0.5 * (1.0 - side) * 0.5) * a, side * (0.55 * R + 0.06 * fk * R));
+      vec2 q = vec2(x, y) - vc;
+      float rv = R * (0.9 + 0.22 * fk);
+      float r = length(q);
+      if (r > rv * 3.0) continue;
+      float th = atan(q.y, q.x) * side;
+      // a spiral arm of cloud round a clear heart
+      float spiral = 0.5 + 0.5 * cos(th - 3.2 * log(r / rv + 0.05));
+      float core = exp(-r * r / (rv * rv * 0.35));
+      float zr = (r - rv) / (rv * 0.6);
+      float ring = exp(-zr * zr);
+      dp += (-0.25 * core + 0.1 * ring * spiral) * fade;
+    }
+  }
+  return dp;
+}
+
 void cloudPotential(vec3 d, float seed, out float P, out float S, out float O, out float CI) {
   float lat = asin(clamp(d.y, -1.0, 1.0));
   float alat = abs(lat);
@@ -189,6 +235,8 @@ void cloudPotential(vec3 d, float seed, out float P, out float S, out float O, o
   // (only where there is one: a floor everywhere would lift every clear sky toward the edge)
   pot = max(pot, mix(pot, 0.41 + 0.45 * trop, smoothstep(0.0, 0.12, trop)));
   pot -= eye * 0.6;
+  // the eddies in the lee of the islands (only where there is a deck to show them)
+  pot += vortexStreets(d) * smoothstep(0.1, 0.35, deck);
   P = pot;
   // regime
   S = clamp(max(max(core * smoothstep(0.08, 0.35, deck), frontS * 0.9), max(polar * 0.7, frontN * 0.6 + storm * 0.25)), 0.0, 1.0);
@@ -458,26 +506,34 @@ void main() {
   }
 
   if (uOut == 1) {
-    // night lights
-    float city = 0.0;
-    for (int i = 0; i < 160; i++) {
-      if (i >= uNumCity) break;
-      vec4 c = texelFetch(uData, ivec2(i, 2), 0);
-      vec3 dv = d - c.xyz;
-      float sg = (18.0 + 42.0 * c.w) / 6371.0;
-      city += c.w * exp(-dot(dv, dv) / (sg * sg)) * (0.7 + 0.3 * sfbm(d * 900.0 + float(i), 2));
+    // r: mineral dust optical depth (x 1/1.2). The Saharan Air Layer rolls off West Africa and
+    // across the Atlantic toward the Caribbean in billowing fronts; Arabian and Thar dust over
+    // the Arabian Sea; the Taklamakan and Gobi's out over the Yellow Sea; a haze over every
+    // desert heart. Domain-warped, so the plumes' edges curl.
+    vec3 dw = vec3(sfbm(d * 9.0 + 71.0, 3), sfbm(d * 9.0 + 83.0, 3), sfbm(d * 9.0 + 97.0, 3));
+    float billow = sfbm(d * 26.0 + dw * 1.8, 4) * 0.5 + 0.5;
+    float dust = desert * 0.35;
+    {
+      // Sahara to the Caribbean: the plume leaves the coast near 15 - 20 N and drifts west, rising
+      // and thinning, bending north a little with the subtropical high
+      float t = clamp((-12.0 - lonD) / 55.0, 0.0, 1.0);
+      float inl = smoothstep(-16.0, -8.0, lonD) * (1.0 - smoothstep(20.0, 30.0, lonD));
+      float lc = mix(16.0, 21.0, t) + 5.0 * sfbm(d * 4.0 + 3.0, 3);
+      float zs = (latD - lc) / mix(7.0, 9.0, t);
+      float sahara = exp(-zs * zs) * (step(lonD, -12.0) * exp(-t * 1.6) * smoothstep(-75.0, -60.0, lonD) + inl * 0.8);
+      float za = (latD - 18.0) / 7.0;
+      float arabian = exp(-za * za) * smoothstep(50.0, 58.0, lonD) * (1.0 - smoothstep(66.0, 75.0, lonD)) * 0.7;
+      float zg = (latD - 38.0) / 5.0;
+      float gobi = exp(-zg * zg) * smoothstep(100.0, 112.0, lonD) * (1.0 - smoothstep(128.0, 140.0, lonD)) * 0.45;
+      dust = max(dust, (sahara + arabian + gobi) * smoothstep(0.3, 0.75, billow + 0.1));
     }
-    float hab = land * (1.0 - arid * 0.85) * (1.0 - smoothstep(52.0, 66.0, alat)) * (1.0 - step(latD, -56.0));
-    float coastal = 0.35 + 0.65 * (1.0 - mc);
-    float towns = smoothstep(0.5, 0.85, sfbm(d * 70.0 + 2.0, 4) * 0.5 + 0.5) * smoothstep(0.35, 0.8, sfbm(d * 9.0 + 5.0, 3) * 0.5 + 0.5);
-    city = (city + hab * coastal * towns * 0.07) * land;
     float ice = 0.0;
     if (latD < -62.0) ice = land;
     if (latD > 59.0 && lonD > -74.0 && lonD < -12.0) ice = land * smoothstep(0.35, 0.8, mc);
     ice = max(ice, (1.0 - land) * smoothstep(77.0, 82.0, latD + n2 * 6.0));
     ice = max(ice, (1.0 - land) * smoothstep(-68.0, -71.0, latD + n2 * 4.0));
     float shelf = (1.0 - land) * smoothstep(0.35, 0.95, mc + 0.25 * coastBand + n1 * 0.1);
-    gl_FragColor = vec4(clamp(city, 0.0, 1.0), ice, arid, shelf);
+    gl_FragColor = vec4(clamp(dust, 0.0, 1.0), ice, arid, shelf);
     return;
   }
 
@@ -760,6 +816,7 @@ export class EarthBake {
         uSc: { value: [[27, -128, 11, 1], [-17, -85, 13, 1], [-17, 5, 11, 0.9], [22, -24, 8, 0.7], [-27, 103, 9, 0.7]].map(([la, lo, e, w]) => new THREE.Vector4(la * D2R, lo * D2R, e * D2R, w)) },
         uTexelKm: { value: (Math.PI / 2 / size) * 6371 },
         uRivers: { value: RIVERS.map(([la, lo, w]) => { const v = bodyDir(la * D2R, lo * D2R, new THREE.Vector3()); return new THREE.Vector4(v.x, v.y, v.z, w); }) },
+        uIsles: { value: VORTEX_ISLES.map(([la, lo, r]) => { const v = bodyDir(la * D2R, lo * D2R, new THREE.Vector3()); return new THREE.Vector4(v.x, v.y, v.z, r); }) },
         uFish: { value: FISHING.map((b) => new THREE.Vector4(b[0], b[1], b[2], b[3])) },
         uLanes: { value: LANES.tex },
         uNumLane: { value: LANES.count },

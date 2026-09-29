@@ -4,6 +4,7 @@ import { NOISE_GLSL } from '../shaders/noise.glsl.js';
 import { U } from '../core/uniforms.js';
 import { SNOISE_GLSL, SPACE_UTIL_GLSL } from './glsl.js';
 import { R_EARTH, MERIDIAN_LON, bodyDir } from './sim.js';
+import { Aurora } from './aurora.js';
 import { EARTH_DETAIL_GLSL, buildLaneTexture, arcologyUniforms, shipClock } from './earthDetail.js';
 
 // The planet, rendered in one pass on a proxy sphere at the top of the
@@ -248,7 +249,13 @@ vec3 integrateAtmo(vec3 ro, vec3 rd, float t0, float t1, bool ground, vec3 sun, 
       vec3 S = ((sR * pR + sM * pM) * Ts + (sR + vec3(sM)) * ms) * uSunE;
       // green oxygen airglow near 95 km (only visible against the night)
       float h = r - Rg;
-      S += vec3(0.25, 1.0, 0.45) * 2.2e-5 * exp(-pow(abs(h - 94.0) / 5.0, 2.0)) * (1.0 - smoothstep(-0.25, 0.05, mu));
+      float agN = 1.0 - smoothstep(-0.25, 0.05, mu);
+      if (agN > 0.0 && abs(h - 94.0) < 16.0) {
+        // (rippled by gravity waves from the weather far below: bands ~100 km apart)
+        vec3 ub = uToBody * up;
+        float rip = 0.72 + 0.28 * sin(dot(ub, vec3(0.62, 0.21, 0.76)) * 400.0 + 2.2 * snoise(ub * 30.0));
+        S += vec3(0.25, 1.0, 0.45) * 2.2e-5 * exp(-pow(abs(h - 94.0) / 5.0, 2.0)) * agN * rip;
+      }
       vec3 sT = exp(-ext * dt);
       L += T * (S - S * sT) / max(ext, vec3(1e-7));
       T *= sT;
@@ -559,9 +566,23 @@ void main() {
   vec4 arco = od_arcology(b, fp, arcoNight);
   if (arco.a > 0.0) col = mix(col, arco.rgb / S_PI * (uSunE * sunT * max(mu, 0.0) * shadow + skyAmb), arco.a);
 
+  // Kilauea's vog by day
+  vec3 volcNight;
+  vec4 volc = od_volcano(b, fp, volcNight);
+  if (volc.a > 0.0) col = mix(col, volc.rgb / S_PI * (uSunE * sunT * max(mu, 0.0) * shadow + skyAmb), volc.a);
+  // mineral dust (the bake's optical depth): a tan veil over sea and land, lit by the Sun,
+  // hiding a little of what lies beneath (the clouds above it are drawn over it)
+  float tauD = B.r * 1.2;
+  if (tauD > 0.003) {
+    float muV = max(dot(n, V), 0.08);
+    float tD = exp(-tauD / muV);
+    vec3 dustL = vec3(0.6, 0.46, 0.3) / S_PI * (uSunE * sunT * max(mu, 0.0) * rsh + skyAmb * 0.6);
+    col = col * tD + dustL * (1.0 - tD);
+  }
+
   // night lights of the Concord: warm old cores, cool new districts, transit filaments
   // (baked), with district and block lattices where they are resolved, and Meridian
-  float night = 1.0 - smoothstep(-0.12, 0.05, mu);
+  float night = od_switchOn(b, mu, fp);
   vec4 LT = texture(uLights, b);
   float lw = LT.r, lc = LT.g, ln = LT.b;
   float micro = 1.0;
@@ -590,6 +611,7 @@ void main() {
   }
   emis += meridianNight(b, fp);
   emis += arcoNight * 0.12;
+  emis += volcNight * 0.05;
   emis += shipLight * 0.05 * (1.0 - landF);
 
   // clouds: the low and middle deck (8 km) and the cirrus above it (12.5 km), each on its own
@@ -648,6 +670,8 @@ void main() {
     float conv = smoothstep(0.55, 0.95, lcl.x * clamp(lcl.y / 40.0, 0.0, 1.0)) * (1.0 - 0.8 * convS) * nightC * (1.0 - smoothstep(25.0, 60.0, fpC));
     float flash = od_lightning(bC, fpC, conv, uTime);
     cloudCol += vec3(0.75, 0.82, 1.0) * flash * 0.9;
+    // the aurora's green on the cloud tops beneath the ovals
+    cloudCol += vec3(0.15, 0.8, 0.35) * od_auroraGround(bC, uToBody * sun) * 0.012 * nightC;
     // faint moonlight
     cloudCol += vec3(0.5, 0.6, 0.8) * 0.004 * max(dot(nC, uMoonDir), 0.0) * nightC;
   }
@@ -707,6 +731,7 @@ const LANES = buildLaneTexture();
 const ARCO = arcologyUniforms();
 export { LANES as EARTH_LANES };
 const _clock = { t: 0, wrap: 0 };
+const _act = { act: 0, surge: 0 };
 
 export class Earth {
   constructor(bake, quality) {
@@ -739,6 +764,7 @@ export class Earth {
       uArco: { value: ARCO.pos },
       uArcoK: { value: ARCO.kind },
       uNlcGain: { value: 1 },
+      uAuroraAct: { value: 0.5 },
     };
     this.material = new THREE.ShaderMaterial({
       vertexShader: VERT,
@@ -776,5 +802,6 @@ export class Earth {
     shipClock(sim.t, _clock);
     u.uShipT.value = _clock.t;
     u.uShipWrap.value = _clock.wrap;
+    u.uAuroraAct.value = Aurora.activity(realTime, _act).act;
   }
 }
