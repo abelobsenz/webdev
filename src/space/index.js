@@ -150,7 +150,7 @@ export class SpaceMode {
     T('lunarLanding', {
       position:o=>o.set(R_MOON+0.02,0,0).applyQuaternion(sim.moonQuat).add(sim.moonPos),
       frame:q=>q.copy(sim.moonQuat).multiply(lunarFrame),
-      minDist:.25,maxDist:20000,defaultDist:15,view:{az:-0.55,el:.3},   // from over the Bay, the town lit by the morning Sun
+      minDist:.25,maxDist:20000,defaultDist:8,view:{az:-0.55,el:.34},   // from over the Bay, the town lit by the morning Sun
     });
     // Medii Works and the landing fields, inland of the town (src/space/lunarWorks.js, lunarTraffic.js)
     T('mediiWorks', {
@@ -173,13 +173,13 @@ export class SpaceMode {
     T('lunarCourt',{
       position:o=>o.copy(courtUp).multiplyScalar(R_MOON+380).add(_v2.set(0,2.75,0)).applyQuaternion(sim.moonQuat).add(sim.moonPos),
       frame:q=>q.copy(sim.moonQuat).multiply(courtFrame),
-      minDist:.12,maxDist:20000,defaultDist:1.35,view:{az:1.15,el:.55},
+      minDist:.12,maxDist:20000,defaultDist:1.05,view:{az:1.15,el:.5},
     });
     // the Moon's orbital stations (src/space/lunarOrbitals.js), followed along their orbits
-    for (const [key, name, d] of [['endymionWheel', 'wheel', 3.2], ['aitkenDepot', 'depot', 2.6], ['heveliusYard', 'yard', 2.2]]) T(key, {
+    for (const [key, name, d, view] of [['endymionWheel', 'wheel', 2.3, { az: 0.55, el: 0.3 }], ['aitkenDepot', 'depot', 1.75, { az: 0.9, el: 0.25 }], ['heveliusYard', 'yard', 1.55, { az: 0.75, el: 0.42 }]]) T(key, {
       position: (o) => (self.moon ? o.copy(self.moon.orbitals[name].group.position).applyQuaternion(sim.moonQuat).add(sim.moonPos) : o.copy(sim.moonPos)),
       frame: (q) => (self.moon ? q.copy(sim.moonQuat).multiply(self.moon.orbitals[name].group.quaternion) : q.copy(sim.moonQuat)),
-      minDist: 0.4, maxDist: 40000, defaultDist: d, view: { az: 0.7, el: 0.35 },
+      minDist: 0.4, maxDist: 40000, defaultDist: d, view,
     });
     const foundryUp=bodyDir(0,NAURU_LON+.009);
     T('foundry', {
