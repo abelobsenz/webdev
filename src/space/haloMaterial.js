@@ -31,10 +31,10 @@ varying float vUp;
 vec3 haloPalette(float p, float h) {
   vec3 a = vec3(0.78, 0.72, 0.62), b = vec3(0.70, 0.57, 0.44);             // limestone, sandstone
   if (p > 0.5 && p < 1.5) { a = vec3(0.66, 0.42, 0.30); b = vec3(0.76, 0.58, 0.40); }   // terracotta, ochre
-  else if (p > 1.5 && p < 2.5) { a = vec3(0.86, 0.85, 0.82); b = vec3(0.60, 0.65, 0.70); }  // white render, slate blue
+  else if (p > 1.5 && p < 2.5) { a = vec3(0.76, 0.75, 0.72); b = vec3(0.56, 0.61, 0.66); }  // white render, slate blue
   else if (p > 2.5 && p < 3.5) { a = vec3(0.45, 0.33, 0.27); b = vec3(0.56, 0.52, 0.47); }  // brick, concrete
   else if (p > 3.5 && p < 4.5) { a = vec3(0.60, 0.70, 0.62); b = vec3(0.82, 0.79, 0.68); }  // sage ceramic, cream
-  else if (p > 4.5) { a = vec3(0.82, 0.62, 0.54); b = vec3(0.55, 0.60, 0.73); }             // rose, lavender grey
+  else if (p > 4.5) { a = vec3(0.76, 0.56, 0.50); b = vec3(0.55, 0.60, 0.73); }             // rose, lavender grey
   return mix(a, b, h);
 }
 vec3 haloTree(float s) {
@@ -56,10 +56,15 @@ void haloKinds(float k, vec2 f, vec2 fw, float px, inout vec3 alb, inout float r
   if (k < 45.5) {
     float pal = k - 40.0;
     if (up > 0.7) {
-      // roofscape: warm membrane, plant rooms, sedum patches, skylights lit from below
+      // roofscape: each building's roof its own finish (pale membrane, dark slate, copper gone
+      // green, sedum, solar slate), then plant rooms, sedum patches, skylights lit from below.
+      // The finish holds until a roof is a couple of pixels across, then settles to their mean
       vec2 rc = floor(f / 11.0);
       float h = hash12(rc + pal * 7.0);
-      alb = mix(vec3(0.40, 0.39, 0.36), vec3(0.50, 0.47, 0.42), mix(0.5, vnoise(f * 0.09), detB));
+      float hr = hash12(floor(f / 38.0) + pal * 3.0 + 0.5);
+      vec3 finish = hr < 0.34 ? vec3(0.46, 0.44, 0.40) : hr < 0.55 ? vec3(0.22, 0.23, 0.25) : hr < 0.7 ? vec3(0.25, 0.42, 0.36) : hr < 0.88 ? vec3(0.16, 0.26, 0.09) : vec3(0.05, 0.07, 0.13);
+      finish = mix(vec3(0.3, 0.32, 0.28), finish, 1.0 - smoothstep(10.0, 28.0, px));
+      alb = finish * (0.9 + 0.2 * mix(0.5, vnoise(f * 0.09), detB));
       float sedum = step(0.62, h) * detB;
       alb = mix(alb, vec3(0.12, 0.2, 0.07), sedum * 0.85);
       float plant = step(0.9, h) * detB;

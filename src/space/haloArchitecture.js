@@ -95,6 +95,27 @@ export function standBox(B, S, x, z, sx, sz, h, k, sink = 16) {
   B.box(x, (y0 + top) / 2, z, sx, top - y0, sz, k);
   return top;
 }
+/**
+ * A mass for the silhouette layer: four walls in one kind and a roof in another, no floor
+ * (10 triangles). From 26 km out a block reads by its roof - tiles, planted terraces, dark glass
+ * - so the mid and far districts show the roofscape the full tiles have, not bare grey slabs.
+ */
+export function massBox(F, S, cx, cz, sx, sz, top, wallK, roofK) {
+  const y0 = Math.min(S.deck(cx - sx / 2), S.deck(cx + sx / 2)) - 8, hx = sx / 2, hz = sz / 2;
+  const faces = [
+    [[1, 0, 0], [[hx, y0, -hz], [hx, top, -hz], [hx, top, hz], [hx, y0, hz]], wallK],
+    [[-1, 0, 0], [[-hx, y0, -hz], [-hx, y0, hz], [-hx, top, hz], [-hx, top, -hz]], wallK],
+    [[0, 0, 1], [[-hx, y0, hz], [hx, y0, hz], [hx, top, hz], [-hx, top, hz]], wallK],
+    [[0, 0, -1], [[-hx, y0, -hz], [-hx, top, -hz], [hx, top, -hz], [hx, y0, -hz]], wallK],
+    [[0, 1, 0], [[-hx, top, -hz], [-hx, top, hz], [hx, top, hz], [hx, top, -hz]], roofK],
+  ];
+  for (const [n, q, k] of faces) {
+    const ids = q.map(([x, y, z]) => F.v(cx + x, y, cz + z, n[0] ? z + cz : x + cx, n[1] ? z + cz : y, k));
+    const h = new THREE.Vector3(...n);
+    F.tri(ids[0], ids[1], ids[2], h); F.tri(ids[0], ids[2], ids[3], h);
+  }
+  return top;
+}
 /** Highest deck point under a footprint across x. */
 export const deckHi = (S, x, sx) => Math.max(S.deck(x - sx / 2), S.deck(x + sx / 2));
 /** Half-round vault along z on the deck (glasshouses, galleries, station halls). */
@@ -141,6 +162,7 @@ function setbackTower(C, cx, cz, sx, sz, hmax, fk) {
   const y0 = deckHi(S, cx, sx);
   const pod = standBox(B, S, cx, cz, sx, sz, 8 + r() * 14, fk);
   B.box(cx, pod + 0.8, cz, sx - 8, 1.6, sz - 8, HK.ROOFGARDEN);
+  if (F) massBox(F, S, cx, cz, sx, sz, pod + 1.6, fk, HK.ROOFGARDEN);
   // shopfronts: a band of light along both street faces, and awnings over the pavement
   for (const s of [-1, 1]) {
     M.box(cx, y0 + 4.2, cz + s * (sz / 2 + 0.4), sx * 0.86, 2.0, 0.6, HK.NEON);
@@ -198,6 +220,7 @@ function courtBlock(C, cx, cz, sx, sz, hmax, fk) {
   const { B, M, N, S, r } = C;
   const wing = 15 + r() * 8, pitched = r() < C.style.pitched;
   const base = Math.min(hmax, 14 + r() * 26);
+  let maxTop = 0;
   const wings = [
     [cx - sx / 2 + wing / 2, cz, wing, sz, false], [cx + sx / 2 - wing / 2, cz, wing, sz, false],
     // (the cross wings stand a hair inside the long ones' ends: no edge is shared between boxes)
@@ -207,7 +230,7 @@ function courtBlock(C, cx, cz, sx, sz, hmax, fk) {
     const h = base + (q % 2 ? 3.6 : 0) * Math.round(r() * 2);
     const k = r() < 0.2 ? facadeKind(C.style.pal + 1) : fk;
     const top = standBox(B, S, x, z, w, d, h, k);
-    if (C.F && q === 0 && base > 30) C.F.box(cx, top / 2, cz, sx, top, sz, k);
+    maxTop = Math.max(maxTop, top);
     if (pitched) {
       gableRoof(B, x, top, z, (alongX ? d : w) + 1.2, 5 + (alongX ? d : w) * 0.22, (alongX ? w : d) + (alongX ? 0 : 1.2), HK.TILE, k, alongX);
       // dormers and chimneys on the long slopes
@@ -223,6 +246,8 @@ function courtBlock(C, cx, cz, sx, sz, hmax, fk) {
     // loggias of light at the court side, shopfront band at the street side
     M.box(x + (alongX ? 0 : (q === 0 ? 1 : -1) * (w / 2 + 0.3)), deckHi(S, x, w) + 4, z + (alongX ? (q === 2 ? 1 : -1) * (d / 2 + 0.3) : 0), alongX ? w * 0.8 : 0.5, 2, alongX ? 0.5 : d * 0.8, HK.NEON);
   });
+  // (silhouette: the block under its roofs - tiles to the ridge line, or planted flat roofs)
+  if (C.F) massBox(C.F, S, cx, cz, sx, sz, maxTop + (pitched ? 4 + wing * 0.11 : 1), fk, pitched ? HK.TILE : HK.ROOFGARDEN);
   // the court: lawn, a tree or three, a lamp
   standBox(B, S, cx, cz, sx - 2 * wing - 2, sz - 2 * wing - 2, 0.9, HK.ROOFGARDEN, 6);
   const nt = 2 + Math.floor(r() * 3);
@@ -248,7 +273,7 @@ function steppedBlock(C, cx, cz, sx, sz, hmax, fk) {
     const w = L * (1 - i / steps), c = -dir * (L - w) / 2, h = Math.min(hmax, storey * (i + 1));
     const x = alongX ? cx + c : cx, z = alongX ? cz : cz + c;
     const top = standBox(B, S, x, z, alongX ? w : sx - 0.5 * i, alongX ? sz - 0.5 * i : w, h, fk);
-    if (C.F && i === steps - 1) C.F.box(x, top / 2, z, alongX ? w : sx, top, alongX ? sz : w, fk);
+    if (C.F && i === steps - 1) massBox(C.F, S, cx, cz, sx, sz, deckHi(S, cx, sx) + (top - deckHi(S, cx, sx)) * 0.55, fk, HK.ROOFGARDEN);
     // the exposed step of this storey band (the part the next one does not cover)
     const ew = L / steps, ec = -dir * (L - w) / 2 + dir * (w / 2 - ew / 2);
     const gx = alongX ? cx + ec : cx, gz = alongX ? cz : cz + ec;
