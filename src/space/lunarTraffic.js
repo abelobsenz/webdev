@@ -670,10 +670,9 @@ export class LunarTraffic {
 
   updateYard(t) {
     for (let i = 0; i < 2; i++) {
-      const [a, b] = this.gantrySpans[i];
-      const { q } = bounce(t, 0.8 + i * 0.3, b - a, i * 90);
-      const v = a + q;
-      const [x, z] = UV(YARD.gantryU, v);
+      const span = this.gantrySpans[i], a = span[0];
+      const { q } = bounce(t, 0.8 + i * 0.3, span[1] - a, i * 90);
+      const v = a + q, x = (YARD.gantryU - v) * S2, z = (YARD.gantryU + v) * S2;
       seat(_m, x, z, ROT_UV, 0.3);
       this.gantries.setMatrixAt(i, _m);
       // the trolley shuttles across the bridge between the container rows
