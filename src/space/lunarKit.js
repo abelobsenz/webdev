@@ -34,6 +34,10 @@ import { R_MOON } from './sim.js';
 //   silo          processing silo with ring platforms and a ladder cage
 //   gantry        pad gantry crane (bridge 60 m) ; 'trolley' rides its bridge
 //   mast          lamp and comms mast
+//   cart          a town runabout (tinted), for the street grid
+//   container     12 m freight container (tinted)
+//   serviceTower  pad umbilical tower with its swing arm (+z toward the craft)
+//   sphereTank    propellant sphere on its legs, with a catwalk
 
 const TAU = Math.PI * 2;
 const V = (x, y, z) => new THREE.Vector3(x, y, z);
@@ -461,12 +465,72 @@ function mast() {
   return B.geometry();
 }
 
+function cart() {
+  // a town runabout: two seats under a glazed canopy, four small wheels, lamps fore and aft
+  const B = new CB();
+  B.box(0, 0.55, 0, 1.5, 0.4, 2.8, LK.PAINT);
+  for (const z of [-0.95, 0.95]) for (const sx of [-0.72, 0.72]) wheel(B, sx, 0.3, z, 0.3, 0.2, 8);
+  B.loft([{ z: -1.2, pts: [[-0.72, 0.75], [0.72, 0.75], [0.66, 1.55], [-0.66, 1.55]] }, { z: 0.7, pts: [[-0.72, 0.75], [0.72, 0.75], [0.6, 1.5], [-0.6, 1.5]] }], LK.GLASS);
+  B.box(0, 1.58, -0.25, 1.36, 0.08, 1.9, LK.PAINT);
+  B.box(0, 0.8, 1.2, 1.4, 0.35, 0.4, LK.PAINT);
+  for (const sx of [-0.5, 0.5]) { B.box(sx, 0.78, 1.41, 0.24, 0.12, 0.02, LK.LIGHT); B.box(sx, 0.78, -1.41, 0.2, 0.1, 0.02, LK.HAZARD); }
+  return B.geometry();
+}
+
+function container() {
+  // a 12 m freight container: corrugated sides, corner castings, a door end
+  const B = new CB();
+  B.box(0, 1.3, 0, 2.5, 2.6, 12.2, LK.PAINT);
+  for (let z = -5.4; z <= 5.4; z += 0.9) for (const sx of [-1.27, 1.27]) B.box(sx, 1.3, z, 0.05, 2.4, 0.25, LK.PAINT);
+  for (const sz of [-6.1, 6.1]) for (const sx of [-1.15, 1.15]) for (const y of [0.1, 2.5]) B.box(sx, y, sz, 0.25, 0.22, 0.2, LK.DARK);
+  B.box(0, 1.3, 6.12, 2.3, 2.3, 0.04, LK.HULL);
+  for (const sx of [-0.4, 0.4]) B.box(sx, 1.3, 6.16, 0.06, 2.2, 0.06, LK.DARK);
+  return B.geometry();
+}
+
+function serviceTower() {
+  // pad umbilical tower: a braced lattice, a swing arm with the propellant and power lines,
+  // a lit cab at the top, hazard banding at its foot
+  const B = new CB();
+  B.box(0, 0.4, 0, 4.4, 0.8, 4.4, LK.WALL);
+  B.box(0, 1.2, 0, 3.8, 0.8, 3.8, LK.HAZARD);
+  for (const [sx, sz] of [[-1.5, -1.5], [1.5, -1.5], [1.5, 1.5], [-1.5, 1.5]]) B.box(sx, 11, sz, 0.35, 20, 0.35, LK.PAINT);
+  for (let y = 2; y < 20; y += 3) {
+    for (const f of [0, 1, 2, 3]) {
+      const a = f * Math.PI / 2, c = Math.cos(a), s = Math.sin(a);
+      const p0 = V(c * 1.5 - s * 1.5, y, s * 1.5 + c * 1.5), p1 = V(c * 1.5 + s * 1.5, y + 3, s * 1.5 - c * 1.5);
+      strut(B, p0, p1, 0.12, LK.PAINT);
+    }
+    B.box(0, y, 0, 3.3, 0.12, 3.3, LK.PAINT);
+  }
+  B.box(0, 21.4, 0, 4.2, 2.6, 4.2, LK.HULL);
+  B.box(0, 21.6, 2.12, 3.4, 1.2, 0.06, LK.GLASS);
+  B.box(0, 23.0, 0, 0.4, 0.4, 0.4, LK.LIGHT);
+  // the swing arm toward the craft (+z), carrying three lines
+  B.box(0, 17.2, 6.5, 1.4, 1.2, 10, LK.PAINT);
+  for (const sx of [-0.5, 0, 0.5]) B.tube([V(sx, 16.4, 1.8), V(sx, 16.2, 11.4), V(sx, 14.2, 12.4)], 0.12, 5, sx ? LK.BRONZE : LK.CONDUIT);
+  return B.geometry();
+}
+
+function sphereTank() {
+  // a propellant sphere on a ring of legs, insulated white, with its catwalk and vent
+  const B = new CB();
+  ball(B, 0, 14, 0, 10, LK.HULL, 24, 12);
+  for (let i = 0; i < 8; i++) { const a = i / 8 * TAU; strut(B, V(Math.cos(a) * 9.4, 0, Math.sin(a) * 9.4), V(Math.cos(a) * 9.6, 14, Math.sin(a) * 9.6), 0.6, LK.PAINT); }
+  latheY(B, [[10.2, 13.6, LK.DECK], [11.6, 13.6, LK.DECK], [11.6, 13.9, LK.DECK], [10.2, 13.9, LK.DECK]], 24);
+  latheY(B, [[10.05, 11.2, LK.HAZARD], [10.05, 11.6, LK.HAZARD]], 24);
+  B.box(0, 24.6, 0, 0.5, 1.6, 0.5, LK.HULL);
+  B.box(0, 25.5, 0, 0.3, 0.3, 0.3, LK.LIGHT);
+  for (let i = 0; i < 8; i++) { const a = i / 8 * TAU; B.box(Math.cos(a) * 9.5, 0.3, Math.sin(a) * 9.5, 1.6, 0.6, 1.6, LK.WALL); }
+  return B.geometry();
+}
+
 // ------------------------------------------------------------------------ registry --
 
 const MAKERS = {
   lander: crewLander, cargoLander, suit, walker, rover, hauler, tug, tram, excavator, wheel: bucketWheel,
   tracker: trackerPost, panel: trackerPanel, radiator: radiatorWing, boulder0: () => boulder(11), boulder1: () => boulder(29), boulder2: () => boulder(47),
-  drone, launch, sled, vault, dome, silo, gantry, trolley, mast,
+  drone, launch, sled, vault, dome, silo, gantry, trolley, mast, cart, container, serviceTower, sphereTank,
 };
 const CACHE = new Map();
 /** A kit part's geometry (built once, shared by every settlement). */
@@ -485,7 +549,7 @@ export function kit(name) {
 export const KIT_PARTS = Object.keys(MAKERS);
 
 // Footprint radii (metres) for the placement checks.
-export const KIT_R = { lander: 13, cargoLander: 13, rover: 4.6, hauler: 6.6, tug: 8, tram: 12.2, excavator: 21, tracker: 4.5, radiator: 2, vault: 18.5, dome: 42, silo: 6.3, gantry: 32, mast: 1 };
+export const KIT_R = { cart: 1.6, container: 6.3, serviceTower: 3.2, sphereTank: 12, lander: 13, cargoLander: 13, rover: 4.6, hauler: 6.6, tug: 8, tram: 12.2, excavator: 21, tracker: 4.5, radiator: 2, vault: 18.5, dome: 42, silo: 6.3, gantry: 32, mast: 1 };
 
 // ------------------------------------------------------------------ placement on the sphere --
 

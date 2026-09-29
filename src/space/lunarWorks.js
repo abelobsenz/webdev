@@ -32,6 +32,7 @@ const ROT_UV = -Math.PI / 4;
 const UP = new THREE.Vector3(0, 1, 0);
 const gy = (x, z) => surfaceY(x, z);
 const _m = new THREE.Matrix4();
+const CRATE = [[0.72, 0.24, 0.16], [0.16, 0.3, 0.55], [0.86, 0.66, 0.2], [0.22, 0.46, 0.34], [0.8, 0.78, 0.72], [0.45, 0.46, 0.5]];
 
 export const RAIL_H = 11;                         // guideway top above the ground (m)
 export const TRACK_X = 2.4;                       // the two tracks either side of the line's axis
@@ -42,6 +43,22 @@ export const MINE = { u0: 3500, u1: 5100, v0: -6300, v1: -5200 };
 export const PLANT = { u0: 3350, u1: 4300, v0: -4950, v1: -3900 };
 export const QUARTER = { u0: 3300, u1: 4350, v0: -3780, v1: -3050 };
 export const RADS = { u0: 4420, u1: 4940, v0: -4900, v1: -3950 };
+export const YARD = { u0: 3170, u1: 3320, v0: -4400, v1: -3950, gantryU: 3245 };
+// Craft on the landing fields: [pad, du, dv (metres from the pad's centre), part, cycling].
+// Parked craft face their service tower, which stands outboard of them.
+export const LANDER_SLOTS = [[0, 110, -95, 'cargoLander', false], [0, -120, -110, 'lander', true], [1, 0, 0, 'lander', true], [1, 130, 85, 'lander', false],
+  [1, -140, 70, 'cargoLander', false], [2, -120, 100, 'cargoLander', false], [2, 125, -115, 'lander', true], [0, 20, 150, 'lander', false]];
+export const TOWER_D = 18;                           // service tower from its craft's axis (m)
+// container stacks inside each pad's rim, clear of the craft and the tugs' circuit (pad-relative u, v)
+export const PAD_STACKS = [[-140, 110], [-60, 180], [60, 170]];
+/** Site-frame x, z of a slot, and the yaw that turns the craft's +z (between its legs) outboard. */
+export function slotFrame(slot, PADS) {
+  const [k, du, dv] = slot;
+  const [x, z] = UV(PADS[k][0] + du, PADS[k][1] + dv);
+  const [cx, cz] = UV(PADS[k][0], PADS[k][1]);
+  const yaw = Math.hypot(du, dv) < 1 ? 0.7 : Math.atan2(x - cx, z - cz);
+  return { x, z, yaw, u: PADS[k][0] + du, v: PADS[k][1] + dv };
+}
 
 /** Round a (u, v) polyline's corners with arcs of radius r and resample it every `step` m. */
 export function filletPath(corners, r, step) {
@@ -75,8 +92,11 @@ export function filletPath(corners, r, step) {
   return out;
 }
 
-/** landingPlan: the town's footprints (lunarLanding.js), kept clear of craters and boulders. */
-export function buildMediiWorks(landingPlan = [], driver = null) {
+/**
+ * landingPlan: the town's footprints (lunarLanding.js), kept clear of craters and boulders;
+ * driver: its mass driver's line; PADS: its landing fields.
+ */
+export function buildMediiWorks(landingPlan = [], driver = null, PADS = null) {
   const B = new CB();
   const lamps = [];
   const plan = [];
@@ -428,6 +448,59 @@ export function buildMediiWorks(landingPlan = [], driver = null) {
   }
   const servicePts = svc.map(([u, v]) => at(u, v, 0.6));
 
+  // ------------------------------------------------------------ the freight yard --
+  // beside the Works station: container rows under two travelling gantries on their rails
+  const stacks = [];
+  {
+    const { u0, u1, v0, v1, gantryU } = YARD;
+    pad(u0, u1, v0, v1, 0.3, LK.GROUND, 75);
+    foot('yard', u0, u1, v0, v1);
+    for (const du of [-30, 30]) {
+      const a = at(gantryU + du, v0 + 6, 0.3), b = at(gantryU + du, v1 - 6, 0.3);
+      const m = new THREE.Matrix4().lookAt(a, b, UP).setPosition(a.clone().add(b).multiplyScalar(0.5));
+      B.push(m); B.box(0, 0.1, 0, 1.2, 0.2, a.distanceTo(b), LK.DARK); B.pop();
+    }
+    for (const du of [-20, -8, 8, 20]) for (let v = v0 + 26; v < v1 - 26; v += 13.4) {
+      const hgt = 1 + Math.floor(rnd() * 3);
+      for (let h = 0; h < hgt; h++) { placeAt('container', gantryU + du, v, 0, 0.3 + h * 2.62, 1, CRATE[Math.floor(rnd() * CRATE.length)]); }
+      stacks.push([gantryU + du, v, hgt]);
+    }
+    for (const v of [v0 + 10, v1 - 10]) for (const u of [u0 + 8, u1 - 8]) { placeAt('mast', u, v, 0); lamp(u, v, 17.6, LAMP.WHITE, 1.2, 1.6); }
+  }
+
+  // ------------------------------------------------------------ the fields' furniture --
+  const towers = [];
+  if (PADS) {
+    // service towers beside the parked craft, outboard
+    for (const sl of LANDER_SLOTS) {
+      if (sl[4]) continue;
+      const f = slotFrame(sl, PADS);
+      const tx = f.x + Math.sin(f.yaw) * TOWER_D, tz = f.z + Math.cos(f.yaw) * TOWER_D;
+      put('serviceTower', seat(_m, tx, tz, f.yaw + Math.PI, 1.2), [0.86, 0.84, 0.8]);
+      towers.push([tx, tz]);
+      lamps.push({ p: new THREE.Vector3(tx, gy(tx, tz) + 1.2 + 23.6, tz), r: 1.1, color: LAMP.RED, i: 1.6, breathe: 0.4 });
+    }
+    // container stacks on each pad, and a propellant farm of three spheres behind each field
+    PADS.forEach(([pu, pv], k) => {
+      const [su, sv] = PAD_STACKS[k];
+      for (let i = 0; i < 6; i++) {
+        const u = pu + su + (i % 3 - 1) * 3.2, v = pv + sv + (i < 3 ? -7 : 7);
+        const n = 1 + Math.floor(rnd() * 3);
+        for (let h = 0; h < n; h++) placeAt('container', u, v, 0, 1.2 + h * 2.62, 1, CRATE[Math.floor(rnd() * CRATE.length)]);
+      }
+      for (let i = 0; i < 3; i++) {
+        const u = pu - 40 + i * 40, v = pv - 318;
+        placeAt('sphereTank', u, v, 0, 0, 1, [0.92, 0.92, 0.9]);
+        foot('tanks', u - 13, u + 13, v - 13, v + 13);
+      }
+      // the pipe run from the tanks to the pad's rim, on sleepers
+      const a = at(pu - 52, pv - 318, 1.2), b = at(pu + 52, pv - 318, 1.2), c = at(pu, pv - 318, 1.2), d = at(pu, pv - 250, 1.2);
+      B.tube([a, b], 0.45, 8, LK.HULL);
+      B.tube([c, d], 0.45, 8, LK.CONDUIT);
+      for (let s2 = 0; s2 <= 6; s2++) { const u = pu, v = pv - 318 + s2 * 11; pushAt(u, v); B.box(0, 0.35, 0, 2.4, 0.7, 0.6, LK.WALL); B.pop(); }
+    });
+  }
+
   // ------------------------------------------------------------ the ground --
   // small fresh craters: a raised rim of regolith round a dark floor, and boulders
   const blocked = (u, v, pad0 = 0) => plan.some((p) => u > p.u0 - pad0 && u < p.u1 + pad0 && v > p.v0 - pad0 && v < p.v1 + pad0)
@@ -477,7 +550,7 @@ export function buildMediiWorks(landingPlan = [], driver = null) {
 
   const geo = B.geometry();
   return {
-    geo, lamps, plan, inst, trackers, excavators, craters, boulders,
+    geo, lamps, plan, inst, trackers, excavators, craters, boulders, stacks, towers,
     rail: { pts: railPts, s: railS, stations: stationS, names: RAIL_STATIONS.map((r) => r[0]) },
     haul, service: servicePts,
   };

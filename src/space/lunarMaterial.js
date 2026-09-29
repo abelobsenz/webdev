@@ -219,12 +219,15 @@ void main() {
     rough = 0.8;
   } else if (k < 28.5) {
     // mass-driver coil: bronze windings glowing in a slow wave that runs out along the
-    // guideway (2.4 km long, every 5 s), and a brighter launch pulse that follows it out
-    // every 40 s; both smooth in time, no coil ever switches on or off
+    // guideway (2.4 km long, every 5 s), and a brighter launch pulse that rides with the sled:
+    // a minute's cycle, ten seconds loading at the breech, then 40 m/s^2 (4 g) down the 36 km
+    // to 1.7 km/s at the gate (lunarTraffic.js driverS is the same law); smooth in time
     float s = vFac.x;
     float wave = 0.5 + 0.5 * sin(s / 380.0 - uTime * 1.25);
-    float front = fract(uTime / 40.0) * 38000.0;
-    float launch = exp(-pow((s - front) / 700.0, 2.0));
+    float tau = mod(uTime, 60.0) - 10.0;
+    float front = tau > 0.0 ? 20.0 * tau * tau : -1.0e5;
+    float dxl = (s - front) / 700.0;
+    float launch = exp(-dxl * dxl);
     alb = vec3(0.5, 0.36, 0.22); rough = 0.35; metal = 0.9;
     em = uAccent * (0.3 + 1.5 * wave * wave + 5.0 * launch);
   } else if (k < 29.5) {

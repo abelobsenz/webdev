@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { lunarMesh, lunarInstanced, createLunarMaterial } from './lunarMaterial.js';
 import { kit, seat, mulberry, EXCAVATOR_HUB, TRACKER_AXLE } from './lunarKit.js';
-import { buildMediiWorks, TRACK_X } from './lunarWorks.js';
+import { buildMediiWorks, TRACK_X, LANDER_SLOTS, slotFrame, YARD } from './lunarWorks.js';
 import { shoreV } from './lunarLanding.js';
 import { surfaceY } from './lunarSite.js';
 import { addLamps } from './craftMesh.js';
@@ -71,9 +71,22 @@ export class Path {
 const BO = { q: 0, sg: 1 };
 const bounce = (t, v, L, ph) => { const q = ((t * v + ph) % (2 * L) + 2 * L) % (2 * L); if (q < L) { BO.q = q; BO.sg = 1; } else { BO.q = 2 * L - q; BO.sg = -1; } return BO; };
 const TR = { s: 0, dir: 1 };
+/**
+ * The mass driver's law (the coil shader's launch pulse follows it): a 60 s cycle, 10 s at the
+ * breech, then 40 m/s^2 to the gate (1.7 km/s at 36 km), and on out at that speed.
+ */
+export function driverS(t, L = 36000) {
+  const tau = (((t % 60) + 60) % 60) - 10;
+  if (tau <= 0) return 0;
+  const s = 20 * tau * tau;
+  if (s <= L) return s;
+  const tg = Math.sqrt(L / 20);
+  return L + 40 * tg * (tau - tg);
+}
 const LC = { h: 0, thr: 0 };
 
 const _x = new THREE.Vector3(), _y = new THREE.Vector3(), _z = new THREE.Vector3(), _p = new THREE.Vector3(), _t = new THREE.Vector3();
+const _e2 = new THREE.Matrix4();
 const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _s1 = new THREE.Vector3(1, 1, 1), _e = new THREE.Euler();
 /** Frame with +z along `fwd` and +y as close to `up` as it can be, at p. */
 function frameAlong(out, p, fwd, up = UP) {
@@ -132,7 +145,7 @@ export class LunarTraffic {
     const t0 = performance.now();
     this.group = new THREE.Group();
     this.group.name = 'Medii Landing life and Works';
-    this.works = works || buildMediiWorks(landingData.plan, landingData.driver);
+    this.works = works || buildMediiWorks(landingData.plan, landingData.driver, landingData.S.PADS);
     const W = this.works;
     const rnd = mulberry(5150);
     this.mat = createLunarMaterial({ lit: 0.6 });
@@ -204,11 +217,8 @@ export class LunarTraffic {
     // --- the landing fields ---
     {
       const PADS = landingData.S.PADS;
-      const padAt = (k, du, dv) => [PADS[k][0] + du, PADS[k][1] + dv];
-      // [pad, du, dv, part, cycling]
-      const SLOTS = [[0, 110, -95, 'cargoLander', false], [0, -120, -110, 'lander', true], [1, 0, 0, 'lander', true], [1, 130, 85, 'lander', false],
-        [1, -140, 70, 'cargoLander', false], [2, -120, 100, 'cargoLander', false], [2, 125, -115, 'lander', true], [0, 20, 150, 'lander', false]];
-      this.slots = SLOTS.map(([k, du, dv, part, cyc], i) => { const [u, v] = padAt(k, du, dv); const [x, z] = UV(u, v); return { k, u, v, x, z, part, cyc, yaw: rnd() * TAU, phase: i * 97.3 }; });
+      // parked craft face their service towers (lunarWorks.js); the cycling ones turn as they come
+      this.slots = LANDER_SLOTS.map((sl, i) => { const f = slotFrame(sl, PADS); return { k: sl[0], u: f.u, v: f.v, x: f.x, z: f.z, part: sl[3], cyc: sl[4], yaw: f.yaw, phase: i * 97.3 }; });
       const byPart = (p) => this.slots.filter((s) => s.part === p);
       this.landers = lunarInstanced(kit('lander'), byPart('lander').length, {}, this.mat);
       this.cargo = lunarInstanced(kit('cargoLander'), byPart('cargoLander').length, {}, this.mat, { tint: true });
@@ -230,7 +240,7 @@ export class LunarTraffic {
       const crew = [];
       for (const s of this.slots) {
         const n = s.cyc ? 6 : 10;
-        for (let i = 0; i < n; i++) crew.push({ x: s.x, z: s.z, r: 16 + rnd() * 7, a0: rnd() * TAU, w: (rnd() < 0.5 ? -1 : 1) * (0.9 + rnd() * 0.5), slot: s, tint: SUITS[Math.floor(rnd() * SUITS.length)] });
+        for (let i = 0; i < n; i++) crew.push({ x: s.x, z: s.z, r: 22.5 + rnd() * 5, a0: rnd() * TAU, w: (rnd() < 0.5 ? -1 : 1) * (0.9 + rnd() * 0.5), slot: s, tint: SUITS[Math.floor(rnd() * SUITS.length)] });
       }
       this.crew = crew;
       this.suits = lunarInstanced(kit('suit'), crew.length, {}, this.mat, { tint: true });
@@ -254,6 +264,17 @@ export class LunarTraffic {
       this.wheelBase = W.excavators.map((e) => { const m = new THREE.Matrix4(); seat(m, e.x, e.z, e.yaw, 0.25); return m.multiply(new THREE.Matrix4().makeTranslation(EXCAVATOR_HUB.x, EXCAVATOR_HUB.y, EXCAVATOR_HUB.z)); });
       this.group.add(this.haulers, this.wheels);
       this.mineCentre = W.haul[0].clone();
+    }
+
+    // --- the freight yard's gantries ---
+    {
+      this.gantries = lunarInstanced(kit('gantry'), 2, {}, this.mat, { tint: true });
+      this.trolleys = lunarInstanced(kit('trolley'), 2, {}, this.mat, { tint: true });
+      for (const m of [this.gantries, this.trolleys]) { m.instanceMatrix.setUsage(THREE.DynamicDrawUsage); for (let i = 0; i < 2; i++) m.instanceColor.setXYZ(i, 0.9, 0.62, 0.12); }
+      this.gantries.name = 'Freight yard gantries'; this.trolleys.name = 'Gantry trolleys';
+      const mid = (YARD.v0 + YARD.v1) / 2;
+      this.gantrySpans = [[YARD.v0 + 22, mid - 12], [mid + 12, YARD.v1 - 22]];
+      this.group.add(this.gantries, this.trolleys);
     }
 
     // --- rovers on the hamlet roads and the service road ---
@@ -282,7 +303,7 @@ export class LunarTraffic {
 
     // --- townspeople ---
     {
-      const { T, V } = landingData.S;
+      const { T, V, U_TOWN } = landingData.S;
       const walks = [];
       // the Boulevard: six lanes each side on each terrace, clear of the trunks and lamp posts
       for (const [v0, v1, h] of [[V.MID + 26, V.LOW - 14, T.MID], [V.LOW + 18, V.STRAND - 14, T.LOW]]) {
@@ -298,6 +319,16 @@ export class LunarTraffic {
       }
       // round the Lift plaza, both ways
       for (const [r, n] of [[300, 90], [345, 110]]) for (let i = 0; i < n; i++) walks.push({ kind: 2, a: r + (rnd() - 0.5) * 3, v0: 0, v1: 0, h: T.LIFT, ph: rnd() * TAU, sp: (rnd() < 0.5 ? -1 : 1) * (1.0 + rnd() * 0.5) });
+      // the cross streets of the courtyard town: along v between the blocks, along u between the rows
+      const streets = [];
+      for (const [v0, v1, h] of [[V.MID + 12, V.LOW - 116, T.MID], [V.LOW + 12, V.STRAND - 72, T.LOW]]) for (const s of [-1, 1]) for (let u = 200; u < U_TOWN - 150; u += 170) streets.push({ along: 'v', c: s * u, a0: v0, a1: v1, h });
+      for (let v = V.MID + 9 + 110 + 9; v < V.LOW - 20; v += 128) for (const s of [-1, 1]) streets.push({ along: 'u', c: v, a0: s > 0 ? 44 : -U_TOWN + 12, a1: s > 0 ? U_TOWN - 12 : -44, h: T.MID });
+      for (let v = V.LOW + 9 + 110 + 9; v < V.STRAND - 80; v += 128) for (const s of [-1, 1]) streets.push({ along: 'u', c: v, a0: s > 0 ? 44 : -U_TOWN + 12, a1: s > 0 ? U_TOWN - 12 : -44, h: T.LOW });
+      this.streets = streets;
+      for (const st of streets) for (const off of [-7.2, 7.2]) {
+        const n = Math.round((st.a1 - st.a0) / 60);
+        for (let i = 0; i < n; i++) walks.push({ kind: st.along === 'v' ? 0 : 3, a: st.c + off + (rnd() - 0.5) * 0.8, v0: st.a0, v1: st.a1, h: st.h, ph: rnd() * 6000, sp: 1.0 + rnd() * 0.6 });
+      }
       this.walks = walks;
       this.walkers = lunarInstanced(kit('walker'), walks.length, {}, this.mat, { tint: true });
       this.walkers.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
@@ -305,6 +336,18 @@ export class LunarTraffic {
       this.walkers.name = 'Townspeople';
       this.group.add(this.walkers);
       this.townCentre = new THREE.Vector3(...(() => { const [x, z] = UV(0, 1600); return [x, 0, z]; })());
+    }
+
+    // --- runabouts on the cross streets, keeping right ---
+    {
+      const carts = [];
+      this.streets.forEach((st, si) => { const n = Math.max(1, Math.round((st.a1 - st.a0) / 220)); for (let i = 0; i < n; i++) carts.push({ si, ph: rnd() * 1e4, v: 5 + rnd() * 4 }); });
+      this.carts = carts;
+      this.cartMesh = lunarInstanced(kit('cart'), carts.length, {}, this.mat, { tint: true });
+      this.cartMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      carts.forEach((c, i) => this.cartMesh.instanceColor.setXYZ(i, ...LIVERY[(i * 7) % LIVERY.length]));
+      this.cartMesh.name = 'Town runabouts';
+      this.group.add(this.cartMesh);
     }
 
     // --- harbour launches ---
@@ -345,7 +388,7 @@ export class LunarTraffic {
       this.group.add(this.sled);
     }
 
-    this.vehicles = [this.tugs, this.rovers, this.haulers, this.wheels, this.drones, this.boats];
+    this.vehicles = [this.tugs, this.rovers, this.haulers, this.wheels, this.drones, this.boats, this.gantries, this.trolleys];
     this.group.traverse((o) => { o.frustumCulled = false; });
     this._cam = new THREE.Vector3();
     this._inv = new THREE.Matrix4();
@@ -446,9 +489,30 @@ export class LunarTraffic {
     this.updateTrains(t);
     this.updateLanders(t);
     this.updateSled(t);
-    if (vehNear) { this.updateVehicles(t); this.updateMine(t); }
+    if (vehNear) { this.updateVehicles(t); this.updateMine(t); this.updateYard(t); }
     if (this.suits.visible) this.updateCrews(t);
     if (this.walkers.visible) this.updateWalkers(t);
+    this.cartMesh.visible = dTown < 9000;
+    if (this.cartMesh.visible) this.updateCarts(t);
+  }
+
+  updateCarts(t) {
+    const arr = this.cartMesh.instanceMatrix.array;
+    for (let i = 0; i < this.carts.length; i++) {
+      const c = this.carts[i], st = this.streets[c.si];
+      const { q, sg } = bounce(t, c.v, st.a1 - st.a0, c.ph);
+      // keep right: 3 m off the street's centreline, to the right of the direction of travel
+      let u, v, yaw;
+      if (st.along === 'v') { v = st.a0 + q; u = st.c - 3 * sg; yaw = sg > 0 ? 0 : Math.PI; }
+      else { u = st.a0 + q; v = st.c + 3 * sg; yaw = sg > 0 ? Math.PI / 2 : -Math.PI / 2; }
+      const x = (u - v) * S2, z = (u + v) * S2;
+      const ang = ROT_UV + yaw, cs = Math.cos(ang), sn = Math.sin(ang), o = i * 16;
+      arr[o] = cs; arr[o + 1] = 0; arr[o + 2] = -sn; arr[o + 3] = 0;
+      arr[o + 4] = 0; arr[o + 5] = 1; arr[o + 6] = 0; arr[o + 7] = 0;
+      arr[o + 8] = sn; arr[o + 9] = 0; arr[o + 10] = cs; arr[o + 11] = 0;
+      arr[o + 12] = x; arr[o + 13] = surfaceY(x, z) + st.h; arr[o + 14] = z; arr[o + 15] = 1;
+    }
+    this.cartMesh.instanceMatrix.needsUpdate = true;
   }
 
   updateTrains(t) {
@@ -492,7 +556,7 @@ export class LunarTraffic {
 
   updateSled(t) {
     const d = this.driver;
-    const s = (((t / 40) % 1) + 1) % 1 * 38000;              // rides the coils' launch pulse
+    const s = driverS(t, d.L);                               // rides the coils' launch pulse
     this.sled.visible = s < d.L + 2500;
     if (!this.sled.visible) return;
     _p.copy(d.P0).addScaledVector(d.dir, s);
@@ -547,6 +611,23 @@ export class LunarTraffic {
     this.drones.instanceMatrix.needsUpdate = true;
   }
 
+  updateYard(t) {
+    for (let i = 0; i < 2; i++) {
+      const [a, b] = this.gantrySpans[i];
+      const { q } = bounce(t, 0.8 + i * 0.3, b - a, i * 90);
+      const v = a + q;
+      const [x, z] = UV(YARD.gantryU, v);
+      seat(_m, x, z, ROT_UV, 0.3);
+      this.gantries.setMatrixAt(i, _m);
+      // the trolley shuttles across the bridge between the container rows
+      const tx = 22 * Math.sin(t * 0.07 + i * 2.1);
+      _m.multiply(_e2.makeTranslation(tx, 0, 0));
+      this.trolleys.setMatrixAt(i, _m);
+    }
+    this.gantries.instanceMatrix.needsUpdate = true;
+    this.trolleys.instanceMatrix.needsUpdate = true;
+  }
+
   updateMine(t) {
     const P = this.haul;
     for (let i = 0; i < 9; i++) {
@@ -587,7 +668,9 @@ export class LunarTraffic {
         yaw = -a + (w.sp > 0 ? 0 : Math.PI);
       } else {
         const { q, sg } = bounce(t, w.sp, w.v1 - w.v0, w.ph);
-        if (w.kind === 0) { u = w.a; v = w.v0 + q; yaw = sg > 0 ? 0 : Math.PI; } else { u = w.v0 + q; v = Math.min(w.a, shoreV(u) - 36); yaw = sg > 0 ? Math.PI / 2 : -Math.PI / 2; }
+        if (w.kind === 0) { u = w.a; v = w.v0 + q; yaw = sg > 0 ? 0 : Math.PI; }
+        else if (w.kind === 3) { u = w.v0 + q; v = w.a; yaw = sg > 0 ? Math.PI / 2 : -Math.PI / 2; }
+        else { u = w.v0 + q; v = Math.min(w.a, shoreV(u) - 36); yaw = sg > 0 ? Math.PI / 2 : -Math.PI / 2; }
       }
       const x = (u - v) * S2, z = (u + v) * S2;
       // (townspeople stand upright on their terraces: the site frame's tilt over 3 km is 0.1 degree)

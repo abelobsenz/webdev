@@ -28,6 +28,9 @@ const gy = (x, z) => surfaceY(x, z);
 const UP = new THREE.Vector3(0, 1, 0), DOWN = new THREE.Vector3(0, -1, 0);
 const ROT_UV = -Math.PI / 4;       // local x -> u, local z -> v
 
+/** The three landing fields' centres (u, v metres); pad top 1.2 m, radius 248, blast walls to 276. */
+export const PADS = [[-1350, -2500], [-500, -2900], [350, -2500]];
+
 function mulberry(a) { return () => { a |= 0; a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
 
 // ------------------------------------------------------------------ builders --
@@ -180,7 +183,6 @@ export function buildMediiLanding() {
   const T_LIFT = 7.0, T_MID = 5.5, T_LOW = 4.0, T_STRAND = 2.5;
   const V_LOW = 1550, V_STRAND = 2900, V_MID = 550, U_TOWN = 1700;
   const DOMES = [[-650, -1150, 210], [-1250, -1000, 150], [-150, -1050, 130], [-1250, -1450, 110], [-300, -1470, 95]];
-  const PADS = [[-1350, -2500], [-500, -2900], [350, -2500]];
   const S = {
     B, UV, gy, at, lamp, lamps, plan, foot, courts, shoreV, rnd, prism, gable, ROT_UV, DOMES, PADS, U_TOWN,
     T: { LIFT: T_LIFT, MID: T_MID, LOW: T_LOW, STRAND: T_STRAND }, V: { MID: V_MID, LOW: V_LOW, STRAND: V_STRAND },

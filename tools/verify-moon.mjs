@@ -4,7 +4,7 @@
 // Run from the repo root: node tools/verify-moon.mjs
 import * as THREE from 'three';
 import { buildMediiLanding, shoreV } from '../src/space/lunarLanding.js';
-import { buildMediiWorks, RAIL_H, TRACK_X, ARRAY } from '../src/space/lunarWorks.js';
+import { buildMediiWorks, RAIL_H, TRACK_X, ARRAY, TOWER_D, PAD_STACKS, YARD } from '../src/space/lunarWorks.js';
 import { LunarTraffic } from '../src/space/lunarTraffic.js';
 import { LunarOutposts, buildOutpost, townDir } from '../src/space/lunarOutposts.js';
 import { kit, KIT_PARTS, KIT_R, TRACKER_AXLE } from '../src/space/lunarKit.js';
@@ -37,7 +37,7 @@ let t0 = performance.now();
 const L = buildMediiLanding();
 report.landingMs = Math.round(performance.now() - t0);
 t0 = performance.now();
-const W = buildMediiWorks(L.plan, L.driver);
+const W = buildMediiWorks(L.plan, L.driver, L.S.PADS);
 report.worksMs = Math.round(performance.now() - t0);
 t0 = performance.now();
 const life = new LunarTraffic(L, { works: W });
@@ -128,6 +128,28 @@ report.landingTris = tris(L.geo); report.worksTris = tris(W.geo);
     if (cyc === 0) ok(Math.abs(h) < 0.02, `lander seated (${h.toFixed(3)})`);
   }
   ok(kit('lander').boundingBox.min.y > -0.01 && kit('cargoLander').boundingBox.min.y > -0.01, 'lander footpads at the origin');
+  // service towers: beside their craft, clear of its footpads and of every other craft; the
+  // crews' circles pass outside the towers and inside the next craft's reach
+  for (const [tx, tz] of W.towers) {
+    const [tu, tv] = toUV(tx, tz);
+    const own = S.reduce((b, s) => Math.min(b, Math.hypot(s.u - tu, s.v - tv)), 1e9);
+    ok(Math.abs(own - TOWER_D) < 0.01, `tower ${own.toFixed(2)} m from its craft`);
+    for (const s of S) if (Math.hypot(s.u - tu, s.v - tv) > TOWER_D + 1) ok(Math.hypot(s.u - tu, s.v - tv) > 13 + 3.2 + 4, 'tower clear of other craft');
+    for (const s of S) { const d = Math.hypot(s.u - tu, s.v - tv); if (d < TOWER_D + 1) { const fp = [0, 1, 2, 3].map((k) => { const a = s.yaw + Math.PI / 4 + k * Math.PI / 2; return [s.x + Math.sin(a) * 11.5, s.z + Math.cos(a) * 11.5]; }); for (const [fx, fz] of fp) ok(Math.hypot(fx - tx, fz - tz) > 3.2 + 1.2, 'tower clear of the footpads'); } }
+    const [pu, pv] = PADS.reduce((b, p) => (Math.hypot(p[0] - tu, p[1] - tv) < Math.hypot(b[0] - tu, b[1] - tv) ? p : b));
+    ok(Math.hypot(tu - pu, tv - pv) + 3.2 < 214 - 8, 'tower inside the tugs\' circuit');
+  }
+  for (const c of life.crew) ok(c.r - 0.4 > TOWER_D + 3.2, 'crew circle outside the tower');
+  for (let i = 0; i < S.length; i++) for (let j = 0; j < S.length; j++) if (i !== j) ok(Math.hypot(S[i].u - S[j].u, S[i].v - S[j].v) > 28 + 40 + 13 + 1, `crews of one craft clear of the next (${Math.hypot(S[i].u - S[j].u, S[i].v - S[j].v).toFixed(0)})`);
+  // container stacks on the pads: inside the tugs' circuit, clear of the craft
+  PADS.forEach(([pu, pv], k) => {
+    const [su, sv] = PAD_STACKS[k];
+    const r = Math.hypot(su, sv) + Math.hypot(4.5, 13.2);
+    ok(r < 214 - 8.5, `pad ${k} stacks inside the tugs' circuit (${r.toFixed(0)})`);
+    for (const s of S) ok(Math.hypot(pu + su - s.u, pv + sv - s.v) > 13 + 14 + 28, `pad ${k} stacks clear of craft and crews`);
+  });
+  // the yard's container rows between the gantry legs
+  for (const [u] of W.stacks) ok(Math.abs(u - YARD.gantryU) + 1.3 < 30 - 1.4, 'yard stacks between the gantry legs');
   // tugs' circuit clears the parked craft
   for (const s of S) { const d = Math.hypot(s.u - PADS[s.k][0], s.v - PADS[s.k][1]); ok(Math.abs(d - 214) > 13 + 4 + 3, `tug circuit clears lander (${d.toFixed(0)})`); }
 }
@@ -177,6 +199,12 @@ report.landingTris = tris(L.geo); report.worksTris = tris(W.geo);
         dmin = Math.min(dmin, Math.hypot(a.x + ab.x * tt - p.x, a.z + ab.z * tt - p.z));
       }
       if (dmin > 4.1) rovBad++;
+    }
+    // runabouts on the streets, never inside a building
+    for (let i = 0; i < life.carts.length; i++) {
+      life.cartMesh.getMatrixAt(i, m); p.setFromMatrixPosition(m);
+      const [u, v] = toUV(p.x, p.z);
+      if (blocks.some((r) => inRect(u, v, r, 1.4))) rovBad++;
     }
     // trains on their tracks, cars apart
     for (let i = 0; i < 8; i++) {
