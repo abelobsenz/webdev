@@ -8,6 +8,10 @@ import { R_EARTH, R_MOON, MERIDIAN_LON, bodyDir } from './sim.js';
 import { stationFrame, CORRIDORS } from './stations.js';
 import { HS } from './harbour.js';
 import { FleetTraffic } from './fleetTraffic.js';
+import { buildLinerDetail } from './linerDetail.js';
+
+/** km: the liners' near fittings are drawn inside this range (a 2.4 km hull spans ~60 px at 60 km). */
+export const LINER_DETAIL_RANGE = 60;
 
 // MERIDIAN's ships in the orbital view (km units; the craft are built in metres).
 //
@@ -451,6 +455,30 @@ export class Fleet {
     }
     // the working lanes: outer roads, holding stacks, Selene's ore run, patrol and convoys
     this.traffic.update(sim, realTime, dt, space);
+    // the Concord liners' fittings, built the first time a camera comes near either of them
+    this._linerDetail(space.camera);
+  }
+
+  /** Near detail for the berthed and the visiting liner (src/space/linerDetail.js): lazy, hidden beyond range. */
+  _linerDetail(cam, force = false) {
+    if (!cam && !force) return;
+    const hulls = [this.docked, this.movers.find((m) => m.name === 'approach')?.mesh].filter(Boolean);
+    let near = force;
+    for (const h of hulls) {
+      h.getWorldPosition(_v);
+      h.userData.detailNear = force || (cam && _v.distanceTo(cam.position) < LINER_DETAIL_RANGE);
+      near ||= h.userData.detailNear;
+    }
+    if (near && !this.linerDetail) {
+      this.linerDetail = buildLinerDetail();
+      for (const h of hulls) {
+        const part = craftPart(h, this.linerDetail.geo);
+        addLamps(part, this.linerDetail.lamps, { minPx: 1.1 });
+        h.add(part);
+        h.userData.detail = part;
+      }
+    }
+    if (this.linerDetail) for (const h of hulls) h.userData.detail.visible = !!h.userData.detailNear;
   }
 }
 

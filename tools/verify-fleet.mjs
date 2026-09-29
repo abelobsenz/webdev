@@ -81,6 +81,7 @@ const frame = (t) => {
   space.scene.updateMatrixWorld(true);
 };
 frame(0);
+assert.ok(!fleet.linerDetail, 'liner detail is not built while every camera is far off');
 
 // ---- 3. routes: continuous, finite, speeds a torch-drive era allows; no gaps at leg joins
 const stations = traffic.stations;
@@ -291,6 +292,64 @@ assert.ok(minClear > 0.4, `working lanes clear every structure by ${minClear} km
   for (let i = 0; i < n; i++) traffic.update(sim, 700 + i * 0.016, 0.016, space);
   out.updateMs = +((performance.now() - t1) / n).toFixed(4);
   assert.ok(out.updateMs < 0.3, `traffic update ${out.updateMs} ms per frame`);
+}
+// ---- 7. the Concord liner's near fittings: lazy, seated off the keel collars, clear of the pier
+{
+  const docked = fleet.docked;
+  assert.ok(fleet.linerDetail && docked.userData.detail.visible, 'liner detail built once the camera came within range (section 6)');
+  fleet.linerDetail = null; docked.remove(docked.userData.detail);
+  const t2 = performance.now();
+  fleet._linerDetail(null, true);
+  out.linerDetailMs = +(performance.now() - t2).toFixed(1);
+  assert.ok(out.linerDetailMs < 400, `liner detail builds in ${out.linerDetailMs} ms`);
+  const D = fleet.linerDetail, g = D.geo, p = g.attributes.position;
+  out.linerDetailTriangles = g.index.count / 3;
+  assert.ok(out.linerDetailTriangles > 60000 && out.linerDetailTriangles < 1.2e6, 'liner detail within budget');
+  for (let i = 0; i < p.array.length; i++) assert.ok(Number.isFinite(p.array[i]), 'liner detail finite');
+  assert.ok(docked.userData.detail && docked.userData.detail.parent === docked, 'the fittings ride the berthed liner');
+  // nothing on the keel line where the collars and the port shuttles are
+  const { KEEL_CLEAR } = await import('../src/space/linerDetail.js');
+  const w = V();
+  let keel = 0;
+  for (let i = 0; i < p.count; i++) { w.fromBufferAttribute(p, i); if (w.y < -20 && Math.abs(w.x) < KEEL_CLEAR && w.z > -470 && w.z < 640) keel++; }
+  assert.equal(keel, 0, 'keel collars left clear');
+  // the port shuttles berthed at the collars: no fitting within 3 m of their hulls
+  const att = tree(tris(new THREE.Mesh(fleet.linerAttendants.geo)));
+  let mAtt = Infinity;
+  for (let i = 0; i < p.count; i += 3) mAtt = Math.min(mAtt, dist(att, w.fromBufferAttribute(p, i), 50));
+  out.linerDetailShuttleClearanceM = +mAtt.toFixed(2);
+  assert.ok(mAtt > 3, `fittings clear the berthed shuttles (${mAtt} m)`);
+  // the Harbour's structure (pier, gangways, arms, berthed ships): every fitting vertex > 4 m off
+  const el = space.elevator, st = el.station;
+  el.harbour.updateMatrixWorld(true);
+  const toH = el.harbour.matrixWorld.clone().invert();
+  const dm = new THREE.Matrix4().multiplyMatrices(toH, docked.matrixWorld);
+  const box = new THREE.Box3().setFromBufferAttribute(p).applyMatrix4(dm).expandByScalar(0.08);
+  const near = [];
+  for (const o of [st.body, st.terrace, ...(st.rings || []), ...(st.wings || []).map((x) => x.pivot), st.shipsBig, st.shipsSmall].filter(Boolean)) {
+    o.updateMatrixWorld(true);
+    o.traverse((m) => {
+      if (!m.isMesh || m.material?.transparent || m.geometry.isInstancedBufferGeometry) return;
+      const M = new THREE.Matrix4().multiplyMatrices(toH, m.matrixWorld), P = m.geometry.attributes.position, ix = m.geometry.index;
+      for (let i = 0; i < ix.count; i += 3) {
+        const tr = new THREE.Triangle(...[0, 1, 2].map((j) => V().fromBufferAttribute(P, ix.getX(i + j)).applyMatrix4(M)));
+        if (box.intersectsTriangle(tr)) near.push(tr);
+      }
+    });
+  }
+  let mH = Infinity;
+  if (near.length) {
+    const T = tree(near);
+    const bad = new THREE.Box3();
+    for (let i = 0; i < p.count; i += 2) {
+      const d = dist(T, w.fromBufferAttribute(p, i).applyMatrix4(dm), 1) * 1000;
+      if (d < 4) { bad.expandByPoint(V().fromBufferAttribute(p, i)); (out.badZ ||= new Set()).add(Math.round(p.getZ(i) / 20) * 20 + ':' + Math.round(p.getY(i) / 10) * 10); }
+      mH = Math.min(mH, d);
+    }
+    if (!bad.isEmpty()) console.log('fittings too near the Harbour (liner metres):', bad.min.toArray().map(Math.round), bad.max.toArray().map(Math.round));
+  }
+  out.linerDetailHarbourClearanceM = Number.isFinite(mH) ? +mH.toFixed(1) : 'none-near';
+  assert.ok(mH > 4, `fittings clear the Harbour's pier and structure (${mH} m, ${near.length} triangles near)`);
 }
 console.log(JSON.stringify(out));
 console.log('FLEET_VERIFIED');

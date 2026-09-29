@@ -320,7 +320,14 @@ export class StationTraffic {
     this.baseLamps.set(this.aL.array); this.baseDirs.set(this.aD.array); this.baseCols.set(this.aC.array);
     space.scene.add(this.group);
     this.hullsOn = true;
-    this.body = space.addBody(`fleetTraffic-${name}`, [this.group], null, 0, {
+    // the body's bound (for tools that read centre and radius): every route, sampled, plus the
+    // largest hull's metre-scale geometry; the depth slices use the tight interval below
+    let reach = 0;
+    const p = new THREE.Vector3(), f = new THREE.Vector3();
+    for (const sh of this.ships) for (let t = 0; t < sh.route.T; t += 5) { shipPose(sh, t, p, f); reach = Math.max(reach, p.length()); }
+    for (const d of designs) reach = Math.max(reach, d.radius * 1.05);
+    this.reach = reach + 5;
+    this.body = space.addBody(`fleetTraffic-${name}`, [this.group], (o) => this.group.getWorldPosition(o || _w), this.reach, {
       solid: true,
       interval: (cam) => this.interval(cam),
     });
