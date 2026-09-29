@@ -913,6 +913,11 @@ void main() {
   float towns = farLamp(along, uHubKm * 0.25, 2.2, fw) * (1.0 - hubs);
   vec3 warm = vec3(1.0, 0.7, 0.42);
   col += warm * (hubs * 1.6 + towns * 0.5) * (0.12 + 0.9 * night);
+  // the districts between them: the whole ring is lived in, so by night the band is a
+  // continuous thread of city light, brighter and dimmer by district (40 km stretches, their
+  // mean kept once a stretch is under a few pixels); by day a faint warm cast over the glass
+  float stretch = mix(0.9, 0.45 + 0.9 * farHash(floor(along / 40.0) + 7.0 * uGlass), 1.0 - smoothstep(10.0, 40.0, fw));
+  col += warm * stretch * (0.004 + 0.1 * night) * (1.0 - hubs);          // (the deck's own mean, for a clean hand-over)
   col += vec3(1.0, 0.45, 0.3) * farLamp(along, 25.0, 0.12, fw) * 0.8;               // crest markers
   vec3 H = normalize(V + uSunDir);
   float nh = max(dot(rhat, H), 0.0);
