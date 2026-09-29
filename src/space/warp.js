@@ -86,11 +86,14 @@ void main() {
   }
   // ---- the wall: radial push where rays graze the shell, outward across the contracting front
   // (the image squeezed), inward across the expanding back, with the drop-out ripple
-  vec2 cUv = toUv(normalize(uC));
+  vec2 cUv = toUv(uC / max(dc, 1e-9));
   vec2 uv = toUv(src);
+  vec3 gr = d * tc - uC;
+  vec3 pr = gr / max(length(gr), 1e-9);                             // where the ray grazes the shell
+  float x = dot(pr, uDir);                                           // +1 ahead .. -1 behind
+  float ph = atan(pr.y, pr.x + 1e-6) * 12.0 / 6.2831853 + x * 2.0 - uTime * 0.25;
+  float fw = min(fwidth(ph), 0.5);                                   // (outside any branch)
   if (!inside && tc > 0.0) {
-    vec3 pr = normalize(d * tc - uC);                               // where the ray grazes the shell
-    float x = dot(pr, uDir);                                         // +1 ahead .. -1 behind
     vec2 rad = vUv - cUv;
     float shim = 0.85 + 0.15 * sin(atan(rad.y, rad.x + 1e-6) * 7.0 + uTime * 3.1) * sin(rho * 23.0 - uTime * 5.3);
     float push = uWall * wall * x * 0.22 * shim;
@@ -103,11 +106,6 @@ void main() {
   // caustic threads along the wall: light from the background concentrated where the deflection
   // turns over (the faint grid that survives), tinted by the Doppler shift of that side
   if (wall > 1e-3 && tc > 0.0) {
-    vec3 pr = normalize(d * tc - uC);
-    float x = dot(pr, uDir);
-    float a = atan(pr.y, pr.x + 1e-6);
-    float ph = a * 12.0 / 6.2831853 + x * 2.0 - uTime * 0.25;
-    float fw = min(fwidth(ph), 0.5);
     float thread = mix(1.0 - smoothstep(0.0, 0.08 + fw, abs(fract(ph) - 0.5)), 0.2, smoothstep(0.1, 0.4, fw));
     float rq = (rho - 1.0 - 0.02 * sin(uTime * 2.3)) / (w * 0.35);
     float ring = exp(-rq * rq);
