@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import { SpaceSim, R_EARTH, bodyDir, MERIDIAN_LON } from '../src/space/sim.js';
 import { Orbit, MU, sunSyncInclination, sunlitFraction, periodOf } from '../src/space/kepler.js';
 import { LowOrbit } from '../src/space/lowOrbit.js';
-import { buildHotel, HOTEL, buildPolar, POLAR, buildFarmDrum, buildFarmFrame, FARM, buildPower, POWER, SKYHOOK, buildTram } from '../src/space/leoStations.js';
+import { buildHotel, HOTEL, buildPolar, POLAR, buildFarmDrum, buildFarmFrame, FARM, buildPower, POWER, SKYHOOK, buildTram, buildHabitat } from '../src/space/leoStations.js';
 import { SHELLS } from '../src/space/constellations.js';
 import { buildRelayCollar, buildCrawler, crawlerAt, CRAWLERS, CRAWL_RANGE } from '../src/space/tetherStations.js';
 import { RIBBON } from '../src/space/climbers.js';
@@ -170,6 +170,9 @@ function sweptHits(moving, fixed, ax, c = new THREE.Vector3(), cell = 1) {
   const h = buildHotel();
   const hits = sweptHits(samples(h.wheel), samples(h.fixed), new THREE.Vector3(0, 0, 1));
   ok(hits === 0, `hotel wheel sweeps clear of the spindle (${hits} fixed samples in its path)`);
+  const hb = buildHabitat();
+  const habHits = sweptHits(samples(hb.wheel), samples(hb.fixed), new THREE.Vector3(0, 0, 1));
+  ok(habHits === 0, `Halcyon torus sweeps clear of its axle and collector (${habHits})`);
   const b = buildPolar();
   const ringHits = sweptHits(samples(b.ring), samples(b.body), new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, POLAR.ringY, 0));
   ok(ringHits === 0, `polar centrifuge clear (${ringHits})`);

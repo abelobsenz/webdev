@@ -171,4 +171,9 @@ TARGET_INFO.anansi = {
   lore:'A 900 km tether that turns end over end as it orbits. At the bottom of each swing its tip moves 3.2 km/s slower than the hub, slow enough for a hopper launched from the Halo deck to meet it. The grapple takes the hopper, carries it over the top, and lets go at more than 10 km/s, fast enough for the Moon. Each tip catches one hopper every quarter hour.',
   facts:[['Tether','900 km'],['Tip speed','3.2 km/s relative'],['Tip gravity','2.3 g']],
 };
-TARGET_ORDER.push('aurelia', 'demeter', 'anansi', 'boreal', 'dawnline');
+TARGET_INFO.halcyon = {
+  key:'',name:'Halcyon',district:'Frozen orbit · 1,440-1,760 km · 63.4°',
+  lore:'A town in a wheel. The torus is almost two kilometres across and turns once a minute. Forty thousand people live in terraced apartments glazed into its walls, above a long park that runs all the way round under the roof glass. Its orbit is tilted at the critical angle, where the Earth\u2019s bulge no longer turns the ellipse, so its highest point always falls over the same latitude. Shuttles from the Halo berth at the despun docks astern.',
+  facts:[['Torus','1.9 km, 1 g at 1 rpm'],['Residents','40,000'],['Orbit','frozen, 63.4°']],
+};
+TARGET_ORDER.push('halcyon', 'aurelia', 'demeter', 'anansi', 'boreal', 'dawnline');

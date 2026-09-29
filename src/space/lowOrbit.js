@@ -7,7 +7,7 @@ import { createRibbonMaterial, buildRibbonGeometry } from './lines.js';
 import { R_EARTH, MERIDIAN_LON, bodyDir } from './sim.js';
 import { Orbit, MU, sunSyncInclination, nodeFacing, sunlitFraction } from './kepler.js';
 import {
-  buildHotel, hotelOmega, buildFarmDrum, buildFarmFrame, FARM, farmOmega, buildPolar, POLAR, polarOmega,
+  buildHotel, hotelOmega, buildHabitat, habOmega, buildFarmDrum, buildFarmFrame, FARM, farmOmega, buildPolar, POLAR, polarOmega,
   buildPower, POWER, buildTram, buildSkyhookHub, buildGrapple, SKYHOOK, buildSweeper, buildDebrisChunk, buildSatellites,
 } from './leoStations.js';
 import { Constellations } from './constellations.js';
@@ -18,6 +18,7 @@ import { droneGeo, DynLamps } from './lifeKit.js';
 //
 //   Aurelia Wheel (hotel, 820 km, 51.6 deg)        Demeter Reach (farm, 1,050 km, 28 deg)
 //   Boreal Watch (polar, 900 km, 90 deg)           Dawnline (sun-synchronous dawn-dusk, 1,200 km)
+//   Halcyon (a 1.9 km torus town on a frozen 63.4 deg orbit, 1,440-1,760 km)
 //   Anansi skyhook (rotovator, hub 1,250 km, 12 deg, 900 km of tether turning every 15 min,
 //     catching hoppers launched from the Halo at the bottom of each tip's swing and throwing
 //     them on at the top)
@@ -200,6 +201,23 @@ export class LowOrbit {
       s.meshes = [s.fixed];
       this.stations.push(s);
     }
+    // ---- Halcyon: a town-sized torus on a frozen orbit (critical inclination: its perigee stays put)
+    {
+      const o = new Orbit({ alt: 1600, e: 0.02, inc: 63.435 * DEG, node: 5.2, argp: 0.9, M0: 3.3 });
+      const s = new Station('halcyon', o, 1.12, 2200, [1.0, 0.82, 0.55], 0.7);
+      const h = buildHabitat();
+      s.fixed = craftMesh(h.fixed, {}, s.mat);
+      s.wheel = craftPart(s.fixed, h.wheel);
+      s.fixed.add(s.wheel);
+      lampSet(s.fixed, h.lamps); lampSet(s.wheel, h.wheelLamps);
+      s.root.add(s.fixed);
+      s.ports = h.ports;
+      s.omega = habOmega();
+      s.frameAt = (t, p, q) => { o.pos(t, p); if (q) basisQ(sun, Y, q); return p; };
+      s.animate = (rt) => { s.wheel.rotation.z = (s.omega * rt) % TAU; };
+      s.meshes = [s.fixed];
+      this.stations.push(s);
+    }
     // ---- Demeter Reach: the farm (drum axes on the Sun, counter-rotating)
     {
       const o = new Orbit({ alt: 1050, inc: 28 * DEG, node: 2.3, M0: 2.1 });
@@ -328,6 +346,7 @@ export class LowOrbit {
     const dg = droneGeo(7);
     const lanes = {
       aurelia: { axis: 'z', c: new THREE.Vector3(0, 0, 0), r0: 292, r1: 345, h0: -45, h1: 45, n: 10 },
+      halcyon: { axis: 'z', c: new THREE.Vector3(0, 0, 0), r0: 1090, r1: 1200, h0: -70, h1: 70, n: 14 },
       demeter: { axis: 'z', c: new THREE.Vector3(0, 0, 0), r0: 60, r1: 130, h0: 475, h1: 540, n: 8 },
       boreal: { axis: 'y', c: new THREE.Vector3(0, 0, 0), r0: 55, r1: 95, h0: 152, h1: 170, n: 6 },
       dawnline: { axis: 'z', c: new THREE.Vector3(0, 0, 0), r0: 110, r1: 420, h0: 40, h1: 80, n: 10 },
@@ -350,7 +369,7 @@ export class LowOrbit {
     this.glints = new Glints(this.stations.length + 3 + this.shuttles.length + this.hoppers.length);
     this.group.add(this.glints.points);
     this.trails = [];
-    const tc = { aurelia: [1.0, 0.8, 0.5], demeter: [0.6, 1.0, 0.5], boreal: [0.5, 0.85, 1.0], dawnline: [1.0, 0.55, 0.35] };
+    const tc = { halcyon: [1.0, 0.9, 0.7], aurelia: [1.0, 0.8, 0.5], demeter: [0.6, 1.0, 0.5], boreal: [0.5, 0.85, 1.0], dawnline: [1.0, 0.55, 0.35] };
     for (const s of this.stations) {
       const tr = trailFor(s.orbit, tc[s.name] || [0.7, 0.7, 0.75], tc[s.name] ? 1 : 0.5);
       tr.station = s;
@@ -535,6 +554,7 @@ void main() {
       ['halo0', 'aurelia', 'halo1', 'aurelia'], ['halo1', 'demeter', 'halo0', 'boreal'], ['halo0', 'dawnline', 'aurelia', 'halo1'],
       ['halo1', 'aurelia', 'demeter', 'halo0'], ['halo0', 'boreal', 'dawnline', 'halo1'], ['halo0', 'demeter', 'halo1', 'dawnline'],
       ['aurelia', 'halo0', 'boreal', 'halo1'], ['demeter', 'halo1', 'aurelia', 'halo0'],
+      ['halo0', 'halcyon', 'halo1', 'halcyon'], ['halcyon', 'demeter', 'halo0', 'aurelia'], ['halo1', 'halcyon', 'dawnline', 'halo0'],
     ];
     this.shuttles = routes.map((r, i) => {
       const legs = [];
@@ -826,6 +846,7 @@ export function leoTargets(space) {
     frame: (q) => (space.lowOrbit ? space.lowOrbit.pose(name, space.sim, null, q) : q.identity()),
   });
   return {
+    halcyon: { ...P('halcyon'), minDist: 1.4, maxDist: 40000, defaultDist: 3.8, view: { az: 0.5, el: 0.45 } },
     aurelia: { ...P('aurelia'), minDist: 0.45, maxDist: 40000, defaultDist: 1.25, view: { az: 0.8, el: 0.35 } },
     demeter: { ...P('demeter'), minDist: 1.1, maxDist: 40000, defaultDist: 3.2, view: { az: 2.3, el: 0.4 } },
     boreal: { ...P('boreal'), minDist: 0.35, maxDist: 40000, defaultDist: 0.95, view: { az: 0.6, el: 0.15 } },

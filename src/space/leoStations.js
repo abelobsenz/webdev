@@ -21,6 +21,7 @@ import { V, here, atAim, truss, catwalk, radiatorWing, dish, mast, dockingCollar
 //                      blanket facing the Sun, a phased-array emitter on a gimbal mast
 //                      holding on the ground station below.
 //   Anansi skyhook     a rotovator: hub, 900 km of tether, grapple stations at both tips.
+//   Halcyon            a torus town: 30 decks of glazed terraces, parkland under the roof, despun docks.
 //   Gleaner            debris sweeper: capture net forward, ablation laser, hopper bins.
 
 const TAU = Math.PI * 2;
@@ -178,6 +179,70 @@ export function buildHotel() {
   lamps.push({ p: tip, r: 1.8, color: LAMP.RED, i: 3.6, breathe: 0.7 });
   for (let k = 0; k < 24; k++) { const a = (k / 24) * TAU; lamps.push({ p: V(Math.cos(a) * 49.5, Math.sin(a) * 49.5, 143.2), r: 0.45, color: WARM, i: 1.8 }); }
   return { fixed: F.geometry(), wheel: W.geometry(), lamps, wheelLamps, ports, radius: 0.34 };
+}
+
+// ------------------------------------------------------------ habitat ----
+export const HAB = { R: 960, depth: 110, halfW: 65, hubR: 90, axle: 30, segs: 240, spokes: 6 };
+export const habOmega = () => Math.sqrt(9.81 / HAB.R);
+
+/**
+ * Halcyon: a town-sized torus (1.9 km across, one turn a minute for 1 g) on six spokes, its axis
+ * on the Sun. Thirty decks of terraced apartments glazed in the side walls look out; the inner
+ * roof is parkland under glass, shaded by chevron louvres; the rim is a thick shielding floor.
+ * A despun axle carries the docks and, sunward, the light-collector annulus.
+ */
+export function buildHabitat() {
+  const F = new CB(), W = new CB();
+  const lamps = [], wheelLamps = [], ports = [];
+  const { R, depth, halfW: hw, segs } = HAB;
+  const r0 = R - depth;
+  for (let k = 0; k < segs; k++) {
+    const a = (k / segs) * TAU;
+    W.push(rotZ(a));
+    const arcO = (TAU * (R + 6)) / segs * 1.01, arcM = (TAU * R) / segs * 1.01, arcI = (TAU * r0) / segs * 1.01;
+    W.box(0, R + 3, 0, arcO, 6, 2 * hw + 6, CK.HULL);                               // shielding floor
+    W.box(0, R + 6.4, 0, arcO, 0.8, 3, CK.CONDUIT);
+    for (const s of [-1, 1]) {
+      W.box(0, R - depth / 2, s * hw, arcM, depth, 2, CK.GLASS);                   // terraced apartments
+      if (k % 3 === 0) W.box(0, R - depth / 2, s * (hw + 1.4), 1.2, depth, 1.4, CK.BRONZE);   // mullion piers
+      if (k % 2 === 0) for (const dy of [-30, 0, 30]) W.box(0, R - depth / 2 + dy, s * (hw + 3), arcM * 0.8, 4, 4, CK.DECK);   // balconies
+      W.box(0, r0 - 2, s * (hw - 3), arcI, 4, 6, CK.BRONZE);                        // roof edge beam
+    }
+    W.box(0, r0 - 1, 0, arcI, 2, 2 * hw - 10, k % 10 < 7 ? CK.ROOF : CK.CONSERVATORY);
+    if (k % 2 === 1) W.box(0, r0 - 5, 0, arcI * 0.25, 1, 2 * hw - 14, CK.DARK);    // chevron louvre
+    if (k % 6 === 0) W.box(arcM / 2, R - depth / 2, 0, 3, depth + 10, 2 * hw + 8, CK.BRONZE);   // frame
+    W.pop();
+    const c = Math.cos(a), sn = Math.sin(a);
+    if (k % 2 === 0) for (const s of [-1, 1]) wheelLamps.push({ p: V(-sn * (R + 7), c * (R + 7), s * (hw + 3)), r: 2.2, color: LAMP.AMBER, i: 1.8, breathe: 0.12, phase: k / segs });
+    if (k % 4 === 1) wheelLamps.push({ p: V(-sn * (r0 - 7), c * (r0 - 7), 0), r: 2.6, color: WARM, i: 1.7 });
+  }
+  for (let k = 0; k < HAB.spokes; k++) {
+    const a = (k / HAB.spokes) * TAU + TAU / 12, c = Math.cos(a), s = Math.sin(a);
+    const p0 = V(c * (HAB.hubR - 2), s * (HAB.hubR - 2), 0), p1 = V(c * (r0 - 2), s * (r0 - 2), 0);
+    W.tube([p0, p1], 13, 16, CK.HULL);
+    for (const z of [-17, 17]) W.tube([p0.clone().setZ(z), p1.clone().setZ(z)], 4, 10, CK.GLASS);
+    for (let j = 1; j < 8; j++) { atAim(W, p0.clone().lerp(p1, j / 8), V(c, s, 0)); W.lathe([[13, -2, CK.BRONZE], [18, -1, CK.BRONZE], [18, 1, CK.HULL], [13, 2, CK.BRONZE]], 20, 0, { closedProfile: true }); W.pop(); }
+    wheelLamps.push({ p: V(c * (R + 8), s * (R + 8), 0), r: 4, color: k % 2 ? LAMP.RED : LAMP.GREEN, i: 3.2 });
+  }
+  W.lathe([[HAB.axle + 8, -60, CK.DARK], [HAB.hubR - 6, -60, CK.HULL], [HAB.hubR, -50, CK.BRONZE], [HAB.hubR, -20, CK.HULL], [HAB.hubR + 2, -10, CK.GLASS],
+    [HAB.hubR + 2, 10, CK.GLASS], [HAB.hubR, 20, CK.HULL], [HAB.hubR, 50, CK.BRONZE], [HAB.hubR - 6, 60, CK.HULL], [HAB.axle + 8, 60, CK.DARK]], 64, 0, { closedProfile: true });
+  // ---- despun: axle, bearings, the docks astern, the collector annulus sunward
+  const ax = HAB.axle;
+  F.lathe([[ax, -260, CK.HULL], [ax, -70, CK.HULL], [ax + 1, -68, CK.BRONZE], [ax + 1, 68, CK.BRONZE], [ax, 70, CK.HULL], [ax, 290, CK.HULL]], 40);
+  for (const s of [-1, 1]) latheAt(F, tr(0, 0, 0), [[ax, s * 63, CK.BRONZE], [HAB.hubR - 10, s * 63, CK.BRONZE], [HAB.hubR - 10, s * 74, CK.DARK], [ax, s * 74, CK.DARK]], 48, true);
+  F.lathe([[ax, -150, CK.HULL], [60, -160, CK.HULL], [64, -170, CK.BRONZE], [64.5, -176, CK.GLASS], [64.5, -214, CK.GLASS], [64, -220, CK.BRONZE], [56, -236, CK.HULL], [ax, -260, CK.DARK]], 48);
+  for (let k = 0; k < 6; k++) {
+    const a = (k / 6) * TAU, d = V(Math.cos(a), Math.sin(a), 0);
+    dockPort(F, lamps, ports, d.clone().multiplyScalar(62).setZ(-195), d, 26, 6);
+  }
+  truss(F, V(0, 0, 290), V(0, 0, 330), 20, 20, 0.8, CK.DARK);
+  F.push(tr(0, 0, 340));
+  F.lathe([[36, -6, CK.BRONZE], [760, -6, CK.DARK], [1060, -4, CK.BRONZE], [1060, 4, CK.PANEL], [760, 6, CK.PANEL], [36, 6, CK.BRONZE]], 128, 0, { closedProfile: true });
+  for (let k = 0; k < 12; k++) { const a = (k / 12) * TAU; F.tube([V(Math.cos(a) * 40, Math.sin(a) * 40, 0), V(Math.cos(a) * 1050, Math.sin(a) * 1050, 8)], 2.5, 6, CK.BRONZE); lamps.push({ p: V(Math.cos(a) * 1066, Math.sin(a) * 1066, 0), r: 4, color: k % 3 ? LAMP.WHITE : LAMP.RED, i: 3.2, breathe: 0.6, phase: k / 12 }); }
+  F.pop();
+  for (let k = 0; k < 12; k++) { const a = (k / 12) * TAU; lamps.push({ p: V(Math.cos(a) * 65.2, Math.sin(a) * 65.2, -195 + ((k % 2) ? 12 : -12)), r: 1.4, color: WARM, i: 1.8 }); }
+  lamps.push({ p: V(0, 0, -266), r: 4, color: LAMP.RED, i: 3.4, breathe: 0.7 });
+  return { fixed: F.geometry(), wheel: W.geometry(), lamps, wheelLamps, ports };
 }
 
 // --------------------------------------------------------------- farm ----
