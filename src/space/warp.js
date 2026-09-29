@@ -70,7 +70,8 @@ void main() {
   // how much of the bubble the ray passes through: 1 within the shell's disc, easing off across the wall
   float w = 0.12;
   float through = inside ? 1.0 : 1.0 - smoothstep(1.0 - w, 1.0 + w, rho);
-  float wall = inside ? 0.0 : exp(-pow((rho - 1.0) / w, 2.0));
+  float wq = (rho - 1.0) / w;
+  float wall = inside ? 0.0 : exp(-wq * wq);
   // ---- aberration through the wall: sources at psi_s appear at psi
   float beta = uBeta * through;
   vec3 src = d;
@@ -108,7 +109,8 @@ void main() {
     float ph = a * 12.0 / 6.2831853 + x * 2.0 - uTime * 0.25;
     float fw = min(fwidth(ph), 0.5);
     float thread = mix(1.0 - smoothstep(0.0, 0.08 + fw, abs(fract(ph) - 0.5)), 0.2, smoothstep(0.1, 0.4, fw));
-    float ring = exp(-pow((rho - 1.0 - 0.02 * sin(uTime * 2.3)) / (w * 0.35), 2.0));
+    float rq = (rho - 1.0 - 0.02 * sin(uTime * 2.3)) / (w * 0.35);
+    float ring = exp(-rq * rq);
     vec3 tint = mix(vec3(1.0, 0.45, 0.3), vec3(0.45, 0.7, 1.0), 0.5 + 0.5 * x);
     float caus = uWall * (ring * (0.6 + 0.4 * thread) + wall * 0.25);
     col = col * (1.0 + 1.6 * caus) + tint * caus * 0.02 * uSunE;
