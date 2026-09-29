@@ -519,6 +519,20 @@ function buildRelay(c) {
         Bp.box(s * (x0 + x1) / 2, 2.4, -chord / 2, x1 - x0, 0.6, 0.8, CK.BRONZE);
       }
       lamps.push({ p: V(s * (span + 10), 0, 0), r: 3, color: LAMP.RED, i: 5, breathe: 1, phase: s > 0 ? 0 : 0.5 });
+      // a tensioned wing: king posts at the root either side of the blankets and stays to the
+      // boom's thirds and tip, the way long deployable arrays are held flat against their own
+      // slewing; the power harness runs beneath the boom to the slip ring, glowing with the
+      // relay's accent as it carries the collected power inward
+      const post = chord / 2 + r.range(24, 40);
+      for (const e of [-1, 1]) {
+        const tip = V(s * 12, 0, e * post);
+        Bp.tube([V(s * 12, 0, e * 1.5), tip], 1.3, 6, CK.BRONZE);
+        Bp.box(tip.x, tip.y, tip.z, 4, 4, 4, CK.DARK);
+        lamps.push({ p: tip.clone().add(V(0, 2.6, 0)), r: 1.4, color: LAMP.WHITE, i: 3, breathe: 1, phase: (e + 1) * 0.25 + (s > 0 ? 0 : 0.12) });
+        for (const f of [0.34, 0.67, 1]) Bp.tube([tip.clone().add(V(s * 1.5, 0, -e * 1.5)), V(s * (12 + span * f), 0, e * 2.6)], 0.55, 4, CK.DARK);
+      }
+      Bp.tube([V(s * 10, -3.6, 0), V(s * (span + 4), -3.6, 0)], 1.1, 6, CK.CONDUIT);
+      for (let i = 1; i < nb; i++) { const x = s * (12 + (span - 4) * (i / nb) - 1.5); Bp.box(x, 0.2, 0, 3.4, 6.6, 5, CK.BRONZE); }   // hinge frames
     }
   }, { axis: 'z' });
   truss(B, V(0, 32, 0), V(0, 55, 0), 6, 6, 0.4);
