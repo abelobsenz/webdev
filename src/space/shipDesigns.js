@@ -152,7 +152,7 @@ export function buildTanker(seed = 1) {
   radiatorWing(B, V(0, -2.4, -22), V(0, -1, 0), V(1, 0, 0), span, 12, null, null);
   // crew drum at the bow
   B.at(0, 0, z1 + 8);
-  B.lathe([[0.1, 0, CK.HULL], [6, 0, CK.HULL], [6.5, 1, CK.BRONZE], [6.5, 3, CK.GLASS], [6.8, 3.4, CK.LANTERN], [6.5, 3.8, CK.BRONZE], [6.5, 6.5, CK.GLASS], [5.5, 9, CK.HULL], [2.6, 11, CK.HULL], [0.1, 11, CK.HULL]], 24);
+  B.lathe([[0.1, 0, CK.HULL], [6, 0, CK.HULL], [6.5, 1, DK.LIVERY], [6.5, 3, CK.GLASS], [6.8, 3.4, CK.LANTERN], [6.5, 3.8, CK.BRONZE], [6.5, 6.5, DK.PORTS], [5.5, 9, DK.LIVERY], [2.6, 11, CK.HULL], [0.1, 11, CK.HULL]], 24);
   B.at(0, 5.8, 5.5);
   bridge(B, 5, 2.4, 6, lamps);
   B.pop();
@@ -324,7 +324,7 @@ export function buildLighter(seed = 1) {
   const L = r.range(22, 30), W = r.range(8, 10);
   // flat cargo deck on a keel beam, pallets strapped down
   B.box(0, 0, 0, W, 0.8, L, CK.DECK);
-  B.box(0, -1.4, 0, 2.4, 2, L + 2, CK.HULL);
+  B.box(0, -1.4, 0, 2.4, 2, L + 2, DK.GRIME);
   for (const s of [-1, 1]) B.tube([V(s * W / 2, 0.9, -L / 2), V(s * W / 2, 0.9, L / 2)], 0.08, 4, CK.BRONZE);   // deck-edge rails
   for (let z = -L / 2 + 1; z <= L / 2 - 1; z += 2) for (const s of [-1, 1]) B.box(s * W / 2, 0.5, z, 0.08, 0.9, 0.08, CK.DARK);
   const pal = r.int(3, 6);
@@ -336,7 +336,7 @@ export function buildLighter(seed = 1) {
   B.at(0, 2.8, L / 2 + 1);
   bridge(B, 4.2, 2.6, 4.4, lamps);
   B.pop();
-  B.box(0, 1.2, L / 2 + 1, 2, 2.4, 3, CK.HULL);
+  B.box(0, 1.2, L / 2 + 1, 2, 2.4, 3, DK.LIVERY);
   for (const x of [-2, 2]) bell(B, x, -1.4, -L / 2 - 1, 1.1, 2.2, glows);
   for (const s of [-1, 1]) for (const z of [-L / 2 + 1.5, L / 2 - 1.5]) rcs.push(...rcsQuad(B, V(s * (W / 2 + 0.3), -0.2, z), V(s, 0, 0), V(0, 0, 1), 0.6));
   navSet(lamps, { hw: W / 2 + 0.4, y: 0.6, z: 0, stern: V(0, 1.4, -L / 2 - 0.4), r: 0.35 });
