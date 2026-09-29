@@ -6,7 +6,7 @@
 import * as THREE from 'three';
 import {
   buildHotel, HOTEL, buildHabitat, HAB, HAB_COLLECTOR, buildFarmDrum, buildFarmFrame, FARM, buildPolar, POLAR, buildPower, POWER,
-  buildSkyhookHub, buildGrapple, buildTram,
+  buildSkyhookHub, buildGrapple, buildTram, EMITTER_HEX,
 } from '../src/space/leoStations.js';
 
 let fails = 0;
@@ -142,6 +142,8 @@ ok(tri < 500000, `dawnline ${Math.round(tri)} triangles (< 500k)`);
     if (k === 11 && Math.abs(y) > 20 && Math.abs(x) < 230 && z < -30) clash++;
   }
   ok(clash === 0, `dawnline back-frame fins keep off the hub radiators (${clash})`);
+  const flats = 2 * EMITTER_HEX.r * Math.cos(Math.PI / 6);
+  ok(EMITTER_HEX.tiles > 400 && EMITTER_HEX.pitch - flats > 0.5, `dawnline emitter ${EMITTER_HEX.tiles} hex tiles, ${(EMITTER_HEX.pitch - flats).toFixed(2)} m gaps`);
 }
 sane("anansi hub", buildSkyhookHub().geo); sane("anansi grapple", buildGrapple().geo);
 sane('tram', buildTram());

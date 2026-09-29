@@ -552,6 +552,7 @@ export function buildPolar() {
 
 // -------------------------------------------------------------- power ----
 export const POWER = { half: 950, height: 360, pivotZ: -300, disc: 120, discOff: 64, tramY: 12, tramZ: -16.5 };
+export const EMITTER_HEX = { r: 4.6, pitch: 9, tiles: 0 };   // tile circumradius, centre spacing (m)
 
 /** The Dawnline inspection tram (+x along the rail), 14 m. */
 export function buildTram() {
@@ -633,14 +634,21 @@ export function buildPower() {
   const { disc: R, discOff: d } = POWER;
   E.tube([V(0, 0, 0), V(0, 0, d - 6)], 3.2, 12, CK.BRONZE);
   E.lathe([[0.02, d - 8, CK.HULL], [R * 0.2, d - 6, CK.HULL], [R, d - 1, CK.BRONZE], [R + 1, d, CK.BRONZE], [R, d + 1.6, CK.DARK], [0.02, d + 1.6, CK.DARK]], 64);
-  for (let ring = 1; ring < 6; ring++) {
-    const rr = (ring / 6) * R, m = Math.round(ring * 8);
-    for (let k = 0; k < m; k++) {
-      const a = (k / m) * TAU + ring * 0.3;
-      E.box(Math.cos(a) * rr, Math.sin(a) * rr, d + 2, 13, 13, 0.8, (ring + k) % 3 ? CK.PANEL : CK.DARK);
-    }
-    E.push(tr(0, 0, d + 2.6)); E.torus(rr + 7, 0.5, 96, 4, CK.BRONZE); E.pop();
+  // the aperture: hexagonal radiating tiles close-packed on a hex grid (8 m across the flats,
+  // 1 m gaps), every seventh a darker phase-reference tile, sub-array frames in rings
+  const hexR = EMITTER_HEX.r, pitch = EMITTER_HEX.pitch;
+  let tiles = 0;
+  for (let q = -12; q <= 12; q++) for (let r = -12; r <= 12; r++) {
+    const x = pitch * (q + r / 2), y = pitch * r * Math.sqrt(3) / 2;
+    if (Math.hypot(x, y) > R - hexR - 2) continue;
+    const ref = ((q - r) % 7 + 7) % 7 === 0;
+    E.push(tr(x, y, d + 1.6));
+    E.lathe([[0.02, 0, CK.DARK], [hexR, 0, CK.DARK], [hexR, ref ? 0.8 : 1.4, ref ? CK.DARK : CK.PANEL], [0.02, ref ? 0.8 : 1.4, CK.PANEL]], 6, Math.PI / 6);
+    E.pop();
+    tiles++;
   }
+  EMITTER_HEX.tiles = tiles;
+  for (let ring = 2; ring < 6; ring += 1) { const rr = (ring / 6) * R; E.push(tr(0, 0, d + 3.2)); E.torus(rr, 0.45, 96, 4, CK.BRONZE); E.pop(); }
   for (let k = 0; k < 16; k++) { const a = (k / 16) * TAU; E.tube([V(0, 0, 4), V(Math.cos(a) * R * 0.95, Math.sin(a) * R * 0.95, d - 2)], 0.7, 4, CK.DARK); }
   for (let k = 0; k < 24; k++) { const a = (k / 24) * TAU; emitterLamps.push({ p: V(Math.cos(a) * (R + 2), Math.sin(a) * (R + 2), d + 1), r: 1.6, color: LAMP.RED, i: 2.6, breathe: 0.5, phase: k / 24 }); }
   emitterLamps.push({ p: V(0, 0, d + 3.4), r: 3.2, color: [1.0, 0.45, 0.25], i: 2.4, breathe: 0.4 });
