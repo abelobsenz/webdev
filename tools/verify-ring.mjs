@@ -298,5 +298,17 @@ space.camera.position.copy(el.junction.position).applyQuaternion(sim.earthQuat).
 el.update(sim, 300, 0.016, space);
 assert.ok(el.junctionLife.group.visible && el.junctionLife.pods.count === 0 && el.junctionLife.cranes.length === 4, 'The junction works too, leaving the main tether to the climbers');
 
+// per-frame cost of the elevator (cars, relays, counterweight town, junction) and the ports
+{
+  space.camera.position.copy(el.counter.position).applyQuaternion(sim.earthQuat).add(V(0, 30, 0));
+  const te = [], tp = [];
+  for (let f = 0; f < 200; f++) {
+    let s0 = performance.now(); el.update(sim, f * 0.5, 0.016, space); te.push(performance.now() - s0);
+    s0 = performance.now(); ports.update(sim, f * 0.5, 0.016, space); tp.push(performance.now() - s0);
+  }
+  te.sort((x, y) => x - y); tp.sort((x, y) => x - y);
+  out.elevatorUpdateMedianMs = +te[100].toFixed(3); out.portsUpdateMedianMs = +tp[100].toFixed(3);
+  assert.ok(te[100] < 0.3 && tp[100] < 0.3, 'Elevator and port updates stay under 0.3 ms');
+}
 console.log(JSON.stringify(out));
 console.log('RING_VERIFIED');
