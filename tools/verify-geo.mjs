@@ -5,7 +5,7 @@
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import { HarbourStation, HS } from '../src/space/harbour.js';
-import { LIFE, cranePose, podR, PODS_PER_LINE, dronePose, armFrame, ROAD, roadPose, berthDronePose } from '../src/space/harbourLife.js';
+import { LIFE, cranePose, podR, PODS_PER_LINE, dronePose, armFrame, ROAD, roadPose, berthDronePose, PROM, concourseR, tramAngle } from '../src/space/harbourLife.js';
 import { buildConcordYard, buildWaterStore, YARD, STORE, sectionPoint, movementPlan, movementPose, MOVEMENTS, routeAround } from '../src/space/geoRoads.js';
 import { approachVoyage, voyage } from '../src/space/fleet.js';
 import { WATER, waterRunPose } from '../src/space/waterRun.js';
@@ -156,6 +156,26 @@ for (const t of [5, 40, 77, 140, 200]) {
   for (const t of [0, 51, 133, 377]) for (const [ai, F] of armF.entries()) for (let j = 0; j < DR.perArm; j++) { dronePose(t, j, ai, P, V()); P.applyMatrix4(F); g = Math.min(g, kc.dist(P, 120) - 5); }
   results.armDroneKitClearM = +g.toFixed(1);
   assert.ok(g > 5, `arm drones clear the gallery town by ${g} m`);
+}
+// the Concourse promenades: seated on the glass, clear of the middle ring's turning hub, trams on their rails
+{
+  for (const y of PROM.levels) {
+    assert.ok(Math.abs(y) - 8 > 300 + 50, 'promenades clear the middle ring hub collar');
+    for (const dy of [-8, 4]) assert.ok(concourseR(y + dy) > concourseR(y) - 25 + 2, 'promenade decks are seated in the glass through their thickness');
+  }
+  let g = Infinity;
+  for (let l = 0; l < PROM.levels.length; l++) for (let j = 0; j < PROM.trams; j++) for (const t of [0, 40, 400]) {
+    const a = tramAngle(l, j, t), r = concourseR(PROM.levels[l]) + PROM.tramR;
+    P.set(Math.cos(a) * r, PROM.levels[l] + 14, Math.sin(a) * r).multiplyScalar(HS);
+    g = Math.min(g, hc.dist(P, 60) - 8 * HS);
+  }
+  results.promenadeTramClearM = +g.toFixed(1);
+  assert.ok(g > 3, `promenade trams clear the Concourse by ${g} m`);
+  // the outer edge of every promenade stands off everything but the glass it is seated in
+  let e = Infinity;
+  for (const y of PROM.levels) for (let k = 0; k < 64; k++) { const a = (k / 64) * Math.PI * 2, r = concourseR(y) + PROM.width; P.set(Math.cos(a) * r, y, Math.sin(a) * r).multiplyScalar(HS); e = Math.min(e, hc.dist(P, 80)); }
+  results.promenadeEdgeStandoffM = +e.toFixed(1);
+  assert.ok(e > 20, 'the promenades stand out from the Concourse');
 }
 // berth service drones stay off their ships, the fingers and the gantries
 {

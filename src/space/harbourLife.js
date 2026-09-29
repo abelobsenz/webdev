@@ -121,6 +121,57 @@ export function berthDronePose(b, j, t, outP) {
   return outP.copy(sh.pos).addScaledVector(b.side, sd * out).addScaledVector(b.d, along).setY(sh.pos.y + lift);
 }
 
+// ---- the Concourse promenades: four lit balcony rings round the glass Concourse at the
+//      spindle's waist (design units), clear of the middle ring's turning hub (|y| < 300,
+//      r > 2750), each with a railing, lamp standards and a promenade tram running round it
+export const PROM = { levels: [-1150, -800, 800, 1150], width: 90, tramR: 60, trams: 3, speed: 9 };
+const CONCOURSE = [[2000, -1900], [2500, -1300], [2650, -400], [2700, -300], [2700, 300], [2650, 400], [2500, 1300], [2000, 1900]];
+/** Radius of the Concourse's glass at height y (design units). */
+export function concourseR(y) {
+  for (let i = 0; i < CONCOURSE.length - 1; i++) {
+    const [r0, y0] = CONCOURSE[i], [r1, y1] = CONCOURSE[i + 1];
+    if (y >= y0 && y <= y1) return r0 + (r1 - r0) * (y - y0) / (y1 - y0);
+  }
+  return 900;
+}
+function promenadeGeo(lamps) {
+  const B = new CB();
+  const toY = new THREE.Matrix4().makeRotationX(-Math.PI / 2);
+  for (const y of PROM.levels) {
+    const rs = concourseR(y), ro = rs + PROM.width;
+    B.push(toY);
+    lathe(B, [[rs - 25, y - 8, CK.DARK], [ro, y - 8, CK.BRONZE], [ro, y + 4, CK.BRONZE], [ro - 6, y + 4, CK.DECK], [rs - 25, y + 4, CK.DECK]], 96, 0, { closedProfile: true });
+    B.pop();
+    // railing and a tram rail at the outer edge
+    B.push(new THREE.Matrix4().makeTranslation(0, y + 7, 0).multiply(new THREE.Matrix4().makeRotationX(Math.PI / 2)));
+    B.torus(ro - 3, 1.4, 128, 4, CK.BRONZE);
+    B.pop();
+    B.push(new THREE.Matrix4().makeTranslation(0, y + 6, 0).multiply(new THREE.Matrix4().makeRotationX(Math.PI / 2)));
+    B.torus(rs + PROM.tramR, 2.2, 128, 5, CK.DARK);
+    B.pop();
+    for (let k = 0; k < 48; k++) {
+      const a = (k / 48) * TAU, c = Math.cos(a), sn = Math.sin(a), r = ro - 3;
+      B.tube([V(c * r, y + 4, sn * r), V(c * r, y + 7, sn * r)], 0.6, 4, CK.HULL);
+      if (k % 2 === 0) {
+        const rl = rs + 30;
+        B.tube([V(c * rl, y + 4, sn * rl), V(c * rl, y + 22, sn * rl)], 0.9, 5, CK.DARK);
+        lamps.push({ p: V(c * rl, y + 24, sn * rl), r: 5, color: k % 6 ? LAMP.AMBER : LAMP.WHITE, i: 1.5, breathe: 0.15, phase: k / 48 });
+      }
+    }
+  }
+  return B.geometry();
+}
+function tramGeo() {
+  const B = new CB();
+  B.box(0, 8, 0, 14, 12, 60, CK.HULL);
+  B.box(0, 9, 0, 14.4, 5, 56, CK.LANTERN);
+  B.box(0, 15, 0, 15, 1.5, 62, CK.BRONZE);
+  for (const z of [-22, 22]) B.box(0, 1.6, z, 6, 3.2, 8, CK.DARK);
+  return B.geometry();
+}
+/** Tram j of promenade level l at time t: angle round the Concourse. */
+export function tramAngle(l, j, t) { return (j / PROM.trams) * TAU + (l % 2 ? 1 : -1) * (PROM.speed / (concourseR(PROM.levels[l]) + PROM.tramR)) * t + l * 0.7; }
+
 /** Arm frame: design-local (x along, y keel-out, z across) to the Harbour's drawn metres. */
 export function armFrame(arm) {
   const s = arm.up ? 1 : -1;
@@ -323,6 +374,16 @@ export class HarbourLife {
     for (let i = 0; i < this.berthWork.length * 2; i++) dl.push({ p: V(0, 0, 0), r: 3, color: i % 2 ? LAMP.TEAL : LAMP.WHITE, i: 2.2, breathe: 0.4, phase: (i * 0.29) % 1 });
     this.dynLamps = new DynLamps(dl, { minPx: 1.1 });
     this.root.add(this.dynLamps.mesh);
+    // ---- the Concourse promenades and their trams (design units, scaled by HS)
+    const promLamps = [];
+    const promGeo = promenadeGeo(promLamps);
+    promGeo.scale(HS, HS, HS);
+    this.prom = new THREE.Mesh(promGeo, body.material);
+    this.prom.onBeforeRender = body.onBeforeRender; this.prom.renderOrder = 3;
+    this.root.add(this.prom);
+    for (const l of promLamps) kitLamps.push({ ...l, p: l.p.clone().multiplyScalar(HS), r: l.r * HS });
+    this.trams = instancedPart(body, tramGeo(), PROM.levels.length * PROM.trams);
+    this.root.add(this.trams);
     // ---- the Ring Road (its own holder: its lights show from much further out than the rest)
     this.road = new THREE.Group();
     this.road.scale.setScalar(KM);
@@ -503,6 +564,16 @@ export class HarbourLife {
     }
     this.drones.instanceMatrix.needsUpdate = true;
     this.dynLamps.commit();
+    // promenade trams
+    k = 0;
+    for (let l = 0; l < PROM.levels.length; l++) for (let j = 0; j < PROM.trams; j++) {
+      const a = tramAngle(l, j, t), r = concourseR(PROM.levels[l]) + PROM.tramR;
+      p.set(Math.cos(a) * r, PROM.levels[l] + 6, Math.sin(a) * r).multiplyScalar(HS);
+      f.set(-Math.sin(a), 0, Math.cos(a)).multiplyScalar(l % 2 ? 1 : -1);
+      poseMatrix(m, p, f, this._up, HS);
+      this.trams.setMatrixAt(k++, m);
+    }
+    this.trams.instanceMatrix.needsUpdate = true;
     // lift cars on the spokes (ring-local; the ring's own rotation carries them round)
     for (const rl of this.ringLife) {
       for (let s = 0; s < 6; s++) {
