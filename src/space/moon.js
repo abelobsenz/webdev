@@ -13,6 +13,7 @@ import { buildMediiLanding } from './lunarLanding.js';
 import { lunarMesh, LUNAR_FRAME, LK, createLunarMaterial } from './lunarMaterial.js';
 import { CB } from '../craft/craftGeometry.js';
 import { LunarTraffic } from './lunarTraffic.js';
+import { buildMediiWorks } from './lunarWorks.js';
 import { LunarOutposts } from './lunarOutposts.js';
 import { LunarHops } from './lunarHops.js';
 
@@ -322,7 +323,7 @@ export class Moon {
   /** Build Medii Works and the Landing's traffic now (normally done on approach). */
   ensureLife() {
     if (this.life) return this.life;
-    this.life = new LunarTraffic(this.landingData);
+    this.life = new LunarTraffic(this.landingData, { works: this._works || null });
     this.landing.add(this.life.group);
     return this.life;
   }
@@ -388,7 +389,11 @@ export class Moon {
     if (this.space.camera) {
       const cam = this.space.camera.position;
       this.landing.getWorldPosition(_lp);
-      if (!this.life && _lp.distanceTo(cam) < 2500) this.ensureLife();
+      // (built over two frames on approach: the Works' geometry, then the traffic that uses it)
+      if (!this.life && _lp.distanceTo(cam) < 2500) {
+        if (!this._works) this._works = buildMediiWorks(this.landingData.plan, this.landingData.driver, this.landingData.S.PADS);
+        else this.ensureLife();
+      }
       if (this.life) {
         this.landing.getWorldQuaternion(_lq).invert();
         _sunSite.copy(sim.sunDir).applyQuaternion(_lq);

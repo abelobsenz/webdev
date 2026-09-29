@@ -144,6 +144,17 @@ export class SpaceMode {
       frame:q=>q.copy(sim.moonQuat).multiply(lunarFrame),
       minDist:.25,maxDist:20000,defaultDist:15,view:{az:-0.55,el:.3},   // from over the Bay, the town lit by the morning Sun
     });
+    // Medii Works and the landing fields, inland of the town (src/space/lunarWorks.js, lunarTraffic.js)
+    T('mediiWorks', {
+      position:o=>o.set(5.798,0.03,-0.424).applyQuaternion(lunarFrame).add(_v2.set(R_MOON,0,0)).applyQuaternion(sim.moonQuat).add(sim.moonPos),
+      frame:q=>q.copy(sim.moonQuat).multiply(lunarFrame),
+      minDist:.08,maxDist:20000,defaultDist:3.2,view:{az:2.4,el:.32},
+    });
+    T('lunarFields', {
+      position:o=>o.set(1.485,0.02,-2.192).applyQuaternion(lunarFrame).add(_v2.set(R_MOON,0,0)).applyQuaternion(sim.moonQuat).add(sim.moonPos),
+      frame:q=>q.copy(sim.moonQuat).multiply(lunarFrame),
+      minDist:.05,maxDist:20000,defaultDist:1.6,view:{az:-2.2,el:.28},
+    });
     const terraceLocal=new THREE.Vector3(Math.cos(.2),0,Math.sin(.2)).multiplyScalar(9.174).addScaledVector(new THREE.Vector3(-Math.sin(.2),0,Math.cos(.2)),.32).setY(-1.07);
     T('harbourTerrace',{
       position:o=>o.copy(terraceLocal).applyQuaternion(meridQ).addScaledVector(merid,R_EARTH+GEO_ALT).applyQuaternion(sim.earthQuat),

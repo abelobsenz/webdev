@@ -131,3 +131,16 @@ TARGET_INFO.releaseYard = {
   facts:[['Spar','23 km'],['Cradles','2'],['Release speed','7.75 km/s']],
 };
 TARGET_ORDER.push('releaseYard');
+
+// Medii Works and the landing fields (src/space/lunarWorks.js, lunarTraffic.js)
+TARGET_INFO.mediiWorks = {
+  key:'',name:'Medii Works',district:'The Moon · inland of Medii Landing',
+  lore:'The working half of the Landing. The Fields Line runs on its double guideway from the domes past the three landing fields to the plant, where regolith from the open working is smelted for oxygen and metal and the heat goes out through a farm of radiator wings. Haulers circle from the face to the hopper, bucket wheels turn, eleven thousand trackers follow the Sun, and the hoppers from the outposts set down on their own field by the radiators.',
+  facts:[['Fields Line','8.6 km, five stations'],['Solar array','10,900 trackers'],['Outposts served','13']],
+};
+TARGET_INFO.lunarFields = {
+  key:'',name:'Medii landing fields',district:'The Moon · Medii Landing',
+  lore:'Three pads of dark composite inside blast walls open toward the town. Crew and cargo landers stand at their service towers while tugs tow propellant bowsers round the rim and suited crews walk the craft; every few minutes another comes down on a pale plume from three kilometres, stands a while, and lifts away.',
+  facts:[['Pads','3 x 496 m'],['Propellant farm','9 spheres'],['Turnaround','about 3 minutes']],
+};
+TARGET_ORDER.push('mediiWorks', 'lunarFields');
