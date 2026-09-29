@@ -180,6 +180,21 @@ vec2 lowCloud(vec3 b, float fp, float bias, bool fine) {
   float cover = smoothstep(0.5 - edge, 0.5 + edge, Pd);
   float thick = clamp((Pd - 0.5) / 0.3, 0.0, 1.0);
   float tau = mix(mix(8.0, 5.0, S), 48.0, thick * (0.5 + 0.5 * thick)) * mix(1.0, mix(0.72, 1.12, mix(0.75, heart, cellRes)), S * (1.0 - O));
+#if QUALITY > 0
+  // deep convection resolved: the towers of a storm complex (~10 km domes, overshooting tops
+  // punching through the anvil), their optical depth, and so their relief and shadows, heaped
+  // at the centres of the updraughts
+  float convP = smoothstep(0.66, 0.82, P) * (1.0 - smoothstep(0.35, 0.7, S));
+  if (fine && convP > 0.0) {
+    float towerRes = 1.0 - smoothstep(2.5, 6.0, fp);
+    if (towerRes > 0.0) {
+      vec2 tc = cellF(q * (6371.0 / 11.0) + 17.0);
+      float dome = 1.0 - smoothstep(0.0, 0.62, tc.x);
+      float over = (1.0 - smoothstep(0.0, 0.22, tc.x)) * step(0.72, hash13(floor(q * (6371.0 / 11.0) + 17.0)));
+      tau *= mix(1.0, 0.55 + 1.2 * dome * dome + 0.9 * over, convP * towerRes);
+    }
+  }
+#endif
   return vec2(cover, tau);
 }
 // High ice cloud on its own shell: thin, fibrous, drawn out along the wind. x = cover, y = tau
@@ -505,9 +520,15 @@ void main() {
     al *= od_seaTexture(b, fp, B.a);
     al *= 1.0 + 0.7 * shRough - 0.45 * clamp(shSlick, 0.0, 1.0);
     al = clamp(al, 0.05, 0.6);
+    // the waves themselves where the pixel resolves them: their slope tilts the facet normal, and
+    // the roughness keeps only what is still below the pixel
+    float swVar;
+    vec3 swSlope = od_swell(b, fp, uTime, swVar);
+    al = sqrt(max(al * al - swVar, 0.0016));
+    vec3 nw = normalize(n - transpose(uToBody) * swSlope * (1.0 - ice));
     al = mix(al, 0.5, ice);
     vec3 Hh = normalize(V + sun);
-    float nh = max(dot(n, Hh), 0.0), nv = max(dot(n, V), 1e-3), nl = max(dot(n, sun), 0.0);
+    float nh = max(dot(nw, Hh), 0.0), nv = max(dot(nw, V), 1e-3), nl = max(dot(n, sun), 0.0);
     float a2 = al * al;
     float dd = nh * nh * (a2 - 1.0) + 1.0;
     float D = a2 / (S_PI * dd * dd);
@@ -550,6 +571,16 @@ void main() {
   // brighter from afar, where a city is a pixel's mean, calmer close up so districts keep their
   // structure (a smooth function of range: nothing pops)
   float rangeK = mix(0.7, 1.35, smoothstep(3.0, 30.0, fp));
+  // the city's night: full through the evening, dimmer in the small hours as the shops and
+  // offices go dark, a lift with the early shifts before dawn (local solar time from the Sun)
+  {
+    vec3 sB = uToBody * sun;
+    float hA = atan(-b.z, b.x) - atan(-sB.z, sB.x);
+    float hour = mod(12.0 + hA * 3.8197 + 48.0, 24.0);
+    float sinceDusk = mod(hour - 18.0 + 24.0, 24.0);
+    float zc = (sinceDusk - 11.5) / 1.1;
+    rangeK *= mix(1.0, 0.62, smoothstep(4.5, 9.0, sinceDusk)) + 0.22 * exp(-zc * zc);
+  }
   vec3 emis = ((vec3(1.0, 0.6, 0.28) * lw * 4.2 + vec3(0.66, 0.88, 1.0) * lc * 3.6) * micro + vec3(0.72, 0.86, 1.0) * ln * 1.05) * rangeK;
   // a soft shoulder, so a metro's heart stays warm-white instead of clipping to a white splat
   // (and stays under the bloom's threshold: no metro flares into a star)

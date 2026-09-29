@@ -3,7 +3,7 @@ import { FullscreenPass, FS_VERT } from '../core/fullscreen.js';
 import { SNOISE_GLSL } from './glsl.js';
 import { NOISE_GLSL } from '../shaders/noise.glsl.js';
 import { LAND_MASK_PNG } from './landmask.js';
-import { CITIES, RANGES, DESERTS, HALO_PORTS, WILDS, FISHING } from './earthData.js';
+import { CITIES, RANGES, DESERTS, HALO_PORTS, WILDS, FISHING, RIVERS } from './earthData.js';
 import { LANE_BAKE_GLSL, buildLaneTexture } from './earthDetail.js';
 import { bodyDir } from './sim.js';
 
@@ -31,6 +31,7 @@ uniform vec4 uWild[10];
 uniform vec4 uSc[5];
 uniform float uTexelKm;
 uniform vec4 uFish[5];
+uniform vec4 uRivers[${RIVERS.length}];
 varying vec2 vUv;
 ${NOISE_GLSL}
 ${SNOISE_GLSL}
@@ -523,6 +524,36 @@ void main() {
   dsand = mix(dsand, vec3(0.22, 0.16, 0.11), smoothstep(0.56, 0.74, sfbm(d * 13.0 + 3.0, 4) * 0.5 + 0.5) * 0.75);
   c = mix(c, dsand, dune);
   c *= 0.78 + 0.44 * (n2 * 0.5 + 0.5);
+  // farmland: the settled plains as a county-scale patchwork of crops, fallow and woodlots
+  // (greener in the wet, straw and ochre toward the steppe), none in the deserts or the far north
+  {
+    float farm = land * (1.0 - smoothstep(0.35, 0.7, arid)) * (1.0 - smoothstep(52.0, 60.0, alat)) * (1.0 - wet * 0.8) * smoothstep(0.45, 0.62, sfbm(d * 6.0 + 29.0, 3) * 0.5 + 0.5 + 0.15 * (1.0 - mc));
+    if (farm > 0.0) {
+      vec3 fq = d * 520.0;                                   // ~12 km parcels (districts of fields)
+      vec3 fh = hash33(floor(fq + 0.35 * vec3(sfbm(d * 90.0, 2))));
+      vec3 crop = fh.x < 0.4 ? vec3(0.07, 0.11, 0.035) : fh.x < 0.7 ? vec3(0.16, 0.14, 0.07) : fh.x < 0.88 ? vec3(0.11, 0.1, 0.06) : vec3(0.045, 0.07, 0.03);
+      crop *= 0.85 + 0.3 * fh.y;
+      c = mix(c, mix(crop, c, 0.35), farm * 0.75);
+    }
+  }
+  // the built-up land of the metros by day: grey-ochre fabric with green parks and dark water
+  // between, densest round the old cores
+  {
+    float urban = 0.0;
+    for (int i = 0; i < 160; i++) {
+      if (i >= uNumCity) break;
+      vec4 cc = texelFetch(uData, ivec2(i, 2), 0);
+      vec3 dv = d - cc.xyz;
+      float dk2 = dot(dv, dv) * 40589641.0;
+      float rm = 10.0 + 22.0 * cc.w;
+      if (dk2 > rm * rm * 9.0) continue;
+      float dk = sqrt(dk2);
+      urban = max(urban, smoothstep(0.2, 0.55, exp(-dk / rm) + 0.18 * sfbm(d * 330.0 + float(i) * 1.7, 3)) * cc.w);
+    }
+    vec3 urbC = mix(vec3(0.13, 0.12, 0.105), vec3(0.19, 0.175, 0.15), n2 * 0.5 + 0.5);
+    urbC = mix(urbC, vec3(0.05, 0.07, 0.035), smoothstep(0.55, 0.8, sfbm(d * 700.0 + 3.0, 2) * 0.5 + 0.5) * 0.6);
+    c = mix(c, urbC, clamp(urban, 0.0, 1.0) * land * 0.85);
+  }
   // mountains: bare rock and snow above a latitude-dependent snowline
   c = mix(c, rock * (0.8 + 0.4 * rid), smoothstep(0.18, 0.45, mount * rid));
   float snowline = mix(0.62, 0.12, smoothstep(0.0, 65.0, alat));
@@ -545,6 +576,35 @@ void main() {
   vec3 bankC = mix(vec3(0.018, 0.06, 0.05), vec3(0.05, 0.2, 0.18), tropic) * (0.8 + 0.4 * smoothstep(0.3, 0.7, n2 * 0.5 + 0.5));
   vec3 ocean = mix(vec3(0.004, 0.011, 0.028), shelfC, shelf);
   ocean = mix(ocean, bankC, bank * (0.35 + 0.65 * tropic) * smoothstep(0.3, 0.6, n1 * 0.5 + 0.5 + 0.25 * tropic));
+  // plankton blooms: milky turquoise (coccolithophores) and green (diatoms) swirling through the
+  // eddies of the high-latitude seas and the upwelling off the western coasts
+  {
+    vec3 bw = vec3(sfbm(d * 18.0 + 3.0, 3), sfbm(d * 18.0 + 9.0, 3), sfbm(d * 18.0 + 15.0, 3));
+    float eddy = sfbm(d * 70.0 + bw * 2.4, 4) * 0.5 + 0.5;
+    float zl = (alat - 55.0) / 9.0;
+    float hiLat = exp(-zl * zl);
+    float upwell = 0.0;
+    for (int i = 0; i < 5; i++) upwell = max(upwell, exp(-pow(length((vec2(lat, lon) - uSc[i].xy) / (uSc[i].z * 0.7)), 2.0)));
+    float bloomZone = (hiLat * 0.9 + upwell * 0.8) * smoothstep(0.45, 0.7, sfbm(d * 8.0 + 51.0, 3) * 0.5 + 0.5 + 0.2 * shelf);
+    float bloom = bloomZone * smoothstep(0.45, 0.75, eddy);
+    vec3 bloomC = mix(vec3(0.012, 0.05, 0.035), vec3(0.04, 0.12, 0.12), smoothstep(0.6, 0.9, eddy) * hiLat);
+    ocean = mix(ocean, bloomC, clamp(bloom, 0.0, 1.0) * (1.0 - land) * 0.85);
+  }
+  // river plumes: the sediment of the great rivers fanning out over the shelf, ochre near the
+  // mouth, green-brown at its swirling edge
+  {
+    float plume = 0.0;
+    for (int i = 0; i < ${RIVERS.length}; i++) {
+      vec3 dv = d - uRivers[i].xyz;
+      float dk = length(dv) * 6371.0;
+      float L = 60.0 + 260.0 * uRivers[i].w;
+      if (dk > L * 3.0) continue;
+      float edge = sfbm(d * 160.0 + float(i) * 4.1, 3);
+      plume = max(plume, smoothstep(0.15, 0.55, exp(-dk / L) + 0.2 * edge) * uRivers[i].w);
+    }
+    vec3 silt = mix(vec3(0.03, 0.05, 0.035), vec3(0.1, 0.075, 0.04), smoothstep(0.3, 0.8, plume));
+    ocean = mix(ocean, silt, clamp(plume * 1.3, 0.0, 1.0) * (1.0 - land) * (0.6 + 0.4 * shelf));
+  }
   float seaIce = smoothstep(77.0, 82.0, latD + n2 * 6.0) + smoothstep(-68.0, -71.0, latD + n2 * 4.0);
   ocean = mix(ocean, vec3(0.7, 0.75, 0.8) * (0.85 + 0.15 * n2), clamp(seaIce, 0.0, 1.0));
   vec3 alb = land > 0.5 ? c : ocean;
@@ -699,6 +759,7 @@ export class EarthBake {
         // stratocumulus decks: lat, lon (rad), extent (rad), strength: California, Peru, Namibia, Canaries, Western Australia
         uSc: { value: [[27, -128, 11, 1], [-17, -85, 13, 1], [-17, 5, 11, 0.9], [22, -24, 8, 0.7], [-27, 103, 9, 0.7]].map(([la, lo, e, w]) => new THREE.Vector4(la * D2R, lo * D2R, e * D2R, w)) },
         uTexelKm: { value: (Math.PI / 2 / size) * 6371 },
+        uRivers: { value: RIVERS.map(([la, lo, w]) => { const v = bodyDir(la * D2R, lo * D2R, new THREE.Vector3()); return new THREE.Vector4(v.x, v.y, v.z, w); }) },
         uFish: { value: FISHING.map((b) => new THREE.Vector4(b[0], b[1], b[2], b[3])) },
         uLanes: { value: LANES.tex },
         uNumLane: { value: LANES.count },

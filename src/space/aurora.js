@@ -184,7 +184,8 @@ void main() {
   if (night <= 0.0) discard;
   float y = vPC.y;
   // the diffuse band: brightest on its equatorward side, soft edges
-  float band = exp(-pow((y + 0.25) / 0.55, 2.0));
+  float yb = (y + 0.25) / 0.55;
+  float band = exp(-yb * yb);
   // pulsating patches tens of km across, each on its own few-second rhythm
   float u = vPC.x * 60.0;
   float cell = floor(u) + floor((y + 1.0) * 4.0) * 97.0;

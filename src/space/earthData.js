@@ -158,3 +158,23 @@ export const FISHING = [
   [6, 12, 100, 104],          // the Gulf of Thailand
   [26, 34, 121, 127],         // the East China Sea
 ];
+
+// River mouths whose sediment stains the sea: [lat, lon, discharge weight]
+export const RIVERS = [
+  [0.2, -50.0, 1.0],          // Amazon
+  [8.6, -60.8, 0.45],         // Orinoco
+  [29.0, -89.3, 0.5],         // Mississippi
+  [21.8, 90.5, 0.8],          // Ganges - Brahmaputra
+  [31.4, 121.9, 0.75],        // Yangtze
+  [37.8, 119.3, 0.55],        // Yellow River
+  [-35.0, -56.5, 0.6],        // the Plate
+  [4.3, 6.1, 0.4],            // Niger
+  [-6.0, 12.3, 0.55],         // Congo
+  [9.7, 106.5, 0.45],         // Mekong
+  [24.0, 67.3, 0.3],          // Indus
+  [15.8, 95.2, 0.4],          // Irrawaddy
+  [-18.8, 36.3, 0.3],         // Zambezi
+  [31.5, 31.2, 0.2],          // Nile
+  [69.4, -134.5, 0.35],       // Mackenzie
+  [67.0, 72.5, 0.4],          // Ob
+];

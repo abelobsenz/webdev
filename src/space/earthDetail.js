@@ -191,6 +191,33 @@ float od_seaTexture(vec3 b, float fp, float shelf) {
   return clamp(1.0 + 0.9 * fr + ed - 0.3 * sl + 0.35 * iw, 0.5, 2.2);
 }
 
+// Swell and wind sea, resolved only close in (the Meridian approach, a low pass): six trains of
+// deep-water waves, 40 - 240 m long, running on their own dispersion (omega^2 = g k). Returns the
+// surface slope (body frame); resVar is the slope variance the pixel now resolves, which the
+// glint's microfacet roughness gives back (Toksvig), so the mean glint is kept as it sharpens
+// into sparkle.
+vec3 od_swell(vec3 b, float fp, float t, out float resVar) {
+  resVar = 0.0;
+  vec3 sl = vec3(0.0);
+  if (fp > 0.35) return sl;
+  for (int i = 0; i < 6; i++) {
+    float fi = float(i);
+    float lam = 0.24 * pow(0.7, fi);                  // km
+    float K = 6.2832 * 6371.0 / lam;                  // rad per unit of b
+    // directions spread round the trade-wind swell's heading
+    float az = 0.5 + 0.55 * sin(fi * 2.4) + 0.2 * fi;
+    vec3 D = normalize(vec3(cos(az), 0.35 * sin(fi * 1.7), sin(az)));
+    D = normalize(D - b * dot(D, b) + 1e-5);
+    float omega = sqrt(9.81 * 6.2832 / (lam * 1000.0));
+    float s = 0.07 * pow(0.85, fi);                   // slope amplitude A k
+    float f = 1.0 - smoothstep(lam * 0.12, lam * 0.4, fp);
+    if (f <= 0.0) continue;
+    sl += D * (s * f * cos(dot(b, D) * K - omega * t + fi * 1.7));
+    resVar += 0.5 * s * s * f * f;
+  }
+  return sl;
+}
+
 // Lightning in deep convection (conv: 0..1, the deck's convective share at this point).
 float od_lightning(vec3 bC, float fpC, float conv, float t) {
   if (conv <= 0.0) return 0.0;
