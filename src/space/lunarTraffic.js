@@ -330,6 +330,8 @@ export class LunarTraffic {
         const n = Math.round((st.a1 - st.a0) / 60);
         for (let i = 0; i < n; i++) walks.push({ kind: st.along === 'v' ? 0 : 3, a: st.c + off + (rnd() - 0.5) * 0.8, v0: st.a0, v1: st.a1, h: st.h, ph: rnd() * 6000, sp: 1.0 + rnd() * 0.6 });
       }
+      // travellers on the Fields station's plaza, between the platforms' stairs and the terminal
+      for (const vv of [-2122, -2106]) for (let i = 0; i < 18; i++) walks.push({ kind: 3, a: vv + (rnd() - 0.5) * 1.5, v0: -1000, v1: -860, h: 0.35, ph: rnd() * 3000, sp: 0.8 + rnd() * 0.6 });
       this.walks = walks;
       this.walkers = lunarInstanced(kit('walker'), walks.length, {}, this.mat, { tint: true });
       this.walkers.instanceMatrix.setUsage(THREE.DynamicDrawUsage);

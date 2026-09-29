@@ -471,6 +471,44 @@ export function buildMediiWorks(landingPlan = [], driver = null, PADS = null) {
     for (const v of [v0 + 10, v1 - 10]) for (const u of [u0 + 8, u1 - 8]) { placeAt('mast', u, v, 0); lamp(u, v, 17.6, LAMP.WHITE, 1.2, 1.6); }
   }
 
+  // ------------------------------------------------------------ the Fields Terminal --
+  // between the Fields station and the pads: a two-storey concourse, glazed above a stone
+  // base, its lit name band toward the station plaza, and a glazed gallery out to each field
+  {
+    const uc = -930, v0 = -2400, v1 = -2170, W2 = 21;
+    foot('terminal', uc - W2 - 4, uc + W2 + 4, v0 - 4, v1 + 4);
+    pushAt(uc, (v0 + v1) / 2);
+    const L = v1 - v0;
+    B.box(0, 3.5, 0, 2 * W2, 8, L, LK.STONE);                           // the ground storey: halls, baggage, customs
+    B.box(0, 10.5, 0, 2 * W2 - 1, 6, L - 1, LK.GLASS);                  // the concourse: a glazed storey over the fields
+    for (let z = -L / 2 + 5; z <= L / 2 - 5; z += 10) for (const sx of [-1, 1]) B.box(sx * (W2 - 0.3), 10.5, z, 0.5, 6, 0.5, LK.BRONZE);
+    B.push(new THREE.Matrix4().makeTranslation(0, 13.5, 0));
+    B.loft([{ z: -L / 2 - 2, pts: [[-W2 - 2, 0], [W2 + 2, 0], [W2 - 4, 4.5], [-W2 + 4, 4.5]] }, { z: L / 2 + 2, pts: [[-W2 - 2, 0], [W2 + 2, 0], [W2 - 4, 4.5], [-W2 + 4, 4.5]] }], LK.ROOF);
+    B.pop();
+    B.box(0, 7.8, L / 2 + 0.3, 2 * W2 - 6, 1.6, 0.3, LK.SIGN);          // the name band, toward the plaza
+    for (const sx of [-1, 1]) B.box(sx * (W2 + 0.2), 7.9, 0, 0.3, 0.9, L - 20, LK.SIGN);
+    B.box(0, 2.6, L / 2 + 5, 24, 0.5, 10, LK.HULL);                      // the entrance canopy
+    for (const sx of [-11, 11]) B.box(sx, 1.2, L / 2 + 9.5, 0.4, 2.4, 0.4, LK.BRONZE);
+    B.box(0, 1.5, L / 2 + 0.1, 16, 3, 0.2, LK.GLASS);
+    B.pop();
+    lamp(uc, v1 + 8, 2.3, LAMP.WHITE, 1.1, 1.3);
+    for (const v of [v0 + 30, (v0 + v1) / 2, v1 - 30]) for (const s2 of [-1, 1]) lamp(uc + s2 * (W2 + 1), v, 14.5, LAMP.AMBER, 0.9, 1.1);
+    // galleries: glazed tubes on pylons from the concourse's flanks toward each field
+    for (const [ua, va, ub, vb] of [[uc - W2, -2330, -1058, -2380], [uc + W2, -2330, -806, -2520]]) {
+      const n = 6, pts = [];
+      for (let i = 0; i <= n; i++) { const u = ua + (ub - ua) * i / n, v = va + (vb - va) * i / n; pts.push(at(u, v, 10.5)); }
+      B.tube(pts, 3.0, 12, LK.GLASS);
+      for (let i = 1; i < n; i++) { const u = ua + (ub - ua) * i / n, v = va + (vb - va) * i / n; pushAt(u, v); B.box(0, 3.75, 0, 1.4, 7.5, 1.4, LK.HULL); B.pop(); }
+      pushAt(ub, vb);                                                     // the gate house at its end
+      B.box(0, 7, 0, 12, 14, 12, LK.HULL);
+      B.box(0, 10.5, 0, 12.2, 3, 12.2, LK.GLASS);
+      B.box(0, 14.3, 0, 12.6, 0.6, 12.6, LK.ROOF);
+      B.pop();
+      lamp(ub, vb, 15.2, LAMP.RED, 1.2, 1.2, { breathe: 0.3 });
+      foot('gate', ub - 8, ub + 8, vb - 8, vb + 8);
+    }
+  }
+
   // ------------------------------------------------------------ the hop field --
   {
     const { u, v, r } = HOP_FIELD;
