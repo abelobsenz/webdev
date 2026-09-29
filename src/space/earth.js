@@ -386,6 +386,22 @@ float cityLattice(vec3 b, float fp) {
     float lit = 0.5 + hash12(floor(g) + 3.0);
     m *= mix(1.0, (0.45 + 2.2 * street) * lit / 0.78, fB);
   }
+  // avenues ~800 m apart, resolved from a low pass: each carries platoons of headlights and
+  // tail-lights moving along it (alternate avenues flowing opposite ways), so a resolved city
+  // is visibly alive; the mean is kept as the pattern fades with range
+  float fS = 1.0 - smoothstep(0.8 / 7.0, 0.8 / 2.5, fp);
+  if (fS > 0.0) {
+    vec2 g = q / 0.8;
+    vec2 cellA = floor(g + 0.5);
+    vec2 fr = abs(fract(g) - 0.5);
+    float ax = smoothstep(0.43, 0.5, fr.x), ay = smoothstep(0.43, 0.5, fr.y);
+    float hx = hash12(vec2(cellA.x, 3.0)), hy = hash12(vec2(cellA.y, 7.0));
+    float vx = (hx > 0.5 ? 1.0 : -1.0) * (0.018 + 0.014 * hx), vy = (hy > 0.5 ? 1.0 : -1.0) * (0.018 + 0.014 * hy);
+    float flowN = 0.5 + 0.5 * sin((q.y - uTime * vx) * 3.927 + hx * 6.2832);     // platoons ~1.6 km apart
+    float flowE = 0.5 + 0.5 * sin((q.x - uTime * vy) * 3.927 + hy * 6.2832);
+    float streets = max(ax * (0.4 + 1.2 * flowN), ay * (0.4 + 1.2 * flowE));
+    m *= mix(1.0, (0.55 + 1.9 * streets) / 0.9, fS);
+  }
   return m;
 }
 
@@ -715,6 +731,8 @@ void main() {
   L *= mix(1.0, uAtmoGain, smoothstep(0.08, 0.6, dot(n, -rd)) * (hitG ? 1.0 : 0.0));
   // noctilucent clouds at the summer mesopause
   vec3 nlc = od_nlc(ro, rd, sun, hitG ? tG.x : 1e9);
+  // and nacreous clouds in the Antarctic winter stratosphere
+  nlc += od_psc(ro, rd, sun, hitG ? tG.x : 1e9);
   if (hitG) {
     gl_FragColor = vec4(col * T + L + nlc, 1.0);
     vec4 clip = projectionMatrix * viewMatrix * vec4(pG, 1.0);

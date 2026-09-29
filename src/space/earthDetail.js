@@ -393,6 +393,36 @@ vec3 od_sprites(vec3 ro, vec3 rd, vec3 sun, float t) {
   return col * I * 0.35;
 }
 
+// Polar stratospheric (nacreous) clouds: in the Antarctic winter (June) the stratosphere over
+// the pole is cold enough for ice and nitric-acid-trihydrate clouds at ~22 km. Lenticular sheets
+// in the lee of the mountains, lit from below the horizon at twilight, iridescent (the tiny
+// uniform droplets diffract sunlight into mother-of-pearl bands that shift with the angle).
+vec3 od_psc(vec3 ro, vec3 rd, vec3 sun, float tMax) {
+  vec2 tN = sphereHits(ro, rd, Rg + 22.0);
+  if (tN.x > tN.y) return vec3(0.0);
+  float t = tN.x > 0.0 ? tN.x : tN.y;
+  if (t <= 0.0 || t > tMax) return vec3(0.0);
+  vec3 p = ro + rd * t;
+  vec3 n = normalize(p);
+  vec3 bb = uToBody * n;
+  float band = smoothstep(-0.84, -0.9, bb.y);                     // poleward of ~60 S
+  if (band <= 0.0) return vec3(0.0);
+  float muS = dot(n, sun);
+  float dark = smoothstep(0.1, -0.02, muS) * smoothstep(-0.2, -0.06, muS);   // twilight only
+  float lit = earthShadow(p, sun);
+  if (lit * dark <= 0.0) return vec3(0.0);
+  // lenticular sheets drawn out along the circumpolar wind (zonal: east-west)
+  vec3 q = bb * (6371.0 / 60.0);
+  vec3 qz = vec3(q.x * 0.35 + q.z * 0.94, q.y * 3.0, q.z * 0.35 - q.x * 0.94);
+  float sheet = smoothstep(0.55, 0.8, snoise(qz * 0.5 + 11.0) * 0.5 + 0.5 + 0.2 * snoise(q * 0.15 + 4.0));
+  float thick = 0.5 + 0.5 * snoise(q * 1.7 + 2.0);
+  // iridescence: interference colours shifting with the scattering angle and the sheet's thickness
+  float ang = acos(clamp(dot(rd, sun), -1.0, 1.0));
+  vec3 iri = 0.55 + 0.45 * cos(6.2832 * (vec3(0.0, 0.33, 0.67) + ang * 2.4 + thick * 0.8));
+  float mu = max(abs(dot(rd, n)), 0.03);
+  return iri * band * sheet * min(1.0 / mu, 30.0) * lit * dark * uSunE * 3.5e-4 * uNlcGain;
+}
+
 // Noctilucent clouds (added in front of the planet and its limb).
 vec3 od_nlc(vec3 ro, vec3 rd, vec3 sun, float tMax) {
   vec2 tN = sphereHits(ro, rd, Rg + 83.0);
