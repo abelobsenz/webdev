@@ -5,6 +5,7 @@ import { createCraftMaterial, updateCraftMaterial } from '../craft/craftMaterial
 import { craftMesh, craftPart, addLamps, CRAFT_FRAME } from './craftMesh.js';
 import { LAMP } from './lamps.js';
 import { yardAxes } from './releaseYard.js';
+import { buildCourtCrane } from './stations.js';
 
 // The counterweight as a working town (metres, the rock's frame: +Y up the tether, away from
 // the Earth; the tether arrives along -Y). Added to the works of src/space/stations.js:
@@ -30,6 +31,7 @@ export const WHEEL = { rimIn: 3370, rimOut: 3630, halfAxial: 90, hubIn: 950, hub
 export const wheelOmega = () => Math.sqrt(WHEEL.g / WHEEL.rimOut);          // rad/s for 1 g on the rim floor
 export const STEM = { top: -15000, bottom: -19500, bore: 320 };   // bore: clear of the climbers (<= 201 m off the axis)
 export const TUGS = { n: 8, r: 5000, laneGap: 600, yMin: -16300, yMax: -14700 };
+export const CRANE = { scale: 0.45, reach: 900 * 0.45, drop: 70 * 0.45 };   // stations.js court crane, scaled
 export const CAPSULE = { spacing: 260, speed: 14, rail: 170, railR: 32, bodyY: 69, bodyH: 18 };   // rail: stations.js conveyor rail offset (+y) and radius
 
 function mulberry(seed) {
@@ -130,18 +132,51 @@ function landingField(B, lamps, r) {
   latheY(B, 260, 300, -170, [[16, 0, CK.BRONZE], [34, 6, CK.GLASS], [34, 30, CK.GLASS], [20, 40, CK.BRONZE], [0.1, 44, CK.DARK]], 18);
   lamps.push({ p: V(260, 352, -170), r: 8, color: LAMP.WHITE, i: 3.0, breathe: 0.6 });
 }
-const SITE_KINDS = [habBlock, smelter, tankFarm, landingField, habBlock];
+function domeTown(B, lamps, r) {
+  // a planted town under a 320 m conservatory dome, a ring of glazed blocks round its foot,
+  // pressurised walkways out to the platform's corners
+  latheY(B, 0, 60, 0, [[0.1, 0, CK.DECK], [330, 0, CK.BRONZE], [330, 12, CK.BRONZE], [318, 50, CK.CONSERVATORY], [280, 110, CK.CONSERVATORY], [210, 160, CK.CONSERVATORY], [120, 188, CK.CONSERVATORY], [40, 198, CK.BRONZE], [0.1, 200, CK.BRONZE]], 40);
+  for (let k = 0; k < 16; k++) {
+    const a = (k / 16) * TAU, rr = 330 + 10;
+    B.push(new THREE.Matrix4().makeRotationY(-a));
+    B.tube([V(rr - 12, 70, 0), V(rr - 30, 110, 0), V(rr - 130, 175, 0)], 3, 5, CK.BRONZE);        // dome ribs
+    B.pop();
+    if (k % 2) continue;
+    const bx = Math.cos(a) * 360, bz = Math.sin(a) * 200;
+    B.box(bx * 0.95, 90, bz * 0.95, 40, 60, 40, CK.GLASS);
+  }
+  for (const [x, z] of [[-340, -210], [340, -210], [-340, 210], [340, 210]]) B.tube([V(x * 0.62, 72, z * 0.62), V(x * 0.95, 72, z * 0.95)], 9, 8, CK.GLASS);
+  lamps.push({ p: V(0, 266, 0), r: 14, color: LAMP.WHITE, i: 2.4, breathe: 0.4 });
+  for (let k = 0; k < 8; k++) { const a = (k / 8) * TAU; lamps.push({ p: V(Math.cos(a) * 334, 76, Math.sin(a) * 334), r: 7, color: LAMP.AMBER, i: 2.0, breathe: 0.2, phase: k / 8 }); }
+}
+function foundryYard(B, lamps, r) {
+  // the casting hall, stacked ingots in rows, and a portal gantry over the stacks; a slewing
+  // crane on the corner mast (animated, see CounterLife) works the loading apron
+  B.box(-160, 110, -120, 360, 100, 200, CK.HULL);
+  B.box(-160, 140, -19, 340, 10, 2, CK.LANTERN);
+  for (let x = -320; x <= 0; x += 64) B.box(x, 164, -120, 50, 8, 190, CK.RADIATOR);
+  for (let i = 0; i < 5; i++) for (let j = 0; j < 3; j++) {
+    const h = 1 + Math.floor(r() * 4);
+    for (let k = 0; k < h; k++) B.box(60 + i * 56, 72 + k * 22, 60 + j * 60, 44, 20, 44, (i + j + k) % 3 ? CK.BRONZE : CK.DARK);
+  }
+  for (const x of [30, 310]) for (const z of [20, 200]) B.box(x, 125, z, 12, 130, 12, CK.HULL);
+  for (const z of [20, 200]) B.box(170, 196, z, 300, 12, 12, CK.BRONZE);
+  B.box(200, 188, 110, 30, 16, 200, CK.DARK);
+  lamps.push({ p: V(170, 210, 110), r: 8, color: LAMP.AMBER, i: 2.4, breathe: 0.5 });
+}
+foundryYard.crane = { at: V(-330, 60, 180), mast: 220, clear: 110 };
+const SITE_KINDS = [habBlock, smelter, tankFarm, landingField, domeTown, foundryYard, habBlock];
 
 /**
  * Settlements seated on the rock. surfaceRadius(dir) returns the rock's radius in metres along a
  * direction (a raycast on the actual mesh). Each site stands on a 700 m platform on legs.
  */
-export function buildSettlements(surfaceRadius, works, { count = 22, seed = 5 } = {}) {
-  const B = new CB(), lamps = [], sites = [], legs = [];
+export function buildSettlements(surfaceRadius, works, { count = 30, seed = 5 } = {}) {
+  const B = new CB(), lamps = [], sites = [], legs = [], cranes = [];
   const r = mulberry(seed);
   const keep = counterKeepOuts(works);
   const golden = Math.PI * (3 - Math.sqrt(5));
-  const N = 64;
+  const N = 110;
   for (let i = 0; i < N && sites.length < count; i++) {
     const y = 1 - (2 * (i + 0.5)) / N, rad = Math.sqrt(1 - y * y), a = i * golden;
     const d = V(Math.cos(a) * rad, y, Math.sin(a) * rad);
@@ -182,13 +217,36 @@ export function buildSettlements(surfaceRadius, works, { count = 22, seed = 5 } 
     SITE_KINDS[kind](B, kindLamps, r);
     B.pop();
     const siteLamps = kindLamps.map((l) => ({ ...l, p: l.p.clone().applyMatrix4(lift) }));
+    const crane = SITE_KINDS[kind].crane;
+    if (crane) {
+      // a slewing crane on its own mast, raised until its jib clears the rock all round its sweep
+      const foot = crane.at.clone().applyMatrix4(lift), mInv = m.clone().invert();
+      // ground under the jib tip (and its hanging load) all round the sweep, at a given seat height
+      const sweep = (y) => {
+        let gap = Infinity;
+        for (let k = 0; k < 24; k++) {
+          const a = (k / 24) * TAU, tip = V(foot.x + Math.cos(a) * CRANE.reach, y, foot.z + Math.sin(a) * CRANE.reach);
+          const dir = tip.applyMatrix4(m).normalize();
+          gap = Math.min(gap, y - CRANE.drop - dir.multiplyScalar(surfaceRadius(dir)).applyMatrix4(mInv).y);
+        }
+        return gap;
+      };
+      let seatY = foot.y + crane.mast;
+      for (let it = 0; it < 4; it++) { const g = sweep(seatY); if (g >= 60) break; seatY += 60 - g + 5; }
+      const seat = V(foot.x, seatY, foot.z);
+      const rockGap = sweep(seatY);
+      B.tube([foot, seat.clone().add(V(0, -14, 0))], 12, 8, CK.HULL);
+      for (let yy = foot.y + 60; yy < seatY - 30; yy += 60) B.box(foot.x, yy, foot.z, 34, 3, 34, CK.BRONZE);
+      cranes.push({ seat: m.clone().multiply(new THREE.Matrix4().makeTranslation(seat.x, seat.y, seat.z)), rockGap, structureGap: seatY - foot.y - crane.clear - CRANE.drop, site: sites.length, mast: seatY - foot.y });
+      siteLamps.push({ p: seat.clone().add(V(0, 40, 0)), r: 8, color: LAMP.RED, i: 2.6, breathe: 0.5 });
+    }
     // platform edge lights
     for (const [x, z] of corners.slice(0, 4)) siteLamps.push({ p: V(x * 1.14, deckY + 24, z * 1.2), r: 7, color: LAMP.AMBER, i: 2.0, breathe: 0.3, phase: r() });
     for (const l of siteLamps) lamps.push({ ...l, p: l.p.clone().applyMatrix4(m) });
     B.pop();
     sites.push({ dir: d, centre: V(0, deckY + 200, 0).applyMatrix4(m), radius: 760, kind: SITE_KINDS[kind].name, deckY, surface: sr });
   }
-  return { geo: B.geometry(), lamps, sites, legs, keepOuts: keep };
+  return { geo: B.geometry(), lamps, sites, legs, cranes, keepOuts: keep };
 }
 
 // ------------------------------------------------------------ Twinwheel ----
@@ -301,6 +359,19 @@ export class CounterLife {
       return im;
     };
     this.capsules = inst(buildCapsule(), Math.max(nCaps, 1));
+    // slewing cranes on the foundry yards (the Halo ports' court crane at 0.45 scale)
+    const crane = buildCourtCrane();
+    const sc = new THREE.Matrix4().makeScale(CRANE.scale, CRANE.scale, CRANE.scale);
+    this.cranes = this.settle.cranes.map((c, i) => {
+      const head = craftPart(this.mesh, crane.geo);
+      head.matrixAutoUpdate = false;
+      head.userData.seat = c.seat.clone().multiply(sc);
+      head.userData.phase = i * 2.1;
+      addLamps(head, crane.lamps, { minPx: 1.2 });
+      this.mesh.add(head);
+      return head;
+    });
+    this._rot = new THREE.Matrix4();
     this.tugs = inst(buildTug(80).geo, TUGS.n);
     this.omega = wheelOmega();
     this.buildMs = performance.now() - t0;
@@ -318,6 +389,10 @@ export class CounterLife {
   }
 
   update(t) {
+    for (const c of this.cranes) {
+      c.matrix.multiplyMatrices(c.userData.seat, this._rot.makeRotationY(0.9 * Math.sin(t * 0.015 + c.userData.phase)));
+      c.matrixWorldNeedsUpdate = true;
+    }
     for (let i = 0; i < this.wheels.length; i++) this.wheels[i].rotation.y = this.wheelAngle(i, t) % TAU;
     let n = 0;
     for (const b of this.belts) {

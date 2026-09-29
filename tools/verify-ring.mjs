@@ -198,6 +198,10 @@ for (const s of CL.settle.sites) for (const k of keep) keepGap = Math.min(keepGa
 out.siteKeepOutClearanceMetres = Math.round(keepGap);
 out.settlements = CL.settle.sites.length;
 assert.ok(keepGap > 0 && CL.settle.sites.length >= 12, 'Settlements clear mines, cradles, conveyors, terminal, mast and the release spar');
+const cr = CL.settle.cranes;
+out.foundryCranes = cr.length;
+assert.ok(cr.length >= 2 && cr.every((c) => c.rockGap > 30 && c.structureGap > 50), 'Foundry cranes slew clear of the rock and of their yards');
+out.craneRockClearanceMetres = Math.round(Math.min(...cr.map((c) => c.rockGap)));
 let reach = 0;
 eachVertex(CL.settle.geo, (x, y, z) => { reach = Math.max(reach, Math.hypot(x, y, z)); });
 for (const w of WHEELS) reach = Math.max(reach, Math.hypot(WHEEL.rimOut, w.y - 200));
