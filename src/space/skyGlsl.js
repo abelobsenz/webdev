@@ -283,7 +283,7 @@ vec3 sk_comet(vec3 ro, vec3 rd, float px) {
   vec3 V = uCometVel;
   vec3 col = vec3(0.0);
   // coma: a soft head a few arcminutes across, and the star-like nucleus region
-  float ca = acos(clamp(dot(rd, toH / dH), -1.0, 1.0));
+  float ca = 2.0 * asin(clamp(length(rd - toH / dH) * 0.5, 0.0, 1.0));   // (exact at small angles)
   float cr = uCometK.w / dH;
   col += vec3(0.8, 0.95, 0.9) * exp(-ca / max(cr, px)) * min(1.0, cr / max(px, 1e-6)) * 0.35;
   float sg = max(px * 0.6, 0.00008);

@@ -596,6 +596,7 @@ void main() {
   // the Indus plain, the inland deltas), dark water through forest and plain
   {
     float oasis = 0.0, water = 0.0;
+    float wob = 0.8 + 0.4 * sfbm(d * 400.0 + 5.0, 2);          // the banks' irregular width
     for (int i = 0; i < 64; i++) {
       if (i >= uNumValley) break;
       vec4 va = texelFetch(uData, ivec2(i, 6), 0);
@@ -603,7 +604,8 @@ void main() {
       vec3 ab = vb.xyz - va.xyz;
       float t = clamp(dot(d - va.xyz, ab) / max(dot(ab, ab), 1e-9), 0.0, 1.0);
       float dk = length(d - va.xyz - ab * t) * 6371.0;
-      float wk = va.w * (0.8 + 0.4 * sfbm(d * 400.0 + float(i), 2));
+      if (dk > va.w * 4.0) continue;
+      float wk = va.w * wob;
       float f = exp(-dk * dk / (wk * wk));
       if (vb.w > 0.5) oasis = max(oasis, f); else water = max(water, f);
     }
