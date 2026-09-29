@@ -8,6 +8,8 @@ import { R_EARTH, bodyDir } from './sim.js';
 import { NAURU_LON } from './fleet.js';
 import { HelianthTraffic } from './helianthTraffic.js';
 import { addFoundryUnload } from './foundryUnload.js';
+import { HelianthDistrict } from './helianthDistrict.js';
+import { FoundryYard } from './foundryYard.js';
 
 const V=(x,y,z)=>new THREE.Vector3(x,y,z), TAU=Math.PI*2;
 const TO_Y=new THREE.Matrix4().makeRotationX(-Math.PI/2);
@@ -365,6 +367,16 @@ export class WorkingStations {
     // service tugs on their petal circuits and the relay beacons (src/space/helianthTraffic.js)
     this.helianth=new HelianthTraffic(this.solar,s.userData.sunDir);
     space.addBody('solarCollector',[this.solar],()=>this.solar.getWorldPosition(new THREE.Vector3()),19.8,{solid:true,hint:.9});
+    // catwalks, crawlers, crews, berths and the statite flotilla (src/space/helianthDistrict.js)
+    this.district=new HelianthDistrict(this.solar,s.userData.sunDir,space);
+    // gantry cranes, stock traffic, furnace light and crews at the foundry (src/space/foundryYard.js)
+    this.yard=new FoundryYard(this.foundry,this.foundryData);
+    this._cam=new THREE.Vector3();this._fw=new THREE.Vector3();
   }
-  update(sim,realTime=0) {this.solar.position.copy(sim.sunPos).add(this.solarOffset);this.helianth.update(realTime);}
+  update(sim,realTime=0,dt=0,space=this.space) {
+    this.solar.position.copy(sim.sunPos).add(this.solarOffset);this.helianth.update(realTime);
+    const cam=space?.camera?this._cam.copy(space.camera.position):null;
+    this.district.update(realTime,cam);
+    this.yard.update(realTime,cam?this.foundry.getWorldPosition(this._fw).distanceTo(cam):Infinity);
+  }
 }
