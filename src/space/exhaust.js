@@ -112,7 +112,11 @@ export function createEngine({ rt, re, len, plumeLen = 18 * re, plumeAngle = 0.2
   th.frustumCulled = false; th.renderOrder = 17;
   g.add(th);
   // the plume: a volumetric Gaussian jet from the exit plane (space/plume.js)
-  const plume = createPlume({ r0: re * 0.95, len: plumeLen, angle: plumeAngle, halo: Math.min(plumeAngle * 2.3, 0.9), core: [0.85, 0.9, 1.0], far: color, haloCol: [color[0] * 0.95, color[1] * 0.75, color[2]] });
+  // hydrogen plasma: a white exit that blooms, a pale blue coherent jet several nozzle lengths
+  // long, a vast faint violet-rose envelope (Balmer glow) opening at ~25 degrees
+  void plumeAngle;
+  const plume = createPlume({ r0: re * 0.95, len: plumeLen, coreAngle: 0.07, envAngle: 0.44, ax: 5, ac: 1.2, ae: 0.2,
+    exit: [1.0, 0.97, 1.0], core: [0.8, 0.88, 1.0], far: color, env: [0.62, 0.42, 1.0] });
   plume.position.z = len;
   g.add(plume);
   let heat = 0;

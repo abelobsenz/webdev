@@ -462,9 +462,11 @@ export class ShipPilot {
       this.rates.multiplyScalar(Math.exp(-dt * 3));
       this._pose();
     }
-    if (this.body) this.body.radius = 0.26;                 // the hull, and the warp sheet round it
+    if (this.body) this.body.radius = 0.08;                 // the hull and its plumes
     const i = this.input, j = this.jump;
     if (this.warp) this.warp.update(dt, j ? j.bubble : 0, j ? j.flow : 0, j ? j.flash : 0);
+    // while the bubble bends the light round it, the ship is drawn after the lens pass (renderOverlay)
+    if (this.body) this.body.visible = !(this.warp && this.warp.active);
     const burn = this.burn / A_MAIN;
     if (!this.voice && this.space.app.audio) this.voice = new EngineVoice(this.space.app.audio, 'drive');
     const rcs = this.active ? Math.min(1, Math.abs(i.roll) + Math.abs(i.pitch) + Math.abs(i.yaw) + Math.abs(i.lift) + (i.fwd < 0 ? 1 : 0) + (this.assistA || 0) / A_ASSIST) : 0;
@@ -475,6 +477,22 @@ export class ShipPilot {
     if (!this.active) { this.cmdAng.multiplyScalar(Math.exp(-dt * 8)); this.cmdLin.multiplyScalar(Math.exp(-dt * 8)); }
     this.ship.update(dt, { throttle: this.active ? Math.min(burn, 1) : 0, aux: this.active ? Math.min(1, burn) * 0.7 : 0, boost: burn > 1.1 ? 1 : 0, legs: this.legs, rcs,
       ang: this.cmdAng, lin: this.cmdLin, sunlit, time: realTime });
+  }
+
+  /** After the scene: re-image it through the warp bubble, then draw the ship in its flat interior. */
+  renderOverlay(r, cam, space) {
+    if (!this.warp || !this.ship || !this.warp.active) return;
+    const rt = space.app.pipeline.hdrRT;
+    if (!this.warp.render(r, cam, rt)) return;
+    const root = this.ship.root, d = this.worldPos(_w).distanceTo(cam.position);
+    const n0 = cam.near, f0 = cam.far;
+    cam.near = Math.max(d - 0.09, 0.0004); cam.far = d + 0.09; cam.updateProjectionMatrix();
+    r.setRenderTarget(rt);
+    r.clearDepth();
+    root.visible = true;
+    r.render(root, cam);
+    root.visible = false;
+    cam.near = n0; cam.far = f0; cam.updateProjectionMatrix();
   }
 
   _pose() {
@@ -495,7 +513,7 @@ export class ShipPilot {
     if (c.bridge) eye = V().set(0, 4.3, -1.5).multiplyScalar(0.001).applyQuaternion(Qs).add(P);
     else {
       // during a jump the camera rises to look down on the warped sheet
-      const el = 0.14 + 0.36 * (this.jump ? this.jump.bubble || 0 : 0);
+      const el = 0.14 + 0.12 * (this.jump ? this.jump.bubble || 0 : 0);
       eye = V().set(0, Math.sin(el) * c.dist + 0.003, Math.cos(el) * c.dist).applyQuaternion(c.q).add(P);
     }
     cam.position.copy(eye);
