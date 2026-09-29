@@ -54,6 +54,24 @@ const uniqueTris = lo.triangles();
 log('unique triangles', uniqueTris);
 ok(uniqueTris < 4e6, 'unique triangles under 4M');
 
+// ---- triangles per level of detail: far (a glint and the orbit trace), mid (lamps: two per lamp),
+// near (the full model: every mesh under the station, instanced parts at full count)
+{
+  const per = {};
+  for (const s of [...lo.stations, lo.skyhook]) {
+    let near = 0, lamps = 0;
+    s.root.traverse((o) => {
+      const g = o.geometry;
+      if (!g || !g.index) return;
+      if (g.isInstancedBufferGeometry) lamps += (g.index.count / 3) * g.instanceCount;
+      else near += (g.index.count / 3) * (o.isInstancedMesh ? o.instanceMatrix.count : 1);
+    });
+    per[s.name] = { far: 2, mid: lamps, near: near + lamps };
+    ok(near + lamps < 12e6, `${s.name} near LOD within the domain budget`);
+  }
+  log('triangles per LOD', per);
+}
+
 // ---- buffer sanity: instanced capacities, index ranges, lamp instance counts
 function buffers(root) {
   let n = 0;
