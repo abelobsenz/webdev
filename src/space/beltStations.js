@@ -185,7 +185,18 @@ function block(c, x, y, z, w, h, l, kinds = [DK.PORTS, CK.GLASS]) {
  * down the sides.
  */
 function rim(B, R, h, w, seg, { inner = DK.CONCOURSE, side = DK.PORTS, floor = DK.LIVERY } = {}) {
-  B.lathe([[R, -w / 2, floor], [R, w / 2, floor], [R - h * 0.35, w / 2, side], [R - h, w / 2 - h * 0.3, side], [R - h, -w / 2 + h * 0.3, inner], [R - h * 0.35, -w / 2, side], [R, -w / 2, side]], seg, 0, { closedProfile: true });
+  // floor plate outward in livery, ported side walls, the shoulders glazed (the homes along the
+  // rim look out through them), the lit concourse roof facing the hub
+  B.lathe([[R, -w / 2, floor], [R, w / 2, floor], [R - h * 0.35, w / 2, side], [R - h, w / 2 - h * 0.3, CK.GLASS], [R - h, -w / 2 + h * 0.3, inner], [R - h * 0.35, -w / 2, CK.GLASS], [R, -w / 2, side]], seg, 0, { closedProfile: true });
+  // twelve districts between pressure bulkheads: heavy collars standing proud of the plate
+  for (let i = 0; i < 12; i++) {
+    B.push(new THREE.Matrix4().makeRotationZ(((i + 0.5) / 12) * TAU));
+    B.box(R - h * 0.5, 0, 0, h * 1.12, 7, w * 1.03, DK.GRIME);
+    B.box(R + h * 0.06 + 0.4, 0, 0, 0.8, 3, w * 0.5, CK.LANTERN);
+    B.pop();
+  }
+  // service mains along the floor plate near each edge, pulsing with the station's accent
+  for (const s of [-1, 1]) { B.at(0, 0, s * (w / 2 - 4)); B.torus(R + 0.8, 0.8, seg, 6, CK.CONDUIT); B.pop(); }
   // a lit gallery under the eaves each side and rib frames every 1/seg of a turn
   for (const s of [-1, 1]) { B.at(0, 0, s * (w / 2 + 0.4)); B.torus(R - h * 0.45, h * 0.06, seg, 5, CK.LANTERN); B.pop(); }
   for (let i = 0; i < seg; i += 2) {
