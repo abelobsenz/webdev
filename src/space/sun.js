@@ -254,7 +254,9 @@ void main() {
     }
     // a thin sheet: brighter seen edge-on (longer path), capped
     float path = min(1.0 / max(abs(dn), 0.2), 3.0);
-    col += vec3(1.0, 0.38, 0.32) * dens * ends * path * 0.42;
+    // H-alpha red, and fainter than the chromosphere they rise from: seen against black sky,
+    // not painted blobs; their threads carry the structure
+    col += vec3(1.0, 0.32, 0.25) * dens * ends * path * 0.26;
   }
   gl_FragColor = vec4(col * uDiscL, 0.0);
 }

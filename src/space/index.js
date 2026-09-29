@@ -114,7 +114,7 @@ export class SpaceMode {
     });
     // the default view of the Moon keeps a little of the night side, the terminator's relief across it
     T('moon', { position: (o) => o.copy(sim.moonPos), frame: (q) => q.copy(sim.moonQuat), minDist: R_MOON + 250, maxDist: 400000, defaultDist: 7400, view: { az: 1.3, el: 0.24 } });
-    T('sun', { position: (o) => o.copy(sim.sunPos), frame: identity, minDist: 3e6, maxDist: 1.2e8, defaultDist: 3.2e7, view: { az: 2.2, el: 0.55 } });
+    T('sun', { position: (o) => o.copy(sim.sunPos), frame: identity, minDist: 3e6, maxDist: 1.2e8, defaultDist: 1.4e7, view: { az: 2.2, el: 0.55 } });   // the disc inside its lattice shell, the rings sweeping past
     for (const [k, o] of Object.entries(fleetTargets(this))) T(k, o);
     for (const [k, o] of Object.entries(geoRoadTargets(this))) T(k, o);
     T('releaseYard', releaseYardTarget(this));
