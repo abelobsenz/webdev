@@ -261,6 +261,42 @@ function steppedBlock(C, cx, cz, sx, sz, hmax, fk) {
   }
 }
 
+/** A tower going up: its concrete core and floor plates, open top storeys, a tower crane. */
+export const CRANE_JIB = { len: 40, back: 14, mastW: 2.4 };
+function constructionSite(C, cx, cz, sx, sz, hmax) {
+  const { B, M, N, S, r } = C;
+  const y0 = standBox(B, S, cx, cz, sx, sz, 0.8, CK.DECK, 10);
+  const tw = 36 + r() * 22, td = 36 + r() * 22, built = Math.min(hmax - 80, 40 + r() * 110);
+  // the core rises ahead of the floors; plates on columns up to the working level
+  B.box(cx, y0 + (built + 14) / 2, cz, tw * 0.32, built + 14, td * 0.32, CK.DARK);
+  for (let yy = y0 + 3.6; yy < y0 + built; yy += 3.6) B.box(cx, yy, cz, tw, 0.5, td, CK.DECK);
+  for (const [sx2, sz2] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) B.box(cx + sx2 * (tw / 2 - 0.6), y0 + built / 2, cz + sz2 * (td / 2 - 0.6), 1.0, built, 1.0, CK.DARK);
+  // the finished lower storeys already glazed
+  B.box(cx, y0 + built * 0.25, cz, tw - 0.4, built * 0.5, td - 0.4, CK.GLASS);
+  // hoarding round the site, lit
+  for (const s of [-1, 1]) { M.box(cx, y0 + 1.5, cz + s * (sz / 2 - 2), sx - 6, 3, 0.3, HK.AWNING); M.box(cx + s * (sx / 2 - 2), y0 + 1.5, cz, 0.3, 3, sz - 6, HK.AWNING); }
+  // the tower crane's mast beside the core (its jib slews, HaloDistricts life)
+  const mx = cx + tw / 2 + 6, mz = cz, top = y0 + built + 36;
+  B.box(mx, (y0 + top) / 2, mz, CRANE_JIB.mastW, top - y0, CRANE_JIB.mastW, CK.BRONZE);
+  for (let yy = y0 + 12; yy < top; yy += 24) N.box(mx - 3.2, yy, mz, 6.4, 0.5, 0.5, CK.BRONZE);   // ties to the core
+  C.lamps.push({ p: V3(mx, top + 8, mz), r: 2.5, color: LAMPC.RED, i: 2.4, breathe: 0.6, phase: r() });
+  C.flamps.push({ p: V3(cx, y0 + built + 4, cz), r: 3, color: LAMPC.COOL, i: 2.0 });   // work lights on the deck
+  if (C.cranes) C.cranes.push(mx, top, mz, r() * TAU);
+}
+
+/** The slewing part of a tower crane: jib, counter-jib and weights, cab, trolley and hook. */
+export function buildCraneJib() {
+  const B = new CB(), L = CRANE_JIB.len, K = CRANE_JIB.back;
+  B.box(0, 1.2, (L - K) / 2, 1.8, 1.8, L + K, CK.BRONZE);
+  B.box(0, 3.6, 0, 1.6, 3.4, 1.6, CK.BRONZE);                   // the peak
+  B.box(0, 0.4, -K + 2, 3.2, 3, 4, CK.DARK);                      // counterweights
+  B.box(1.6, 0.2, 1.6, 1.8, 2.2, 2.2, CK.GLASS);                  // cab
+  B.box(0, -0.2, L * 0.6, 1.2, 0.8, 2, CK.DARK);                  // trolley
+  B.box(0, -9, L * 0.6, 0.08, 17, 0.08, CK.DARK);                 // hoist line
+  B.box(0, -17.8, L * 0.6, 1.2, 1.2, 1.2, CK.LANTERN);            // hook block, lit
+  return B.geometry();
+}
+
 function pocketSquare(C, cx, cz, sx, sz) {
   const { B, M, N, S, r } = C;
   const y = standBox(B, S, cx, cz, sx, sz, 1.2, HK.STONE, 10);
@@ -289,6 +325,7 @@ export function townCell(C, x0, x1, z0, z1) {
     walk(C, 0, cx, cz, sx / 2 + 2.5, sz / 2 + 2.5, pave);
     const roll = r(), fk = facadeKind(C.style.pal + (r() < 0.25 ? (r() < 0.5 ? 1 : 5) : 0));
     if (roll < 0.1) pocketSquare(C, cx, cz, sx, sz);
+    else if (roll < 0.135) constructionSite(C, cx, cz, sx, sz, hmax);
     else if (roll < 0.38) setbackTower(C, cx, cz, sx, sz, hmax, fk);
     else if (roll < 0.78) courtBlock(C, cx, cz, sx, sz, hmax, fk);
     else steppedBlock(C, cx, cz, sx, sz, hmax, fk);

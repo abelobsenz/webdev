@@ -6,7 +6,7 @@ import { CRAFT_FRAME } from './craftMesh.js';
 import { createLamps, LAMP } from './lamps.js';
 import { HALO_PORTS } from './earthData.js';
 import { createHaloMaterial } from './haloMaterial.js';
-import { buildPerson, buildDrone, DISTRICT_STYLE, standBox, vault, ribArc, cliffs, townCell, parkCell, farmCell, civicCell, worksCell, stadiumCell, marketCell, buildVaultFrame, harbourTown, HARBOUR, buildHarbourBoat } from './haloArchitecture.js';
+import { buildCraneJib, CRANE_JIB, buildPerson, buildDrone, DISTRICT_STYLE, standBox, vault, ribArc, cliffs, townCell, parkCell, farmCell, civicCell, worksCell, stadiumCell, marketCell, buildVaultFrame, harbourTown, HARBOUR, buildHarbourBoat } from './haloArchitecture.js';
 import { bodyDir } from './sim.js';
 
 // The Halo, lived in. Seen from orbit the deck shader already paints a continent of towns and
@@ -287,17 +287,17 @@ const MAST_X = 16340;                        // crest lamp masts, outboard of th
 export function buildDistrictTile(variant, S, bay, seed = 1) {
   const B = new CB(), M = new CB(), N = new CB(), F = new CB(), lamps = [], flamps = [];
   const r = mulberry(seed * 7919 + variant * 104729 + 17);
-  const C = { B, M, N, F, lamps, flamps, S, r, style: DISTRICT_STYLE[variant], tileL: TILE_L, walks: [] };
+  const C = { B, M, N, F, lamps, flamps, S, r, style: DISTRICT_STYLE[variant], tileL: TILE_L, walks: [], cranes: [] };
   const steps = buildDistrictSteps(C, bay, variant);
   FAR = F;
   try { while (!steps.next().done); } finally { FAR = null; }
-  return { major: B.geometry(), minor: M.geometry(), fine: N.geometry(), far: F.geometry(), lamps, flamps, cells: B.cells, walks: new Float32Array(C.walks) };
+  return { major: B.geometry(), minor: M.geometry(), fine: N.geometry(), far: F.geometry(), lamps, flamps, cells: B.cells, walks: new Float32Array(C.walks), cranes: new Float32Array(C.cranes) };
 }
 /** The same tile built a slice per call (the terraces and services, then six columns of cells at a time). */
 export function* buildDistrictTileSteps(variant, S, bay, seed = 1) {
   const B = new CB(), M = new CB(), N = new CB(), F = new CB(), lamps = [], flamps = [];
   const r = mulberry(seed * 7919 + variant * 104729 + 17);
-  const C = { B, M, N, F, lamps, flamps, S, r, style: DISTRICT_STYLE[variant], tileL: TILE_L, walks: [] };
+  const C = { B, M, N, F, lamps, flamps, S, r, style: DISTRICT_STYLE[variant], tileL: TILE_L, walks: [], cranes: [] };
   const steps = buildDistrictSteps(C, bay, variant);
   for (;;) {
     FAR = F;
@@ -306,7 +306,7 @@ export function* buildDistrictTileSteps(variant, S, bay, seed = 1) {
     if (done) break;
     yield null;
   }
-  return { major: B.geometry(), minor: M.geometry(), fine: N.geometry(), far: F.geometry(), lamps, flamps, cells: B.cells, walks: new Float32Array(C.walks) };
+  return { major: B.geometry(), minor: M.geometry(), fine: N.geometry(), far: F.geometry(), lamps, flamps, cells: B.cells, walks: new Float32Array(C.walks), cranes: new Float32Array(C.cranes) };
 }
 function* buildDistrictSteps(C, bay, variant) {
   const { B, M, F, lamps, S, r } = C;
@@ -605,7 +605,7 @@ export class HaloDistricts {
     const lamps = createLamps(t.lamps, { minPx: 1.2 });
     // street lamps: only drawn close in, and allowed to shrink below a pixel with the distance
     const flamps = t.flamps ? createLamps(t.flamps, { minPx: 0.8, gain: 0.9 }) : null;
-    return { major: t.major, minor: t.minor, fine: t.fine, far: t.far, lamps, flamps, cells: t.cells, walks: t.walks, lampCount: t.lamps.length, flampCount: t.flamps ? t.flamps.length : 0 };
+    return { major: t.major, minor: t.minor, fine: t.fine, far: t.far, lamps, flamps, cells: t.cells, walks: t.walks, cranes: t.cranes, lampCount: t.lamps.length, flampCount: t.flamps ? t.flamps.length : 0 };
   }
   _mesh(geo, mat) {
     const m = new THREE.Mesh(geo, mat);
@@ -668,6 +668,9 @@ export class HaloDistricts {
     // harbour boats: ferries and sailing boats on their rounds of the basin (a hub tile or two
     // is ever inside the window; capacity for four)
     this.people = inst(buildPerson(), PEOPLE.max);
+    // every crane of every tile within minor range can be drawn (capacity from the built variants)
+    const cranesPerTile = Math.max(1, ...this.variants.map((v) => v.cranes.length / 4));
+    this.jibs = inst(buildCraneJib(), cranesPerTile * (2 * Math.ceil(MINOR_RANGE_KM / (TILE_L / 1000)) + 3));
     this.drones = inst(buildDrone(), DRONES.perTile * (2 * DRONES.reach + 1));
     this.boats = [0, 1].map((fleet) => inst(buildHarbourBoat(fleet), 4 * HARBOUR.routes.reduce((n, rt) => n + (rt.fleet === fleet ? rt.n : 0), 0)));
     this.trains = inst(buildTrainCar(), 8 * 24);
@@ -845,6 +848,27 @@ export class HaloDistricts {
     this._harbourBoats(t);
     this._people(t);
     this._drones(t);
+    this._cranes(t);
+  }
+
+  /** Tower cranes slewing over the building sites of the tiles within minor range. */
+  _cranes(t) {
+    const im = this.jibs, cap = im.instanceMatrix.count;
+    im.count = 0;
+    for (const s of this.slots) {
+      if (!s.g.visible || !s.minor.visible) continue;
+      const W = this.variants[this.tileVariant[s.k]].cranes, uk = this.tileAngle(s.k) * this.Rm, st = this.tileStretch(s.k);
+      for (let i = 0; i < W.length && im.count < cap; i += 4) {
+        const ph = W[i + 3];
+        // slew back and forth between pick-up and placing, pausing at each end
+        const a = ph + 1.4 * Math.sin(0.035 * t + ph * 3.0) + 0.3 * Math.sin(0.11 * t + ph);
+        this._place(_m, uk + W[i + 2] * st, W[i], W[i + 1], 1);
+        _r.makeRotationY(a);
+        _m.multiply(_r);
+        im.setMatrixAt(im.count++, _m);
+      }
+    }
+    im.instanceMatrix.needsUpdate = true;
   }
 
   /** Survey drones sweeping the outside of the glass over the tiles round the camera. */

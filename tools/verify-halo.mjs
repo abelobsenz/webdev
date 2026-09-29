@@ -204,6 +204,31 @@ for (const v of D.variants) {
   assert.ok(v.flampCount > 0 && v.lampCount > 0, 'Every variant has beacons and street lamps');
 }
 out.layerTris = layerTris;
+// cranes: the jib's sweep stays over its own lot and clear above the core it is building
+{
+  const g = D.jibs.geometry; g.computeBoundingBox();
+  const bb = g.boundingBox, reach = Math.max(bb.max.z, -bb.min.z, bb.max.x, -bb.min.x);
+  let n = 0, hits = 0;
+  for (const v of D.variants) {
+    const W = v.cranes;
+    n += W.length / 4;
+    if (!W.length) continue;
+    // nothing but the crane's own mast and ties inside the cylinder its jib and hook sweep
+    for (const geo of [v.major, v.minor, v.fine]) eachVertex(geo, (x, y, z) => {
+      for (let i = 0; i < W.length; i += 4) {
+        const dx = x - W[i], dz = z - W[i + 2], dy = y - W[i + 1];
+        if (dy < bb.min.y - 0.5 || dy > bb.max.y + 0.5 || dx * dx + dz * dz > (reach + 1) * (reach + 1)) continue;
+        if (Math.abs(dx) < 1.4 && Math.abs(dz) < 1.4) continue;                   // the mast
+        if (Math.abs(dz) < 0.4 && dx > -6.6 && dx < 0) continue;                  // its ties to the core
+        hits++;
+      }
+    });
+  }
+  out.cranes = n;
+  out.craneSweepHits = hits;
+  assert.ok(n > 0 && reach < 60, 'Cranes on the building sites, jibs under 60 m');
+  assert.equal(hits, 0, 'Crane jibs and hooks sweep clear air');
+}
 // people's loops: on the pavements (just above the deck, never inside a wall or the water)
 {
   let bad = 0, loops = 0;
@@ -270,6 +295,10 @@ assert.ok(out.closestApproachTris < 12e6, 'District tiles within 12M rendered tr
   out.slotsNear = { fine, minor, major, mid, frame };
   out.people = D.people.count;
   out.drones = D.drones.count;
+  out.craneJibs = D.jibs.count;
+  assert.ok(D.jibs.count > 0 && D.jibs.count <= D.jibs.instanceMatrix.count, 'Tower cranes slewing over the building sites');
+  const cranesInRange = D.slots.filter((s) => s.g.visible && s.minor.visible).reduce((n, s) => n + D.variants[D.tileVariant[s.k]].cranes.length / 4, 0);
+  assert.equal(D.jibs.count, cranesInRange, 'Every crane in range has its jib');
   assert.ok(D.drones.count > 0 && D.drones.count <= D.drones.instanceMatrix.count, 'Survey drones over the glass');
   assert.ok(D.people.count > 50 && D.people.count <= D.people.instanceMatrix.count, 'People walking round the camera, within their buffer');
   assert.ok(fine >= 3 && fine <= fineSlots, 'Fine detail only on the nearest tiles');
