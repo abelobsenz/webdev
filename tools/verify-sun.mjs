@@ -654,3 +654,5 @@ const stT = tree(tris(sc.geo));
 }
 console.log(JSON.stringify(results));
 console.log('SUN_DOMAIN_VERIFIED');
+// wave 2: the Helianth's collector shells, the Foundry Commons, the Sun's shell and planes
+await import('./verify-sun-swarm.mjs');

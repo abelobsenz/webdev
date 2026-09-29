@@ -28,7 +28,7 @@ const TO_Y = new THREE.Matrix4().makeRotationX(-Math.PI / 2);
 
 export const COMMONS = {
   street: { y: -1300, z0: 6400, z1: 16200, r: 210 },
-  track: { y: -1300 + 240, x: 90 },                 // two tram tracks along the street's crown
+  track: { y: -1071, x: 50 },                      // tram origin height (bogies on the rails) and the two tracks' offset
   blocks: { z0: 8800, z1: 15600, pitch: 560, gap: 180, depth: 380 },
   pier: { z: 16200, len: 1800 },
   fans: { z: 11250, x0: 3400, span: 3600 },
@@ -45,7 +45,7 @@ export function commonsBlocks() {
   const { z0, z1, pitch, depth } = COMMONS.blocks;
   for (const side of [-1, 1]) for (let z = z0; z <= z1; z += pitch) {
     if (z > 11000 && z < 12500) continue;   // the anneal stack's plaza and the fans' headers
-    const w = 380 + 200 * r(), h = 4 + Math.floor(r() * 6), d = depth * (0.8 + 0.3 * r());
+    const w = 380 + 200 * r(), h = 6 + Math.floor(r() * 7), d = depth * (0.8 + 0.3 * r());
     const x0 = COMMONS.street.r + 60;
     out.push({ x: side * (x0 + w / 2), z, w, d, h, side, seed: r(), tier: 0 });
     // the back row, lower, across a lane from the front row
@@ -56,7 +56,8 @@ export function commonsBlocks() {
 }
 const STOREY = 42;           // a storey of rooms, including its slab (m)
 export const blockBase = () => COMMONS.street.y - 140;     // blocks stand on the street's footing plinths
-export const COMMONS_CRUISE = COMMONS.street.y - 140 + 60 + 9 * 42 + 200;   // above the tallest roof (nine storeys)
+export const COMMONS_CRUISE = COMMONS.street.y - 140 + 60 + 12 * 42 + 200;   // above the tallest roof (twelve storeys)
+export const BRIDGE_Y = -975;                    // street bridges: clear over the trams (their roofs at -1038)
 
 /** The fixed town (metres, foundry frame). */
 export function buildCommons() {
@@ -70,9 +71,14 @@ export function buildCommons() {
     B.pop();
   }
   for (const s of [-1, 1]) B.box(s * street.r * 0.62, street.y + street.r * 0.74, (street.z0 + street.z1) / 2, 60, 14, street.z1 - street.z0 - 200, CK.GLASS);
-  // tram tracks along its crown on sleepers
-  for (const s of [-1, 1]) B.box(s * track.x, track.y - 18, (street.z0 + street.z1) / 2, 14, 8, street.z1 - street.z0 - 100, CK.BRONZE);
-  for (let z = street.z0 + 50; z < street.z1; z += 120) B.box(0, track.y - 26, z, 260, 10, 18, CK.DARK);
+  // the tramway along its crown: a deck on a keel seated in the tube, two rails, cross ribs
+  const yt = street.y + street.r, zm = (street.z0 + street.z1) / 2, zl = street.z1 - street.z0 - 100;
+  B.box(0, yt, zm, 180, 12, zl, CK.DECK);
+  B.box(0, yt - 15, zm, 110, 30, zl, CK.DARK);
+  for (const s of [-1, 1]) B.box(s * track.x, yt + 10, zm, 12, 8, zl, CK.BRONZE);
+  for (let z = street.z0 + 110; z < street.z1 - 60; z += 120) B.box(0, yt + 7, z, 176, 2, 10, CK.DARK);
+  // the crossovers at the termini, where the loop changes track
+  for (const [zA, zE] of [[street.z1 - 500, street.z1 - 350], [street.z0 + 500, street.z0 + 350]]) B.tube([V(track.x, yt + 10, zA), V(0, yt + 10, zE), V(-track.x, yt + 10, zA)], 5, 6, CK.BRONZE);
   // the wheel's hub tube meets the street at its south end: a collar
   B.at(0, street.y, street.z0); B.lathe([[street.r + 60, -60, CK.BRONZE], [street.r + 80, 0, CK.HULL], [street.r + 60, 60, CK.BRONZE]], 20, 0, { closedProfile: false }); B.pop();
   // tenements
@@ -85,7 +91,7 @@ export function buildCommons() {
     // the block: glazed faces, plate ends; a set-back upper floor on the taller ones
     const up = b.h > 6 ? 2 : 0, lowH = (b.h - up) * STOREY;
     B.box(b.x, base + 60 + lowH / 2, b.z, b.w, lowH, b.d, CK.GLASS);
-    for (const s of [-1, 1]) B.box(b.x + s * (b.w / 2 + 6), base + 60 + lowH / 2, b.z, 12, lowH, b.d * 0.3, CK.HULL);   // stair cores
+    for (const s of [-1, 1]) B.box(b.x + b.side * b.w * 0.2, base + 60 + lowH / 2, b.z + s * (b.d / 2 + 6), b.w * 0.3, lowH, 12, CK.HULL);   // stair cores on the ends
     if (up) B.box(b.x - b.side * b.w * 0.12, base + 60 + lowH + up * STOREY / 2, b.z, b.w * 0.7, up * STOREY, b.d * 0.75, CK.GLASS);
     // slab edges every storey: balconies with a people-height rail on the street face
     const face = b.x - b.side * b.w / 2;
@@ -120,24 +126,26 @@ export function buildCommons() {
     B.box((xa + xb) / 2, y - 11, (f.z + k.z) / 2, Math.abs(xb - xa) + 20, 2, 30, CK.BRONZE);
   }
   west.forEach((w, i) => {
-    const e = east[i]; if (!e || i % 2) return;
-    const y = blockBase() + 60 + Math.min(w.h, e.h, 4) * STOREY - STOREY * 1.5;
+    const e = east[i]; if (!e || i % 2 || Math.min(w.h, e.h) < 9) return;
+    const y = BRIDGE_Y;
     const x0 = w.x + w.w / 2, x1 = e.x - e.w / 2;
     B.box((x0 + x1) / 2, y, w.z, x1 - x0, 24, 30, CK.GLASS);
     B.box((x0 + x1) / 2, y - 13, w.z, x1 - x0, 3, 36, CK.BRONZE);
   });
   // the anneal works' cooling stack on its plaza, glowing at the throat
-  B.box(0, street.y - 120, stack.z, 2900, 60, 1000, CK.DECK);
+  const plaza = street.y - street.r - 70;   // (the plaza deck's centre, under the street tube)
+  B.box(0, plaza, stack.z, 2900, 60, 1000, CK.DECK);
+  for (let k = -3; k <= 3; k++) B.box(0, plaza + 30 + (street.y - street.r - plaza - 30) / 2 + 5, stack.z + k * 140, 50, street.y - street.r - plaza - 20, 50, CK.BRONZE);   // posts up to the street's keel
   for (const s of [-1, 1]) {
-    B.at(s * 900, street.y - 90, stack.z); B.push(TO_Y);
+    B.at(s * 900, plaza + 30, stack.z); B.push(TO_Y);
     B.lathe([[stack.r, 0, CK.HULL], [stack.r * 0.82, stack.h * 0.45, CK.HULL], [stack.r * 0.7, stack.h * 0.7, CK.BRONZE], [stack.r * 0.78, stack.h, CK.LANTERN], [stack.r * 0.7, stack.h, CK.DARK]], 24, 0, { closedProfile: false });
     B.pop(); B.pop();
-    for (let k = 0; k < 6; k++) { const a = k / 6 * TAU; B.tube([V(s * 900 + Math.cos(a) * stack.r * 1.25, street.y - 90, stack.z + Math.sin(a) * stack.r * 1.25), V(s * 900 + Math.cos(a) * stack.r * 0.9, street.y + stack.h * 0.3, stack.z + Math.sin(a) * stack.r * 0.9)], 14, 5, CK.DARK); }
-    lamps.push({ p: V(s * 900, street.y - 90 + stack.h + 30, stack.z), r: 24, color: LAMP.RED, i: 2.6, breathe: 0.9, phase: s > 0 ? 0 : 0.5 });
+    for (let k = 0; k < 6; k++) { const a = k / 6 * TAU; B.tube([V(s * 900 + Math.cos(a) * stack.r * 1.25, plaza + 30, stack.z + Math.sin(a) * stack.r * 1.25), V(s * 900 + Math.cos(a) * stack.r * 0.9, street.y + stack.h * 0.3, stack.z + Math.sin(a) * stack.r * 0.9)], 14, 5, CK.DARK); }
+    lamps.push({ p: V(s * 900, plaza + 30 + stack.h + 30, stack.z), r: 24, color: LAMP.RED, i: 2.6, breathe: 0.9, phase: s > 0 ? 0 : 0.5 });
     // pipe runs from the stack's foot into the street
     B.tube([V(s * 900, street.y - 60, stack.z - stack.r), V(s * 500, street.y - 60, stack.z - 300), V(s * (street.r + 10), street.y - 60, stack.z - 300)], 36, 8, CK.BRONZE);
   }
-  // radiator fans east and west (the forge's heat), edge-on to the Sun, on their headers
+  // radiator fans east and west (the forge's heat): vertical fins fanned off their headers
   for (const s of [-1, 1]) {
     B.tube([V(s * (street.r - 20), street.y, fans.z), V(s * fans.x0, street.y, fans.z)], 90, 10, CK.HULL);
     for (let k = 0; k < 5; k++) {
@@ -173,14 +181,20 @@ export function buildTram() {
   for (const z of [-61, 61]) B.box(0, 16, z, 20, 18, 2, CK.LANTERN);
   return B.geometry();
 }
-/** Tram k at time t: z along the street (metres) and its track (+-1). */
+/** The tram loop: north on the east track, south on the west, crossing over at the termini. */
+const tramU = (k, t) => (((t / COMMONS.tramT) + k / COMMONS.trams) % 1 + 1) % 1;
+const TRAM_L = () => COMMONS.street.z1 - COMMONS.street.z0 - 700, CROSS = 150;
+/** Tram k at time t: z along the street (metres). */
 export function tramZ(k, t) {
-  const { z0, z1 } = COMMONS.street, L = z1 - z0 - 700;
-  const u = (((t / COMMONS.tramT) + k / COMMONS.trams) % 1 + 1) % 1, s = u < 0.5 ? u * 2 : 2 - u * 2;
-  const e = s * s * (3 - 2 * s);
-  return z0 + 350 + L * e;
+  const u = tramU(k, t), s = u < 0.5 ? u * 2 : 2 - u * 2;
+  return COMMONS.street.z0 + 350 + TRAM_L() * s;
 }
-export const tramTrack = (k) => (k % 2 ? 1 : -1);
+/** Tram k at time t: x across the street (on its track, sliding over at the crossovers). */
+export function tramX(k, t) {
+  const u = tramU(k, t), s = u < 0.5 ? u * 2 : 2 - u * 2, L = TRAM_L();
+  const toEnd = Math.min(s * L, (1 - s) * L), side = u < 0.5 ? 1 : -1;
+  return side * COMMONS.track.x * Math.min(1, toEnd / CROSS);
+}
 
 /** Drone k at time t (metres): hopping between block roofs across the street. */
 export function commonsDrone(k, t, blocks, out) {
@@ -235,11 +249,11 @@ export class FoundryCommons {
   animate(t) {
     const m = this._m, p = this._p;
     for (let k = 0; k < COMMONS.trams; k++) {
-      const z = tramZ(k, t), x = tramTrack(k) * COMMONS.track.x;
-      m.makeTranslation(x, COMMONS.track.y - 12, z);
+      const z = tramZ(k, t), x = tramX(k, t);
+      m.makeTranslation(x, COMMONS.track.y, z);
       this.trams.setMatrixAt(k, m);
-      this.tramLamps.set(k * 2, p.set(x, COMMONS.track.y + 4, z + 64));
-      this.tramLamps.set(k * 2 + 1, p.set(x, COMMONS.track.y + 4, z - 64));
+      this.tramLamps.set(k * 2, p.set(x, COMMONS.track.y + 16, z + 64));
+      this.tramLamps.set(k * 2 + 1, p.set(x, COMMONS.track.y + 16, z - 64));
     }
     this.trams.instanceMatrix.needsUpdate = true; this.tramLamps.commit();
     for (let k = 0; k < COMMONS.drones; k++) {
