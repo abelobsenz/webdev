@@ -8,6 +8,8 @@ import {
   buildHotel, HOTEL, buildHabitat, HAB, HAB_COLLECTOR, buildFarmDrum, buildFarmFrame, FARM, buildPolar, POLAR, buildPower, POWER,
   buildSkyhookHub, buildGrapple, buildTram, EMITTER_HEX,
 } from '../src/space/leoStations.js';
+import { LowOrbit, leoTargets } from '../src/space/lowOrbit.js';
+import { SpaceSim, R_EARTH } from '../src/space/sim.js';
 
 let fails = 0;
 const ok = (c, msg) => { if (!c) { fails++; console.log('FAIL', msg); } else console.log('ok  ', msg); };
@@ -154,6 +156,67 @@ ok(tri < 500000, `dawnline ${Math.round(tri)} triangles (< 500k)`);
 }
 sane("anansi hub", buildSkyhookHub().geo); sane("anansi grapple", buildGrapple().geo);
 sane('tram', buildTram());
+
+// ---- the shell at run time: trails, approach strobes, the Demeter film, framing, buffers, cost
+{
+  const sim = new SpaceSim();
+  sim.syncFromHours(21);
+  const space = {
+    scene: new THREE.Scene(), bodies: [], camera: new THREE.PerspectiveCamera(50, 16 / 9, 0.01, 1e7), size: new THREE.Vector2(960, 540), sim,
+    addBody(name, objects, center, radius, opts) { const b = { name, objects, center, radius, ...opts }; this.bodies.push(b); return b; },
+  };
+  const t0 = performance.now();
+  const lo = new LowOrbit(space);
+  ok(performance.now() - t0 < 1500, `low orbit built in ${(performance.now() - t0).toFixed(0)} ms`);
+  space.lowOrbit = lo;
+  space.scene.add(lo.group);
+  const targets = leoTargets(space), cam = space.camera, p = new THREE.Vector3(), q = new THREE.Quaternion();
+  sim.step(0);
+  lo.update(sim, 0, 0.016, space);
+  for (const [name, T] of Object.entries(targets)) {
+    const st = lo.byName[name];
+    const bound = st.radius * 1.15 + 0.05;
+    ok(T.defaultDist > bound * 1.3 && T.defaultDist < bound * 4.5, `${name} framed at ${T.defaultDist} km (bound ${bound.toFixed(2)} km): fills the view without clipping`);
+  }
+  // camera parked at Halcyon's default view: every orbit trace is hidden (they are a map)
+  targets.halcyon.position(p); targets.halcyon.frame(q);
+  cam.position.copy(p).add(new THREE.Vector3(0, 0, targets.halcyon.defaultDist).applyQuaternion(q));
+  cam.updateMatrixWorld();
+  lo.update(sim, 10, 0.016, space);
+  ok(lo.trails.every((t) => !t.mesh.visible), 'orbit traces hidden while the camera is inside the shell');
+  cam.position.set(R_EARTH + 30000, 0, 0); cam.updateMatrixWorld();
+  lo.update(sim, 11, 0.016, space);
+  ok(lo.trails.some((t) => t.mesh.visible), 'orbit traces drawn from 30,000 km out');
+  // approach strobes: dark between runs (no permanent bead string)
+  const hal = lo.byName.halcyon;
+  if (hal.approach) {
+    let lit = 0;
+    const g = hal.approach.lamps;
+    lo._animateApproach(hal, 1.0);
+    for (let i = 0; i < hal.approach.n; i++) if (g.C.array[i * 4] > 0.05 * Math.max(g.base[i * 4], 1e-6)) lit++;
+    ok(lit < hal.approach.n / 3, `approach strobes mostly dark between runs (${lit} of ${hal.approach.n} lit)`);
+  }
+  // Demeter's film meshes: one per drum, the mirror material, sheets clear of the drum
+  const dem = lo.byName.demeter;
+  const films = dem.drums.map((d) => d.children.find((c) => c.material && c.material.uniforms && c.material.uniforms.uCylR));
+  ok(films.every(Boolean), 'demeter drums carry their mirror film meshes');
+  // buffer sanity for everything the shell draws
+  let badIdx = 0, badInst = 0, badAttr = 0;
+  lo.group.traverse((o) => {
+    if (!o.isMesh) return;
+    const g = o.geometry, pos = g.attributes.position;
+    if (g.index && !g.isInstancedBufferGeometry) { let m = 0; const a = g.index.array; for (let i = 0; i < a.length; i++) if (a[i] > m) m = a[i]; if (m >= pos.count) badIdx++; }
+    if (o.isInstancedMesh && o.count > o.instanceMatrix.count) badInst++;
+    if (g.isInstancedBufferGeometry) for (const k in g.attributes) { const at = g.attributes[k]; if (at.isInstancedBufferAttribute && at.count < (g.instanceCount === Infinity ? 0 : g.instanceCount)) badAttr++; }
+  });
+  ok(!badIdx && !badInst && !badAttr, `shell buffers sane (index ${badIdx}, instance counts ${badInst}, instanced attributes ${badAttr})`);
+  // per-frame cost near a station
+  cam.position.copy(p).add(new THREE.Vector3(0, 0, 2).applyQuaternion(q)); cam.updateMatrixWorld();
+  const n = 200, t1 = performance.now();
+  for (let i = 0; i < n; i++) { sim.step(0.016); lo.update(sim, 20 + i * 0.016, 0.016, space); }
+  const ms = (performance.now() - t1) / n;
+  ok(ms < 0.6, `low orbit update ${ms.toFixed(3)} ms per frame (headless; the app's budget is 0.3 ms for this domain's additions)`);
+}
 
 for (const [k, v] of Object.entries(T)) ok(v < 900, `${k} built in ${v.toFixed(0)} ms (< 900)`);
 console.log(fails ? `${fails} FAILED` : 'all passed');
