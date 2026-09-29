@@ -142,7 +142,7 @@ void main() {
       lights = vec3(0.004, 0.005, 0.008);
     }
   }
-  vec3 day = vec3(1.0, 0.96, 0.9) * uSunE * 0.11 * uDay;           // the mirrors' daylight, through glass
+  vec3 day = vec3(1.0, 0.96, 0.9) * uSunE * 0.14 * uDay;           // the mirrors' daylight (~0.45 of full sun on the land), through glass
   vec3 col = alb * (day + vec3(0.004, 0.006, 0.012)) + lights * (1.0 - 0.85 * uDay) * isLand;
   // clouds on a deck 1.5 km over the far land
   float rc = R - 1500.0;

@@ -516,6 +516,20 @@ export function buildPolar() {
   lamps.push({ p: tip, r: 2, color: LAMP.RED, i: 3.6, breathe: 0.7 });
   dish(B, V(8, 258, 0), V(1, 1, 0).normalize(), 6);
   catwalk(B, V(5.6, -220, 5.6), V(5.6, 250, 5.6), V(1, 0, 1).normalize(), 1.2, 1.1);
+  // the pressurised tunnel inside the spine truss, node to zenith through the centrifuge's
+  // bearing, ringed every 18 m; a lit coolant conduit and a power bus down the truss faces
+  // (the pieces of the station read as one body instead of a stack of separate parts)
+  for (const [y0, y1] of [[-44, POLAR.ringY - 7], [POLAR.ringY + 7, 250]]) {
+    B.tube([V(0, y0, 0), V(0, y1, 0)], 3.2, 14, CK.HULL);
+    for (let y = y0 + 9; y < y1 - 4; y += 18) { B.push(tr(0, y, 0).multiply(toY)); B.torus(3.4, 0.35, 16, 4, CK.BRONZE); B.pop(); }
+  }
+  B.tube([V(-5.9, -224, 0), V(-5.9, 256, 0)], 0.8, 6, CK.CONDUIT);
+  B.tube([V(0, -224, -5.9), V(0, 256, -5.9)], 0.6, 6, CK.BRONZE);
+  // a baffle ring over the nadir deck: it shades the instruments' optics from the Earth's limb glare
+  B.push(tr(0, -224, 0).multiply(toY));
+  B.lathe([[52, 0, CK.DARK], [66, 6, CK.HULL], [66, 9, CK.BRONZE], [52, 3, CK.HULL], [52, 0, CK.DARK]], 48, Math.PI / 48);
+  B.pop();
+  for (let k = 0; k < 8; k++) { const a = (k / 8) * TAU; B.tube([V(Math.cos(a) * 40, -228, Math.sin(a) * 40), V(Math.cos(a) * 60, -221.6, Math.sin(a) * 60)], 0.6, 4, CK.DARK); }
   // the centrifuge (spins about y): a glazed torus on four spokes
   Rg.push(tr(0, POLAR.ringY, 0).multiply(new THREE.Matrix4().makeRotationX(Math.PI / 2)));
   Rg.torus(POLAR.ringR, POLAR.ringTube, 96, 14, CK.GLASS);

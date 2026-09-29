@@ -5,7 +5,7 @@
 // back frame clear of the hub's radiators, and build timings. Run: node tools/verify-habitats.mjs
 import * as THREE from 'three';
 import {
-  buildHotel, HOTEL, buildHabitat, HAB, HAB_COLLECTOR, buildFarmDrum, buildFarmFrame, FARM, buildPolar, buildPower, POWER,
+  buildHotel, HOTEL, buildHabitat, HAB, HAB_COLLECTOR, buildFarmDrum, buildFarmFrame, FARM, buildPolar, POLAR, buildPower, POWER,
   buildSkyhookHub, buildGrapple, buildTram,
 } from '../src/space/leoStations.js';
 
@@ -108,6 +108,22 @@ ok(tri < 900000, `demeter ${Math.round(tri)} triangles (< 900k)`);
 // ---- Boreal, Dawnline, Anansi
 const pol = time('boreal', buildPolar);
 tri = sane('boreal body', pol.body) + sane('boreal ring', pol.ring) + sane('boreal wings', pol.wings);
+{
+  // the spine's tunnel, conduit and bus pass inside the centrifuge's bearing collar (inner 7.5 m)
+  const p = pol.body.attributes.position.array, f = pol.body.attributes.aFacade.array;
+  let rMax = 0;
+  for (let i = 0; i < p.length / 3; i++) {
+    const y = p[i * 3 + 1], k = Math.round(f[i * 3 + 2]);
+    if ((k === 1 || k === 4) && Math.abs(y - POLAR.ringY) < 12 && Math.hypot(p[i * 3], p[i * 3 + 2]) < 12) rMax = Math.max(rMax, Math.hypot(p[i * 3], p[i * 3 + 2]));
+  }
+  ok(rMax < 7.5, `boreal tunnel and conduit through the bearing collar at r <= ${rMax.toFixed(2)} m (< 7.5)`);
+  const rp = pol.ring.attributes.position.array; let bore = Infinity;
+  for (let i = 0; i < rp.length / 3; i++) bore = Math.min(bore, Math.hypot(rp[i * 3], rp[i * 3 + 2]));
+  const ring = { rMin: bore };
+  ok(ring.rMin > 12.5, `boreal centrifuge hub bore ${ring.rMin.toFixed(1)} m clear of the collar (12 m)`);
+  const shade = extent(pol.body, null, (x, y, z) => y > -226 && y < -212 && Math.hypot(x, z) > 50);
+  ok(shade.n > 0, 'boreal baffle ring above the nadir deck (deck top -228 m)');
+}
 const pw = time('dawnline', buildPower);
 tri = sane('dawnline body', pw.body) + sane('dawnline emitter', pw.emitter);
 ok(tri < 500000, `dawnline ${Math.round(tri)} triangles (< 500k)`);

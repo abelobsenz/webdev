@@ -226,7 +226,9 @@ export class LagrangeColonies {
     const m = new THREE.Group();
     m.scale.setScalar(KM);
     group.add(m);
-    const mat = createCraftMaterial({ accent: name === 'L4' ? [0.55, 0.9, 1.0] : [1.0, 0.78, 0.45], lit: 0.5, fill: 0.14, flood: 1 });
+    // fill kept low: the land strips lie along the sunlight (the axis is on the Sun), so the hull is
+    // lit only by the Earth and Moon and the windows' daylight must read brighter than it
+    const mat = createCraftMaterial({ accent: name === 'L4' ? [0.55, 0.9, 1.0] : [1.0, 0.78, 0.45], lit: 0.5, fill: 0.05, flood: 1 });
     const winMat = createWindowMaterial(seed);
     const frame = craftMesh(pt.frame.geo, { scale: 1 }, mat);
     m.add(frame);
@@ -449,7 +451,10 @@ export class LagrangeColonies {
       P.mat.uniforms.uLit.value = 0.3 + 0.5 * (1 - day);
       if (!P.m.visible) continue;
       const det = d < DETAIL_KM * 8;
-      for (const ls of P.lampSets) if (ls) ls.visible = det;
+      // the hull's lamps are for the near view: from tens of km they would dot the whole hull, so
+      // they fade to a fifth (the windows and the cap towns carry the colony's light there)
+      const lg = 1 - 0.8 * smooth(14, 60, d);
+      for (const ls of P.lampSets) if (ls) { ls.visible = det; ls.material.uniforms.uGain.value = lg; }
       if (Math.abs(P.alpha - P.ramAlpha) > 1e-7) this._rams(P);
       for (const C of P.cyls) {
         C.rotor.rotation.z = C.s * ((COL.SPIN * t) % TAU);
