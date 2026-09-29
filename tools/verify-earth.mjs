@@ -464,6 +464,11 @@ lint('meteors', metMat);
   ok(/if \(relK > 0\.01\)/.test(efs) && /float lcv = deckHit \? cA : 0\.0;/.test(efs), 'relief faded in, limb tops counted');
   // worst-case cloud evaluations per pixel at the lowest tier (deck relief + self shadow + ground
   // shadow + coarse shade): the per-pixel cost stays bounded
+  ok(F.RELIEF.stepsByQ.length === 4 && F.RELIEF.stepsByQ.every((n) => n >= 3 && n <= F.RELIEF.steps) && F.RELIEF.stepsByQ[0] <= F.RELIEF.stepsByQ[3], 'relief steps per tier');
+  ok(/for \(int k = 1; k <= EF_RELIEF_N; k\+\+\)/.test(efs), 'relief loop bound is the tier constant');
+  // lee waves: resolved only close in (gone before 4.5 px), a nudge to the potential, ground-fixed
+  ok(F.LEE.wl >= 6 && F.LEE.wl <= 20 && F.LEE.amp > 0 && F.LEE.amp < 0.2, 'lee wave scale');
+  ok(/if \(oct >= EF_SHADOW_OCT\) Pd \+= ef_leeWave\(b, fp, P\);/.test(efs), 'lee waves in the body frame, on the deck and its shadows');
   const evals = F.RELIEF.steps + F.SHADOW_MARCH.steps + 2;
   ok(evals <= 10, `cloud evaluations per pixel ${evals}`);
   ok(!/lowCloud\([^;]*,\s*(true|false)\)/.test(efs), 'lowCloud takes an octave count');

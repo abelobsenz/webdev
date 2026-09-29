@@ -146,6 +146,8 @@ vec2 lowCloud(vec3 b, float fp, float bias, int oct) {
   vec3 dt = oct > 0 ? ef_cloudDetail(q, fp, 1.0 - S, oct) : vec3(0.0, EF_CD_RMS, 0.0);
   bool fine = oct >= EF_CLOUD_OCT;
   float Pd = P + A * dt.x;
+  // wave clouds in the lee of the ranges (fixed to the ground: body frame)
+  if (oct >= EF_SHADOW_OCT) Pd += ef_leeWave(b, fp, P);
   float edge = 0.012 + 0.3 * A * dt.y;
   // cells: open (cloud in the lanes round clear hearts) and closed (bright hearts, dark lanes)
   float cellRes = 0.0, lane = 0.0, heart = 0.62;

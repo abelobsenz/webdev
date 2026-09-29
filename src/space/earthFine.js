@@ -35,6 +35,10 @@ export const RIDGE_OCTAVES = [
   { wl: 5, amp: 0.26, q: 0 },
   { wl: 1.8, amp: 0.11, q: 1 },
 ];
+/** The relief march: steps through the tops' layer, the view slant below which it runs, and the footprint (km) above which it fades out. */
+export const RELIEF = { steps: 4, stepsByQ: [3, 4, 4, 4], muLo: 0.3, muHi: 0.45, fpLo: 2.0, fpHi: 4.0 };
+/** Lee-wave clouds: wavelength (km) and amplitude in the cloud potential. */
+export const LEE = { wl: 11, amp: 0.13 };
 /** The terrain-shadow march for a low Sun: first step (km), growth per step, steps, height exaggeration. */
 export const TERRAIN_MARCH = { d0: 4, grow: 2.3, steps: 5, exag: 2.5 };
 /** The self-shadow march: first step (km, at least this many pixels), growth per step, steps. */
@@ -72,12 +76,15 @@ export const EARTH_FINE_GLSL = /* glsl */ `
 #if QUALITY >= 2
 #define EF_CLOUD_OCT ${CLOUD_OCT_BY_Q[2]}
 #define EF_SHADOW_OCT ${SHADOW_OCT_BY_Q[2]}
+#define EF_RELIEF_N ${RELIEF.stepsByQ[2]}
 #elif QUALITY == 1
 #define EF_CLOUD_OCT ${CLOUD_OCT_BY_Q[1]}
 #define EF_SHADOW_OCT ${SHADOW_OCT_BY_Q[1]}
+#define EF_RELIEF_N ${RELIEF.stepsByQ[1]}
 #else
 #define EF_CLOUD_OCT ${CLOUD_OCT_BY_Q[0]}
 #define EF_SHADOW_OCT ${SHADOW_OCT_BY_Q[0]}
+#define EF_RELIEF_N ${RELIEF.stepsByQ[0]}
 #endif
 #define EF_CD_N ${CLOUD_OCTAVES.length}
 ${arr('EF_CD_A', CLOUD_OCTAVES.map((o) => o.amp))}
@@ -124,6 +131,26 @@ vec3 ef_cloudDetail(vec3 q, float fp, float cumu, int oct) {
     if (i == 2) x.y /= st;
   }
   return vec3(s, sqrt(u), res / 2.45);
+}
+
+// Lee waves: downwind of a range the westerlies set the air oscillating, and where it is moist
+// enough a train of parallel wave clouds (~11 km apart) stands in the lee across the wind, fixed
+// to the ground while the weather drifts through. b: body direction, P: the cloud potential.
+// Returns the change to the potential (bands of cloud and clear between them).
+float ef_leeWave(vec3 b, float fp, float P) {
+  float w = ef_fade(${f(LEE.wl)}, fp) * smoothstep(0.38, 0.55, abs(b.y));
+  float moist = exp(-((P - 0.46) / 0.13) * ((P - 0.46) / 0.13));
+  if (w * moist < 0.01) return 0.0;
+  vec3 east = normalize(vec3(b.z, 0.0, -b.x) + 1e-6);
+  // the range upwind (west): the bake's heights ~20 and ~45 km off, against the ground here
+  float hU = max(textureLod(uSurfA, normalize(b - east * (20.0 / 6371.0)), 2.0).a, textureLod(uSurfA, normalize(b - east * (45.0 / 6371.0)), 2.0).a) * 2.0 - 1.0;
+  float hH = textureLod(uSurfA, b, 2.0).a * 2.0 - 1.0;
+  float lee = smoothstep(0.1, 0.3, hU) * smoothstep(0.0, 0.08, hU - hH);
+  if (lee < 0.01) return 0.0;
+  vec3 p = b * 6371.0;
+  float ph = atan(-b.z, b.x) * sqrt(max(1.0 - b.y * b.y, 0.0)) * (6371.0 / ${f(LEE.wl)}) + 1.2 * snoise(p / 70.0 + 13.0);
+  // (the train reaches as far downwind as the upwind samples still see the range: a few waves)
+  return ${f(LEE.amp)} * lee * w * moist * cos(ph * 6.2832);
 }
 
 // ---- the land ---------------------------------------------------------------------------------
@@ -350,8 +377,6 @@ float ef_cloudSelfShadow(vec3 nC, vec3 sun, float muC, float fpC, float bias, fl
 `;
 
 // ---- GLSL, part 3: the deck's relief at a slant (after lowCloud and landBias; needs RC) ---------
-/** The relief march: steps through the tops' layer, the view slant below which it runs, and the footprint (km) above which it fades out. */
-export const RELIEF = { steps: 4, muLo: 0.3, muHi: 0.45, fpLo: 2.0, fpHi: 4.0 };
 export const EARTH_FINE_RELIEF_GLSL = /* glsl */ `
 // The deck seen at a slant: march the ray down through the layer of the tops (RC .. RC + the
 // tops' height) and stop where it first meets a top, so toward the horizon the towers stand up,
@@ -377,8 +402,8 @@ bool ef_deck(vec3 ro, vec3 rd, vec2 tC, out vec2 lcl, out float tHit, out float 
       float t0 = max(tT.x, 0.0);
       float tPrev = t0;
       float gPrev = length(ro + rd * t0) - RC;
-      for (int k = 1; k <= ${RELIEF.steps}; k++) {
-        float t = mix(t0, tBase, float(k) / ${f(RELIEF.steps)});
+      for (int k = 1; k <= EF_RELIEF_N; k++) {
+        float t = mix(t0, tBase, float(k) / float(EF_RELIEF_N));
         vec3 p = ro + rd * t;
         vec2 c = lowCloud(uToBody * normalize(p), max(t * uPixAng, 1e-3), bias, EF_CLOUD_OCT);
         float g = length(p) - RC - top * c.x * sqrt(clamp(c.y / 48.0, 0.0, 1.0));
@@ -387,7 +412,7 @@ bool ef_deck(vec3 ro, vec3 rd, vec2 tC, out vec2 lcl, out float tHit, out float 
           lcl = c;
           return true;
         }
-        if (k == ${RELIEF.steps}) {
+        if (k == EF_RELIEF_N) {
           // the ray reached the base (or, at the limb, its lowest point) over clear air
           lcl = hitBase ? c : vec2(0.0);
           return hitBase;
