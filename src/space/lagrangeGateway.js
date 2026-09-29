@@ -52,7 +52,7 @@ export function buildGateway() {
       B.tube([root, tip], 14, 10, CK.HULL);
       catwalk(B, root.clone().add(V(0, 0, 18)), tip.clone().add(V(0, 0, 18)), V(0, 0, 1), 2.4, 1.2);
       // side berths along the arm, facing away from the station (+-z)
-      for (const f of [0.45, 0.85]) {
+      for (const f of [0.36, 0.92]) {
         const p = root.clone().lerp(tip, f).add(V(0, 0, s * 18));
         B.push(new THREE.Matrix4().makeRotationX(s > 0 ? 0 : Math.PI).setPosition(p));
         const dc = dockingCollar(B, 9);

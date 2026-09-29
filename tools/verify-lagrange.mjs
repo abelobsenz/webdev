@@ -180,6 +180,38 @@ ok(lag.life.buildMs < 400, `near detail built in ${lag.life.buildMs.toFixed(0)} 
   ok(COL.BERTH_R - reach > 60, `crane jibs stay ${(COL.BERTH_R - reach).toFixed(0)} m inboard of the berthing axis`);
 }
 
+{
+  // ships keep apart from each other (every station, sampled over ten minutes)
+  // each hull as a capsule: its bounding box's length along its heading, its widest half-section as radius
+  const seg = new THREE.Line3(), seg2 = new THREE.Line3(), c1 = new THREE.Vector3(), c2 = new THREE.Vector3();
+  const segDist = (a, b) => {
+    // closest points between two segments (sampled on a then refined on b: exact enough for a gate)
+    let best = Infinity;
+    for (let k = 0; k <= 16; k++) { a.at(k / 16, c1); b.closestPointToPoint(c1, true, c2); best = Math.min(best, c1.distanceTo(c2)); }
+    return best;
+  };
+  const cap = (d) => { if (!d._cap) { const bb = d.geo.boundingBox || (d.geo.computeBoundingBox(), d.geo.boundingBox); d._cap = { z0: bb.min.z, z1: bb.max.z, r: Math.max(-bb.min.x, bb.max.x, -bb.min.y, bb.max.y) }; } return d._cap; };
+  let worst = Infinity;
+  const ps = [], fs = [];
+  for (const st of lag.traffic) {
+    const ships = st.ships;
+    for (let i = 0; i < ships.length; i++) { ps[i] = ps[i] || new THREE.Vector3(); fs[i] = fs[i] || new THREE.Vector3(); }
+    for (let t = 0; t < 600; t += 1.5) {
+      for (let i = 0; i < ships.length; i++) { shipPose(ships[i], t, ps[i], fs[i]); ships[i]._v = ships[i].vis; }
+      for (let i = 0; i < ships.length; i++) for (let j = i + 1; j < ships.length; j++) {
+        if (ships[i]._v < 0.05 || ships[j]._v < 0.05) continue;
+        const A = ships[i], B = ships[j], ca = cap(A.design), cb = cap(B.design), ka = A.scale / 1000, kb = B.scale / 1000;
+        if (ps[i].distanceTo(ps[j]) > (A.design.radius * A.scale + B.design.radius * B.scale) / 1000 + 0.05) continue;
+        seg.start.copy(ps[i]).addScaledVector(fs[i], ca.z0 * ka); seg.end.copy(ps[i]).addScaledVector(fs[i], ca.z1 * ka);
+        seg2.start.copy(ps[j]).addScaledVector(fs[j], cb.z0 * kb); seg2.end.copy(ps[j]).addScaledVector(fs[j], cb.z1 * kb);
+        worst = Math.min(worst, segDist(seg, seg2) - ca.r * ka - cb.r * kb);
+      }
+    }
+  }
+  if (worst === Infinity) worst = 1;
+  ok(worst > 0.02, `ships keep clear of each other (closest hull gap ${(worst * 1000).toFixed(0)} m)`);
+}
+
 // ---- animate, then buffer sanity over everything the module draws
 const roots = [...lag.pairs.map((q) => q.group), ...lag.pairs.map((q) => q.approach), lag.gateway.group, lag.gateway.approach, lag.laneGroup, ...lag.traffic.map((s) => s.group)];
 const cams = [L4.clone().add(new THREE.Vector3(0, 30, 90)), L5.clone().add(new THREE.Vector3(60, 0, -60)), L1.clone().add(new THREE.Vector3(0, 2, 3)), new THREE.Vector3(0, 0, 40000)];
