@@ -426,7 +426,7 @@ check(nonFinite === 0, `${nonFinite} non-finite transforms`);
   check(iPort > iBelt && iBelt > iMain && iPort < fs.indexOf('N = normalize(N + T * bump.x'), 'port GLSL: portKinds called after the belt kinds, before the bump');
   check((fs.match(/void portKinds\(/g) || []).length === 1 && (fs.match(/varying float vOcc;/g) || []).length === 1, 'port GLSL: spliced once');
   check(/attribute float aOcc;/.test(vs) && /varying float vOcc;/.test(vs) && /vOcc = aOcc;/.test(vs), 'port vertex shader: aOcc -> vOcc');
-  check(fs.includes('col = col * (1.0 - 0.82 * clamp(vOcc, 0.0, 1.0)) + alb * 0.004 + em;'), 'port GLSL: occlusion darkens the lit terms only');
+  check(/col = col \* \(1\.0 - 0\.82 \* clamp\(vOcc, 0\.0, 1\.0\)\) \+ alb \* 0\.004( \* occ)? \+ em;/.test(fs), 'port GLSL: occlusion darkens the lit terms only');
   check(Array.isArray(m.defaultAttributeValues.aOcc) && m.defaultAttributeValues.aOcc[0] === 0, 'aOcc default supplied for meshes without it');
   check(m.userData.dressed && m.uniforms.uLivery && m.uniforms.uLivery2, 'port material keeps the dressed uniforms');
   const kinds = Object.values(PK);

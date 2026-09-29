@@ -127,7 +127,8 @@ export function portShaders(vs, fs) {
   if (_cache && _cache.vs === vs && _cache.fs === fs) return _cache.out;
   const call = 'beltKinds(k, f, fw, px, alb, rough, metal, em, bump);';
   const main = 'void main() {';
-  const lit = 'col += alb * 0.004 + em;';
+  // the craft material's last lighting line (with or without the refined cavity occlusion)
+  const lit = fs.includes('col += alb * 0.004 * occ + em;') ? 'col += alb * 0.004 * occ + em;' : 'col += alb * 0.004 + em;';
   const vmain = 'vFac = aFacade;';
   if (!fs.includes(call) || !fs.includes(lit) || fs.lastIndexOf(main) < 0 || !vs.includes(vmain)) {
     throw new Error('portMaterial: craft shader layout changed; cannot splice the port kinds');
@@ -135,7 +136,7 @@ export function portShaders(vs, fs) {
   const at = fs.lastIndexOf(main);
   const fOut = 'varying float vOcc;\n' + fs.slice(0, at) + PORT_GLSL + '\n' + fs.slice(at)
     .replace(call, `${call}\n  portKinds(k, f, fw, px, alb, rough, metal, em, bump);`)
-    .replace(lit, 'col = col * (1.0 - 0.82 * clamp(vOcc, 0.0, 1.0)) + alb * 0.004 + em;');
+    .replace(lit, `col = col * (1.0 - 0.82 * clamp(vOcc, 0.0, 1.0)) + ${lit.slice(7)}`);
   const vOut = 'attribute float aOcc;\nvarying float vOcc;\n' + vs.replace(vmain, `${vmain}\n  vOcc = aOcc;`);
   _cache = { vs, fs, out: { vs: vOut, fs: fOut } };
   return _cache.out;
