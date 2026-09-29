@@ -124,8 +124,6 @@ export function buildHotel() {
     for (const s of [-1, 1]) {
       W.box(0, R - depth / 2, s * hw, arcM, depth, 0.8, CK.GLASS);                   // five decks of suites
       W.box(0, R + 0.6, s * (hw + 0.6), arcO, 1.4, 1.4, CK.BRONZE);                 // floor edge beam
-      W.box(0, r0 - 1.4, s * (hw - 0.9), arcI, 0.08, 0.08, CK.BRONZE);              // roof walk handrail
-      W.box(0, r0 - 0.9, s * (hw - 0.9), 0.08, 1.0, 0.08, CK.DARK);                 // rail post
       if (k % 2 === 0) {
         W.box(0, R - 7.5, s * (hw + 1.6), arcM * 0.62, 7.4, 2.4, CK.GLASS);          // bay-window suites
         W.box(0, R - 3.6, s * (hw + 1.8), arcM * 0.7, 0.5, 3.0, CK.DARK);            // hood
