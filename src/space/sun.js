@@ -199,10 +199,12 @@ void main() {
   vec3 col = vec3(0.0);
   // corona: streamers fixed on the Sun, falling off steeply; polar plumes
   float st = sfbm(dirW * 2.5 + vec3(0.0, uTime * 0.002, 0.0), 3) * 0.5 + 0.5;
-  float helmet = exp(-pow(dirW.y / 0.45, 2.0));
+  float hy = dirW.y / 0.45;
+  float helmet = exp(-hy * hy);   // (squared by hand: pow() of a negative base is undefined)
   // (the plumes are broad soft rays over the poles: a low azimuthal frequency, so they never
   // turn to a fur of fine radial hairs)
-  float plume = pow(0.5 + 0.5 * snoise(vec3(dirW.xz * 7.0, 3.0)), 2.0) * smoothstep(0.7, 0.95, abs(dirW.y));
+  float pl = clamp(0.5 + 0.5 * snoise(vec3(dirW.xz * 7.0, 3.0)), 0.0, 1.0);
+  float plume = pl * pl * smoothstep(0.7, 0.95, abs(dirW.y));
   float cor = pow(max(b, 1.0), -3.3) * (0.35 + 0.9 * st * (0.5 + helmet)) + 0.4 * plume * pow(max(b, 1.0), -2.5);
   cor += 0.02 * pow(max(b, 1.0), -1.6);
   col += vec3(1.0, 0.94, 0.86) * cor * 0.07 * smoothstep(5.0, 3.0, b);
@@ -232,7 +234,7 @@ void main() {
     float H = uPromH[k].x;
     float seed = uPromH[k].y;
     float uc = clamp(u, 0.0, 1.0);
-    float arch = H * pow(sin(3.14159 * uc), 0.7);
+    float arch = H * pow(max(sin(3.14159 * uc), 0.0), 0.7);
     float ends = smoothstep(-0.05, 0.05, u) * (1.0 - smoothstep(0.95, 1.05, u));
     float dens;
     if (uProm[k].w < 0.5) {

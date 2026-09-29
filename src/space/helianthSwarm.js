@@ -555,7 +555,10 @@ export class HelianthSwarm {
         const h = Math.hypot(fp.x, fp.z), q = r();
         if (h < SWARM.geoR || h > SWARM.farR) continue;
         fp.y = shellY(D, L.y, fp.x, fp.z);
-        far.push({ p: fp.clone(), r: 2.2, color: q < 0.08 ? LAMP.TEAL : q < 0.5 ? [1.0, 0.6, 0.28] : [1.0, 0.48, 0.2], i: (q < 0.08 ? 2.2 : 1.1 + q) * (li ? 0.8 : 1), breathe: 0.25, phase: q });
+        // every block keeps a beacon, but only the relay-teal ones are bright: the rest are dim
+        // warm marker lights of uneven strength, so the far lattice reads as scattered lit
+        // structure rather than ruled dotted lines
+        far.push({ p: fp.clone(), r: 2.2, color: q < 0.08 ? LAMP.TEAL : q < 0.5 ? [1.0, 0.6, 0.28] : [1.0, 0.48, 0.2], i: (q < 0.08 ? 2.2 : 0.35 + 1.1 * q * q) * (li ? 0.8 : 1), breathe: 0.25 + 0.5 * (q > 0.7 ? 1 : 0), phase: q });
       }
     });
     this.farLamps = createLamps(far, { minPx: 1.0, gain: 1 });
