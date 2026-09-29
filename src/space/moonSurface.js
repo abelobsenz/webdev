@@ -479,11 +479,13 @@ float horizonShadow(vec3 up, float h0, vec3 sun, float sinE) {
   vec3 ts = normalize(sun - up * sinE + 1e-6);
   float tanE = sinE / max(sqrt(1.0 - sinE * sinE), 1e-3);
   float vis = 1.0;
-  float dist = 1.5;
+  // (the first step a good fraction of a bake texel out, and the occluder read a level blurrier:
+  // stepping through bilinear texels cast square-edged shadow blocks under a low Sun)
+  float dist = max(1.5, 0.45 * uTexKm);
   for (int i = 0; i < 8; i++) {
     vec3 q = normalize(up + ts * (dist / RM));
     // one level blurrier than the march step: the occluder is a smooth ridge, not texels
-    float lod = max(log2(dist / uTexKm), 0.0) + 0.7;
+    float lod = max(log2(dist / uTexKm), 0.0) + 1.1;
     float hq = max(decodeH(textureLod(uMoonA, q, lod).a), 0.0);
     float rise = hq - h0 - dist * dist / (2.0 * RM);
     // penumbra: the Sun's half-degree disc over the distance, and never sharper than 40 m
@@ -657,7 +659,9 @@ void main() {
     float lit = smoothstep(-0.012, 0.012, mu);
     // sunlight through the thin air: warmer as the Sun sinks
     vec3 sunCol = mix(vec3(1.0, 0.62, 0.36), vec3(1.0, 0.975, 0.94), smoothstep(-0.01, 0.14, mu));
-    float vis = horizonShadow(up, hl, sun, mu);
+    // the receiver carries the procedural relief: crests stand up out of the bake's shadow
+    // line and hollows fill with shade first, so the terminator breaks along the hills
+    float vis = horizonShadow(up, hl + 0.5 * gf.h, sun, mu);
     // cloud shadow where the sun ray crosses the deck
     float csh = 1.0;
     if (mu > -0.05) {
