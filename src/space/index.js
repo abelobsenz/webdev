@@ -28,6 +28,7 @@ import { WorkingStations } from './workingStations.js';
 import { GeoRoads, geoRoadTargets } from './geoRoads.js';
 import { ReleaseYard, releaseYardTarget } from './releaseYard.js';
 import { LowOrbit, leoTargets } from './lowOrbit.js';
+import { GeoBelt, geoBeltTargets } from './geoBelt.js';
 import { computeSky } from '../core/sun.js';
 import { ShipPilot } from './shipPilot.js';
 import { LagrangeColonies, lagrangePoint, lagrangeFrame } from './lagrange.js';
@@ -118,6 +119,7 @@ export class SpaceMode {
     for (const [k, o] of Object.entries(geoRoadTargets(this))) T(k, o);
     T('releaseYard', releaseYardTarget(this));
     for (const [k, o] of Object.entries(leoTargets(this))) T(k, o);
+    for (const [k, o] of Object.entries(geoBeltTargets(this))) T(k, o);
     // unlisted targets (no key): the junction on the Halo and the counterweight
     const meridQ = stationFrame(merid);
     T('junction', {
@@ -288,6 +290,9 @@ export class SpaceMode {
     // the Lagrange colonies at L4 and L5 and the Fulcrum gateway at L1, with their lanes
     this.lagrange = new LagrangeColonies(this);
     this.modules.push(this.lagrange);
+    // the rest of the geostationary belt: thirty sites of working stations and their traffic
+    this.geoBelt = new GeoBelt(this);
+    this.modules.push(this.geoBelt);
     // the Lodestar, flown by the visitor (V): built on first boarding
     this.ship = new ShipPilot(this);
     this.modules.push(this.ship);

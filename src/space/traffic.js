@@ -2,9 +2,9 @@ import * as THREE from 'three';
 import { R_EARTH, GEO_ALT, MERIDIAN_LON, bodyDir } from './sim.js';
 import { HALO_PORTS } from './earthData.js';
 import { CORRIDORS, stationFrame } from './stations.js';
-import { createCraftMaterial, updateCraftMaterial } from '../craft/craftMaterial.js';
+import { updateCraftMaterial } from '../craft/craftMaterial.js';
 import { buildCourier, buildShuttle, buildTug } from '../craft/craftClasses.js';
-import { CRAFT_FRAME } from './craftMesh.js';
+import { CRAFT_FRAME, createDressedMaterial, LIVERIES } from './craftMesh.js';
 import { design } from './shipDesigns.js';
 
 // Orbital traffic as designed corridors, positioned on the GPU from the simulation clock
@@ -330,7 +330,8 @@ export class Traffic {
     const classes = [buildCourier(44), buildShuttle(110), buildTug(80), design('packet', 4), design('lighter', 1), design('hauler', 3), design('tanker', 5)];
     const accents = [[0.55, 0.85, 1.0], [0.55, 0.9, 1.0], [1.0, 0.72, 0.42], [0.55, 0.88, 1.0], [0.5, 1.0, 0.8], [1.0, 0.72, 0.45], [1.0, 0.62, 0.35]];
     this.hullSets = classes.map((c, i) => {
-      const mat = createCraftMaterial({ accent: accents[i], lit: 0.5 });
+      const lv = LIVERIES[(i * 3 + 1) % LIVERIES.length];
+      const mat = createDressedMaterial({ accent: accents[i], lit: 0.5, livery: lv[0], livery2: lv[1] });
       const im = new THREE.InstancedMesh(c.geo, mat, HULL_MAX);
       im.count = 0;
       im.frustumCulled = false;

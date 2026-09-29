@@ -4,7 +4,7 @@ import { lathe, buildShuttle, buildTug, buildFreighter, buildCourier } from '../
 import { LAMP } from './lamps.js';
 import { ctube } from './hull.js';
 import { buildEmbarkationTerrace } from './interfaces.js';
-import { craftMesh, craftPart, addLamps, placeMerge, placeLamps, pixelRadius, KM } from './craftMesh.js';
+import { craftMesh, craftPart, addLamps, placeMerge, placeLamps, pixelRadius, KM, dressedMesh, DK } from './craftMesh.js';
 import { HarbourLife } from './harbourLife.js';
 import { TerraceLife } from './terraceLife.js';
 
@@ -96,15 +96,15 @@ export function buildHarbour() {
   lathe(B, [
     [0.1, -17200, CK.DARK], [520, -17200, CK.DARK], [760, -16900, CK.BRONZE], [1500, -16300, CK.HULL], [1900, -15500, CK.HULL],
     [1950, -15300, CK.BRONZE], [1950, -14100, CK.GLASS], [2050, -13950, CK.LANTERN], [1950, -13800, CK.BRONZE], [1950, -13300, CK.GLASS],
-    [1700, -12700, CK.HULL], [1000, -12000, CK.HULL], [900, -11000, CK.HULL],
+    [1700, -12700, DK.PORTS], [1000, -12000, DK.PORTS], [900, -11000, DK.PORTS],
     // lower hub collar (static half of the bearing)
-    [900, -7000, CK.HULL], [1050, -6900, CK.BRONZE], [1050, -5100, CK.BRONZE], [900, -5000, CK.HULL],
+    [900, -7000, DK.LIVERY], [1050, -6900, CK.BRONZE], [1050, -5100, CK.BRONZE], [900, -5000, DK.LIVERY],
     [900, -2600, CK.HULL], [1200, -2400, CK.BRONZE],
     // the Concourse
     [2000, -1900, CK.HULL], [2500, -1300, CK.GLASS], [2650, -400, CK.GLASS], [2700, -300, CK.LANTERN], [2700, 300, CK.LANTERN], [2650, 400, CK.GLASS],
     [2500, 1300, CK.GLASS], [2000, 1900, CK.HULL], [1200, 2400, CK.BRONZE], [900, 2600, CK.HULL],
-    [900, 5000, CK.HULL], [1050, 5100, CK.BRONZE], [1050, 6900, CK.BRONZE], [900, 7000, CK.HULL],
-    [900, 11000, CK.HULL], [1000, 12000, CK.HULL], [1700, 12700, CK.HULL], [1950, 13300, CK.GLASS], [1950, 13800, CK.BRONZE],
+    [900, 5000, DK.LIVERY], [1050, 5100, CK.BRONZE], [1050, 6900, CK.BRONZE], [900, 7000, DK.LIVERY],
+    [900, 11000, DK.PORTS], [1000, 12000, DK.PORTS], [1700, 12700, DK.PORTS], [1950, 13300, CK.GLASS], [1950, 13800, CK.BRONZE],
     [2050, 13950, CK.LANTERN], [1950, 14100, CK.GLASS], [1950, 15300, CK.BRONZE], [1900, 15500, CK.HULL], [1500, 16300, CK.HULL],
     [760, 16900, CK.BRONZE], [520, 17200, CK.DARK], [0.1, 17200, CK.DARK],
   ], 40);
@@ -126,7 +126,7 @@ export function buildHarbour() {
     const side = V(-Math.sin(a), 0, Math.cos(a));
     arms.push({ a, y, L, d, side, up });
     // gallery tube and its keel truss
-    ctube(B, [d.clone().multiplyScalar(850).setY(y), d.clone().multiplyScalar(L).setY(y)], 230, 12, CK.HULL);
+    ctube(B, [d.clone().multiplyScalar(850).setY(y), d.clone().multiplyScalar(L).setY(y)], 230, 12, DK.PORTS);
     ctube(B, [d.clone().multiplyScalar(850).setY(y - (up ? -330 : 330)), d.clone().multiplyScalar(L - 400).setY(y - (up ? -330 : 330))], 70, 5, CK.DARK);
     for (let r = 2000; r < L - 300; r += 1400) {
       const p = d.clone().multiplyScalar(r).setY(y);
@@ -216,7 +216,7 @@ export function buildHarbour() {
       const t = (k / nSp) * TAU;
       const d = V(Math.cos(t), 0, Math.sin(t));
       const p0 = d.clone().multiplyScalar(hubR).setY(yc), p1 = d.clone().multiplyScalar(R - b * 0.9).setY(yc);
-      ctube(W, [p0, p1], 120, 10, CK.HULL);
+      ctube(W, [p0, p1], 120, 10, DK.LIVERY);
       ctube(W, [p0.clone().add(V(0, 150, 0)), p1.clone().add(V(0, 150, 0))], 30, 4, CK.LANTERN);
       for (const f of [0.08, 0.92]) {
         const c = p0.clone().lerp(p1, f);
@@ -276,7 +276,7 @@ export function buildHarbour() {
   for (const arm of arms) {
     const side = arm.up ? 1 : -1;
     const p=arm.d.clone().multiplyScalar(arm.L-980).setY(arm.y);
-    ctube(D,[p,p.clone().add(V(0,side*450,0))],70,10,CK.HULL);
+    ctube(D,[p,p.clone().add(V(0,side*450,0))],70,10,DK.GRIME);
     const root=p.clone().add(V(0,side*410,0));
     D.push(new THREE.Matrix4().compose(root,new THREE.Quaternion().setFromUnitVectors(V(0,0,1),V(0,side,0)),V(1,1,1)));
     lathe(D,[[190,-50,CK.HULL],[265,0,CK.BRONZE],[275,90,CK.GLASS],[230,190,CK.ROOF],[90,320,CK.ROOF],[0,350,CK.BRONZE]],28);D.pop();
@@ -309,7 +309,7 @@ export function buildHarbour() {
     const lat = arm.side.clone().multiplyScalar(i === 4 ? 1 : -1);
     const along = arm.L + 100;
     const pos = arm.d.clone().multiplyScalar(along).addScaledVector(lat, 330).setY(arm.y);
-    ctube(D, [arm.d.clone().multiplyScalar(along).addScaledVector(lat, 200).setY(arm.y), pos.clone().addScaledVector(lat, -20)], 20, 10, CK.HULL);
+    ctube(D, [arm.d.clone().multiplyScalar(along).addScaledVector(lat, 200).setY(arm.y), pos.clone().addScaledVector(lat, -20)], 20, 10, DK.GRIME);
     const c = pos.clone().addScaledVector(lat, -16.6);
     D.push(new THREE.Matrix4().makeBasis(arm.d, V(0, 1, 0), new THREE.Vector3().crossVectors(arm.d, V(0, 1, 0))).setPosition(c));
     D.box(0, 0, 0, 14, 14, 14, CK.BRONZE);
@@ -338,7 +338,7 @@ export function buildHarbour() {
     const halfW = big ? 191 * sc : 257;
     const off = bth.side.clone().multiplyScalar(bth.sd * (80 + 45 + halfW));
     const pos = bth.tip.clone().add(off);
-    ctube(D, [bth.tip.clone(), pos.clone().addScaledVector(bth.side, -bth.sd * halfW * 0.3)], big ? 42 : 30, 10, CK.HULL);
+    ctube(D, [bth.tip.clone(), pos.clone().addScaledVector(bth.side, -bth.sd * halfW * 0.3)], big ? 42 : 30, 10, DK.GRIME);
     D.at(bth.tip.x + bth.side.x * bth.sd * 100, bth.tip.y, bth.tip.z + bth.side.z * bth.sd * 100, 0, Math.atan2(bth.side.x * bth.sd, bth.side.z * bth.sd), 0);
     lathe(D, [[big ? 42 : 30, -22, CK.BRONZE], [big ? 62 : 46, -14, CK.BRONZE], [big ? 62 : 46, 14, CK.LANTERN], [big ? 42 : 30, 22, CK.BRONZE]], 16);
     D.pop();
@@ -427,7 +427,7 @@ export class HarbourStation {
     const h = buildHarbour();
     this.data = h;
     this.group = new THREE.Group();
-    this.body = craftMesh(h.body, { accent: [0.55, 0.85, 1.0], lit: 0.62 });
+    this.body = dressedMesh(h.body, { accent: [0.55, 0.85, 1.0], lit: 0.62, livery: [0.14, 0.26, 0.46], livery2: [0.9, 0.72, 0.3] });
     this.group.add(this.body);
     this.rings = h.rings.map((r) => {
       const m = craftPart(this.body, r.geo);

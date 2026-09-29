@@ -1,6 +1,6 @@
 import * as THREE from 'three';
-import { createCraftMaterial, updateCraftMaterial } from '../craft/craftMaterial.js';
-import { CRAFT_FRAME, KM } from './craftMesh.js';
+import { updateCraftMaterial } from '../craft/craftMaterial.js';
+import { CRAFT_FRAME, KM, createDressedMaterial, LIVERIES } from './craftMesh.js';
 import { createLamps, LAMP } from './lamps.js';
 import { CORRIDORS } from './stations.js';
 import { design } from './shipDesigns.js';
@@ -299,7 +299,8 @@ export class StationTraffic {
     this.ships = [];
     // instanced hulls, one per design
     this.sets = designs.map((d) => {
-      const mat = createCraftMaterial({ accent: d.accent || [0.55, 0.88, 1.0], lit: 0.6 });
+      const lv = LIVERIES[((d.seed ?? 0) * 3 + (d.kind || '').length) % LIVERIES.length];
+      const mat = createDressedMaterial({ accent: d.accent || [0.55, 0.88, 1.0], lit: 0.6, livery: d.livery || lv[0], livery2: d.livery2 || lv[1] });
       const im = new THREE.InstancedMesh(d.geo, mat, Math.max(1, roster.filter((r) => r.design === d).length));
       im.count = 0;
       im.frustumCulled = false;
