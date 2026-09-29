@@ -48,6 +48,16 @@ export function petalTop(x, z) {
   }
   return petalY(z);
 }
+/** Height of the petal's lower skin at lateral x (the faceted section's lower chord). */
+export function petalBottom(x, z) {
+  const w = petalW(z), u = Math.abs(x) / w;
+  const lo = [SECTION[0], ...SECTION.slice(6), SECTION[0]].map(([px, py]) => [Math.abs(px), py <= 0 ? py : -py]).sort((a, b) => a[0] - b[0]);
+  for (let i = 0; i < lo.length - 1; i++) if (u <= lo[i + 1][0] + 1e-9) {
+    const [x0, y0] = lo[i], [x1, y1] = lo[i + 1], t = (u - x0) / Math.max(x1 - x0, 1e-9);
+    return petalY(z) + y0 + (y1 - y0) * t;
+  }
+  return petalY(z);
+}
 /** Petal k's frame: local +Z along the petal (makeRotationY(k/12 turn), as the station builds it). */
 export const petalMatrix = (k, out = new THREE.Matrix4()) => out.makeRotationY((k / PETAL.count) * TAU);
 
@@ -101,6 +111,25 @@ export function buildPetalFittings() {
     receivers.push({ x, z, top: y0 + 35, base: y0 });
     lamps.push({ p: V(x, y0 + 38, z), r: 6, color: LAMP.AMBER, i: 1.4, breathe: 0.5, phase: t + (sd > 0 ? 0.5 : 0) });
   }
+  // the back structure: a Warren truss under each half of the petal, its two chords hanging
+  // 60 m below the skin, the diagonals anchored two metres into the underside (the mirror's
+  // figure is held by this truss, not by the thin skin)
+  for (const sd of [-1, 1]) {
+    const chord = [], anchors = [];
+    const lat = (z) => sd * (0.32 * petalW(z));
+    for (let z = 1800, j = 0; z <= 14200; z += 155, j++) {
+      const x = lat(z);
+      if (j % 2 === 0) chord.push(V(x, petalBottom(x, z) - 60, z)); else anchors.push(V(x, petalBottom(x, z) + 2, z));
+    }
+    B.tube(chord, 7, 6, CK.DARK);
+    for (let j = 0; j < anchors.length; j++) {
+      const a = anchors[j];
+      for (const c of [chord[j], chord[j + 1]]) if (c) B.tube([c.clone().add(V(0, 5, 0)), a], 3.2, 5, CK.HULL);
+      B.box(a.x, a.y - 3, a.z, 16, 5, 16, CK.BRONZE);                 // anchor pads under the skin
+    }
+    // cross ties to the spine line every fourth bay
+    for (let j = 0; j < chord.length; j += 4) { const c = chord[j]; B.tube([c.clone().add(V(-sd * 6, 0, 0)), V(0, petalBottom(0, c.z) + 2, c.z)], 3.2, 5, CK.HULL); }
+  }
   // the tip mast: a lattice post with a lamp head (the tip lamp itself is the station's)
   {
     const z = 14300, y = spineY(z) + PETAL.spineR - 4;
@@ -145,6 +174,26 @@ export function crawlerZ(t, i) {
 /** +1 while the crawler runs outward, -1 homeward. */
 export function crawlerDir(t, i) { const u = (((t / 900 + i * 0.37) % 1) + 1) % 1; return u < 0.5 ? 1 : -1; }
 
+// -------------------------------------------------------------- spoke cars ----
+// Lift cars ride the tops of the habitat wheel's six spokes (tubes of radius 120 m at y 2200 from
+// the hub at 1200 m to the wheel at 4000 m), carrying crews between the hub and the wheel.
+export const SPOKE = { y: 2200, r: 120, seg: 12, from: 1450, to: 3640, T: 150 };
+export const spokeTop = () => SPOKE.y + SPOKE.r * Math.cos(Math.PI / SPOKE.seg) - 0.5;   // (seated half a metre into the flats)
+export function spokeCarR(k, t) {
+  const u = (((t / SPOKE.T) + k * 0.31) % 1 + 1) % 1;
+  const s = u < 0.2 ? 0 : u < 0.5 ? smooth(0.2, 0.5, u) : u < 0.7 ? 1 : 1 - smooth(0.7, 1, u);
+  return SPOKE.from + (SPOKE.to - SPOKE.from) * s;
+}
+export function buildSpokeCar() {
+  const B = new CB();
+  for (const sd of [-1, 1]) B.box(sd * 11, 3, 0, 6, 6, 52, CK.DARK);              // running gear, astride the crown
+  B.box(0, 13, 0, 34, 16, 58, CK.HULL);
+  B.box(0, 15, 0, 35, 6, 50, CK.GLASS);
+  B.box(0, 22.5, 0, 30, 3, 54, CK.BRONZE);
+  for (const sd of [-1, 1]) B.box(0, 12, sd * 29.4, 12, 10, 1, CK.LANTERN);
+  return B.geometry();
+}
+
 // ------------------------------------------------------------------ berths ----
 export const BERTH = { y: 1950, root: 1150, end: 2550, count: 6, ship: 160 };
 /** Hub docking arms and their seated shuttles (station metres). */
@@ -177,7 +226,7 @@ export function buildBerths() {
 }
 
 // ---------------------------------------------------------------- flotilla ----
-export const FLOTILLA = { count: 48, rMin: 60000, rMax: 400000, yMin: -24000, yMax: 24000, range: 2.5e3 };
+export const FLOTILLA = { count: 90, rMin: 60000, rMax: 400000, yMin: -24000, yMax: 24000, range: 2.5e3 };
 function rng(seed) { let s = seed >>> 0; return () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; }; }
 
 /** Statite placements (station metres): position, kind (0 concentrator, 1 relay), slew phase. */
@@ -209,6 +258,9 @@ export function buildConcentrator() {
   };
   facet(0, 0, 440, 0, 0);
   for (let k = 0; k < 6; k++) { const a = (k / 6) * TAU; facet(Math.cos(a) * 800, Math.sin(a) * 800, 430, 0.2, -a + Math.PI / 2); }
+  // the outer ring of twelve, toed in harder toward the receiver on its boom
+  for (let k = 0; k < 12; k++) { const a = ((k + 0.5) / 12) * TAU; facet(Math.cos(a) * 1560, Math.sin(a) * 1560, 400, 0.38, -a + Math.PI / 2); }
+  for (let k = 0; k < 12; k++) { const a = ((k + 0.5) / 12) * TAU; B.tube([V(Math.cos(a) * 800, 110, Math.sin(a) * 800), V(Math.cos(a) * 1560, 150, Math.sin(a) * 1560)], 9, 6, CK.DARK); }
   // backing truss and the spine to the receiver
   for (let k = 0; k < 6; k++) { const a = (k / 6) * TAU; B.tube([V(Math.cos(a) * 90, 130, Math.sin(a) * 90), V(Math.cos(a) * 800, 110, Math.sin(a) * 800)], 12, 6, CK.DARK); }
   B.at(0, 110, 0); B.push(TO_Y); B.torus(800, 9, 36, 6, CK.HULL); B.pop(); B.pop();
@@ -376,6 +428,11 @@ export class HelianthDistrict {
         this.crawlerLamps = new MovingLamps(PETAL.count, { r: 2.2, color: LAMP.AMBER, i: 3, breathe: 0.6 });
         this.crawlerLamps.mesh.scale.setScalar(0.001);
         this.near.add(this.crawlerLamps.mesh);
+        this.spokeCars = mk(buildSpokeCar(), Array.from({ length: 6 }, () => new THREE.Matrix4()));
+        this.near.add(this.spokeCars);
+        this.spokeLamps = new MovingLamps(6, { r: 4, color: LAMP.TEAL, i: 2.6, breathe: 0.4 });
+        this.spokeLamps.mesh.scale.setScalar(0.001);
+        this.near.add(this.spokeLamps.mesh);
         this.crew = new MovingLamps(PETAL.count * 4, { r: 1.2, color: LAMP.WHITE, i: 2.4 });
         this.crew.mesh.scale.setScalar(0.001);
         this.near.add(this.crew.mesh);
@@ -457,6 +514,15 @@ export class HelianthDistrict {
       this.crawlerLamps.commit();
       for (let j = 0; j < this.crew.count; j++) { const petal = crewOnCatwalk(j, t, P); this.crew.set(j, P.applyMatrix4(petalMatrix(petal, this._pm))); }
       this.crew.commit();
+      for (let k = 0; k < 6; k++) {
+        const a = (k / 6) * TAU, r = spokeCarR(k, t);
+        // car frame: +z along the spoke (outward), +y up
+        this._pm.makeBasis(this._x.set(Math.sin(a), 0, -Math.cos(a)), this._y.set(0, 1, 0), P.set(Math.cos(a), 0, Math.sin(a))).setPosition(Math.cos(a) * r, spokeTop(), Math.sin(a) * r);
+        this.spokeCars.setMatrixAt(k, this._pm);
+        this.spokeLamps.set(k, P.set(Math.cos(a) * r, spokeTop() + 30, Math.sin(a) * r));
+      }
+      this.spokeCars.instanceMatrix.needsUpdate = true;
+      this.spokeLamps.commit();
     }
     if (this.statites) for (const im of this.statites) {
       im.userData.idx.forEach((i, n) => { const s = this.layout[i]; im.setMatrixAt(n, this._m.compose(s.p, statiteSlew(s, t, this._q), this._s.set(s.size, s.size, s.size))); });

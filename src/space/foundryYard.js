@@ -16,6 +16,7 @@ import { craftInstances, MovingLamps } from './helianthDistrict.js';
 //   furnaces  the three reduction furnaces glow through their glazed bands; the process pods
 //             breathe with the arc light of the melt
 //   drones    inspection drones circle the garden wheel and the courts on fixed, clear orbits
+//   wheel     lift cars ride the tops of the garden wheel's six spokes between hub and rim
 //   crews     suited crews walk the stack roofs under the spine pipe, helmet lamps lit
 //   queue     three ore tenders hold station in the approach lane south of the halls,
 //             waiting their turn at the unloading bays
@@ -140,6 +141,24 @@ export function buildDrone() {
   return B.geometry();
 }
 
+/** Garden-wheel spoke lifts (foundry metres): spokes of radius 90 m at y 500 round (0, 6200). */
+export const WHEEL = { c: V(0, 500, 6200), r: 90, seg: 10, from: 720, to: 1640, T: 120 };
+export const wheelCarTop = () => WHEEL.c.y + WHEEL.r * Math.cos(Math.PI / WHEEL.seg) - 0.5;
+export function wheelCar(k, t, out = V(0, 0, 0)) {
+  const a = (k / 6) * TAU, u = (((t / WHEEL.T) + k * 0.41) % 1 + 1) % 1;
+  const s = u < 0.15 ? 0 : u < 0.5 ? smooth(0.15, 0.5, u) : u < 0.65 ? 1 : 1 - smooth(0.65, 1, u);
+  const r = WHEEL.from + (WHEEL.to - WHEEL.from) * s;
+  return out.set(WHEEL.c.x + Math.cos(a) * r, wheelCarTop(), WHEEL.c.z + Math.sin(a) * r);
+}
+export function buildWheelCar() {
+  const B = new CB();
+  for (const sd of [-1, 1]) B.box(sd * 8, 2.5, 0, 5, 5, 40, CK.DARK);
+  B.box(0, 11, 0, 26, 13, 44, CK.HULL);
+  B.box(0, 12.5, 0, 27, 5, 38, CK.GLASS);
+  B.box(0, 18.8, 0, 22, 2.5, 40, CK.BRONZE);
+  return B.geometry();
+}
+
 /** Crew walking the stack roofs (foundry metres). */
 export function crewPos(j, t, out = V(0, 0, 0)) {
   const s = j % 2 ? 1 : -1, stack = (j >> 1) % 5, side = (j >> 1) % 2 ? 1 : -1, T = 180 + (j % 7) * 20;
@@ -184,6 +203,8 @@ export class FoundryYard {
     const cb = new CB(); cb.tube([V(0, 0, 0), V(0, 1, 0)], 1.5, 6, CK.DARK);
     this.cables = craftInstances(cb.geometry(), [0, 1, 2, 3].map(() => new THREE.Matrix4()), opt);
     this.carts = craftInstances(buildCart(), Array.from({ length: 4 }, () => new THREE.Matrix4()), opt);
+    this.wheelCars = craftInstances(buildWheelCar(), Array.from({ length: 6 }, () => new THREE.Matrix4()), opt);
+    this.root.add(this.wheelCars);
     this.orbits = droneOrbits();
     this.drones = craftInstances(buildDrone(), this.orbits.map(() => new THREE.Matrix4()), opt);
     this.root.add(this.bridges, this.trolleys, this.cassettes, this.cables, this.carts, this.drones);
@@ -241,7 +262,13 @@ export class FoundryYard {
       this.droneLamps.set(k, P.setY(P.y + 6));
     }
     for (let j = 0; j < this.crew.count; j++) this.crew.set(j, crewPos(j, t, P));
-    for (const im of [this.bridges, this.trolleys, this.cassettes, this.cables, this.carts, this.drones]) im.instanceMatrix.needsUpdate = true;
+    for (let k = 0; k < 6; k++) {
+      const a = (k / 6) * TAU;
+      wheelCar(k, t, P);
+      m.makeRotationY(Math.PI / 2 - a).setPosition(P);          // +z along the spoke, outward
+      this.wheelCars.setMatrixAt(k, m);
+    }
+    for (const im of [this.bridges, this.trolleys, this.cassettes, this.cables, this.carts, this.drones, this.wheelCars]) im.instanceMatrix.needsUpdate = true;
     this.droneLamps.commit(); this.cartLamps.commit(); this.crew.commit();
   }
 }

@@ -18,6 +18,8 @@ import { RS } from './hearthLens.js';
 //             stand off the ring short of each station's supports and dish, dwelling at each
 //   feeder    the injector's accelerator collars and funnel coils; three matter tankers hold in
 //             a queue astern of the feeder and a fourth works the transfer berth above it
+//   drones    three cleaning drones sweep circles in front of every dish, standing off its
+//             mirror, between the spokes that cross it and the receiver's struts
 //   refuge    the wheels' rim lamps and garden lights turn with them
 //
 // Everything draws with the Hearth's hull material, so it shares the disc's light and the
@@ -86,6 +88,27 @@ export function stationFittingsKm() {
   const hull = toHullKinds(f.geo, null, 1), ferry = toHullKinds(f.ferry.geo, f.ferry.m);
   const lamps = [...f.lamps, ...placeLamps(f.ferry.lamps || [], f.ferry.m).map((l) => ({ ...l, p: l.p.clone().multiplyScalar(0.001), r: l.r * 0.001 * 3 }))];
   return { geo: merge([hull, ferry]), parts: { hull, ferry }, lamps };
+}
+
+// ------------------------------------------------------------------ drones ----
+// The dish (buildCollector, scaled 0.32): a spherical cap of radius 12.8 km about its vertex at the
+// collector's origin, concave toward +x, 8.4 km in radius at its rim.
+export const DISH = { R: 40 * 0.32, rim: 8.43, stand: 0.95, radii: [3.3, 4.7, 6.0] };   // (between the spokes behind and the receiver struts in front)
+export const dishSag = (r) => DISH.R * (1 - Math.cos(Math.asin(Math.min(r / DISH.R, 1))));
+/** Drone j's position in its collector's frame at time t (km). */
+export function dishDrone(i, j, t, out = V(0, 0, 0)) {
+  const r = DISH.radii[j], T = 160 + 45 * j, th = (t / T) * TAU * (j % 2 ? -1 : 1) + i * 1.3 + j * 2.1;
+  return out.set(dishSag(r) + DISH.stand, Math.cos(th) * r, Math.sin(th) * r);
+}
+export function buildDishDrone() {
+  // a flat cleaning drone (metres): a disc body facing the mirror (-x), four thruster pods, a lamp mast
+  const B = new CB();
+  B.push(new THREE.Matrix4().makeRotationY(-Math.PI / 2));
+  lathe(B, [[0, -8, CK.DARK], [34, -6, CK.HULL], [40, 0, CK.BRONZE], [34, 8, CK.HULL], [12, 12, CK.GLASS], [0, 13, CK.GLASS]], 16);
+  B.pop();
+  for (let k = 0; k < 4; k++) { const a = (k / 4) * TAU + Math.PI / 4; B.tube([V(0, Math.cos(a) * 36, Math.sin(a) * 36), V(-4, Math.cos(a) * 56, Math.sin(a) * 56)], 3, 6, CK.BRONZE); B.box(-4, Math.cos(a) * 60, Math.sin(a) * 60, 12, 10, 10, CK.DARK); }
+  B.tube([V(6, 0, 0), V(40, 0, 0)], 2, 6, CK.HULL);
+  return toHullKinds(B.geometry());
 }
 
 // -------------------------------------------------------------------- trams ----
@@ -178,6 +201,13 @@ export class HearthDistrict {
     for (const m of mats) L.push(...placeLamps(sf.lamps, m));
     this.fittings.add(createLamps(L, { minPx: 1.1, mask }));
     hearth.stations.add(this.fittings);
+    // ---- the dish drones: instanced on the collectors' frames, lamps riding with them
+    this.collectorMats = mats;
+    this.drones = new THREE.InstancedMesh(buildDishDrone(), mat, mats.length * DISH.radii.length);
+    hearth.stations.add(this.drones);
+    this.droneLamps = createLamps(Array.from({ length: mats.length * DISH.radii.length }, (_, k) => ({ p: V(0, 0, 0), r: 0.012, color: k % 3 ? LAMP.TEAL : LAMP.AMBER, i: 3, breathe: 0.5, phase: (k * 0.37) % 1 })), { minPx: 1.1, mask });
+    this.droneAttr = this.droneLamps.geometry.getAttribute('iLamp');
+    hearth.stations.add(this.droneLamps);
     // ---- ring platforms and trams
     const pl = buildPlatforms();
     this.platforms = new THREE.Mesh(toHullKinds(pl.geo, null, 1), mat);
@@ -218,7 +248,7 @@ export class HearthDistrict {
       for (let k = 0; k < 6; k++) { const a = (k / 6) * TAU; R.push({ p: V(Math.cos(a) * 6.8, 0.85, Math.sin(a) * 6.8), r: 0.18, color: [1.0, 0.78, 0.5], i: 1.4, breathe: 0.2, phase: (k + w) / 6 }); }
       rotor.add(createLamps(R, { minPx: 1.1, mask }));
     });
-    for (const o of [this.fittings, this.platforms, this.trams, this.coils, ...this.tankers.map((t) => t.mesh)]) { o.frustumCulled = false; o.renderOrder = 3; }
+    for (const o of [this.fittings, this.drones, this.platforms, this.trams, this.coils, ...this.tankers.map((t) => t.mesh)]) { o.frustumCulled = false; o.renderOrder = 3; }
     this._m = new THREE.Matrix4(); this._q = new THREE.Quaternion(); this._p = V(0, 0, 0); this._s = V(1, 1, 1); this._t = V(0, 0, 0); this._y = V(0, 1, 0); this._z = V(0, 0, 0);
     this.update(0);
   }
@@ -239,6 +269,16 @@ export class HearthDistrict {
     }
     this.trams.instanceMatrix.needsUpdate = true;
     this.tramAttr.needsUpdate = true;
+    const da = this.droneAttr.array, nr = DISH.radii.length;
+    for (let i = 0; i < this.collectorMats.length; i++) for (let j = 0; j < nr; j++) {
+      const k = i * nr + j;
+      dishDrone(i, j, t, P).applyMatrix4(this.collectorMats[i]);
+      m.copy(this.collectorMats[i]).setPosition(P);
+      this.drones.setMatrixAt(k, m);
+      da[k * 4] = P.x; da[k * 4 + 1] = P.y; da[k * 4 + 2] = P.z;
+    }
+    this.drones.instanceMatrix.needsUpdate = true;
+    this.droneAttr.needsUpdate = true;
     const w = this.tankers[3];
     tankerPose(t, w.mesh.position);
     const u = (((t / TANKER.T) % 1) + 1) % 1, moving = (u < 0.25) || (u > 0.6 && u < 0.85);

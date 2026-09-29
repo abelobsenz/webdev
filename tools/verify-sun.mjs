@@ -9,11 +9,12 @@ import { helianthCircuits, circuitPose } from '../src/space/helianthTraffic.js';
 import {
   HelianthDistrict, buildPetalFittings, buildCrawler, buildBerths, petalMatrix, petalTop, spineY, DECK_TOP, CATWALK, CREW_LANE, crawlerZ, crewOnCatwalk,
   flotillaLayout, courierRoute, courierPose, COURIER, FLOTILLA, PETAL, buildConcentrator, buildRelayPlatform, BERTH,
+  petalBottom, SPOKE, spokeTop, spokeCarR, buildSpokeCar,
 } from '../src/space/helianthDistrict.js';
-import { FoundryYard, buildCraneWorks, cranePose, cartPose, droneOrbits, dronePos, crewPos, COURT, CRANE, CART, QUEUE } from '../src/space/foundryYard.js';
+import { FoundryYard, buildWheelCar, wheelCar, WHEEL, buildCraneWorks, cranePose, cartPose, droneOrbits, dronePos, crewPos, COURT, CRANE, CART, QUEUE } from '../src/space/foundryYard.js';
 import { buildTender } from '../src/craft/craftGeometry.js';
-import { Hearth } from '../src/space/hearth.js';
-import { buildStationFittings, tramArc, tramAngle, RING, TRAM, tankerSlots, tankerPose, TANKER, MODULE, HearthDistrict } from '../src/space/hearthDistrict.js';
+import { Hearth, buildCollector } from '../src/space/hearth.js';
+import { buildStationFittings, dishDrone, dishSag, DISH, buildDishDrone, tramArc, tramAngle, RING, TRAM, tankerSlots, tankerPose, TANKER, MODULE, HearthDistrict } from '../src/space/hearthDistrict.js';
 import { buildFeeder } from '../src/space/hearthWorks.js';
 
 const V = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z), results = {}, I = new THREE.Matrix4();
@@ -76,6 +77,26 @@ const stT = tree(tris(sc.geo));
     const skin = Math.min(...[[-40, 0], [40, 0], [0, -55], [0, 55]].map(([dx, dz]) => petalTop(r.x + dx, r.z + dz)));
     assert.ok(r.base <= skin + 1e-6 && skin - r.base < 60, `receiver at z ${r.z.toFixed(0)} seated (${(skin - r.base).toFixed(1)} m embed)`);
     assert.ok(dist(stT, V(r.x, r.base + 3, r.z)) < 40, 'receiver base meets the petal');
+  }
+  // the back truss: every diagonal's upper end two metres into the underside, the chords hanging clear
+  for (let z = 1900; z < 14200; z += 733) for (const sd of [-1, 1]) {
+    const x = sd * 0.32 * (100 + 1450 * Math.pow(Math.sin(Math.PI * (z - 1550) / 12950), 0.8));
+    const d = dist(stT, V(x, petalBottom(x, z), z));
+    assert.ok(d < 2.5, `petal underside survey matches the loft at z ${z} (${d.toFixed(2)} m)`);
+  }
+  // lift cars on the wheel spokes: wheels on the spoke crown, the car clear of hub, wheel and hoops
+  {
+    const cg = buildSpokeCar(), cb = new THREE.Box3().setFromBufferAttribute(cg.attributes.position);
+    assert.ok(Math.abs(cb.min.y) < 1e-6, 'lift car running gear at its origin');
+    let carClear = Infinity;
+    for (let t = 0; t < SPOKE.T; t += 3) for (let k = 0; k < 6; k++) {
+      const a = (k / 6) * Math.PI * 2, r = spokeCarR(k, t), d = V(Math.cos(a), 0, Math.sin(a)), tg = V(-d.z, 0, d.x);
+      assert.ok(dist(stT, d.clone().multiplyScalar(r).setY(spokeTop() - 0.5)) < 5, 'lift car bears on its spoke');
+      for (const dr of [cb.min.z, cb.max.z]) for (const dt of [cb.min.x, cb.max.x]) carClear = Math.min(carClear, dist(stT, d.clone().multiplyScalar(r + dr).addScaledVector(tg, dt).setY(spokeTop() + cb.max.y), carClear + 1));
+      for (const dr of [cb.min.z, cb.max.z]) carClear = Math.min(carClear, dist(stT, d.clone().multiplyScalar(r + dr).setY(spokeTop() + 20), carClear + 1));
+    }
+    assert.ok(carClear > 10, `lift cars clear the hub, the wheel and its hoops by ${carClear.toFixed(0)} m`);
+    results.spokeCarClearanceMetres = +carClear.toFixed(0);
   }
   // tugs keep clear of all twelve petals' fittings and the berths
   const fitT = tree([...Array.from({ length: PETAL.count }, (_, k) => tris(f.geo, petalMatrix(k), 1, 2)).flat(), ...tris(buildBerths().geo)]);
@@ -240,6 +261,19 @@ const stT = tree(tris(sc.geo));
     assert.ok(Math.abs(lx) < CRANE.pickX - w / 2 - 20 && Math.abs(lx) > COURT.spineR + 10, 'crews walk the roof strip between the pipe and the set-down places');
     assert.ok(Math.abs(P.y - COURT.roofTop - 1.7) < 1e-9, 'crews on the roof');
   }
+  // garden-wheel lift cars on their spokes
+  {
+    const cb = new THREE.Box3().setFromBufferAttribute(buildWheelCar().attributes.position);
+    let wc = Infinity;
+    for (let t = 0; t < WHEEL.T; t += 2) for (let k = 0; k < 6; k++) {
+      wheelCar(k, t, P);
+      const a = (k / 6) * Math.PI * 2, d = V(Math.cos(a), 0, Math.sin(a));
+      assert.ok(dist(foT, P.clone().setY(P.y - 0.5)) < 5, 'wheel car bears on its spoke');
+      for (const dr of [cb.min.z, cb.max.z]) wc = Math.min(wc, dist(foT, P.clone().addScaledVector(d, dr).setY(P.y + cb.max.y), wc + 1), dist(foT, P.clone().addScaledVector(d, dr).setY(P.y + 15), wc + 1));
+    }
+    assert.ok(wc > 8, `wheel lift cars clear the hub and rim by ${wc.toFixed(0)} m`);
+    results.wheelCarClearanceMetres = +wc.toFixed(0);
+  }
   // the tender queue stands off the halls
   const te = buildTender(300);
   let qClear = Infinity;
@@ -289,6 +323,17 @@ const stT = tree(tris(sc.geo));
   assert.ok(Math.abs(zmin - 1.07) < 1e-6, `ferry seated on its port (${((zmin - 1.07) * 1000).toFixed(2)} m)`);
   const portD = Math.min(...fv2.map((p) => p.distanceTo(V(MODULE.node, 0, 1.07))));
   assert.ok(portD < 0.12, `ferry hull over the port (${(portD * 1000).toFixed(0)} m)`);
+  // dish drones: standing off every mirror and the spokes and struts that cross in front of it
+  {
+    const colT = tree(tris(buildCollector()));
+    const dv = verts(buildDishDrone(), I);
+    const ext = Math.max(...dv.map((p) => p.length()));
+    let dc = Infinity;
+    for (let t = 0; t < 400; t += 2.5) for (let j = 0; j < DISH.radii.length; j++) dc = Math.min(dc, dist(colT, dishDrone(3, j, t)) - ext);
+    assert.ok(dc > 0.25, `dish drones clear their collector by ${(dc * 1000).toFixed(0)} m`);
+    assert.ok(DISH.radii.every((r) => r < DISH.rim - ext - 0.3 && dishSag(r) < DISH.stand + 3.2), 'drone circles lie within the dish rim');
+    results.dishDroneClearanceMetres = +(dc * 1000).toFixed(0);
+  }
   // trams: their arcs stop short of every station's dish and braces; platforms beside the rail
   for (let i = 0; i < RING.count; i++) {
     const { a0, a1 } = tramArc(i);
@@ -325,7 +370,7 @@ const stT = tree(tris(sc.geo));
   assert.ok(ta / 200 < 0.3, 'Hearth district frame under 0.3 ms');
   assert.ok(d.trams.instanceMatrix.array.every(Number.isFinite) && d.tramAttr.array.every(Number.isFinite), 'finite trams');
   let tri = 0;
-  for (const m of [d.fittings, d.platforms, d.trams, d.coils, ...d.tankers.map((x) => x.mesh)]) tri += triCount(m.geometry) * (m.isInstancedMesh ? m.count : 1);
+  for (const m of [d.fittings, d.drones, d.platforms, d.trams, d.coils, ...d.tankers.map((x) => x.mesh)]) tri += triCount(m.geometry) * (m.isInstancedMesh ? m.count : 1);
   results.hearthDistrictRenderedTris = tri;
 }
 console.log(JSON.stringify(results));
