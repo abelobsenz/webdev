@@ -16,6 +16,8 @@ import { buildTender } from '../src/craft/craftGeometry.js';
 import { Hearth, buildCollector } from '../src/space/hearth.js';
 import { buildStationFittings, dishDrone, dishSag, DISH, buildDishDrone, tramArc, tramAngle, RING, TRAM, tankerSlots, tankerPose, TANKER, MODULE, HearthDistrict } from '../src/space/hearthDistrict.js';
 import { buildFeeder } from '../src/space/hearthWorks.js';
+import { SunSwarm } from '../src/space/sun.js';
+import { SpaceSim } from '../src/space/sim.js';
 
 const V = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z), results = {}, I = new THREE.Matrix4();
 function tris(g, m = I, s = 1, step = 1) {
@@ -372,6 +374,60 @@ const stT = tree(tris(sc.geo));
   let tri = 0;
   for (const m of [d.fittings, d.drones, d.platforms, d.trams, d.coils, ...d.tankers.map((x) => x.mesh)]) tri += triCount(m.geometry) * (m.isInstancedMesh ? m.count : 1);
   results.hearthDistrictRenderedTris = tri;
+}
+
+// ======================================================= the Sun and its swarm: shader contracts
+// (no GPU here: every varying the fragment stage reads is written by the vertex stage with the
+// same type, every uniform either stage declares is supplied, loops have constant bounds, and
+// derivatives are taken outside branches and loops)
+{
+  const sim = new SpaceSim(); sim.syncFromHours(12);
+  const space = { camera: new THREE.PerspectiveCamera(50, 16 / 9, 0.01, 1e9), size: new THREE.Vector2(1280, 720), exposure: 1 };
+  const sw = new SunSwarm(space, { swarm: 2000 });
+  space.camera.position.copy(sim.sunPos).add(V(0, 0, 3e7));
+  sw.update(sim, 5, 0.016, space);
+  assert.ok(sw.near > 0.9 && sw.swarm.visible, 'the swarm shows close to the Sun');
+  const strip = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+  const decl = (src, q) => [...strip(src).matchAll(new RegExp(`^\\s*${q}\\s+(\\w+)\\s+(\\w+)`, 'gm'))].map((m) => [m[1], m[2]]);
+  const contract = (vs, fs, uniforms) => {
+    const issues = [], vOut = new Map(decl(vs, 'varying').map(([t, n]) => [n, t])), fv = decl(fs, 'varying');
+    for (const [t, n] of fv) {
+      if (vOut.get(n) !== t) issues.push(`varying ${n} types differ`);
+      if (!new RegExp(`\\b${n}\\s*=`).test(strip(vs))) issues.push(`varying ${n} never written`);
+    }
+    for (const [, n] of [...decl(vs, 'uniform'), ...decl(fs, 'uniform')]) if (!(n in uniforms)) issues.push(`uniform ${n} not supplied`);
+    for (const m of strip(vs + fs).matchAll(/for\s*\(\s*int\s+\w+\s*=\s*(-?\d+)\s*;\s*\w+\s*<=?\s*([^;]+);/g)) if (!/^-?\d+$/.test(m[2].trim())) issues.push(`loop bound ${m[2]}`);
+    // derivatives never inside a loop or branch body (brace-delimited; one-line bodies are caught by the same regex on the controlling line)
+    const stack = [];
+    let ctl = false;
+    for (const tk of strip(fs).split(/(\{|\})/)) {
+      if (tk === '{') { stack.push(ctl); ctl = false; continue; }
+      if (tk === '}') { stack.pop(); continue; }
+      const lines = tk.split(';');
+      for (const ln of lines) {
+        const inCtl = stack.slice(1).some(Boolean) || /\b(if|for|while)\s*\(.*\)\s*[^{]*\b(fwidth|dFdx|dFdy)\s*\(/.test(ln);
+        if (inCtl && /\b(fwidth|dFdx|dFdy)\s*\(/.test(ln)) issues.push('derivative inside a branch or loop');
+      }
+      ctl = /\b(for|if|else|while)\b[^;]*$/.test(tk.trim());
+    }
+    return { issues, varyings: fv.length };
+  };
+  // positive controls: each fault is caught
+  const good = 'varying float vA;\nuniform float uX;\nvoid main() { vA = uX; }', goodF = 'varying float vA;\nuniform float uX;\nvoid main() { float d = fwidth(vA); gl_FragColor = vec4(d); }';
+  assert.equal(contract(good, goodF, { uX: 1 }).issues.length, 0, 'control: a sound pair passes');
+  assert.ok(contract(good, goodF, {}).issues.length > 0, 'control: a missing uniform is caught');
+  assert.ok(contract(good.replace('vA = uX;', ''), goodF, { uX: 1 }).issues.length > 0, 'control: an unwritten varying is caught');
+  assert.ok(contract(good, 'varying float vA;\nuniform float uX;\nvoid main() { if (vA > 0.0) { float d = fwidth(vA); } }', { uX: 1 }).issues.length > 0, 'control: a derivative in a branch is caught');
+  assert.ok(contract(good, 'varying float vA;\nuniform float uX;\nvoid main() { for (int i = 0; i < int(uX); i++) {} }', { uX: 1 }).issues.length > 0, 'control: a variable loop bound is caught');
+  for (const [name, mat] of [['sun', sw.sphere.material], ['corona', sw.corona.material], ['swarm', sw.swarm.material]]) {
+    const r = contract(mat.vertexShader, mat.fragmentShader, mat.uniforms);
+    assert.deepEqual(r.issues, [], `${name} shader contract`);
+    results[`${name}ShaderVaryings`] = r.varyings;
+  }
+  // a mirror resolved (hundreds of pixels) and the swarm's per-frame cost
+  const [, tf] = time(() => { for (let i = 0; i < 200; i++) sw.update(sim, i * 0.1, 0.016, space); });
+  results.sunFrameMs = +(tf / 200).toFixed(3);
+  assert.ok(tf / 200 < 0.3, 'Sun and swarm frame under 0.3 ms');
 }
 console.log(JSON.stringify(results));
 console.log('SUN_DOMAIN_VERIFIED');

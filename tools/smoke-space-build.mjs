@@ -10,6 +10,7 @@ import { GeoRoads } from '../src/space/geoRoads.js';
 import { Lanes } from '../src/space/lanes.js';
 import { ReleaseYard } from '../src/space/releaseYard.js';
 import { Moon } from '../src/space/moon.js';
+import { SunSwarm } from '../src/space/sun.js';
 
 const sim = new SpaceSim();
 sim.syncFromHours(12);
@@ -22,6 +23,8 @@ space.elevator = new Elevator(space, { climbers: 60 });
 space.earthFixed.add(space.elevator.group);
 space.hearth = new Hearth(space, { bhSteps: 110, bhScale: 0.6 });
 space.scene.add(space.hearth.group);
+space.sunSwarm = new SunSwarm(space, { swarm: 4000 });
+space.scene.add(space.sunSwarm.group);
 space.moon = new Moon(space);
 space.scene.add(space.moon.group);
 const mods = [];
@@ -36,6 +39,7 @@ for (const t of [0, 60, 400, 900, 1500]) {
   space.elevator.update(sim, t, 0.016, space);
   space.hearth.update(sim, t, 0.016, space);
   space.moon.update(sim, t);
+  space.sunSwarm.update(sim, t, 0.016, space);
   for (const m of mods) if (m.update) m.update(sim, t, 0.016, space);
   space.scene.updateMatrixWorld(true);
 }
