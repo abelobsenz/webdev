@@ -139,13 +139,29 @@ void main() {
   float ndv = clamp(abs(dot(N, V)), 0.0, 1.0);
   float Fg = 0.04 + 0.96 * pow(1.0 - ndv, 5.0);
   float nh = max(dot(N, H), 0.0);
-  vec3 glint = min(sunL * (pow(nh, 400.0) * 1.6 + pow(nh, 40.0) * 0.05) * Fg, sunL * 0.5);
+  // the glass is laid in 250 m panes, each set a fraction of a degree off true: resolved, the
+  // Sun's reflection breaks into a scatter of flashing panes; unresolved, a wider soft lobe
+  // carrying the same energy
+  float vkm = v * uWidth;
+  vec2 pc = floor(vec2(u / 0.25, vkm / 0.25));
+  float dPane = 1.0 - smoothstep(0.25 / 9.0, 0.25 / 3.0, fk);
+  vec3 jit = (vec3(hash12(pc), hash12(pc + 7.1), hash12(pc + 13.7)) - 0.5) * 0.03;
+  float nhj = max(dot(N, normalize(H + jit)), 0.0);
+  float sparkle = pow(nhj, 1800.0) * 5.0;
+  float smoothG = pow(nh, 400.0) * 1.6;
+  vec3 glint = min(sunL * (mix(pow(nh, 150.0) * 0.9, sparkle, dPane) * 0.6 + smoothG * 0.4 + pow(nh, 40.0) * 0.05) * Fg, sunL * 0.5);
   vec3 sky = vec3(0.02, 0.03, 0.05) * uSunE * 0.05 * Fg + earthshine * 0.3 * Fg;
   vec3 frameC = uAlbedo * 0.7 / 3.14159 * (sunL * ndl + earthshine * 2.0) + min(sunL * pow(nh, 60.0) * 0.3, sunL * 0.4);
-  frameC += uHabitatColor * (0.02 + 0.06 * nightSide) * rib;      // the ribs' own faint lamps
-  float glassA = 0.05 + 0.5 * Fg;
+  // the ribs carry strings of lamps (a bead every 500 m across the vault) that trace its
+  // arches in the night, and glow as lines once the beads are too small to see
+  float bead = aaLamp(vkm + 0.25, 0.5, 0.014);
+  vec3 warm = vec3(1.0, 0.72, 0.42);
+  frameC += uHabitatColor * (0.02 + 0.06 * nightSide) * rib;
+  vec3 ribLight = warm * rib * ribFade * (bead * 3.0 + 0.03) * (0.25 + 0.9 * nightSide);
+  // panes a shade apart in tint (the mean kept), a faint bloom where the towns below shine up
+  float glassA = 0.05 + 0.5 * Fg + 0.03 * (hash12(pc + 3.3) - 0.5) * dPane;
   // premultiplied: frame opaque, glass a thin tint that reflects the sky and the Sun
-  gl_FragColor = vec4(mix(glint + sky, frameC, frame), mix(glassA, 1.0, frame));
+  gl_FragColor = vec4(mix(glint + sky, frameC, frame) + ribLight, mix(glassA, 1.0, frame));
   return;
 #endif
 
@@ -529,13 +545,38 @@ const FAR_FRAG = /* glsl */ `
 uniform vec3 uAlb;
 uniform vec3 uHab;
 uniform vec3 uStream;
+uniform float uHubKm;
+uniform float uGlass;
+// lamps every P km, w km long, their energy kept once they are under a pixel (no popping)
+float farLamp(float x, float P, float w, float fw) {
+  float d = abs(fract(x / P + 0.5) - 0.5) * P;
+  float W = max(w, fw);
+  return clamp(1.0 - d / W, 0.0, 1.0) * min(1.0, w / fw);
+}
+float farHash(float n) { return fract(sin(n * 12.9898) * 43758.5453); }
 void main() {
   vec3 sunL = spaceSunlight(uTransmittanceLUT, vWorld, uSunDir) * uSunE;
   vec3 rhat = normalize(vWorld);
   float night = 1.0 - smoothstep(-0.05, 0.1, dot(rhat, uSunDir));
   vec3 V = normalize(cameraPosition - vWorld);
   float face = 0.3 + 0.5 * abs(dot(V, rhat));
+  float along = vData.x;
+  float fw = max(fwidth(along), 1e-3);
   vec3 col = uAlb * 0.3 * sunL * face + uHab * (0.05 + 0.2 * night) + uStream * 0.06;
+  // what still reads from Earth orbit: the hub cities under their arches (a bead of light every
+  // hub), the river towns between them, the lit wall crests; and by day the vault glass
+  // throwing the Sun back in flashes that run along the band as the view moves
+  float hubs = farLamp(along - 0.5 * uHubKm, uHubKm, 7.0, fw);
+  float towns = farLamp(along, uHubKm * 0.25, 2.2, fw) * (1.0 - hubs);
+  vec3 warm = vec3(1.0, 0.7, 0.42);
+  col += warm * (hubs * 1.6 + towns * 0.5) * (0.12 + 0.9 * night);
+  col += vec3(1.0, 0.45, 0.3) * farLamp(along, 25.0, 0.12, fw) * 0.8;               // crest markers
+  vec3 H = normalize(V + uSunDir);
+  float nh = max(dot(rhat, H), 0.0);
+  float seg = floor(along / 6.0);
+  float flash = step(0.55, farHash(seg + uGlass)) * (0.6 + 0.8 * farHash(seg * 1.7 + 3.1));
+  float cell = 1.0 - smoothstep(0.5, 3.0, fw / 6.0);                                  // flashes only while 6 km spans a few px
+  col += sunL * uGlass * (pow(nh, 900.0) * mix(1.0, flash * 2.0, cell) * 0.35 + pow(nh, 60.0) * 0.012) * (1.0 - night);
   float fade = 1.0 - smoothstep(1.6, 3.2, vPx);
   gl_FragColor = vec4(col * vCoverage * fade, 0.0);
 }
@@ -621,6 +662,7 @@ export class Rings {
       }
       const fm = createRibbonMaterial({ widthKm: def.width, minPx: 1.0, frag: FAR_FRAG, uniforms: {
         uAlb: { value: new THREE.Color(...def.albedo) }, uHab: { value: new THREE.Color(...def.habitat) }, uStream: { value: new THREE.Color(...def.stream) },
+        uHubKm: { value: def.hub }, uGlass: { value: 1.0 },
       } });
       const far = new THREE.Mesh(buildRibbonGeometry([{ pts, along, id: i }]), fm);
       far.frustumCulled = false;

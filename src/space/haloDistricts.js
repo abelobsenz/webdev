@@ -5,6 +5,8 @@ import { createCraftMaterial, updateCraftMaterial } from '../craft/craftMaterial
 import { CRAFT_FRAME } from './craftMesh.js';
 import { createLamps, LAMP } from './lamps.js';
 import { HALO_PORTS } from './earthData.js';
+import { createHaloMaterial } from './haloMaterial.js';
+import { DISTRICT_STYLE, standBox, vault, ribArc, cliffs, townCell, parkCell, farmCell, civicCell, worksCell, stadiumCell, marketCell, buildVaultFrame } from './haloArchitecture.js';
 import { bodyDir } from './sim.js';
 
 // The Halo, lived in. Seen from orbit the deck shader already paints a continent of towns and
@@ -31,7 +33,11 @@ export const TILE_L = 4000;                  // m of ring per district tile
 export const WINDOW = 15;                    // tiles either side of the camera's tile
 const SLOTS = 2 * WINDOW + 1;
 export const NEAR_RANGE_KM = 150;            // districts drawn within this distance of the band
-export const MINOR_RANGE_KM = 26;            // small detail (railings, trees, loggias) within this
+export const MINOR_RANGE_KM = 14;            // small detail (trees, balconies, loggias, boats) within this
+export const MAJOR_RANGE_KM = 30;            // full massing within this; out to the window edge the tile's silhouette
+export const FINE_RANGE_KM = 8;              // finest detail (railings, street trees, pier fins, street lamps)
+export const FRAME_RANGE_KM = 40;            // the vault's ribs and purlins over the tiles within this
+const SEAM_TILES = 8;                        // the last tiles before theta = 0 share the ring's remainder
 export const FAR_TILES = 45;                 // silhouette tiles either side beyond the near window (180 km)
 export const FAR_RANGE_KM = 420;             // silhouettes drawn within this distance of the band
 export const VARIANTS = ['residential', 'agrarian', 'civic', 'works', 'lakeland', 'markets'];
@@ -79,285 +85,12 @@ export function haloSectionM(def) {
 // ------------------------------------------------------------ building kit ----
 const V3 = (x, y, z) => new THREE.Vector3(x, y, z);
 const toY = new THREE.Matrix4().makeRotationX(-Math.PI / 2);
-function latheAt(B, x, y, z, prof, seg = 16) {
-  B.push(new THREE.Matrix4().makeTranslation(x, y, z).multiply(toY));
-  lathe(B, prof, seg);
-  B.pop();
-}
-/** Box standing on the deck across its footprint, its foot sunk under the lowest deck point. */
-function standBox(B, S, x, z, sx, sz, h, k, sink = 16) {
-  const lo = Math.min(S.deck(x - sx / 2), S.deck(x + sx / 2)), hi = Math.max(S.deck(x - sx / 2), S.deck(x + sx / 2));
-  const y0 = lo - sink, top = hi + h;
-  B.box(x, (y0 + top) / 2, z, sx, top - y0, sz, k);
-  return top;
-}
-/** Half-round vault along z on the deck (glasshouses, galleries, station halls). */
-function vault(B, x, y, z0, z1, half, h, kind, rib = CK.BRONZE, n = 12, steps = 4) {
-  const pts = [];
-  for (let i = 0; i <= n; i++) { const a = (i / n) * Math.PI; pts.push([x + Math.cos(a) * half, y + Math.sin(a) * h]); }
-  pts.push([x - half, y - 12], [x + half, y - 12]);
-  const rings = [];
-  for (let j = 0; j <= steps; j++) rings.push({ z: z0 + ((z1 - z0) * j) / steps, pts });
-  B.loft(rings, (i) => (i <= n ? kind : CK.HULL), { capStart: rib, capEnd: rib });
-}
-function ribArc(B, x, y, z, half, h, r, k = CK.BRONZE, n = 8) {
-  const pts = [];
-  for (let i = 0; i <= n; i++) { const a = (i / n) * Math.PI; pts.push(V3(x + Math.cos(a) * (half + r), y + Math.sin(a) * (h + r), z)); }
-  B.tube(pts, r, 5, k);
-}
-
 // ------------------------------------------------------------ the tile ----
+let FAR = null;
 // While a tile variant is built, FAR (when set) receives its silhouette: terraced cliffs in three
 // stacks, towers as full-height blocks, glasshouses as boxes, parks, lakes and lit halls. It is
 // drawn instanced for 45 tiles either side of the near window, so the bands of lit habitat read
 // from a few hundred kilometres and hand over to the full tiles without a change of layout.
-let FAR = null;
-function cliffs(B, M, lamps, S, r) {
-  // terraced habitat on the inner face of each wall: 13 decks of 160 m stepping back up the
-  // wall in 500 m blocks, each with a lit glazed face, a slab, a garden on the exposed step and
-  // a railing on its edge. Lift shafts rise in the light wells between blocks to the crest.
-  const levels = 13, H = 160, segL = 500, gap = 30;
-  for (const sg of [-1, 1]) {
-    const X0 = S.hw;
-    for (let j = 0; j < TILE_L / segL; j++) {
-      const z0 = -TILE_L / 2 + j * segL + gap / 2, z1 = z0 + segL - gap, zc = (z0 + z1) / 2, zl = z1 - z0;
-      const d0 = 520 + (r() - 0.5) * 60, step = 30 + r() * 12;
-      for (let i = 0; i < levels; i++) {
-        const depth = d0 - i * step, next = d0 - (i + 1) * step;
-        const y0 = i === 0 ? S.deck(sg * (X0 - depth)) - 18 : i * H, y1 = (i + 1) * H - 12;
-        const xin = sg * (X0 - depth), xw = sg * (X0 + 20);
-        B.box((xin + xw) / 2, (y0 + y1) / 2, zc, Math.abs(xw - xin), y1 - y0, zl, CK.GLASS);
-        if (FAR && i % 3 === 0) FAR.box((xin + xw) / 2, (y0 + Math.min(levels, i + 3) * H - 12) / 2, zc, Math.abs(xw - xin), Math.min(levels, i + 3) * H - 12 - y0, zl, CK.GLASS);
-        B.box((xin + xw) / 2, y1 + 6, zc, Math.abs(xw - xin) + 6, 12, zl + 4, CK.HULL);
-        if (i < levels - 1) {
-          const gx0 = sg * (X0 - depth + 4), gx1 = sg * (X0 - next - 4);
-          B.box((gx0 + gx1) / 2, y1 + 13.5, zc, Math.abs(gx1 - gx0), 3, zl - 8, CK.GARDEN);
-          // railing along the terrace edge (minor detail)
-          M.box(sg * (X0 - depth + 1.5), y1 + 12.6, zc, 0.35, 1.3, zl - 4, CK.BRONZE);
-        }
-        // loggias: framed balconies standing proud of the glazing
-        const nl = 3 + Math.floor(r() * 4);
-        for (let q = 0; q < nl; q++) {
-          const zq = z0 + ((q + 0.5) / nl) * zl, lw = 26 + r() * 30;
-          M.box(sg * (X0 - depth - 4), (y0 + y1) / 2 - 20, zq, 8, 3, lw, CK.DECK);
-          M.box(sg * (X0 - depth - 7.8), (y0 + y1) / 2 - 18, zq, 0.3, 1.2, lw, CK.BRONZE);
-        }
-      }
-      // sky bridges across the next light well on every third deck (clear of the lift shaft)
-      if (j < TILE_L / segL - 1) for (let i = 1; i < levels; i += 3) {
-        const depth = d0 - i * step, xb = sg * (X0 - depth * 0.55);
-        B.box(xb, i * H + 60, z1 + gap / 2, 30, 8, gap + 6, CK.GLASS);
-        M.box(xb, i * H + 55.6, z1 + gap / 2, 32, 0.8, gap + 6, CK.BRONZE);
-      }
-      // light-well lift shaft and its glass at the crest
-      const zs = z1 + gap / 2;
-      if (j < TILE_L / segL - 1) {
-        // (they stop at the top terrace: the glass meets the wall just above it)
-        const shaftTop = levels * H + 20;
-        B.tube([V3(sg * (X0 - 26), S.deck(sg * (X0 - 26)) - 10, zs), V3(sg * (X0 - 26), shaftTop, zs)], 11, 10, CK.GLASS);
-        for (let yy = 320; yy < shaftTop; yy += 480) M.box(sg * (X0 - 60), yy, zs, 70, 5, gap + 8, CK.DECK);
-        lamps.push({ p: V3(sg * (X0 - 26), shaftTop + 6, zs), r: 6, color: LAMP.AMBER, i: 2.2, breathe: 0.2, phase: j / 8 });
-      }
-      if (j % 2 === 0) lamps.push({ p: V3(sg * (X0 - d0 - 6), H * 0.6, zc), r: 8, color: LAMP.WHITE, i: 1.6 });
-    }
-    // glazed concourse along the foot of the terraces, ribbed every 100 m
-    const xg = sg * (X0 - 660), yg = S.deck(xg);
-    vault(B, xg, yg, -TILE_L / 2, TILE_L / 2, 80, 55, CK.GLASS, false, 10, 4);
-    for (let z = -TILE_L / 2 + 50; z < TILE_L / 2; z += 100) ribArc(M, xg, yg, z, 80, 55, 1.6, CK.BRONZE, 8);
-  }
-}
-
-function townCell(B, M, lamps, S, r, x0, x1, z0, z1) {
-  const nb = 4, bw = (x1 - x0) / nb, bd = (z1 - z0) / nb;
-  const hmax = Math.min(S.roofLow(x0), S.roofLow(x1)) - Math.max(S.deck(x0), S.deck(x1)) - 350;
-  for (let i = 0; i < nb; i++) for (let j = 0; j < nb; j++) {
-    const cx = x0 + (i + 0.5) * bw, cz = z0 + (j + 0.5) * bd, sx = bw - 30, sz = bd - 30;
-    const roll = r();
-    if (roll < 0.12) {
-      // pocket square: planted, with a kiosk
-      standBox(B, S, cx, cz, sx, sz, 1.2, CK.GARDEN, 10);
-      M.box(cx, S.deck(cx) + 5, cz, 14, 8, 14, CK.GLASS);
-      lamps.push({ p: V3(cx, S.deck(cx) + 12, cz), r: 3, color: LAMP.AMBER, i: 1.8 });
-      continue;
-    }
-    const pod = standBox(B, S, cx, cz, sx, sz, 10 + r() * 16, CK.GLASS);
-    B.box(cx, pod + 1.5, cz, sx + 2, 3, sz + 2, CK.HULL);
-    if (roll < 0.45) {
-      // tower on a podium, a garden roof, and a crown lit at night
-      const tw = 36 + r() * 50, td = 36 + r() * 50, th = Math.min(hmax, 70 + r() * r() * 380);
-      const tx = cx + (r() - 0.5) * (sx - tw) * 0.6, tz = cz + (r() - 0.5) * (sz - td) * 0.6;
-      B.box(tx, pod + th / 2, tz, tw, th, td, CK.GLASS);
-      if (FAR) FAR.box(tx, (pod + th) / 2, tz, tw, pod + th, td, CK.GLASS);
-      B.box(tx, pod + th + 3, tz, tw + 2, 6, td + 2, CK.HULL);
-      if (r() < 0.5) B.box(tx, pod + th - 10, tz, tw + 1.2, 6, td + 1.2, CK.LANTERN);
-      M.box(tx, pod + th + 7, tz, tw - 8, 2, td - 8, CK.GARDEN);
-      M.box(tx + tw / 2 - 5, pod + th + 12, tz + td / 2 - 5, 3, 12, 3, CK.DARK);
-      if (th > 200) lamps.push({ p: V3(tx, pod + th + 22, tz), r: 4, color: LAMP.RED, i: 2.6, breathe: 0.4, phase: r() });
-    } else {
-      // mid-rise court: two to four slabs round a garden
-      const n = 2 + Math.floor(r() * 3);
-      for (let q = 0; q < n; q++) {
-        const along = q % 2 === 0, h = 24 + r() * 60;
-        const w = along ? sx * (0.3 + r() * 0.2) : 22 + r() * 10, d = along ? 22 + r() * 10 : sz * (0.3 + r() * 0.2);
-        const bx = cx + (along ? (r() - 0.5) * (sx - w) : (q < 2 ? -1 : 1) * (sx - w) / 2);
-        const bz = cz + (along ? (q < 2 ? -1 : 1) * (sz - d) / 2 : (r() - 0.5) * (sz - d));
-        B.box(bx, pod + h / 2, bz, w, h, d, CK.GLASS);
-        B.box(bx, pod + h + 1.5, bz, w + 1, 3, d + 1, CK.ROOF);
-      }
-      M.box(cx, pod + 3.5, cz, sx * 0.4, 1, sz * 0.4, CK.GARDEN);
-    }
-    if ((i + j) % 2 === 0) lamps.push({ p: V3(x0 + i * bw + 8, S.deck(x0 + i * bw) + 9, z0 + j * bd + 8), r: 2.5, color: LAMP.AMBER, i: 1.5 });
-  }
-}
-
-function parkCell(B, M, lamps, S, r, x0, x1, z0, z1, lakeFrac) {
-  const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2, sx = x1 - x0, sz = z1 - z0;
-  standBox(B, S, cx, cz, sx, sz, 1.5, CK.GARDEN, 12);
-  if (FAR) standBox(FAR, S, cx, cz, sx, sz, 1.5, CK.GARDEN, 12);
-  if (lakeFrac > 0) {
-    const lx = cx + (r() - 0.5) * sx * 0.2, lz = cz + (r() - 0.5) * sz * 0.2, lw = sx * lakeFrac, ld = sz * lakeFrac * (0.7 + r() * 0.3);
-    standBox(B, S, lx, lz, lw, ld, 2.0, CK.DARK, 4);
-    if (FAR) standBox(FAR, S, lx, lz, lw, ld, 2.0, CK.DARK, 4);
-    B.box(lx, Math.max(S.deck(lx - lw / 2), S.deck(lx + lw / 2)) + 2.6, lz - ld / 2 - 5, lw + 20, 1.2, 10, CK.DECK);
-    // a pier and boathouse
-    M.box(lx + lw * 0.25, S.deck(lx) + 3.5, lz, 8, 1.2, ld * 0.35, CK.DECK);
-    M.box(lx + lw * 0.25, S.deck(lx) + 8, lz + ld * 0.17, 20, 9, 14, CK.GLASS);
-    lamps.push({ p: V3(lx + lw * 0.25, S.deck(lx) + 16, lz + ld * 0.17), r: 3, color: LAMP.AMBER, i: 1.8 });
-  }
-  // a pavilion under a small conservatory dome
-  const px = cx + (r() - 0.5) * sx * 0.6, pz = cz + (r() - 0.5) * sz * 0.6, py = S.deck(px);
-  latheAt(B, px, py - 6, pz, [[0.1, 0, CK.DECK], [46, 0, CK.DECK], [46, 8, CK.BRONZE], [44, 14, CK.CONSERVATORY], [34, 34, CK.CONSERVATORY], [18, 44, CK.CONSERVATORY], [4, 48, CK.BRONZE], [0.1, 52, CK.BRONZE]], 20);
-  lamps.push({ p: V3(px, py + 50, pz), r: 3.5, color: LAMP.WHITE, i: 1.6, breathe: 0.2 });
-  // woods: canopies (minor detail)
-  const clumps = 5 + Math.floor(r() * 5);
-  for (let c = 0; c < clumps; c++) {
-    const qx = x0 + 60 + r() * (sx - 120), qz = z0 + 60 + r() * (sz - 120), n = 6 + Math.floor(r() * 10);
-    for (let t = 0; t < n; t++) {
-      const tx = qx + (r() - 0.5) * 90, tz = qz + (r() - 0.5) * 90, s = 10 + r() * 12;
-      M.box(tx, S.deck(tx) + 1.5 + s * 0.9, tz, s, s * 1.3, s, CK.GARDEN);
-    }
-  }
-  // paths
-  M.box(cx, S.deck(cx) + 1.8, cz, 8, 0.6, sz - 20, CK.DECK);
-  M.box(cx, S.deck(cx) + 1.8, cz, sx - 20, 0.6, 8, CK.DECK);
-}
-
-function farmCell(B, M, lamps, S, r, x0, x1, z0, z1) {
-  // glasshouse ranges along the ring, fields between, a packing hall at one end
-  const n = 6, pitch = (x1 - x0) / n, half = pitch * 0.34, len0 = z0 + 70, len1 = z1 - 20;
-  standBox(B, S, (x0 + x1) / 2, (z0 + z1) / 2, x1 - x0, z1 - z0, 1.0, CK.GARDEN, 10);
-  for (let i = 0; i < n; i++) {
-    const x = x0 + (i + 0.5) * pitch, y = Math.max(S.deck(x - half), S.deck(x + half)) + 1;
-    const h = 30 + r() * 16;
-    vault(B, x, y, len0, len1, half, h, CK.CONSERVATORY, CK.BRONZE, 10, 3);
-    if (FAR) FAR.box(x, y + h * 0.35, (len0 + len1) / 2, half * 2, h * 0.7, len1 - len0, CK.CONSERVATORY);
-    for (let z = len0 + 75; z < len1; z += 150) ribArc(M, x, y, z, half, h, 1.1, CK.BRONZE, 6);
-  }
-  standBox(B, S, (x0 + x1) / 2, z0 + 34, (x1 - x0) - 40, 48, 22, CK.HULL);
-  B.box((x0 + x1) / 2, S.deck((x0 + x1) / 2) + 20, z0 + 10, (x1 - x0) - 80, 6, 2, CK.LANTERN);
-  lamps.push({ p: V3((x0 + x1) / 2, S.deck((x0 + x1) / 2) + 30, z0 + 10), r: 4, color: LAMP.WHITE, i: 1.8 });
-}
-
-function civicCell(B, M, lamps, S, r, x0, x1, z0, z1) {
-  const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2, sx = x1 - x0, sz = z1 - z0;
-  standBox(B, S, cx, cz, sx, sz, 2, CK.DECK, 12);
-  const y = Math.max(S.deck(cx - 120), S.deck(cx + 120)) + 2;
-  const top = Math.min(1300, Math.min(S.roofLow(cx - 100), S.roofLow(cx + 100)) - y - 320) * (0.6 + r() * 0.4);
-  // a tapering glass tower with lantern sky-lobbies every ~quarter, a crown and a mast
-  const prof = [[0.1, -10, CK.HULL], [110, -10, CK.HULL], [110, 20, CK.BRONZE]];
-  const lobbies = 4;
-  for (let q = 0; q < lobbies; q++) {
-    const a = q / lobbies, b = (q + 1) / lobbies, ra = 100 - 45 * a, rb = 100 - 45 * b;
-    prof.push([ra, 22 + a * top, CK.GLASS], [rb, b * top - 14, CK.GLASS], [rb + 4, b * top - 12, CK.LANTERN], [rb + 4, b * top - 2, CK.LANTERN], [rb, b * top, CK.BRONZE]);
-  }
-  prof.push([44, top + 30, CK.HULL], [12, top + 60, CK.BRONZE], [3, top + 150, CK.DARK], [0.1, top + 152, CK.DARK]);
-  latheAt(B, cx, y, cz, prof, 28);
-  if (FAR) { latheAt(FAR, cx, y, cz, [[0.1, -10, CK.HULL], [100, -10, CK.GLASS], [55, top, CK.GLASS], [58, top + 4, CK.LANTERN], [3, top + 150, CK.DARK], [0.1, top + 152, CK.DARK]], 8); }
-  lamps.push({ p: V3(cx, y + top + 156, cz), r: 6, color: LAMP.RED, i: 3.0, breathe: 0.5 });
-  for (let k = 0; k < 6; k++) { const a = (k / 6) * TAU; lamps.push({ p: V3(cx + Math.cos(a) * 60, y + top + 34, cz + Math.sin(a) * 60), r: 3.5, color: LAMP.WHITE, i: 2.2 }); }
-  // four low halls round the plaza, colonnaded (columns are minor detail)
-  for (let k = 0; k < 4; k++) {
-    const a = (k / 4) * TAU + Math.PI / 4, hx = cx + Math.cos(a) * sx * 0.3, hz = cz + Math.sin(a) * sz * 0.3;
-    const hh = 26 + r() * 20;
-    B.box(hx, y + hh / 2, hz, 150, hh, 110, CK.GLASS);
-    B.box(hx, y + hh + 2, hz, 160, 4, 120, CK.BRONZE);
-    for (let c = -3; c <= 3; c++) M.box(hx + c * 22, y + hh / 2, hz + 60, 3, hh, 3, CK.BRONZE);
-  }
-  // fountains ring (lamps) and trees
-  for (let k = 0; k < 12; k++) { const a = (k / 12) * TAU; M.box(cx + Math.cos(a) * 190, y + 9, cz + Math.sin(a) * 190, 12, 16, 12, CK.GARDEN); }
-}
-
-function worksCell(B, M, lamps, S, r, x0, x1, z0, z1) {
-  const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2, sx = x1 - x0, sz = z1 - z0;
-  standBox(B, S, cx, cz, sx, sz, 1.2, CK.DECK, 10);
-  // fabrication halls with photovoltaic sawtooth roofs (the vault's own light)
-  const halls = 2 + Math.floor(r() * 2);
-  for (let h = 0; h < halls; h++) {
-    const hx = x0 + ((h + 0.5) / halls) * sx, hw = sx / halls - 70, hl = sz * 0.55, hz = z0 + 40 + hl / 2, hh = 30 + r() * 18;
-    const top = standBox(B, S, hx, hz, hw, hl, hh, CK.HULL);
-    if (FAR) standBox(FAR, S, hx, hz, hw, hl, hh, CK.HULL);
-    for (let t = 0; t < 8; t++) {
-      const tz = hz - hl / 2 + ((t + 0.5) / 8) * hl;
-      B.at(hx, top + 8, tz, -0.5, 0, 0);
-      B.box(0, 0, 0, hw - 6, 1.2, hl / 8 / Math.cos(0.5) - 2, CK.PANEL);
-      B.pop();
-      M.box(hx, top + 8, tz + hl / 16 - 1, hw - 6, 16, 1.2, CK.GLASS);
-    }
-    B.box(hx - hw / 2 - 0.6, top - hh * 0.5, hz, 1.2, hh * 0.4, hl * 0.9, CK.LANTERN);
-    lamps.push({ p: V3(hx, top + 20, hz - hl / 2 - 4), r: 3.5, color: LAMP.AMBER, i: 2.0 });
-  }
-  // reclamation tanks and the pipe rack between them
-  const tz0 = z0 + sz * 0.72;
-  const tanks = [];
-  for (let t = 0; t < 5; t++) {
-    const tx = x0 + 90 + t * ((sx - 180) / 4), tr = 26 + r() * 16, th = 40 + r() * 30, ty = S.deck(tx);
-    latheAt(B, tx, ty - 8, tz0, [[0.1, 0, CK.HULL], [tr, 0, CK.HULL], [tr, th, CK.BRONZE], [tr * 0.7, th + tr * 0.35, CK.HULL], [0.1, th + tr * 0.45, CK.HULL]], 18);
-    tanks.push(V3(tx, ty + th * 0.6, tz0));
-  }
-  for (let t = 0; t < tanks.length - 1; t++) {
-    M.tube([tanks[t].clone().add(V3(0, 0, 40)), tanks[t + 1].clone().add(V3(0, 0, 40))], 3, 6, CK.CONDUIT);
-    M.tube([tanks[t].clone().add(V3(0, 6, 46)), tanks[t + 1].clone().add(V3(0, 6, 46))], 2, 6, CK.BRONZE);
-  }
-  for (const p of tanks) lamps.push({ p: p.clone().add(V3(0, 50, 0)), r: 3, color: LAMP.AMBER, i: 1.6, breathe: 0.3 });
-}
-
-function stadiumCell(B, M, lamps, S, r, x0, x1, z0, z1) {
-  // a sports ground: raked stands in a bowl round a planted pitch, floodlight masts, a plaza
-  const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2, sx = x1 - x0, sz = z1 - z0;
-  standBox(B, S, cx, cz, sx, sz, 1.2, CK.DECK, 10);
-  const y = Math.max(S.deck(cx - 300), S.deck(cx + 300)) + 1.2;
-  latheAt(B, cx, y - 6, cz, [[150, 0, CK.GARDEN], [150, 7, CK.HULL], [170, 10, CK.DECK], [250, 52, CK.DECK], [262, 56, CK.GLASS], [262, 76, CK.BRONZE], [290, 76, CK.HULL], [300, 0, CK.HULL]], 48, true);
-  if (FAR) latheAt(FAR, cx, y - 6, cz, [[150, 0, CK.GARDEN], [262, 56, CK.GLASS], [290, 76, CK.HULL], [300, 0, CK.HULL]], 12, true);
-  latheAt(B, cx, y - 6, cz, [[0.1, 0, CK.GARDEN], [150, 0, CK.GARDEN], [150, 7.4, CK.GARDEN], [0.1, 7.4, CK.GARDEN]], 48);
-  for (let k = 0; k < 6; k++) {
-    const a = (k / 6) * TAU + 0.26, mx = cx + Math.cos(a) * 320, mz = cz + Math.sin(a) * 320;
-    B.box(mx, y + 60, mz, 6, 120, 6, CK.BRONZE);
-    M.box(mx, y + 121, mz, 18, 4, 8, CK.LANTERN);
-    lamps.push({ p: V3(mx, y + 126, mz), r: 5, color: LAMP.WHITE, i: 2.4 });
-  }
-  // rows of seats as ribs on the rake (minor)
-  for (let q = 0; q < 8; q++) {
-    const rr = 178 + q * 9.5, yy = y - 6 + 10 + (q + 0.5) * 5.25;
-    M.push(new THREE.Matrix4().makeTranslation(cx, yy, cz).multiply(new THREE.Matrix4().makeRotationX(Math.PI / 2)));
-    M.torus(rr, 0.8, 64, 4, q % 2 ? CK.BRONZE : CK.GLASS);
-    M.pop();
-  }
-}
-
-function marketCell(B, M, lamps, S, r, x0, x1, z0, z1) {
-  // covered markets: three long arcades with lantern roofs, stalls down both aisles
-  const pitch = (x1 - x0) / 3;
-  standBox(B, S, (x0 + x1) / 2, (z0 + z1) / 2, x1 - x0, z1 - z0, 1.0, CK.DECK, 10);
-  for (let i = 0; i < 3; i++) {
-    const x = x0 + (i + 0.5) * pitch, half = pitch * 0.3, y = Math.max(S.deck(x - half), S.deck(x + half)) + 1;
-    vault(B, x, y + 14, z0 + 40, z1 - 40, half, 22, CK.LANTERN, CK.GLASS, 10, 4);
-    if (FAR) FAR.box(x, y + 18, (z0 + z1) / 2, half * 2, 34, z1 - z0 - 80, CK.LANTERN);
-    for (const sd of [-1, 1]) B.box(x + sd * (half - 1), y + 6, (z0 + z1) / 2, 2, 16, z1 - z0 - 80, CK.GLASS);
-    for (let z = z0 + 70; z < z1 - 60; z += 24) for (const sd of [-1, 1]) M.box(x + sd * half * 0.55, y + 3, z, 10, 4, 14, (z / 24) % 3 < 1 ? CK.BRONZE : CK.ROOF);
-    lamps.push({ p: V3(x, y + 42, z0 + 40), r: 3.5, color: LAMP.AMBER, i: 2.0 }, { p: V3(x, y + 42, z1 - 40), r: 3.5, color: LAMP.AMBER, i: 2.0 });
-  }
-}
-
 function spine(B, M, lamps, S, withStation) {
   // the maglev spine on its viaduct over the ring's centre line
   const y0 = S.deck(0), yT = y0 + 34;
@@ -548,16 +281,32 @@ const MAST_X = 16340;                        // crest lamp masts, outboard of th
 
 /** One district variant (metres, x across the ring, y up from its radius, z along it). */
 export function buildDistrictTile(variant, S, bay, seed = 1) {
-  const B = new CB(), M = new CB(), F = new CB(), lamps = [];
+  const B = new CB(), M = new CB(), N = new CB(), F = new CB(), lamps = [], flamps = [];
   const r = mulberry(seed * 7919 + variant * 104729 + 17);
+  const C = { B, M, N, F, lamps, flamps, S, r, style: DISTRICT_STYLE[variant], tileL: TILE_L };
+  const steps = buildDistrictSteps(C, bay, variant);
   FAR = F;
-  try {
-    buildDistrictBody(B, M, F, lamps, S, bay, r, variant);
-  } finally { FAR = null; }
-  return { major: B.geometry(), minor: M.geometry(), far: F.geometry(), lamps, cells: B.cells };
+  try { while (!steps.next().done); } finally { FAR = null; }
+  return { major: B.geometry(), minor: M.geometry(), fine: N.geometry(), far: F.geometry(), lamps, flamps, cells: B.cells };
 }
-function buildDistrictBody(B, M, F, lamps, S, bay, r, variant) {
-  cliffs(B, M, lamps, S, r);
+/** The same tile built a slice per call (the terraces and services, then six columns of cells at a time). */
+export function* buildDistrictTileSteps(variant, S, bay, seed = 1) {
+  const B = new CB(), M = new CB(), N = new CB(), F = new CB(), lamps = [], flamps = [];
+  const r = mulberry(seed * 7919 + variant * 104729 + 17);
+  const C = { B, M, N, F, lamps, flamps, S, r, style: DISTRICT_STYLE[variant], tileL: TILE_L };
+  const steps = buildDistrictSteps(C, bay, variant);
+  for (;;) {
+    FAR = F;
+    let done;
+    try { done = steps.next().done; } finally { FAR = null; }
+    if (done) break;
+    yield null;
+  }
+  return { major: B.geometry(), minor: M.geometry(), fine: N.geometry(), far: F.geometry(), lamps, flamps, cells: B.cells };
+}
+function* buildDistrictSteps(C, bay, variant) {
+  const { B, M, F, lamps, S, r } = C;
+  cliffs(C);
   // far silhouette of the spine, the outer walls' radiators and lit dock mouths
   F.box(0, S.deck(0) + 20, 0, 36, 40, TILE_L, CK.HULL);
   for (const sg of [-1, 1]) {
@@ -568,6 +317,7 @@ function buildDistrictBody(B, M, F, lamps, S, bay, r, variant) {
   outerWall(B, M, lamps, S, bay);
   rotors(B, M, lamps, S);
   underDeck(B, M, lamps, S);
+  yield;
   const weights = [
     { town: 0.52, park: 0.18, farm: 0.1, civic: 0.06, lake: 0.08, works: 0, stadium: 0.02, market: 0.04 },
     { town: 0.14, park: 0.2, farm: 0.52, civic: 0.02, lake: 0.08, works: 0.04, stadium: 0, market: 0 },
@@ -579,6 +329,7 @@ function buildDistrictBody(B, M, F, lamps, S, bay, r, variant) {
   const kinds = Object.keys(weights);
   const cells = Object.fromEntries(Object.keys(weights).map((k) => [k, 0]));
   for (let cx = -15000; cx < 15000; cx += 1000) for (let cz = -TILE_L / 2; cz < TILE_L / 2; cz += 1000) {
+    if (cz === -TILE_L / 2 && cx > -15000 && (cx + 15000) % 5000 === 0) yield;
     const edge = (x) => (x === 0 || Math.abs(x) === 7000 ? 90 : 30);
     const x0 = cx + edge(cx), x1 = cx + 1000 - edge(cx + 1000);
     const z0 = cz + 30, z1 = cz + 1000 - 30;
@@ -587,14 +338,14 @@ function buildDistrictBody(B, M, F, lamps, S, bay, r, variant) {
     // civic towers only where the vault is high (away from the walls)
     if (kind === 'civic' && Math.abs(cx + 500) > 11000) kind = 'town';
     cells[kind]++;
-    if (kind === 'town') townCell(B, M, lamps, S, r, x0, x1, z0, z1);
-    else if (kind === 'park') parkCell(B, M, lamps, S, r, x0, x1, z0, z1, r() < 0.4 ? 0.35 : 0);
-    else if (kind === 'lake') parkCell(B, M, lamps, S, r, x0, x1, z0, z1, 0.62);
-    else if (kind === 'farm') farmCell(B, M, lamps, S, r, x0, x1, z0, z1);
-    else if (kind === 'civic') civicCell(B, M, lamps, S, r, x0, x1, z0, z1);
-    else if (kind === 'stadium') stadiumCell(B, M, lamps, S, r, x0, x1, z0, z1);
-    else if (kind === 'market') marketCell(B, M, lamps, S, r, x0, x1, z0, z1);
-    else worksCell(B, M, lamps, S, r, x0, x1, z0, z1);
+    if (kind === 'town') townCell(C, x0, x1, z0, z1);
+    else if (kind === 'park') parkCell(C, x0, x1, z0, z1, r() < 0.4 ? 0.35 : 0);
+    else if (kind === 'lake') parkCell(C, x0, x1, z0, z1, 0.62);
+    else if (kind === 'farm') farmCell(C, x0, x1, z0, z1);
+    else if (kind === 'civic') civicCell(C, x0, x1, z0, z1);
+    else if (kind === 'stadium') stadiumCell(C, x0, x1, z0, z1);
+    else if (kind === 'market') marketCell(C, x0, x1, z0, z1);
+    else worksCell(C, x0, x1, z0, z1);
   }
   B.cells = cells;
 }
@@ -729,6 +480,11 @@ export class HaloDistricts {
     this.S = haloSectionM(this.def);
     this.Rm = this.basis.R * 1000;
     this.nTiles = Math.floor((TAU * this.Rm) / TILE_L);
+    // the tiles close the ring: the last SEAM_TILES before theta = 0 share the remainder (~1.4 km,
+    // an undressed seam when every tile was exactly 4 km), each stretched a few percent along
+    // the ring. Hub arches stand on exact 4 km tile centres, and none falls in the seam run.
+    this.seamK = this.nTiles - SEAM_TILES;
+    this.seamLen = (TAU * this.Rm - this.seamK * TILE_L) / SEAM_TILES;
     this.archProfile = rings.archData.profile;
     // tiles near the ports, the foundry and Nauru stay bare (their stations own the deck)
     const exclude = [...HALO_PORTS.map((p) => [bodyDir(0, THREE.MathUtils.degToRad(p.lon)), 18]), [bodyDir(0, THREE.MathUtils.degToRad(166.9) + 0.009), 14]];
@@ -746,13 +502,13 @@ export class HaloDistricts {
     const perHub = Math.round((this.def.hub * 1000) / TILE_L);
     for (const th of rings.archAngles || []) {
       const k = Math.round((th * this.Rm) / TILE_L - 0.5);
-      if (k >= 0 && k < this.nTiles && Math.abs(this.tileAngle(k) - th) * this.Rm < 1) this.hubTiles.set(k, true);
+      if (k >= 0 && k < this.seamK && Math.abs(this.tileAngle(k) - th) * this.Rm < 1) this.hubTiles.set(k, true);
     }
     // gantries: one per bay between arches whose whole travel stays on dressed tiles
     this.gantryBays = [];
     const nBays = Math.floor((TAU * this.basis.R) / this.def.hub);
     for (let j = 1; j < nBays; j++) {
-      const u = j * this.def.hub * 1000, k0 = Math.floor((u - GANTRY.range - 2000) / TILE_L), k1 = Math.floor((u + GANTRY.range + 2000) / TILE_L);
+      const u = j * this.def.hub * 1000, k0 = this.tileAt(Math.max(0, u - GANTRY.range - 2000)), k1 = Math.floor((u + GANTRY.range + 2000) / TILE_L);
       let ok = k1 < this.nTiles;
       for (let k = k0; ok && k <= k1; k++) if (this.tileVariant[k] < 0) ok = false;
       if (ok) this.gantryBays.push({ u, phase: hash2(j, 3) * TAU });
@@ -765,7 +521,7 @@ export class HaloDistricts {
     space.earthFixed.add(this.anchor);
     this.anchorTile = -1e9;
     this.body = space.addBody('halo-districts', [this.anchor], () => this.anchor.getWorldPosition(_c), (MOVER_RANGE + 20000) / 1000, { solid: true });
-    this.mat = createCraftMaterial({ accent: [1.0, 0.76, 0.48], lit: 0.66 });
+    this.mat = createHaloMaterial({ accent: [1.0, 0.76, 0.48], lit: 0.66 });
     this.moverMat = createCraftMaterial({ accent: [0.6, 0.88, 1.0], lit: 0.7 });
     const anchorWorld = this.anchor.userData.world;
     this._before = (mat) => (r, s, cam) => {
@@ -780,7 +536,11 @@ export class HaloDistricts {
     this.stats = { buildMs: 0, pieces: 0 };
   }
 
-  tileAngle(k) { return ((k + 0.5) * TILE_L) / this.Rm; }
+  tileAngle(k) { return (k < this.seamK ? (k + 0.5) * TILE_L : this.seamK * TILE_L + (k - this.seamK + 0.5) * this.seamLen) / this.Rm; }
+  /** Along-ring stretch of tile k (1 except in the seam run). */
+  tileStretch(k) { return k < this.seamK ? 1 : this.seamLen / TILE_L; }
+  /** Tile holding arc position u (m, 0 <= u < circumference). */
+  tileAt(u) { const us = this.seamK * TILE_L; return u < us ? Math.floor(u / TILE_L) : Math.min(this.nTiles - 1, this.seamK + Math.floor((u - us) / this.seamLen)); }
 
   /** Build everything now (tests), or queue it a piece per frame (first approach). */
   buildAll() { this._queue(); while (this.buildQueue.length) this._step(); }
@@ -799,10 +559,24 @@ export class HaloDistricts {
       const floor = this.bay.y - this.bay.h / 2 + 2;
       for (const c of this.shipClasses) { c.y = floor + this.bay.clear + 2 - c.box.min.y; c.zc = (c.box.min.z + c.box.max.z) / 2; }
     });
-    VARIANTS.forEach((_, v) => q.push(() => { this.variants[v] = this._pack(buildDistrictTile(v, S, this.bay, 1)); }));
+    // each variant a slice per frame (tens of milliseconds each), not one long stall
+    VARIANTS.forEach((_, v) => {
+      let gen = null;
+      const piece = () => {
+        gen = gen || buildDistrictTileSteps(v, S, this.bay, 1);
+        const st = gen.next();
+        if (st.done) this.variants[v] = this._pack(st.value);
+        else this.buildQueue.unshift(piece);
+      };
+      q.push(piece);
+    });
     q.push(() => { this.crests[0] = this._pack(buildCrest(S, null)); });
     q.push(() => {
       this.crests[1] = this._pack(buildCrest(S, { profile: this.archProfile, gap: 760, corbelHalf: 550 }));
+    });
+    q.push(() => {
+      const f = buildVaultFrame(S, TILE_L);
+      this.vaultFrame = { geo: f.geo, lamps: createLamps(f.lamps, { minPx: 1.0, gain: 0.9 }), lampCount: f.lamps.length };
     });
     q.push(() => this._buildLife());
     q.push(() => this._buildSlots());
@@ -818,7 +592,9 @@ export class HaloDistricts {
   }
   _pack(t) {
     const lamps = createLamps(t.lamps, { minPx: 1.2 });
-    return { major: t.major, minor: t.minor, far: t.far, lamps, cells: t.cells, lampCount: t.lamps.length };
+    // street lamps: only drawn close in, and allowed to shrink below a pixel with the distance
+    const flamps = t.flamps ? createLamps(t.flamps, { minPx: 0.8, gain: 0.9 }) : null;
+    return { major: t.major, minor: t.minor, fine: t.fine, far: t.far, lamps, flamps, cells: t.cells, lampCount: t.lamps.length, flampCount: t.flamps ? t.flamps.length : 0 };
   }
   _mesh(geo, mat) {
     const m = new THREE.Mesh(geo, mat);
@@ -848,13 +624,14 @@ export class HaloDistricts {
     for (let i = 0; i < SLOTS; i++) {
       const g = new THREE.Group();
       g.matrixAutoUpdate = false;
-      const major = this._mesh(v0.major, this.mat), minor = this._mesh(v0.minor, this.mat);
+      const major = this._mesh(v0.major, this.mat), mid = this._mesh(v0.far, this.mat), minor = this._mesh(v0.minor, this.mat), fine = this._mesh(v0.fine, this.mat);
       const cMajor = this._mesh(c0.major, this.mat), cMinor = this._mesh(c0.minor, this.mat);
-      const lamps = v0.lamps.clone(), cLamps = c0.lamps.clone();
-      g.add(major, minor, cMajor, cMinor, lamps, cLamps);
+      const frame = this._mesh(this.vaultFrame.geo, this.mat);
+      const lamps = v0.lamps.clone(), cLamps = c0.lamps.clone(), fLamps = v0.flamps.clone(), vLamps = this.vaultFrame.lamps.clone();
+      g.add(major, mid, minor, fine, cMajor, cMinor, frame, lamps, cLamps, fLamps, vLamps);
       g.visible = false;
       this.anchor.add(g);
-      this.slots.push({ g, major, minor, cMajor, cMinor, lamps, cLamps, k: -1e9 });
+      this.slots.push({ g, major, mid, minor, fine, cMajor, cMinor, frame, lamps, cLamps, fLamps, vLamps, k: -1e9 });
     }
   }
   _buildLife() {
@@ -902,11 +679,11 @@ export class HaloDistricts {
   }
 
   /** Instance matrix for a point at arc u (m) and axial x, height y (m), relative to the anchor. */
-  _place(out, u, x, y, dirSign) {
+  _place(out, u, x, y, dirSign, stretch = 1) {
     let d = u / this.Rm - this.anchorAngle;
     d -= Math.round(d / TAU) * TAU;
-    const c = Math.cos(d), s = Math.sin(d), R = this.Rm + y, f = dirSign < 0 ? -1 : 1;
-    out.set(f, 0, 0, x, 0, c, -f * s, R * c - this.Rm, 0, s, f * c, R * s, 0, 0, 0, 1);
+    const c = Math.cos(d), s = Math.sin(d), R = this.Rm + y, f = dirSign < 0 ? -1 : 1, fz = f * stretch;
+    out.set(f, 0, 0, x, 0, c, -fz * s, R * c - this.Rm, 0, s, fz * c, R * s, 0, 0, 0, 1);
     return out;
   }
 
@@ -928,7 +705,7 @@ export class HaloDistricts {
     this.anchor.visible = off < NEAR_RANGE_KM;
     this.farGroup.visible = true;
     let th = Math.atan2(cb, ca); if (th < 0) th += TAU;
-    const kc = Math.min(this.nTiles - 1, Math.floor((th * this.Rm) / TILE_L));
+    const kc = this.tileAt(th * this.Rm);
     if (kc !== this.anchorTile) this._recentre(kc);
     if (!this.anchor.visible) return;
     // per-slot distance LOD: small detail only close in
@@ -937,9 +714,12 @@ export class HaloDistricts {
       if (!s.g.visible) continue;
       const e = s.g.matrix.elements, dx = camL.x, dy = camL.y - e[13], dz = camL.z - e[14];
       const dKm = Math.max(Math.abs(dx) - this.S.outer, 0, Math.hypot(dy, Math.max(Math.abs(dz) - TILE_L / 2, 0))) / 1000;
-      const nearMinor = dKm < MINOR_RANGE_KM;
+      const nearMinor = dKm < MINOR_RANGE_KM, nearFine = dKm < FINE_RANGE_KM, nearFrame = dKm < FRAME_RANGE_KM;
       s.minor.visible = nearMinor; s.cMinor.visible = nearMinor;
-      s.major.visible = dKm < NEAR_RANGE_KM; s.cMajor.visible = s.major.visible;
+      s.fine.visible = nearFine; s.fLamps.visible = nearFine;
+      s.frame.visible = nearFrame; s.vLamps.visible = nearFrame;
+      const nearMajor = dKm < MAJOR_RANGE_KM;
+      s.major.visible = nearMajor; s.mid.visible = !nearMajor && dKm < NEAR_RANGE_KM; s.cMajor.visible = dKm < NEAR_RANGE_KM;
     }
     this._life(realTime);
   }
@@ -966,7 +746,7 @@ export class HaloDistricts {
       const kk = (((kc + sgn * d) % this.nTiles) + this.nTiles) % this.nTiles, v = this.tileVariant[kk];
       if (v < 0) continue;
       const im = this.farMeshes[v];
-      im.setMatrixAt(im.count++, this._place(_m, this.tileAngle(kk) * this.Rm, 0, 0, 1));
+      im.setMatrixAt(im.count++, this._place(_m, this.tileAngle(kk) * this.Rm, 0, 0, 1, this.tileStretch(kk)));
     }
     for (const im of this.farMeshes) im.instanceMatrix.needsUpdate = true;
     for (let k = kc - WINDOW; k <= kc + WINDOW; k++) {
@@ -976,11 +756,12 @@ export class HaloDistricts {
       slot.k = kk;
       if (v < 0) { slot.g.visible = false; continue; }
       const V = this.variants[v], C = this.crests[this.hubTiles.has(kk) ? 1 : 0];
-      slot.major.geometry = V.major; slot.minor.geometry = V.minor;
+      slot.major.geometry = V.major; slot.mid.geometry = V.far; slot.minor.geometry = V.minor; slot.fine.geometry = V.fine;
+      slot.fLamps.geometry = V.flamps.geometry; slot.fLamps.material = V.flamps.material;
       slot.lamps.geometry = V.lamps.geometry; slot.lamps.material = V.lamps.material;
       slot.cMajor.geometry = C.major; slot.cMinor.geometry = C.minor;
       slot.cLamps.geometry = C.lamps.geometry; slot.cLamps.material = C.lamps.material;
-      this._place(slot.g.matrix, this.tileAngle(kk) * this.Rm, 0, 0, 1);
+      this._place(slot.g.matrix, this.tileAngle(kk) * this.Rm, 0, 0, 1, this.tileStretch(kk));
       slot.g.matrixWorldNeedsUpdate = true;
       slot.g.visible = true;
     }
@@ -1045,7 +826,7 @@ export class HaloDistricts {
     for (const im of this.ships) im.instanceMatrix.needsUpdate = true;
   }
 
-  tileOk(u, C) { const k = Math.floor((((u % C) + C) % C) / TILE_L); return k < this.nTiles && this.tileVariant[k] >= 0; }
+  tileOk(u, C) { const k = this.tileAt(((u % C) + C) % C); return k < this.nTiles && this.tileVariant[k] >= 0; }
   shipClass(k, sg, zb) { return hash2(k * 4 + (sg > 0 ? 2 : 0) + (zb > 0 ? 1 : 0), 5) < 0.7 ? 0 : 1; }
   gantryU(bay, t) { return bay.u + GANTRY.range * Math.sin((TAU * t) / GANTRY.period + bay.phase); }
   podX(bay, p, t) { return (this.S.hw - 600) * Math.sin(t * (0.0011 + 0.00023 * p) + bay.phase * 3 + p * 1.7); }

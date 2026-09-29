@@ -1,0 +1,617 @@
+import * as THREE from 'three';
+import { CB, CK } from '../craft/craftGeometry.js';
+import { lathe } from '../craft/craftClasses.js';
+import { LAMP } from './lamps.js';
+import { HK, facadeKind, treeKind } from './haloMaterial.js';
+
+// The Halo's architecture, second pass: what each kilometre cell of a district tile holds,
+// built in metres (x across the ring, y up from its radius, z along it) into four layers:
+//
+//   B  major  - massing seen from 60 km: set-back towers, courtyard blocks under tiled roofs,
+//               stepped terraces, lakes, plazas, halls; every roof and street its own kind
+//   M  minor  - within 18 km: trees and woods, balconies, shopfront light, boats, stalls
+//   N  fine   - within 8 km: railings, street trees, rooftop plant, pier fins, fountain jets
+//   F  far    - silhouettes instanced for 180 km beyond the window
+//
+// Districts differ in palette (stone, terracotta, render, brick, ceramic, rose), roof habit
+// (pitched or flat and planted), tree species and lamp colour, so the band reads as a chain
+// of distinct towns rather than one grey pattern. Lamps come in two sets: `lamps` (beacons,
+// crowns, stations; always drawn with the tile) and `flamps` (street lamps; fine range only),
+// so a distant district glows through its windows and streets instead of a speckle of sprites.
+
+const TAU = Math.PI * 2;
+const V3 = (x, y, z) => new THREE.Vector3(x, y, z);
+const toY = new THREE.Matrix4().makeRotationX(-Math.PI / 2);
+const rotY90 = new THREE.Matrix4().makeRotationY(Math.PI / 2);
+
+export const LAMPC = {
+  WARM: [1.0, 0.74, 0.46], SODIUM: [1.0, 0.58, 0.26], COOL: [0.78, 0.88, 1.0], ROSE: [1.0, 0.42, 0.62],
+  TEAL: LAMP.TEAL, VIOLET: [0.72, 0.52, 1.0], LEAF: [0.7, 1.0, 0.62], RED: LAMP.RED, WHITE: LAMP.WHITE, AMBER: LAMP.AMBER,
+};
+
+/** Per-variant character: palette, roof habit, tree species mix, street lamp colour. */
+export const DISTRICT_STYLE = [
+  { pal: 0, pitched: 0.55, trees: [0, 1, 0, 2], street: LAMPC.SODIUM, accent: LAMPC.WARM },      // residential: limestone
+  { pal: 1, pitched: 0.8, trees: [1, 4, 0, 3], street: LAMPC.WARM, accent: LAMPC.AMBER },         // agrarian: terracotta
+  { pal: 2, pitched: 0.2, trees: [0, 1, 2, 0], street: LAMPC.COOL, accent: LAMPC.COOL },          // civic: white render
+  { pal: 3, pitched: 0.35, trees: [0, 4, 0, 1], street: LAMPC.SODIUM, accent: LAMPC.AMBER },      // works: brick
+  { pal: 4, pitched: 0.5, trees: [1, 3, 1, 0], street: LAMPC.LEAF, accent: LAMPC.TEAL },          // lakeland: ceramic
+  { pal: 5, pitched: 0.4, trees: [3, 2, 0, 1], street: LAMPC.ROSE, accent: LAMPC.VIOLET },        // markets: rose
+];
+
+// ------------------------------------------------------------ kit ----
+export function latheAt(B, x, y, z, prof, seg = 16, closed = false, phase = 0) {
+  B.push(new THREE.Matrix4().makeTranslation(x, y, z).multiply(toY));
+  lathe(B, prof, seg, phase, closed ? { closedProfile: true } : undefined);
+  B.pop();
+}
+/** Box standing on the deck across its footprint, its foot sunk under the lowest deck point. */
+export function standBox(B, S, x, z, sx, sz, h, k, sink = 16) {
+  const lo = Math.min(S.deck(x - sx / 2), S.deck(x + sx / 2)), hi = Math.max(S.deck(x - sx / 2), S.deck(x + sx / 2));
+  const y0 = lo - sink, top = hi + h;
+  B.box(x, (y0 + top) / 2, z, sx, top - y0, sz, k);
+  return top;
+}
+/** Highest deck point under a footprint across x. */
+export const deckHi = (S, x, sx) => Math.max(S.deck(x - sx / 2), S.deck(x + sx / 2));
+/** Half-round vault along z on the deck (glasshouses, galleries, station halls). */
+export function vault(B, x, y, z0, z1, half, h, kind, rib = CK.BRONZE, n = 12, steps = 4) {
+  const pts = [];
+  for (let i = 0; i <= n; i++) { const a = (i / n) * Math.PI; pts.push([x + Math.cos(a) * half, y + Math.sin(a) * h]); }
+  pts.push([x - half, y - 12], [x + half, y - 12]);
+  const rings = [];
+  for (let j = 0; j <= steps; j++) rings.push({ z: z0 + ((z1 - z0) * j) / steps, pts });
+  B.loft(rings, (i) => (i <= n ? kind : CK.HULL), { capStart: rib, capEnd: rib });
+}
+export function ribArc(B, x, y, z, half, h, r, k = CK.BRONZE, n = 8) {
+  const pts = [];
+  for (let i = 0; i <= n; i++) { const a = (i / n) * Math.PI; pts.push(V3(x + Math.cos(a) * (half + r), y + Math.sin(a) * (h + r), z)); }
+  B.tube(pts, r, 5, k);
+}
+/** Pitched roof: a prism with its ridge along z (or x), eaves at y. Gable ends take capK. */
+export function gableRoof(B, x, y, z, w, h, len, k, capK, alongX = false) {
+  B.push(new THREE.Matrix4().makeTranslation(x, y, z).multiply(alongX ? rotY90 : new THREE.Matrix4()));
+  const pts = [[-w / 2, 0], [0, h], [w / 2, 0]];
+  B.loft([{ z: -len / 2, pts }, { z: len / 2, pts }], k, { capStart: capK, capEnd: capK });
+  B.pop();
+}
+/** A tree: canopy (a low-poly crown) on a trunk. The crown goes to layer L, the trunk to T. */
+export function tree(L, T, x, y, z, s, species) {
+  // a five-sided double cone (10 triangles): the crown's silhouette without its cost
+  const k = treeKind(species);
+  latheAt(L, x, y + s * 0.3, z, [[0, 0, k], [s * 0.48, s * 0.4, k], [0, s * 0.72, k]], 5, false, (species * 1.3) % 1.2);
+  if (T) T.box(x, y + s * 0.18, z, s * 0.07 + 0.3, s * 0.36, s * 0.07 + 0.3, CK.DARK);
+}
+/** Railing along a straight edge (top rail and posts as two thin boxes). */
+function railing(N, x, y, z, lx, lz) {
+  N.box(x, y + 1.1, z, Math.max(lx, 0.12), 0.12, Math.max(lz, 0.12), CK.BRONZE);
+  N.box(x, y + 0.55, z, Math.max(lx, 0.05) * (lx > lz ? 1 : 0.4) + 0.02, 1.0, Math.max(lz, 0.05) * (lz > lx ? 1 : 0.4) + 0.02, CK.DARK);
+}
+function pickTree(C) { const t = C.style.trees; return t[Math.floor(C.r() * t.length)]; }
+
+// ------------------------------------------------------------ buildings ----
+/** A tower on a podium in two to four set-back tiers, garden terraces on each step. */
+function setbackTower(C, cx, cz, sx, sz, hmax, fk) {
+  const { B, M, N, S, r, F } = C;
+  const y0 = deckHi(S, cx, sx);
+  const pod = standBox(B, S, cx, cz, sx, sz, 8 + r() * 14, fk);
+  B.box(cx, pod + 0.8, cz, sx - 8, 1.6, sz - 8, HK.ROOFGARDEN);
+  // shopfronts: a band of light along both street faces, and awnings over the pavement
+  for (const s of [-1, 1]) {
+    M.box(cx, y0 + 4.2, cz + s * (sz / 2 + 0.4), sx * 0.86, 2.0, 0.6, HK.NEON);
+    N.box(cx, y0 + 6.2, cz + s * (sz / 2 + 2.2), sx * 0.7, 0.4, 4.0, HK.AWNING);
+  }
+  const th = Math.min(hmax - (pod - y0), 70 + r() * r() * 440);
+  let tw = Math.min(sx - 24, 40 + r() * 60), td = Math.min(sz - 24, 40 + r() * 60);
+  let tx = cx + (r() - 0.5) * (sx - tw) * 0.4, tz = cz + (r() - 0.5) * (sz - td) * 0.4;
+  const tiers = th > 260 ? 4 : th > 170 ? 3 : th > 110 ? 2 : 1;
+  const glassy = r() < 0.5;
+  const frac = [[1], [0.62, 0.38], [0.48, 0.32, 0.2], [0.4, 0.28, 0.2, 0.12]][tiers - 1];
+  let y = pod + 1.6;
+  if (F) F.box(tx, (pod + pod + th) / 2, tz, tw, th, td, glassy ? CK.GLASS : fk);
+  for (let t = 0; t < tiers; t++) {
+    const h = th * frac[t];
+    const k = t === 0 ? (glassy ? CK.GLASS : fk) : (glassy ? CK.GLASS : (t % 2 ? CK.GLASS : fk));
+    B.box(tx, y + h / 2, tz, tw, h, td, k);
+    // a lit band at each set-back (the tiers read as rings of light at night)
+    B.box(tx, y + h - 2.5, tz, tw + 0.8, 2.4, td + 0.8, t === tiers - 1 ? CK.LANTERN : CK.BRONZE);
+    // balconies on the long faces of stone tiers
+    if (k !== CK.GLASS) for (let yy = y + 10.8; yy < y + h - 6; yy += 10.8) N.box(tx, yy, tz + (t % 2 ? 1 : -1) * (td / 2 + 0.9), tw * 0.8, 0.3, 1.8, CK.DECK);
+    else for (let yy = y + 28.8; yy < y + h - 6; yy += 28.8) N.box(tx, yy, tz, tw + 0.6, 0.5, td + 0.6, CK.BRONZE);   // floor lines
+    y += h;
+    if (t < tiers - 1) {
+      // the set-back: next tier narrower, its terrace planted and railed
+      const nw = tw * (0.7 + r() * 0.12), nd = td * (0.7 + r() * 0.12);
+      M.box(tx, y + 0.6, tz, tw - 2, 1.2, td - 2, HK.ROOFGARDEN);
+      railing(N, tx, y + 1.2, tz + td / 2 - 1, tw - 2, 0.1);
+      railing(N, tx, y + 1.2, tz - td / 2 + 1, tw - 2, 0.1);
+      railing(N, tx + tw / 2 - 1, y + 1.2, tz, 0.1, td - 2);
+      railing(N, tx - tw / 2 + 1, y + 1.2, tz, 0.1, td - 2);
+      tx += (r() - 0.5) * (tw - nw) * 0.5; tz += (r() - 0.5) * (td - nd) * 0.5;
+      tw = nw; td = nd;
+    }
+  }
+  // crown: a lantern drum, a planted roof, or a bronze spire; masts and beacons on the tall
+  const cr = r();
+  if (cr < 0.35) {
+    latheAt(B, tx, y - 0.5, tz, [[0.1, 0, CK.BRONZE], [Math.min(tw, td) * 0.42, 0, CK.BRONZE], [Math.min(tw, td) * 0.42, 9, CK.LANTERN], [Math.min(tw, td) * 0.3, 14, CK.BRONZE], [0.1, 16, CK.BRONZE]], 12);
+  } else if (cr < 0.7) {
+    B.box(tx, y + 0.6, tz, tw - 4, 1.2, td - 4, HK.ROOFGARDEN);
+    for (let q = 0; q < 3; q++) tree(N, null, tx + (r() - 0.5) * (tw - 12), y + 1.2, tz + (r() - 0.5) * (td - 12), 5 + r() * 3, pickTree(C));
+  } else {
+    latheAt(B, tx, y - 0.5, tz, [[0.1, 0, CK.BRONZE], [Math.min(tw, td) * 0.5, 0, CK.BRONZE], [Math.min(tw, td) * 0.12, Math.min(40, th * 0.12), CK.BRONZE], [0.1, Math.min(60, th * 0.18), CK.BRONZE]], 4);
+  }
+  // rooftop plant and a maintenance hoist
+  for (let q = 0; q < 2; q++) N.box(tx + (q ? 1 : -1) * tw * 0.25, y + 3, tz + (r() - 0.5) * td * 0.4, tw * 0.18, 6, td * 0.2, q ? CK.HULL : CK.DARK);
+  if (th > 200) {
+    M.box(tx + tw / 2 - 4, y + 18, tz + td / 2 - 4, 1.6, 36, 1.6, CK.DARK);
+    C.lamps.push({ p: V3(tx + tw / 2 - 4, y + 38, tz + td / 2 - 4), r: 4, color: LAMPC.RED, i: 2.8, breathe: 0.5, phase: r() });
+  }
+  if (th > 140) C.lamps.push({ p: V3(tx, y + 18, tz), r: 5, color: C.style.accent, i: 1.8, breathe: 0.15, phase: r() });
+}
+
+/** Perimeter block: four wings round a planted court, tiled or planted roofs, a corner turret. */
+function courtBlock(C, cx, cz, sx, sz, hmax, fk) {
+  const { B, M, N, S, r } = C;
+  const wing = 15 + r() * 8, pitched = r() < C.style.pitched;
+  const base = Math.min(hmax, 14 + r() * 26);
+  const wings = [
+    [cx - sx / 2 + wing / 2, cz, wing, sz, false], [cx + sx / 2 - wing / 2, cz, wing, sz, false],
+    [cx, cz - sz / 2 + wing / 2, sx - 2 * wing, wing, true], [cx, cz + sz / 2 - wing / 2, sx - 2 * wing, wing, true],
+  ];
+  wings.forEach(([x, z, w, d, alongX], q) => {
+    const h = base + (q % 2 ? 3.6 : 0) * Math.round(r() * 2);
+    const k = r() < 0.2 ? facadeKind(C.style.pal + 1) : fk;
+    const top = standBox(B, S, x, z, w, d, h, k);
+    if (C.F && q === 0 && base > 30) C.F.box(cx, top / 2, cz, sx, top, sz, k);
+    if (pitched) {
+      gableRoof(B, x, top, z, (alongX ? d : w) + 1.2, 5 + (alongX ? d : w) * 0.22, (alongX ? w : d) + (alongX ? 0 : 1.2), HK.TILE, k, alongX);
+      // dormers and chimneys on the long slopes
+      const L = alongX ? w : d;
+      if (q < 2) for (let t = -L / 2 + 14; t < L / 2 - 10; t += 30 + r() * 12) {
+        const px = alongX ? x + t : x + (r() < 0.5 ? -1 : 1) * w * 0.18, pz = alongX ? z + (r() < 0.5 ? -1 : 1) * d * 0.18 : z + t;
+        N.box(px, top + 2.4, pz, 2.4, 3.2, 2.4, k);
+      }
+    } else {
+      M.box(x, top + 0.5, z, w - 3, 1, d - 3, HK.ROOFGARDEN);
+      N.box(x, top + 2.5, z, Math.min(w, 8), 4, Math.min(d, 8), CK.DARK);
+    }
+    // loggias of light at the court side, shopfront band at the street side
+    M.box(x + (alongX ? 0 : (q === 0 ? 1 : -1) * (w / 2 + 0.3)), deckHi(S, x, w) + 4, z + (alongX ? (q === 2 ? 1 : -1) * (d / 2 + 0.3) : 0), alongX ? w * 0.8 : 0.5, 2, alongX ? 0.5 : d * 0.8, HK.NEON);
+  });
+  // the court: lawn, a tree or three, a lamp
+  standBox(B, S, cx, cz, sx - 2 * wing - 2, sz - 2 * wing - 2, 0.9, HK.ROOFGARDEN, 6);
+  const nt = 2 + Math.floor(r() * 3);
+  for (let t = 0; t < nt; t++) {
+    const x = cx + (r() - 0.5) * (sx - 2 * wing - 20), z = cz + (r() - 0.5) * (sz - 2 * wing - 20);
+    tree(M, N, x, deckHi(S, x, 1) + 0.9, z, 9 + r() * 7, pickTree(C));
+  }
+  C.flamps.push({ p: V3(cx, deckHi(S, cx, 1) + 5, cz), r: 1.6, color: LAMPC.WARM, i: 1.6 });
+  // a corner turret with a pyramid cap on some blocks
+  if (r() < 0.4) {
+    const s = r() < 0.5 ? -1 : 1, t2 = r() < 0.5 ? -1 : 1, x = cx + s * (sx / 2 - wing / 2), z = cz + t2 * (sz / 2 - wing / 2);
+    const top = standBox(B, S, x, z, wing + 4, wing + 4, base + 14, fk);
+    latheAt(B, x, top, z, [[0.1, 0, HK.TILE], [(wing + 4) * 0.72, 0, HK.TILE], [0.1, 12, HK.TILE]], 4);
+  }
+}
+
+/** Stepped terraces: storeys stepping down to the south, a garden on every step. */
+function steppedBlock(C, cx, cz, sx, sz, hmax, fk) {
+  const { B, M, N, S, r } = C;
+  const steps = 3 + Math.floor(r() * 3), alongX = r() < 0.5, L = alongX ? sx : sz, dir = r() < 0.5 ? -1 : 1;
+  const storey = 3.6 * (2 + Math.floor(r() * 2));
+  for (let i = 0; i < steps; i++) {
+    const w = L * (1 - i / steps), c = -dir * (L - w) / 2, h = Math.min(hmax, storey * (i + 1));
+    const x = alongX ? cx + c : cx, z = alongX ? cz : cz + c;
+    const top = standBox(B, S, x, z, alongX ? w : sx, alongX ? sz : w, h, fk);
+    if (C.F && i === steps - 1) C.F.box(x, top / 2, z, alongX ? w : sx, top, alongX ? sz : w, fk);
+    // the exposed step of this storey band (the part the next one does not cover)
+    const ew = L / steps, ec = -dir * (L - w) / 2 + dir * (w / 2 - ew / 2);
+    const gx = alongX ? cx + ec : cx, gz = alongX ? cz : cz + ec;
+    if (i < steps - 1 || true) {
+      M.box(gx, top + 0.6, gz, alongX ? ew - 2 : sx - 2, 1.2, alongX ? sz - 2 : ew - 2, HK.ROOFGARDEN);
+      const ex = alongX ? gx + dir * (ew / 2 - 1) : gx, ez = alongX ? gz : gz + dir * (ew / 2 - 1);
+      railing(N, ex, top + 1.2, ez, alongX ? 0.1 : sx - 2, alongX ? sz - 2 : 0.1);
+      if (i % 2 === 0) tree(N, null, gx, top + 1.2, gz, 4 + r() * 2, pickTree(C));
+    }
+  }
+}
+
+function pocketSquare(C, cx, cz, sx, sz) {
+  const { B, M, N, S, r } = C;
+  const y = standBox(B, S, cx, cz, sx, sz, 1.2, HK.STONE, 10);
+  // a round basin and its jet
+  const R = Math.min(sx, sz) * 0.16;
+  latheAt(B, cx, y - 0.2, cz, [[R - 1.6, 0, HK.STONE], [R + 1.6, 0, HK.STONE], [R + 1.6, 1.4, HK.STONE], [R - 1.6, 1.4, HK.STONE]], 16, true);
+  latheAt(B, cx, y - 0.2, cz, [[0.1, 0, HK.WATER], [R - 1.5, 0, HK.WATER], [R - 1.5, 0.9, HK.WATER], [0.1, 0.9, HK.WATER]], 16);
+  N.tube([V3(cx, y + 0.7, cz), V3(cx, y + 9, cz)], 0.8, 6, HK.WATER);
+  for (let t = 0; t < 8; t++) {
+    const a = (t / 8) * TAU + r() * 0.3, d = R + 16 + r() * (Math.min(sx, sz) * 0.3 - R);
+    tree(M, N, cx + Math.cos(a) * d, y, cz + Math.sin(a) * d, 8 + r() * 6, pickTree(C));
+  }
+  M.box(cx + sx * 0.3, y + 3, cz - sz * 0.3, 8, 6, 8, HK.NEON);
+  C.lamps.push({ p: V3(cx, y + 11, cz), r: 2.5, color: C.style.accent, i: 1.6, breathe: 0.25, phase: r() });
+}
+
+export function townCell(C, x0, x1, z0, z1) {
+  const { B, N, S, r } = C;
+  const nb = 4, bw = (x1 - x0) / nb, bd = (z1 - z0) / nb;
+  const hmax = Math.min(S.roofLow(x0), S.roofLow(x1)) - Math.max(S.deck(x0), S.deck(x1)) - 350;
+  standBox(B, S, (x0 + x1) / 2, (z0 + z1) / 2, x1 - x0, z1 - z0, 0.5, HK.STREET, 8);
+  for (let i = 0; i < nb; i++) for (let j = 0; j < nb; j++) {
+    const cx = x0 + (i + 0.5) * bw, cz = z0 + (j + 0.5) * bd, sx = bw - 36, sz = bd - 36;
+    standBox(B, S, cx, cz, sx + 10, sz + 10, 0.9, HK.STONE, 6);            // pavements
+    const roll = r(), fk = facadeKind(C.style.pal + (r() < 0.25 ? (r() < 0.5 ? 1 : 5) : 0));
+    if (roll < 0.1) pocketSquare(C, cx, cz, sx, sz);
+    else if (roll < 0.38) setbackTower(C, cx, cz, sx, sz, hmax, fk);
+    else if (roll < 0.78) courtBlock(C, cx, cz, sx, sz, hmax, fk);
+    else steppedBlock(C, cx, cz, sx, sz, hmax, fk);
+    // street lamps at the corners and a row of street trees on every other block
+    for (const [s, t] of [[-1, -1], [1, 1]]) {
+      const lx = cx + s * (sx / 2 + 11), lz = cz + t * (sz / 2 + 11), ly = S.deck(lx);
+      N.box(lx, ly + 4.5, lz, 0.35, 9, 0.35, CK.DARK);
+      C.flamps.push({ p: V3(lx, ly + 9.4, lz), r: 1.3, color: C.style.street, i: 1.5 });
+    }
+    if ((i + j) % 2 === 0) for (let t = -sx / 2 + 14; t < sx / 2 - 10; t += 26) {
+      const tx = cx + t, tz = cz - sz / 2 - 8;
+      tree(N, null, tx, S.deck(tx) + 0.9, tz, 7 + r() * 3, pickTree(C));
+    }
+    if ((i + j) % 2 === 0) C.lamps.push({ p: V3(x0 + i * bw + 8, S.deck(x0 + i * bw) + 9, z0 + j * bd + 8), r: 2.5, color: C.style.street, i: 1.4 });
+  }
+}
+
+// ------------------------------------------------------------ open ground ----
+export function parkCell(C, x0, x1, z0, z1, lakeFrac) {
+  const { B, M, N, S, r, F } = C;
+  const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2, sx = x1 - x0, sz = z1 - z0;
+  const yg = standBox(B, S, cx, cz, sx, sz, 1.5, CK.GARDEN, 12);
+  if (F) standBox(F, S, cx, cz, sx, sz, 1.5, CK.GARDEN, 12);
+  let lake = null;
+  if (lakeFrac > 0) {
+    // an oval lake with a stone quay, an island, boats and a boathouse
+    const lx = cx + (r() - 0.5) * sx * 0.2, lz = cz + (r() - 0.5) * sz * 0.2, R = sx * lakeFrac * 0.5, e = 0.7 + r() * 0.3;
+    const y = deckHi(S, lx, 2 * R);
+    lake = { lx, lz, R, e };
+    B.push(new THREE.Matrix4().makeTranslation(lx, 0, lz).multiply(new THREE.Matrix4().makeScale(1, 1, e)));
+    latheAt(B, 0, y + 1.0, 0, [[0.1, 0, HK.WATER], [R, 0, HK.WATER], [R, 1.1, HK.WATER], [0.1, 1.1, HK.WATER]], 28);
+    latheAt(B, 0, y + 0.6, 0, [[R - 1, 0, HK.STONE], [R + 7, 0, HK.STONE], [R + 7, 2.6, HK.STONE], [R - 1, 2.6, HK.STONE]], 28, true);
+    if (F) latheAt(F, 0, y + 1.0, 0, [[0.1, 0, HK.WATER], [R, 0, HK.WATER], [R, 1.1, HK.WATER], [0.1, 1.1, HK.WATER]], 10);
+    // island mound with a pavilion
+    const ir = R * 0.16, ia = r() * TAU, ix = Math.cos(ia) * R * 0.4, iz = Math.sin(ia) * R * 0.4;
+    latheAt(B, ix, y + 1.5, iz, [[0.1, 0, CK.GARDEN], [ir, 0, CK.GARDEN], [ir * 0.6, 6, CK.GARDEN], [0.1, 8, CK.GARDEN]], 10);
+    B.pop();
+    const isx = lx + ix, isz = lz + iz * e;
+    for (let t = 0; t < 5; t++) tree(M, N, isx + (r() - 0.5) * ir, y + 5, isz + (r() - 0.5) * ir * e, 9 + r() * 6, pickTree(C));
+    C.lamps.push({ p: V3(isx, y + 20, isz), r: 3, color: C.style.accent, i: 1.6, breathe: 0.3, phase: r() });
+    // boats: hulls with a mast or a canopy, moored and afloat
+    for (let t = 0; t < 6; t++) {
+      const a = r() * TAU, d = R * (0.55 + r() * 0.35), bx = lx + Math.cos(a) * d, bz = lz + Math.sin(a) * d * e, rot = r() * TAU;
+      M.at(bx, y + 2.6, bz, 0, rot, 0);
+      M.box(0, 0, 0, 2.6, 1.2, 8, t % 3 ? CK.HULL : HK.AWNING);
+      M.box(0, 1.1, -0.8, 2, 1.0, 3, t % 2 ? CK.GLASS : CK.DECK);
+      N.at(bx, y + 2.6, bz, 0, rot, 0); N.box(0, 5, 0.6, 0.2, 9, 0.2, CK.BRONZE); N.pop();
+      M.pop();
+    }
+    // the boathouse on its pier, lit
+    const px = lx + R + 2, py = y + 3.2;
+    M.box(px - 20, py, lz, 40, 1.2, 8, CK.DECK);
+    B.box(px + 10, py + 5, lz, 22, 10, 16, facadeKind(C.style.pal));
+    gableRoof(B, px + 10, py + 10, lz, 23, 6, 17, HK.TILE, facadeKind(C.style.pal));
+    C.lamps.push({ p: V3(px - 38, py + 4, lz), r: 2.5, color: LAMPC.WARM, i: 1.8 });
+    for (let t = 0; t < 12; t++) {
+      const a = (t / 12) * TAU;
+      C.flamps.push({ p: V3(lx + Math.cos(a) * (R + 5), y + 7, lz + Math.sin(a) * (R + 5) * e), r: 1.4, color: C.style.street, i: 1.4 });
+    }
+  }
+  // a pavilion under a small conservatory dome (clear of the lake)
+  let px = cx + (r() - 0.5) * sx * 0.6, pz = cz + (r() - 0.5) * sz * 0.6;
+  if (lake && Math.hypot(px - lake.lx, (pz - lake.lz) / lake.e) < lake.R + 60) { px = x0 + 80; pz = z0 + 80; }
+  const py = S.deck(px);
+  latheAt(B, px, py - 6, pz, [[0.1, 0, CK.DECK], [46, 0, CK.DECK], [46, 8, CK.BRONZE], [44, 14, CK.CONSERVATORY], [34, 34, CK.CONSERVATORY], [18, 44, CK.CONSERVATORY], [4, 48, CK.BRONZE], [0.1, 52, CK.BRONZE]], 20);
+  C.lamps.push({ p: V3(px, py + 50, pz), r: 3.5, color: LAMPC.COOL, i: 1.4, breathe: 0.2 });
+  // woods: clumps of mixed species (off the water)
+  const clumps = 5 + Math.floor(r() * 5);
+  for (let c = 0; c < clumps; c++) {
+    const qx = x0 + 60 + r() * (sx - 120), qz = z0 + 60 + r() * (sz - 120), n = 6 + Math.floor(r() * 10), sp = pickTree(C);
+    for (let t = 0; t < n; t++) {
+      const tx = qx + (r() - 0.5) * 110, tz = qz + (r() - 0.5) * 110, s = 10 + r() * 14;
+      if (lake && Math.hypot(tx - lake.lx, (tz - lake.lz) / lake.e) < lake.R + 14) continue;
+      if (Math.hypot(tx - px, tz - pz) < 56) continue;
+      tree(M, N, tx, S.deck(tx) + 1.5, tz, s, r() < 0.75 ? sp : pickTree(C));
+    }
+  }
+  // stone walks crossing the park, lamp-lit
+  M.box(cx, S.deck(cx) + 1.8, cz, 8, 0.6, sz - 20, HK.STONE);
+  M.box(cx, S.deck(cx) + 1.8, cz, sx - 20, 0.6, 8, HK.STONE);
+  for (let t = -sz / 2 + 40; t < sz / 2; t += 60) C.flamps.push({ p: V3(cx + 7, S.deck(cx) + 5, cz + t), r: 1.2, color: C.style.street, i: 1.3 });
+  void yg;
+}
+
+export function farmCell(C, x0, x1, z0, z1) {
+  const { B, M, N, S, r, F } = C;
+  // glasshouse ranges along the ring, crop strips between, orchards, a farmstead at one end
+  const n = 6, pitch = (x1 - x0) / n, half = pitch * 0.3, len0 = z0 + 90, len1 = z1 - 20;
+  standBox(B, S, (x0 + x1) / 2, (z0 + z1) / 2, x1 - x0, z1 - z0, 1.0, HK.CROPS, 10);
+  for (let i = 0; i < n; i++) {
+    const x = x0 + (i + 0.5) * pitch, y = Math.max(S.deck(x - half), S.deck(x + half)) + 1;
+    if (i === 1) {
+      // an orchard in rows instead of a glasshouse
+      for (let ox = -half + 10; ox < half - 6; ox += 24) for (let oz = len0 + 12; oz < len1 - 6; oz += 30) tree(M, null, x + ox, y, oz, 8 + r() * 2, C.style.trees[1]);
+      if (F) F.box(x, y + 4, (len0 + len1) / 2, half * 2, 8, len1 - len0, treeKind(C.style.trees[1]));
+      continue;
+    }
+    const h = 30 + r() * 16;
+    vault(B, x, y, len0, len1, half, h, CK.CONSERVATORY, CK.BRONZE, 10, 3);
+    if (F) F.box(x, y + h * 0.35, (len0 + len1) / 2, half * 2, h * 0.7, len1 - len0, CK.CONSERVATORY);
+    for (let z = len0 + 75; z < len1; z += 150) ribArc(M, x, y, z, half, h, 1.1, CK.BRONZE, 6);
+    C.flamps.push({ p: V3(x, y + h + 2, (len0 + len1) / 2), r: 1.6, color: LAMPC.LEAF, i: 1.2, breathe: 0.2, phase: r() });
+  }
+  // farmstead: a barn and houses under tiled roofs round a yard, silos
+  const fx = (x0 + x1) / 2, fz = z0 + 44, fk = facadeKind(C.style.pal);
+  const top = standBox(B, S, fx, fz, 180, 40, 12, fk);
+  gableRoof(B, fx, top, fz, 41, 10, 181, HK.TILE, fk, true);
+  for (const s of [-1, 1]) {
+    const hx = fx + s * 230, ht = standBox(B, S, hx, fz, 36, 22, 8, fk);
+    gableRoof(B, hx, ht, fz, 23, 6, 37, HK.TILE, fk, true);
+    latheAt(B, fx + s * 130, S.deck(fx + s * 130) - 4, fz + 6, [[0.1, 0, CK.HULL], [7, 0, CK.HULL], [7, 30, CK.HULL], [4, 36, CK.BRONZE], [0.1, 37, CK.BRONZE]], 10);
+    C.flamps.push({ p: V3(hx, ht + 3, fz + 12), r: 1.5, color: LAMPC.WARM, i: 1.6 });
+  }
+  B.box(fx, S.deck(fx) + 7, fz + 20.6, 120, 3, 1, CK.LANTERN);
+  C.lamps.push({ p: V3(fx, S.deck(fx) + 30, fz + 20), r: 4, color: LAMPC.WARM, i: 1.6 });
+  void N;
+}
+
+export function civicCell(C, x0, x1, z0, z1) {
+  const { B, M, N, S, r, F } = C;
+  const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2, sx = x1 - x0, sz = z1 - z0;
+  standBox(B, S, cx, cz, sx, sz, 2, HK.STONE, 12);
+  const y = Math.max(S.deck(cx - 120), S.deck(cx + 120)) + 2;
+  const top = Math.min(1300, Math.min(S.roofLow(cx - 100), S.roofLow(cx + 100)) - y - 320) * (0.6 + r() * 0.4);
+  // a tapering glass tower with lantern sky-lobbies every ~quarter, a crown and a mast
+  const prof = [[0.1, -10, CK.HULL], [110, -10, CK.HULL], [110, 20, CK.BRONZE]];
+  const lobbies = 4;
+  for (let q = 0; q < lobbies; q++) {
+    const a = q / lobbies, b = (q + 1) / lobbies, ra = 100 - 45 * a, rb = 100 - 45 * b;
+    prof.push([ra, 22 + a * top, CK.GLASS], [rb, b * top - 14, CK.GLASS], [rb + 4, b * top - 12, CK.LANTERN], [rb + 4, b * top - 2, CK.LANTERN], [rb, b * top, CK.BRONZE]);
+  }
+  prof.push([44, top + 30, CK.HULL], [12, top + 60, CK.BRONZE], [3, top + 150, CK.DARK], [0.1, top + 152, CK.DARK]);
+  latheAt(B, cx, y, cz, prof, 28);
+  // sky gardens: planted balconies spiralling up between the lobbies
+  for (let q = 0; q < 12; q++) {
+    const a = (q / 12) * TAU * 2.5, t = 0.08 + (q / 12) * 0.84, rr = 100 - 45 * t + 4;
+    M.at(cx + Math.cos(a) * rr, y + t * top, cz + Math.sin(a) * rr, 0, -a, 0);
+    M.box(0, 0, 0, 10, 2, 34, HK.ROOFGARDEN);
+    M.pop();
+  }
+  if (F) { latheAt(F, cx, y, cz, [[0.1, -10, CK.HULL], [100, -10, CK.GLASS], [55, top, CK.GLASS], [58, top + 4, CK.LANTERN], [3, top + 150, CK.DARK], [0.1, top + 152, CK.DARK]], 8); }
+  C.lamps.push({ p: V3(cx, y + top + 156, cz), r: 6, color: LAMPC.RED, i: 3.0, breathe: 0.5 });
+  for (let k = 0; k < 6; k++) { const a = (k / 6) * TAU; C.lamps.push({ p: V3(cx + Math.cos(a) * 60, y + top + 34, cz + Math.sin(a) * 60), r: 3.5, color: C.style.accent, i: 2.0 }); }
+  // four halls round the plaza: colonnaded stone, pitched copper or planted roofs
+  const fk = facadeKind(C.style.pal + 2);
+  for (let k = 0; k < 4; k++) {
+    const a = (k / 4) * TAU + Math.PI / 4, hx = cx + Math.cos(a) * sx * 0.3, hz = cz + Math.sin(a) * sz * 0.3;
+    const hh = 26 + r() * 20;
+    B.box(hx, y + hh / 2, hz, 150, hh, 110, fk);
+    if (k % 2) gableRoof(B, hx, y + hh, hz, 112, 16, 152, CK.BRONZE, fk, true);
+    else { B.box(hx, y + hh + 2, hz, 156, 4, 116, CK.BRONZE); M.box(hx, y + hh + 4.6, hz, 140, 1.2, 100, HK.ROOFGARDEN); }
+    for (let c = -3; c <= 3; c++) M.box(hx + c * 22, y + hh / 2, hz + 60, 3.4, hh, 3.4, HK.STONE);
+    B.box(hx, y + 5, hz + 55.4, 140, 8, 0.6, CK.LANTERN);
+    C.flamps.push({ p: V3(hx, y + hh + 6, hz + 58), r: 2, color: LAMPC.COOL, i: 1.4 });
+  }
+  // reflecting pools either side of the tower with jets, and an avenue of trees
+  for (const s of [-1, 1]) {
+    const pz = cz + s * 200;
+    B.box(cx, y + 0.6, pz, 180, 1.2, 40, HK.WATER);
+    B.box(cx, y + 0.3, pz, 186, 1.8, 46, HK.STONE);
+    for (let j = -3; j <= 3; j++) N.tube([V3(cx + j * 24, y + 1.1, pz), V3(cx + j * 24, y + 6 + 3 * Math.abs(Math.sin(j)), pz)], 0.5, 5, HK.WATER);
+  }
+  for (let k = 0; k < 16; k++) { const a = (k / 16) * TAU; tree(M, N, cx + Math.cos(a) * 190, y, cz + Math.sin(a) * 190, 12 + r() * 5, pickTree(C)); }
+  for (let k = 0; k < 8; k++) { const a = (k / 8) * TAU; C.flamps.push({ p: V3(cx + Math.cos(a) * 160, y + 6, cz + Math.sin(a) * 160), r: 1.6, color: C.style.street, i: 1.5 }); }
+}
+
+export function worksCell(C, x0, x1, z0, z1) {
+  const { B, M, N, S, r, F } = C;
+  const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2, sx = x1 - x0, sz = z1 - z0;
+  standBox(B, S, cx, cz, sx, sz, 1.2, HK.STREET, 10);
+  // fabrication halls in brick and panel, photovoltaic sawtooth roofs, lit loading doors
+  const halls = 2 + Math.floor(r() * 2), fk = facadeKind(3);
+  for (let h = 0; h < halls; h++) {
+    const hx = x0 + ((h + 0.5) / halls) * sx, hw = sx / halls - 70, hl = sz * 0.55, hz = z0 + 40 + hl / 2, hh = 30 + r() * 18;
+    const top = standBox(B, S, hx, hz, hw, hl, hh, h % 2 ? fk : CK.HULL);
+    if (F) standBox(F, S, hx, hz, hw, hl, hh, h % 2 ? fk : CK.HULL);
+    for (let t = 0; t < 8; t++) {
+      const tz = hz - hl / 2 + ((t + 0.5) / 8) * hl;
+      B.at(hx, top + 8, tz, -0.5, 0, 0);
+      B.box(0, 0, 0, hw - 6, 1.2, hl / 8 / Math.cos(0.5) - 2, CK.PANEL);
+      B.pop();
+      M.box(hx, top + 8, tz + hl / 16 - 1, hw - 6, 16, 1.2, CK.GLASS);
+    }
+    B.box(hx - hw / 2 - 0.6, top - hh * 0.5, hz, 1.2, hh * 0.4, hl * 0.9, CK.LANTERN);
+    for (let d = -2; d <= 2; d++) M.box(hx + d * hw * 0.18, S.deck(hx) + 7, hz - hl / 2 - 0.5, 12, 12, 1, d % 2 ? CK.LANTERN : CK.DARK);
+    C.lamps.push({ p: V3(hx, top + 20, hz - hl / 2 - 4), r: 3.5, color: LAMPC.SODIUM, i: 2.0 });
+    // a travelling crane over the yard in front of the hall
+    const yc = S.deck(hx) + 34;
+    for (const s of [-1, 1]) M.box(hx + s * (hw / 2 - 4), yc / 2 + S.deck(hx) / 2, hz - hl / 2 - 40, 3, yc - S.deck(hx), 3, CK.BRONZE);
+    M.box(hx, yc, hz - hl / 2 - 40, hw, 4, 5, CK.BRONZE);
+    N.box(hx + (r() - 0.5) * hw * 0.6, yc - 5, hz - hl / 2 - 40, 6, 6, 7, CK.DARK);
+  }
+  // reclamation tanks and the pipe rack between them
+  const tz0 = z0 + sz * 0.72;
+  const tanks = [];
+  for (let t = 0; t < 5; t++) {
+    const tx = x0 + 90 + t * ((sx - 180) / 4), tr = 26 + r() * 16, th = 40 + r() * 30, ty = S.deck(tx);
+    latheAt(B, tx, ty - 8, tz0, [[0.1, 0, CK.HULL], [tr, 0, CK.HULL], [tr, th * 0.5, t % 2 ? CK.HULL : fk], [tr, th, CK.BRONZE], [tr * 0.7, th + tr * 0.35, CK.HULL], [0.1, th + tr * 0.45, CK.HULL]], 18);
+    tanks.push(V3(tx, ty + th * 0.6, tz0));
+  }
+  for (let t = 0; t < tanks.length - 1; t++) {
+    M.tube([tanks[t].clone().add(V3(0, 0, 40)), tanks[t + 1].clone().add(V3(0, 0, 40))], 3, 6, CK.CONDUIT);
+    M.tube([tanks[t].clone().add(V3(0, 6, 46)), tanks[t + 1].clone().add(V3(0, 6, 46))], 2, 6, CK.BRONZE);
+  }
+  for (const p of tanks) C.lamps.push({ p: p.clone().add(V3(0, 50, 0)), r: 3, color: LAMPC.AMBER, i: 1.6, breathe: 0.3 });
+}
+
+export function stadiumCell(C, x0, x1, z0, z1) {
+  const { B, M, N, S, r, F } = C;
+  // a sports ground: raked stands in a bowl round a striped pitch, floodlight masts, a plaza
+  const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2, sx = x1 - x0, sz = z1 - z0;
+  standBox(B, S, cx, cz, sx, sz, 1.2, HK.STONE, 10);
+  const y = Math.max(S.deck(cx - 300), S.deck(cx + 300)) + 1.2;
+  const fk = facadeKind(C.style.pal + 2);
+  latheAt(B, cx, y - 6, cz, [[150, 0, CK.GARDEN], [150, 7, CK.HULL], [170, 10, CK.DECK], [250, 52, CK.DECK], [262, 56, CK.GLASS], [262, 76, CK.BRONZE], [290, 76, fk], [300, 0, fk]], 48, true);
+  if (F) latheAt(F, cx, y - 6, cz, [[150, 0, CK.GARDEN], [262, 56, CK.GLASS], [290, 76, CK.HULL], [300, 0, CK.HULL]], 12, true);
+  latheAt(B, cx, y - 6, cz, [[0.1, 0, HK.CROPS], [150, 0, HK.CROPS], [150, 7.4, HK.CROPS], [0.1, 7.4, HK.CROPS]], 48);
+  // the roof ring's lit edge and banners round the rim
+  M.push(new THREE.Matrix4().makeTranslation(cx, y + 70, cz).multiply(new THREE.Matrix4().makeRotationX(Math.PI / 2)));
+  M.torus(276, 1.4, 64, 4, CK.LANTERN);
+  M.pop();
+  for (let k = 0; k < 24; k++) { const a = (k / 24) * TAU; N.box(cx + Math.cos(a) * 296, y + 50, cz + Math.sin(a) * 296, 6, 18, 0.4, HK.AWNING); }
+  for (let k = 0; k < 6; k++) {
+    const a = (k / 6) * TAU + 0.26, mx = cx + Math.cos(a) * 320, mz = cz + Math.sin(a) * 320;
+    B.box(mx, y + 60, mz, 6, 120, 6, CK.BRONZE);
+    M.box(mx, y + 121, mz, 18, 4, 8, CK.LANTERN);
+    C.lamps.push({ p: V3(mx, y + 126, mz), r: 5, color: LAMPC.COOL, i: 2.4 });
+  }
+  // rows of seats as ribs on the rake (minor)
+  for (let q = 0; q < 8; q++) {
+    const rr = 178 + q * 9.5, yy = y - 6 + 10 + (q + 0.5) * 5.25;
+    M.push(new THREE.Matrix4().makeTranslation(cx, yy, cz).multiply(new THREE.Matrix4().makeRotationX(Math.PI / 2)));
+    M.torus(rr, 0.8, 64, 4, q % 2 ? facadeKind(C.style.pal + 1) : HK.AWNING);
+    M.pop();
+  }
+  void r;
+}
+
+export function marketCell(C, x0, x1, z0, z1) {
+  const { B, M, N, S, F } = C;
+  // covered markets: three long arcades with lantern roofs, awnings down both aisles, signs
+  const pitch = (x1 - x0) / 3;
+  standBox(B, S, (x0 + x1) / 2, (z0 + z1) / 2, x1 - x0, z1 - z0, 1.0, HK.STONE, 10);
+  for (let i = 0; i < 3; i++) {
+    const x = x0 + (i + 0.5) * pitch, half = pitch * 0.3, y = Math.max(S.deck(x - half), S.deck(x + half)) + 1;
+    vault(B, x, y + 14, z0 + 40, z1 - 40, half, 22, CK.LANTERN, CK.GLASS, 10, 4);
+    if (F) F.box(x, y + 18, (z0 + z1) / 2, half * 2, 34, z1 - z0 - 80, CK.LANTERN);
+    for (const sd of [-1, 1]) {
+      B.box(x + sd * (half - 1), y + 6, (z0 + z1) / 2, 2, 16, z1 - z0 - 80, facadeKind(C.style.pal));
+      M.box(x + sd * (half - 2.4), y + 11, (z0 + z1) / 2, 0.6, 2, z1 - z0 - 90, HK.NEON);
+    }
+    for (let z = z0 + 70; z < z1 - 60; z += 24) for (const sd of [-1, 1]) {
+      M.box(x + sd * half * 0.55, y + 2, z, 10, 4, 14, (z / 24) % 3 < 1 ? CK.BRONZE : facadeKind(C.style.pal + 1));
+      M.at(x + sd * (half * 0.55 - 6), y + 5, z, 0, 0, sd * 0.35); M.box(0, 0, 0, 6, 0.3, 15, HK.AWNING); M.pop();
+    }
+    C.lamps.push({ p: V3(x, y + 42, z0 + 40), r: 3.5, color: C.style.accent, i: 2.0 }, { p: V3(x, y + 42, z1 - 40), r: 3.5, color: LAMPC.TEAL, i: 1.8 });
+    for (let z = z0 + 60; z < z1 - 40; z += 80) C.flamps.push({ p: V3(x, y + 20, z), r: 1.6, color: z % 160 < 80 ? LAMPC.ROSE : LAMPC.WARM, i: 1.5, breathe: 0.2, phase: z / 1000 });
+  }
+  void N;
+}
+
+// ------------------------------------------------------------ terraces ----
+/**
+ * Terraced habitat on the inner face of each wall: 13 decks of 160 m stepping back up the wall
+ * in 500 m blocks. Blocks alternate stone-and-window facades in the district palette with
+ * glass curtain walls; each deck is capped by a stone slab with a garden on the exposed step.
+ * Every third block carries a cascade: water spilling from terrace to terrace down its face.
+ */
+export function cliffs(C) {
+  const { B, M, N, S, r, F } = C;
+  const levels = 13, H = 160, segL = 500, gap = 30, TL = C.tileL;
+  for (const sg of [-1, 1]) {
+    const X0 = S.hw;
+    for (let j = 0; j < TL / segL; j++) {
+      const z0 = -TL / 2 + j * segL + gap / 2, z1 = z0 + segL - gap, zc = (z0 + z1) / 2, zl = z1 - z0;
+      const d0 = 520 + (r() - 0.5) * 60, step = 30 + r() * 12;
+      const blockK = r() < 0.62 ? facadeKind(C.style.pal + (j % 3 === 2 ? 2 : 0)) : CK.GLASS;
+      const cascade = j % 3 === 1;
+      for (let i = 0; i < levels; i++) {
+        const depth = d0 - i * step, next = d0 - (i + 1) * step;
+        const y0 = i === 0 ? S.deck(sg * (X0 - depth)) - 18 : i * H, y1 = (i + 1) * H - 12;
+        const xin = sg * (X0 - depth), xw = sg * (X0 + 20);
+        const k = blockK === CK.GLASS || i % 4 !== 3 ? blockK : CK.GLASS;
+        B.box((xin + xw) / 2, (y0 + y1) / 2, zc, Math.abs(xw - xin), y1 - y0, zl, k);
+        if (F && i % 3 === 0) F.box((xin + xw) / 2, (y0 + Math.min(levels, i + 3) * H - 12) / 2, zc, Math.abs(xw - xin), Math.min(levels, i + 3) * H - 12 - y0, zl, blockK);
+        B.box((xin + xw) / 2, y1 + 6, zc, Math.abs(xw - xin) + 6, 12, zl + 4, HK.STONE);
+        B.box(xin - sg * 3.4, y1 - 3, zc, 0.8, 2.4, zl, CK.LANTERN);                 // the slab's lit soffit edge
+        if (i < levels - 1) {
+          const gx0 = sg * (X0 - depth + 4), gx1 = sg * (X0 - next - 4);
+          B.box((gx0 + gx1) / 2, y1 + 13.5, zc, Math.abs(gx1 - gx0), 3, zl - 8, HK.ROOFGARDEN);
+          M.box(sg * (X0 - depth + 1.5), y1 + 12.6, zc, 0.35, 1.3, zl - 4, CK.BRONZE);
+          // garden trees along the step (minor) and pergola lamps (fine)
+          for (let t = 0; t < 4; t++) {
+            const tz = z0 + ((t + 0.3 + r() * 0.4) / 4) * zl;
+            if (cascade && Math.abs(tz - zc) < 20) continue;
+            tree(M, null, (gx0 + gx1) / 2, y1 + 15, tz, 7 + r() * 5, pickTree(C));
+          }
+          C.flamps.push({ p: V3((gx0 + gx1) / 2, y1 + 19, zc + (r() - 0.5) * zl * 0.6), r: 1.4, color: C.style.street, i: 1.3 });
+        }
+        // pier fins on stone blocks (fine): the storeys read as a carved face close up
+        if (k !== CK.GLASS) for (let zz = z0 + 12; zz < z1 - 6; zz += 24) N.box(xin - sg * 0.9, (y0 + y1) / 2, zz, 1.8, y1 - y0 - 2, 1.4, HK.STONE);
+        // loggias: framed balconies standing proud of the glazing
+        const nl = 3 + Math.floor(r() * 4);
+        for (let q = 0; q < nl; q++) {
+          const zq = z0 + ((q + 0.5) / nl) * zl, lw = 26 + r() * 30;
+          if (cascade && Math.abs(zq - zc) < lw / 2 + 10) continue;
+          M.box(sg * (X0 - depth - 4), (y0 + y1) / 2 - 20, zq, 8, 3, lw, CK.DECK);
+          M.box(sg * (X0 - depth - 7.8), (y0 + y1) / 2 - 18, zq, 0.3, 1.2, lw, CK.BRONZE);
+          if (q % 2 === 0) M.box(sg * (X0 - depth - 4), (y0 + y1) / 2 - 17.6, zq, 6, 1.8, lw * 0.5, HK.ROOFGARDEN);
+        }
+        // the cascade: a sheet of water down this deck's face into the garden below, and a basin
+        if (cascade) {
+          const top = i === levels - 1 ? y1 : y1 + 15;
+          B.box(sg * (X0 - depth - 1.4), (y0 + 14 + top) / 2 - 7, zc, 1.2, top - y0 - 14, 18, HK.WATER);
+          if (i > 0) B.box(sg * (X0 - depth - 9), y0 + 1.2, zc, 14, 2.4, 26, HK.WATER);
+        }
+      }
+      if (cascade) {
+        // the pool at the foot, over the concourse approach
+        const px = sg * (X0 - d0 - 40), py = S.deck(px);
+        latheAt(B, px, py - 1, zc, [[0.1, 0, HK.WATER], [34, 0, HK.WATER], [34, 2.4, HK.WATER], [0.1, 2.4, HK.WATER]], 16);
+        latheAt(B, px, py - 2, zc, [[33, 0, HK.STONE], [38, 0, HK.STONE], [38, 3.4, HK.STONE], [33, 3.4, HK.STONE]], 16, true);
+        C.lamps.push({ p: V3(px, py + 8, zc), r: 3, color: LAMPC.TEAL, i: 1.6, breathe: 0.4, phase: j / 8 });
+      }
+      // sky bridges across the next light well on every third deck (clear of the lift shaft)
+      if (j < TL / segL - 1) for (let i = 1; i < levels; i += 3) {
+        const depth = d0 - i * step, xb = sg * (X0 - depth * 0.55);
+        B.box(xb, i * H + 60, z1 + gap / 2, 30, 8, gap + 6, CK.GLASS);
+        M.box(xb, i * H + 55.6, z1 + gap / 2, 32, 0.8, gap + 6, CK.BRONZE);
+        B.box(xb, i * H + 64.4, z1 + gap / 2, 30.4, 0.8, gap + 6.4, CK.LANTERN);
+      }
+      // light-well lift shaft and its glass at the crest
+      const zs = z1 + gap / 2;
+      if (j < TL / segL - 1) {
+        const shaftTop = levels * H + 20;
+        B.tube([V3(sg * (X0 - 26), S.deck(sg * (X0 - 26)) - 10, zs), V3(sg * (X0 - 26), shaftTop, zs)], 11, 10, CK.GLASS);
+        for (let yy = 320; yy < shaftTop; yy += 480) M.box(sg * (X0 - 60), yy, zs, 70, 5, gap + 8, CK.DECK);
+        C.lamps.push({ p: V3(sg * (X0 - 26), shaftTop + 6, zs), r: 6, color: LAMPC.AMBER, i: 2.2, breathe: 0.2, phase: j / 8 });
+      }
+      if (j % 2 === 0) C.lamps.push({ p: V3(sg * (X0 - d0 - 6), H * 0.6, zc), r: 8, color: C.style.accent, i: 1.4 });
+    }
+    // glazed concourse along the foot of the terraces, ribbed every 100 m, lit along its spine
+    const xg = sg * (X0 - 660), yg = S.deck(xg);
+    vault(B, xg, yg, -TL / 2, TL / 2, 80, 55, CK.GLASS, false, 10, 4);
+    B.box(xg, yg + 55.6, 0, 3, 1.2, TL, CK.LANTERN);
+    for (let z = -TL / 2 + 50; z < TL / 2; z += 100) ribArc(M, xg, yg, z, 80, 55, 1.6, CK.BRONZE, 8);
+  }
+}
+
+// ------------------------------------------------------------ the vault frame ----
+export const VAULT_FRAME = { lift: 5, ribR: 3.2, ribPitch: 250, purlinPitch: 1000, purlinR: 1.8 };
+/**
+ * The structure of the glass itself, near the camera: arched bronze ribs every 250 m riding
+ * just outside the vault (clear of the gantry pods above), purlins along the ring every
+ * kilometre across it, and lamps strung along every other rib that trace the vault's curve
+ * in the night. One geometry, identical in every tile (the vault is uniform along the ring).
+ */
+export function buildVaultFrame(S, tileL) {
+  const B = new CB(), lamps = [];
+  const N = 96, xs = [];
+  for (let i = 0; i <= N; i++) xs.push(S.hw * Math.sin((i / N - 0.5) * Math.PI));
+  const yOf = (x) => S.roofCurve(x) + VAULT_FRAME.lift + VAULT_FRAME.ribR;
+  for (let z = -tileL / 2 + VAULT_FRAME.ribPitch / 2, q = 0; z < tileL / 2; z += VAULT_FRAME.ribPitch, q++) {
+    B.tube(xs.map((x) => V3(x, yOf(x), z)), VAULT_FRAME.ribR * (q % 4 === 0 ? 1.6 : 1), 6, q % 4 === 0 ? CK.BRONZE : CK.HULL);
+    if (q % 2 === 0) for (let i = 4; i < N; i += 8) lamps.push({ p: V3(xs[i], yOf(xs[i]) + VAULT_FRAME.ribR * 2 + 2, z), r: 3, color: q % 4 ? LAMPC.WARM : LAMPC.AMBER, i: 1.5, breathe: 0.25, phase: i / N });
+  }
+  for (let x = -S.hw + VAULT_FRAME.purlinPitch; x < S.hw; x += VAULT_FRAME.purlinPitch) {
+    const y = S.roofCurve(x) + VAULT_FRAME.lift + VAULT_FRAME.purlinR;
+    B.box(x, y, 0, VAULT_FRAME.purlinR * 2, VAULT_FRAME.purlinR * 2, tileL, CK.BRONZE);
+  }
+  return { geo: B.geometry(), lamps };
+}

@@ -14,7 +14,7 @@ import { Rings } from '../src/space/rings.js';
 import { Elevator } from '../src/space/elevator.js';
 import { HaloPorts, buildPortStation, PORT_LIFE, buildCourtCrane, buildPortTethers } from '../src/space/stations.js';
 import { HALO_PORTS } from '../src/space/earthData.js';
-import { TILE_L, WINDOW, MINOR_RANGE_KM, GANTRY, rotorGeometry, buildGantry, aircarLanes, FAR_TILES } from '../src/space/haloDistricts.js';
+import { TILE_L, WINDOW, MAJOR_RANGE_KM, MINOR_RANGE_KM, FINE_RANGE_KM, FRAME_RANGE_KM, GANTRY, rotorGeometry, buildGantry, aircarLanes, FAR_TILES } from '../src/space/haloDistricts.js';
 import { buildPassengerClimber, buildFreightClimber, buildTetherSegment, GUIDE_OFFSET, RIBBON, CABLE_R, MARKER_PROUD, BORE_R } from '../src/space/climbers.js';
 import { buildRelayCollar, buildRelayRing, RELAY, relayOmega, RELAY_ALTS } from '../src/space/tetherStations.js';
 import { WHEELS, WHEEL, STEM, TUGS, CAPSULE, wheelOmega, segDist, counterKeepOuts } from '../src/space/counterLife.js';
@@ -42,25 +42,28 @@ const pieceMs = [];
 while (D.buildQueue.length) { const a = performance.now(); D._step(); pieceMs.push(performance.now() - a); }
 out.districtBuildMs = Math.round(pieceMs.reduce((s, x) => s + x, 0));
 out.districtMaxPieceMs = Math.round(Math.max(...pieceMs));
-assert.ok(D.built && out.districtBuildMs < 1000, `District build ${out.districtBuildMs} ms (budget 1 s, spread one piece per frame)`);
-assert.ok(out.districtMaxPieceMs < 150, 'No single build piece stalls a frame for long');
+assert.ok(D.built && out.districtBuildMs < 1500, `District build ${out.districtBuildMs} ms (budget 1.5 s, lazily, spread in slices over frames)`);
+assert.ok(out.districtMaxPieceMs < 100, 'No single build piece stalls a frame for long');
 
 const maxMajor = Math.max(...D.variants.map((v) => tris(v.major))) + Math.max(...D.crests.map((c) => tris(c.major)));
 const maxMinor = Math.max(...D.variants.map((v) => tris(v.minor))) + Math.max(...D.crests.map((c) => tris(c.minor)));
 const minorSlots = 2 * Math.ceil(MINOR_RANGE_KM / (TILE_L / 1000)) + 1;
 const movers = D.aircars.instanceMatrix.count * tris(D.aircars.geometry) + D.trains.instanceMatrix.count * tris(D.trains.geometry) + D.trams.instanceMatrix.count * tris(D.trams.geometry) + D.ships.reduce((s, im) => s + im.instanceMatrix.count * tris(im.geometry), 0) + 2 * tris(D.gantryGeo);
 const maxFar = Math.max(...D.variants.map((v) => tris(v.far)));
-out.tileMajorTris = maxMajor; out.tileMinorTris = maxMinor; out.tileFarTris = maxFar;
-out.districtWorstRenderedTris = (2 * WINDOW + 1) * maxMajor + minorSlots * maxMinor + movers + 2 * FAR_TILES * maxFar;
+const maxFine = Math.max(...D.variants.map((v) => tris(v.fine)));
+const fineSlots = 2 * Math.ceil(FINE_RANGE_KM / (TILE_L / 1000)) + 1, frameSlots = Math.min(2 * WINDOW + 1, 2 * Math.ceil(FRAME_RANGE_KM / (TILE_L / 1000)) + 1);
+out.tileMajorTris = maxMajor; out.tileMinorTris = maxMinor; out.tileFineTris = maxFine; out.tileFarTris = maxFar; out.vaultFrameTris = tris(D.vaultFrame.geo);
+const majorSlots = 2 * Math.ceil(MAJOR_RANGE_KM / (TILE_L / 1000)) + 1;
+out.districtWorstRenderedTris = majorSlots * maxMajor + (2 * WINDOW + 1 - majorSlots) * maxFar + minorSlots * maxMinor + fineSlots * maxFine + frameSlots * tris(D.vaultFrame.geo) + movers + 2 * FAR_TILES * maxFar;
 assert.ok(maxFar < maxMajor / 8, 'Far silhouettes are a small fraction of the full tiles');
 for (const v of D.variants) { assert.ok(finite(v.far)); let hi = -Infinity; eachVertex(v.far, (x, y) => { if (Math.abs(x) < S.hw - 1) hi = Math.max(hi, y - S.roofLow(x)); }); assert.ok(hi < -150, 'Silhouettes stay under the glass too'); }
-out.districtUniqueTris = D.variants.reduce((s, v) => s + tris(v.major) + tris(v.minor), 0) + D.crests.reduce((s, c) => s + tris(c.major) + tris(c.minor), 0) + tris(D.gantryGeo);
-assert.ok(out.districtWorstRenderedTris < 10e6, `Districts render at most ${out.districtWorstRenderedTris} triangles (budget 10M)`);
+out.districtUniqueTris = D.variants.reduce((s, v) => s + tris(v.major) + tris(v.minor) + tris(v.fine), 0) + tris(D.vaultFrame.geo) + D.crests.reduce((s, c) => s + tris(c.major) + tris(c.minor), 0) + tris(D.gantryGeo);
+assert.ok(out.districtWorstRenderedTris < 12e6, `Districts render at most ${out.districtWorstRenderedTris} triangles (budget 12M)`);
 assert.ok(out.districtUniqueTris < 4e6, 'Unique district geometry within 4M triangles');
 
 const G = rotorGeometry(S);
 let vaultGap = Infinity, wallHits = 0, rotorHits = 0, deckSink = Infinity;
-for (const v of D.variants) for (const g of [v.major, v.minor]) {
+for (const v of D.variants) for (const g of [v.major, v.minor, v.fine]) {
   assert.ok(finite(g));
   eachVertex(g, (x, y, z) => {
     const ax = Math.abs(x);
@@ -87,7 +90,7 @@ out.vaultClearanceMetres = Math.round(vaultGap);
 // aircar lanes: an empty 14 m tube round every lane through every variant
 const lanes = aircarLanes(S);
 let laneHits = 0;
-for (const v of D.variants) for (const g of [v.major, v.minor]) eachVertex(g, (x, y) => { for (const l of lanes) if (Math.abs(x - l.x) < 14 && Math.abs(y - l.y) < 14) laneHits++; });
+for (const v of D.variants) for (const g of [v.major, v.minor, v.fine]) eachVertex(g, (x, y) => { for (const l of lanes) if (Math.abs(x - l.x) < 14 && Math.abs(y - l.y) < 14) laneHits++; });
 for (const l of lanes) assert.ok(S.roofLow(l.x) - l.y > 1000, 'Aircar lanes run well under the glass');
 assert.equal(laneHits, 0, 'Aircar lanes are clear of every building');
 out.deckEmbedMetres = Math.round(-deckSink);
