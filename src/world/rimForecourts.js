@@ -181,7 +181,7 @@ export function buildRimForecourts(scene, towers, ground, avoid = () => false, {
     for(const st of streets)for(const pts of st.keep??[st.pts]){
       if(!pts?.length)continue;
       for(const ordered of [pts,[...pts].reverse()]){const p=ordered[0],r=Math.hypot(p[0]-cx,p[1]-cz);if(r>=RT-3&&r<RT+22&&ordered[1]){let x=p[0],z=p[1],remaining=6;for(let k=1;k<ordered.length&&remaining>0;k++){const q=ordered[k],dx=q[0]-x,dz=q[1]-z,length=Math.hypot(dx,dz),u=Math.min(1,remaining/(length||1));x+=dx*u;z+=dz*u;remaining-=length;}streetEnds.push({x,z,halfWidth:st.hw,a:Math.atan2(p[1]-cz,p[0]-cx),clippedEnd:{x:p[0],z:p[1]}});}}
-      for(let k=1;k<pts.length;k++){const a=pts[k-1],b=pts[k],dx=b[0]-a[0],dz=b[1]-a[1],u=Math.max(0,Math.min(1,((cx-a[0])*dx+(cz-a[1])*dz)/(dx*dx+dz*dz||1))),x=a[0]+dx*u,z=a[1]+dz*u,d=Math.hypot(x-cx,z-cz);if(d>RT-3&&d<RT+400)streetSegments.push({x,z,d,halfWidth:st.hw,a:Math.atan2(z-cz,x-cx)});}
+      for(let k=1;k<pts.length;k++){const a=pts[k-1],b=pts[k],dx=b[0]-a[0],dz=b[1]-a[1],u=Math.max(0,Math.min(1,((cx-a[0])*dx+(cz-a[1])*dz)/(dx*dx+dz*dz||1))),x=a[0]+dx*u,z=a[1]+dz*u,d=Math.hypot(x-cx,z-cz);if(d-st.hw>RT+.5&&d<RT+400)streetSegments.push({x,z,d,halfWidth:st.hw,a:Math.atan2(z-cz,x-cx)});}
     }
     const arrivals=[];
     for(const end of streetEnds){const a=end.a,p={x:cx+Math.cos(a)*walkR,z:cz+Math.sin(a)*walkR};if(!arrivals.some(e=>Math.hypot(e.street.x-end.x,e.street.z-end.z)<2)&&clearLine(p,end,1.8))arrivals.push({street:end,walk:p,a});}
