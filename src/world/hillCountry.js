@@ -404,7 +404,9 @@ export function buildHillCountry(scene, { onComponent = null } = {}) {
         const u0=q/treadCount,u1=(q+1)/treadCount,blend=(a,b,u)=>a.map((v,j)=>v+(b[j]-v)*u);
         const A=blend(L0,L1,u0),B=blend(R0,R1,u0),D=blend(L0,L1,u1),E=blend(R0,R1,u1);
         if(stair){let y=s.y+(t.y-s.y)*(t.y>s.y?u1:u0);if(shared)y=Math.round(y/.16)*.16;for(const p of [A,B,D,E])p[1]=y;}
-        if(shared&&crossingSurface)for(const [p,blend,u]of [[A,s.padBlend??1,u0],[B,s.padBlend??1,u0],[D,t.padBlend??1,u1],[E,t.padBlend??1,u1]]){const original=(s.originalY??s.y)+((t.originalY??t.y)-(s.originalY??s.y))*u,center={x:s.x+(t.x-s.x)*u,z:s.z+(t.z-s.z)*u,y:original};p[1]+=(crossingSurface({x:p[0],z:p[2],y:original})-crossingSurface(center))*blend;}
+        // (a trunk deck stays level across its width: tilted to each corner's own pad blend, a kerb
+        // side dropped by up to a metre below the carriageway where a pad was off its centreline)
+        if(shared&&crossingSurface&&record.kind!=='trunk')for(const [p,blend,u]of [[A,s.padBlend??1,u0],[B,s.padBlend??1,u0],[D,t.padBlend??1,u1],[E,t.padBlend??1,u1]]){const original=(s.originalY??s.y)+((t.originalY??t.y)-(s.originalY??s.y))*u,center={x:s.x+(t.x-s.x)*u,z:s.z+(t.z-s.z)*u,y:original};p[1]+=(crossingSurface({x:p[0],z:p[2],y:original})-crossingSurface(center))*blend;}
         for(const [p,v]of [[A,-1],[B,1],[E,1],[A,-1],[E,1],[D,-1]])C.drape.vert(p[0],p[1],p[2],up,ROAD_COL,roadLen+segL*(p===D||p===E?u1:u0),v,0);
         C.stone.hexa([...[A,B,E,D].map(p=>[p[0],floor,p[2]]),...[A,B,E,D].map(p=>[p[0],p[1]-.015,p[2]])],1,floor);
       }
