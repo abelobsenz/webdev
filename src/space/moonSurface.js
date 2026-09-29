@@ -215,18 +215,20 @@ City cityAt(vec3 up, float fp, float shore, float t, float siteD) {
       // and a village every ~28 km of it
       float lp = abs(fract(s / 0.05) - 0.5) * 0.05;
       float lamps = mix(1.0, litLine(lp, 0.004, fp) / 0.142, 1.0 - smoothstep(0.004, 0.02, fp));
-      float plots = litLine(dn, 0.35, fp) * step(0.55, hash12(vec2(floor(s / 0.6), float(i) + 0.5 * sign(dot(up, n)))));
+      float plots = litLine(dn, 0.35, fp) * mix(0.45, step(0.55, hash12(vec2(floor(s / 0.6), float(i) + 0.5 * sign(dot(up, n))))), 1.0 - smoothstep(0.2, 0.6, fp));
       float vc = (floor(s / 28.0) + 0.5) * 28.0;
       float hv = hash12(vec2(floor(s / 28.0), float(i) * 3.1));
       float ds = s - vc - (hv - 0.5) * 10.0;
-      float vil = exp(-(ds * ds + dn * dn) / 1.6) * step(0.35, hv) * ends;
-      c.land += vec3(1.0, 0.6, 0.28) * line * lamps * 1.6 + vec3(1.0, 0.72, 0.45) * (plots * 0.5 + vil * 0.9) * ends;
+      float vs = max(1.26, fp * 0.75);          // (a village keeps its light as it shrinks below a pixel)
+      float vil = exp(-(ds * ds + dn * dn) / (vs * vs)) * (1.6 / (vs * vs)) * step(0.35, hv) * ends;
+      c.land += vec3(1.0, 0.6, 0.28) * line * lamps * 1.6 + vec3(1.0, 0.72, 0.45) * (plots * 0.9 + vil * 0.9) * ends;
       c.road = max(c.road, line);
     } else {
       // a rail corridor: cool white line lighting, a station every 45 km, and the trains,
       // 400 m of lit carriages at 140 m/s each way, a train every 36 km
       float st = s - (floor(s / 45.0) + 0.5) * 45.0;
-      float sta = exp(-(st * st + dn * dn) / 0.36);
+      float ss = max(0.6, fp * 0.75);
+      float sta = exp(-(st * st + dn * dn) / (ss * ss)) * (0.36 / (ss * ss));
       float sp = max(0.4, fp);
       float d1 = (fract((s - t * 0.14) / 36.0 + 0.5) - 0.5) * 36.0;
       float d2 = (fract((s + t * 0.14) / 36.0) - 0.5) * 36.0;

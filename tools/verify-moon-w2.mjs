@@ -158,6 +158,18 @@ ok(report.orbitalTris > 30000 && report.orbitalTris < 1.5e6, `orbital triangles 
     }
   }
   ok(armClear > 3, `depot arm passes ${armClear.toFixed(1)} m from the tanks`);
+  // the yard's pods: between the stocks, under the hull, clear of it
+  for (let k = 0; k < 200; k++) {
+    O._moveYard(k * 7.3);
+    const m = new THREE.Matrix4(), p = new THREE.Vector3();
+    for (let i = 0; i < O.yard.pods.count; i++) {
+      O.yard.pods.getMatrixAt(i, m); p.setFromMatrixPosition(m);
+      const zs = ((p.z + 350) % 100 + 100) % 100;
+      ok(Math.min(zs, 100 - zs) > 2.5 + 2.4, `yard pod ${i} at a stock (z ${p.z.toFixed(1)})`);
+      ok(p.y < -10, `yard pod ${i} above the axis (hooks overhead)`);
+      ok(Math.hypot(p.x, p.y) > O.yard.hullR(p.z) + 10, `yard pod ${i} touches the hull`);
+    }
+  }
   report.depotArmClearanceM = +armClear.toFixed(1);
 }
 

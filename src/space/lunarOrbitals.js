@@ -41,6 +41,7 @@ export const ORBITS = {
   depot: { r: R_MOON + 293, n: V(0.96, 0.0, 0.28).normalize(), ph: 2.1 },
   relayA: { r: R_MOON + 203, n: V(-0.5, 0.62, 0.6).normalize(), ph: 0 },
   relayB: { r: R_MOON + 203, n: V(0.62, -0.35, 0.7).normalize(), ph: 1 },
+  yard: { r: R_MOON + 160, n: V(-0.35, 0.88, -0.32).normalize(), ph: 4.0 },
 };
 for (const o of Object.values(ORBITS)) {
   o.u = new THREE.Vector3().crossVectors(o.n, Math.abs(o.n.y) < 0.9 ? V(0, 1, 0) : V(1, 0, 0)).normalize();
@@ -404,6 +405,113 @@ function buildArmSegment(len) {
   return B.geometry();
 }
 
+// ---------------------------------------------------------------------- Hevelius Yard --
+
+export const YARD = { L: 900, W: 240, H: 240, gantryZ: [-260, 180], pods: 16 };
+
+/**
+ * The lunar-orbit shipyard (metres, the dock's length along local z): an open drydock of
+ * truss, a liner on the stocks inside it (plated aft, bare frames forward, her drive section
+ * waiting at the stern), the crew block and its radiators alongside: { geo, lamps, hullR }.
+ */
+export function buildYard() {
+  const { L, W, H } = YARD;
+  const B = new CB();
+  const lamps = [];
+  const hw = W / 2, hh = H / 2;
+  // the dock: four corner trusses the length of it, square frames every 150 m, cross-bracing
+  for (const [x, y] of [[-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh]]) truss(B, x, y, -L / 2, L / 2, 10, 30, LK.PAINT, 0.8);
+  for (let z = -L / 2; z <= L / 2 + 1; z += 150) {
+    B.box(0, -hh, z, W, 6, 6, LK.PAINT); B.box(0, hh, z, W, 6, 6, LK.PAINT);
+    B.box(-hw, 0, z, 6, H, 6, LK.PAINT); B.box(hw, 0, z, 6, H, 6, LK.PAINT);
+    B.box(0, hh + 3.4, z, W - 20, 0.8, 3, LK.HAZARD);
+    for (const [x, y] of [[-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh]]) lamps.push({ p: V(x * 0.94, y * 0.94, z), r: 5, color: LAMP.WHITE, i: 1.4, dir: V(-x, -y, 0).normalize() });
+  }
+  // the gantry rails along the top chords
+  for (const x of [-hw, hw]) B.box(x, hh + 7, 0, 4, 2, L, LK.DARK);
+  // the ship on the stocks: a liner's hull 760 m long, plated from the stern to midships,
+  // the frames bare forward of that with the keel and stringers showing
+  const R = 62;
+  const hullR = (z) => R * Math.min(1, Math.max(0.18, 1 - Math.pow(Math.max(0, (z - 150) / 250), 2) * 0.82));
+  const prof = [];
+  for (let z = -380; z <= 20; z += 20) prof.push([hullR(z), z, z < -330 ? LK.DARK : LK.HULL]);
+  B.lathe(prof, 36);
+  band(B, R + 0.3, -300, -280, 36, LK.SIGN, 1);                             // her name band, lit
+  band(B, R + 0.3, -120, -60, 36, LK.GLASS, 1);                             // the saloon glazing, fitted
+  for (let z = 30; z <= 380; z += 18) {
+    const r = hullR(z);
+    B.push(new THREE.Matrix4().makeTranslation(0, 0, z));
+    B.torus(r, 1.1, 36, 5, LK.BRONZE);
+    B.pop();
+  }
+  B.box(0, -R + 2, 200, 4, 4, 360, LK.BRONZE);                                // the keel
+  for (let k = 0; k < 8; k++) {
+    const a = k / 8 * TAU;
+    const pts = [];
+    for (let z = 20; z <= 380; z += 30) pts.push(V(Math.cos(a) * hullR(z), Math.sin(a) * hullR(z), z));
+    B.tube(pts, 0.8, 4, LK.HULL);
+  }
+  // the drive section waiting at the stern, on its cradle; the stocks holding the hull
+  B.at(0, 0, -410);
+  B.lathe([[40, 0, LK.HULL], [44, -6, LK.DARK], [44, -40, LK.DARK], [30, -52, LK.DARK], [18, -60, LK.BRONZE], [26, -84, LK.DARK], [0, -84, LK.DARK]], 28);
+  B.pop();
+  for (let z = -350; z <= 350; z += 100) {
+    const r = hullR(Math.min(z, 380));
+    for (const s of [-1, 1]) {
+      B.box(s * (r + (hw - r) / 2), 0, z, hw - r, 5, 5, LK.PAINT);
+      B.box(s * (r + 1.5), 0, z, 3, 12, 8, LK.BRONZE);
+    }
+    B.box(0, -(r + (hh - r) / 2), z, 5, hh - r, 5, LK.PAINT);
+  }
+  // the crew block beside the dock: six lit decks, a glazed control gallery, radiators
+  B.box(hw + 70, 0, -150, 90, 70, 160, LK.HULL);
+  B.box(hw + 24.6, 0, -150, 0.8, 60, 140, LK.GLASS);
+  B.box(hw + 116, 0, -150, 2, 54, 150, LK.GLASS);
+  B.box(hw + 70, 36, -150, 70, 2, 120, LK.SIGN);
+  for (const s of [-1, 1]) B.box(hw + 70, s * 75, -150, 80, 80, 1, LK.RADIATOR);
+  B.box(hw + 12, 0, -150, 24, 8, 8, LK.HULL);                                // the gangway tube to the dock
+  lamps.push({ p: V(hw + 118, 30, -80), r: 4, color: LAMP.GREEN, i: 2.4 }, { p: V(hw + 118, -30, -80), r: 4, color: LAMP.RED, i: 2.4 });
+  // welding at the plating front: blue-white arcs, flickering
+  for (let k = 0; k < 10; k++) {
+    const a = (k / 10) * TAU, z = 14 + (k % 3) * 6;
+    lamps.push({ p: V(Math.cos(a) * (hullR(z) + 1.5), Math.sin(a) * (hullR(z) + 1.5), z), r: 1.6, color: [0.75, 0.85, 1.0], i: 4, breathe: 1, phase: (k * 0.37) % 1 });
+  }
+  // beacons on the dock's corners
+  for (const z of [-L / 2, L / 2]) for (const [x, y] of [[-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh]]) lamps.push({ p: V(x, y, z), r: 6, color: LAMP.RED, i: 2.4, breathe: 0.8 });
+  return { geo: B.geometry(), lamps, hullR };
+}
+
+/** A gantry crane bridge spanning the dock's top (metres, centred; its trolley and hoist hang at x). */
+export function buildGantry() {
+  const { W, H } = YARD;
+  const B = new CB();
+  const hh = H / 2, hw = W / 2;
+  for (const s of [-1, 1]) {
+    B.box(s * hw, hh + 12, 0, 12, 8, 26, LK.PAINT);                           // the end carriages on the rails
+    B.box(s * hw, hh + 9, 0, 14, 1.2, 20, LK.HAZARD);
+  }
+  B.box(0, hh + 18, -8, W + 10, 6, 5, LK.PAINT);
+  B.box(0, hh + 18, 8, W + 10, 6, 5, LK.PAINT);
+  B.box(0, hh + 22, 0, W, 1.2, 20, LK.DECK);
+  B.box(30, hh + 14, 0, 16, 8, 16, LK.HULL);                                 // the trolley and its cab
+  B.box(30, hh + 14, 8.2, 12, 4, 0.4, LK.LIGHT);
+  B.tube([V(30, hh + 10, 0), V(30, hh - 50, 0)], 0.3, 4, LK.BRONZE);
+  B.box(30, hh - 52, 0, 12, 4, 12, LK.HAZARD);                               // the hook block with a hull plate
+  B.box(30, hh - 58, 0, 18, 1, 26, LK.HULL);
+  const lamps = [{ p: V(30, hh + 20, 0), r: 3, color: LAMP.AMBER, i: 2.4, breathe: 1 }, { p: V(-hw, hh + 17, 0), r: 2.4, color: LAMP.AMBER, i: 1.6 }, { p: V(hw, hh + 17, 0), r: 2.4, color: LAMP.AMBER, i: 1.6 }];
+  return { geo: B.geometry(), lamps };
+}
+
+/** A worker pod: a glazed sphere with thrusters and two manipulator arms (metres). */
+export function buildPod() {
+  const B = new CB();
+  sphere(B, 0, 0, 0, 2.2, LK.PAINT, 12);
+  B.box(0, 0.4, 2.0, 2.4, 1.2, 0.6, LK.GLASS);
+  for (const s of [-1, 1]) { B.box(s * 1.5, -0.6, 2.6, 0.3, 0.3, 2.2, LK.HULL); B.box(s * 2.3, 0, -0.4, 0.6, 0.6, 0.6, LK.DARK); }
+  B.box(0, 2.3, 0, 0.5, 0.4, 0.5, LK.LIGHT);
+  return B.geometry();
+}
+
 // ---------------------------------------------------------------------- runtime --
 
 const FERRY_SLOTS = [
@@ -519,6 +627,39 @@ export class LunarOrbitals {
       this.depot = { group: g, orbit: o, solG, j1, j2, near: [mesh, tk, solG, arm], hubR: 1.1 };
       this.stations.push(this.depot);
     }
+    // --- Hevelius Yard ---
+    {
+      const g = new THREE.Group();
+      g.name = 'Hevelius Yard';
+      const o = ORBITS.yard;
+      g.quaternion.setFromRotationMatrix(_m.makeBasis(o.u, o.v, o.n));
+      const y = buildYard();
+      const mesh = lunarMesh(y.geo, {}, this.mat);
+      mesh.name = 'Hevelius Yard dock, liner on the stocks and crew block';
+      addLamps(mesh, y.lamps, { minPx: 1.0 });
+      g.add(mesh);
+      const gd = buildGantry();
+      const gantries = YARD.gantryZ.map((z0, i) => {
+        const gm = lunarMesh(gd.geo, {}, this.mat);
+        gm.name = `Hevelius Yard gantry ${i + 1}`;
+        addLamps(gm, gd.lamps, { minPx: 1.0 });
+        g.add(gm);
+        return { mesh: gm, z0 };
+      });
+      // worker pods tending the plating front and the frames
+      const pods = lunarInstanced(buildPod(), YARD.pods, {}, this.mat, { tint: true });
+      pods.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      for (let i = 0; i < YARD.pods; i++) pods.instanceColor.setXYZ(i, ...(i % 3 ? [0.9, 0.62, 0.14] : [0.86, 0.84, 0.8]));
+      pods.name = 'Hevelius Yard worker pods';
+      g.add(pods);
+      // (between the stocks, which stand every 100 m from z = -350; under the hull, clear of the
+      // gantries' hooks overhead)
+      this.podPaths = Array.from({ length: YARD.pods }, (_, i) => ({ z: -100 + (i % 5) * 100, a0: -Math.PI / 2 + ((i * 0.37) % 1 - 0.5) * 1.6, w: 0.03 + 0.01 * (i % 4), dr: 14 + (i % 4) * 5 }));
+      g.visible = false;
+      parent.add(g);
+      this.yard = { group: g, orbit: o, gantries, pods, hullR: y.hullR, near: [mesh, pods, ...gantries.map((q) => q.mesh)], hubR: 0.9 };
+      this.stations.push(this.yard);
+    }
     // --- relays, instanced in the Moon frame (metres about the Moon's centre) ---
     this.relays = lunarInstanced(buildRelay(), RELAYS.length, {}, this.mat);
     this.relays.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
@@ -551,6 +692,7 @@ export class LunarOrbitals {
       s.group.add(s.far);
     }
     this._moveCars(0);
+    this._moveYard(0);
     this._sun = new THREE.Vector3(1, 0, 0);
     this.buildMs = performance.now() - t0;
     this.update(0, null);
@@ -568,6 +710,8 @@ export class LunarOrbitals {
    */
   update(t, sunM, cam = null, camera = null, viewH = 1080) {
     if (sunM) this._sun.copy(sunM);
+    // --- Yard ---
+    orbitPos(this.yard.orbit, t, 0, this.yard.group.position);
     // --- Wheel ---
     const W = this.wheel;
     orbitPos(W.orbit, t, 0, W.group.position);
@@ -601,6 +745,7 @@ export class LunarOrbitals {
       if (near !== s.nearOn) { s.nearOn = near; for (const m of s.near) m.visible = near; s.far.visible = !near; }
       if (d < 3000) camNear = true;
       if (s === W && near && d < 60) this._moveCars(t);
+      if (s === this.yard && near && d < 80) this._moveYard(t);
     }
     // --- relays and ferries (Moon frame, metres) ---
     for (let i = 0; i < RELAYS.length; i++) {
@@ -640,6 +785,21 @@ export class LunarOrbitals {
     this.ferryLamps.geometry.attributes.iLamp.needsUpdate = true;
     this.ferries.visible = !cam || camNear;
     this.relays.visible = !cam || camNear;
+  }
+
+  _moveYard(t) {
+    const Y = this.yard;
+    // the gantries: each works its own reach of the dock, three minutes a traverse
+    Y.gantries.forEach((gq, i) => { const u = 0.5 - 0.5 * Math.cos(t * TAU / 360 + i * 2); gq.mesh.position.z = (gq.z0 + u * 220) * 1e-3; });
+    for (let i = 0; i < YARD.pods; i++) {
+      const P = this.podPaths[i], a = Math.max(-2.7, Math.min(-0.44, P.a0 + 0.6 * Math.sin(t * P.w + i))), r = Y.hullR(P.z) + P.dr;
+      _p.set(Math.cos(a) * r, Math.sin(a) * r, P.z + 6 * Math.sin(t * 0.05 + i));
+      // facing the hull
+      _z.set(-Math.cos(a), -Math.sin(a), 0); _y.set(0, 0, 1); _x.crossVectors(_y, _z);
+      _m.makeBasis(_x, _y, _z).setPosition(_p);
+      Y.pods.setMatrixAt(i, _m);
+    }
+    Y.pods.instanceMatrix.needsUpdate = true;
   }
 
   _moveCars(t) {
