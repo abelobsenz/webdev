@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { CB, CK, TAU, V, lerp, rng, here, hereDir, atAim, tank, sphereTank, rcsQuad, dockingCollar, truss, catwalk, radiatorWing, dish, mast, container, flood } from './shipKit.js';
 import { sectionEllipse } from '../craft/craftGeometry.js';
 import { DK } from './craftMesh.js';
-import { quadLoft, smoothRange } from './portMaterial.js';
+import { quadLoft, smoothRange, PK } from './portMaterial.js';
 import { LAMP } from './lamps.js';
 import { design } from './shipDesigns.js';
 
@@ -191,7 +191,16 @@ function block(c, x, y, z, w, h, l, kinds = [DK.PORTS, CK.GLASS]) {
 function rim(B, R, h, w, seg, { inner = DK.CONCOURSE, side = DK.PORTS, floor = DK.LIVERY } = {}) {
   // floor plate outward in livery, ported side walls, the shoulders glazed (the homes along the
   // rim look out through them), the lit concourse roof facing the hub
-  B.lathe([[R, -w / 2, floor], [R, w / 2, floor], [R - h * 0.35, w / 2, side], [R - h, w / 2 - h * 0.3, CK.GLASS], [R - h, -w / 2 + h * 0.3, inner], [R - h * 0.35, -w / 2, CK.GLASS], [R, -w / 2, side]], seg, 0, { closedProfile: true });
+  // Each side wall steps back in two planted terraces before the glazed shoulder: the homes
+  // stand in tiers with gardens on their setbacks (a sheer ported wall read as one pale band at
+  // the wheel's framing; the treads and their shadowed risers give the rim a stepped silhouette)
+  const t1 = w * 0.055, t2 = w * 0.11, h1 = h * 0.16, h2 = h * 0.34, h3 = h * 0.52;
+  B.lathe([
+    [R, -w / 2, floor], [R, w / 2, floor],
+    [R - h1, w / 2, side], [R - h1, w / 2 - t1, PK.BEDS], [R - h2, w / 2 - t1, CK.GLASS], [R - h2, w / 2 - t2, PK.BEDS], [R - h3, w / 2 - t2, side],
+    [R - h, w / 2 - t2 - h * 0.26, CK.GLASS], [R - h, -w / 2 + t2 + h * 0.26, inner], [R - h3, -w / 2 + t2, CK.GLASS],
+    [R - h2, -w / 2 + t2, side], [R - h2, -w / 2 + t1, PK.BEDS], [R - h1, -w / 2 + t1, CK.GLASS], [R - h1, -w / 2, PK.BEDS], [R, -w / 2, side],
+  ], seg, 0, { closedProfile: true });
   // twelve districts between pressure bulkheads: heavy collars standing proud of the plate
   for (let i = 0; i < 12; i++) {
     B.push(new THREE.Matrix4().makeRotationZ(((i + 0.5) / 12) * TAU));
@@ -549,12 +558,30 @@ function buildRelay(c) {
   // the emitter: a phased-array disc facing the Earth on a tower beneath the core
   const eR = r.range(90, 160);
   B.push(TO_Y);
-  B.lathe([[0.02, -60, DK.ARRAY], [eR, -60, DK.ARRAY], [eR + 2, -58, CK.BRONZE], [eR, -56, CK.DARK], [eR * 0.3, -40, CK.DARK], [18, -24, DK.GRIME], [18, 24, DK.LIVERY], [14, 30, CK.HULL], [0.02, 32, CK.HULL]], 48);
+  B.lathe([[0.02, -60, DK.ARRAY], [eR, -60, DK.ARRAY], [eR + 2, -58, CK.BRONZE], [eR, -56, DK.GRIME], [eR * 0.3, -40, DK.GRIME], [18, -24, DK.GRIME], [18, 24, DK.LIVERY], [14, 30, CK.HULL], [0.02, 32, CK.HULL]], 48);
   B.pop();
   // ribs under the disc and the feed ring
   for (let k = 0; k < 12; k++) {
     const a = (k / 12) * TAU;
-    B.tube([V(Math.cos(a) * 20, -30, Math.sin(a) * 20), V(Math.cos(a) * eR * 0.95, -57, Math.sin(a) * eR * 0.95)], 1.2, 5, CK.DARK);
+    B.tube([V(Math.cos(a) * 20, -30, Math.sin(a) * 20), V(Math.cos(a) * eR * 0.95, -57, Math.sin(a) * eR * 0.95)], 2.2, 6, CK.DARK);
+  }
+  // the disc's back as a stiffened structure, not a flat plate: two concentric ring girders seated on
+  // the back cone (bronze-capped), a livery band at the rim, and the tile service hatches between
+  // the ribs (its back cone is working plate, panelled and stencilled)
+  for (const f of [0.45, 0.78]) {
+    const rr = eR * f, yb = -56 + (-40 + 56) * (1 - f) / 0.7 + 1.2;
+    B.push(new THREE.Matrix4().makeTranslation(0, yb, 0).multiply(new THREE.Matrix4().makeRotationX(Math.PI / 2)));
+    B.torus(rr, 2.6, 64, 6, CK.BRONZE);
+    B.pop();
+  }
+  B.push(new THREE.Matrix4().makeTranslation(0, -56.5, 0).multiply(new THREE.Matrix4().makeRotationX(Math.PI / 2)));
+  B.torus(eR - 2, 2.2, 72, 6, DK.LIVERY);
+  B.pop();
+  for (let k = 0; k < 12; k++) {
+    const a = ((k + 0.5) / 12) * TAU, rr = eR * 0.62, yb = -56 + 16 * (1 - 0.62) / 0.7 + 1;
+    B.at(Math.cos(a) * rr, yb, Math.sin(a) * rr, 0, -a, 0);
+    B.box(0, 0, 0, 10, 2.4, 7, CK.HULL); B.box(0, 1.3, 0, 8, 0.3, 5, CK.LANTERN);
+    B.pop();
   }
   B.torus(eR * 0.55, 1.6, 48, 6, CK.CONDUIT);
   can(c, V(0, 10, 30), Z, 8, 30);
