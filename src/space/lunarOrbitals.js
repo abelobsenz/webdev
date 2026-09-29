@@ -1135,7 +1135,10 @@ export class LunarOrbitals {
       _w.copy(s.group.position).applyMatrix4(this.parent.matrixWorld);
       const d = _w.distanceTo(cam);
       s.group.visible = d < 60000;
-      const near = camera ? pixelRadius(camera, _w, s.hubR, viewH) > 0.5 : d < 2000;
+      // near detail once the station is a real size on screen (on at 12 px, off at 8): at 0.5 px
+      // every station's full geometry was drawn from the Landing, 100-300 km below, as a dot
+      const pr = camera ? pixelRadius(camera, _w, s.hubR, viewH) : 0;
+      const near = camera ? pr > (s.nearOn ? 8 : 12) : d < 2000;
       if (near !== s.nearOn) { s.nearOn = near; for (const m of s.near) m.visible = near; s.far.visible = !near; }
       if (d < 3000) camNear = true;
       if (s === W && near && d < 60) { this._moveCars(t); this._moveApproach(t); }
