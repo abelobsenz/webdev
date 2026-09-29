@@ -164,3 +164,70 @@ export function rectDist(r, x, z) {
   const dx = Math.max(Math.abs(x - r.x) - r.w / 2, 0), dz = Math.max(Math.abs(z - r.z) - r.d / 2, 0);
   return Math.hypot(dx, dz);
 }
+
+/**
+ * A loft of closed rings along z (as CB.loft) whose facade kind is chosen per QUAD, not per
+ * vertex: every quad owns its four vertices, so a panel's kind ends at its seam instead of
+ * the fragment shader interpolating through every kind number in between (a glazing (0)
+ * vertex beside a livery (20) one used to draw thin bands of all nineteen kinds between).
+ * kindFn(i, j) picks quad i round, j along. Returns the skin's [first, end) vertex range.
+ */
+export function quadLoft(B, rings, kindFn, { capStart = 10, capEnd = 10 } = {}) {
+  const n = rings[0].pts.length, first = B.pos.length / 3, hint = new THREE.Vector3();
+  const per = rings.map((R) => { const s = [0]; for (let i = 1; i <= n; i++) { const p = R.pts[i % n], q = R.pts[i - 1]; s.push(s[i - 1] + Math.hypot(p[0] - q[0], p[1] - q[1])); } return s; });
+  let along = 0;
+  for (let j = 0; j < rings.length - 1; j++) {
+    const R0 = rings[j], R1 = rings[j + 1], a1 = along + Math.abs(R1.z - R0.z);
+    let area = 0;
+    for (let i = 0; i < n; i++) { const a = R0.pts[i], b = R0.pts[(i + 1) % n]; area += a[0] * b[1] - b[0] * a[1]; }
+    const o = Math.sign(area) || 1;
+    for (let i = 0; i < n; i++) {
+      const k = kindFn(i, j), i1 = (i + 1) % n;
+      const a = B.v(R0.pts[i][0], R0.pts[i][1], R0.z, per[j][i], along, k), b = B.v(R0.pts[i1][0], R0.pts[i1][1], R0.z, per[j][i + 1], along, k);
+      const c = B.v(R1.pts[i][0], R1.pts[i][1], R1.z, per[j + 1][i], a1, k), d = B.v(R1.pts[i1][0], R1.pts[i1][1], R1.z, per[j + 1][i + 1], a1, k);
+      const p = R0.pts[i], q = R0.pts[i1];
+      hint.set((q[1] - p[1]) * o, (p[0] - q[0]) * o, 0);
+      if (hint.lengthSq() < 1e-8) hint.set(0, 1, 0);
+      B.tri(a, b, d, hint); B.tri(a, d, c, hint);
+    }
+    along = a1;
+  }
+  const skin = B.pos.length / 3;
+  const cap = (R, dir, k) => {
+    const cx = R.pts.reduce((s, p) => s + p[0], 0) / n, cy = R.pts.reduce((s, p) => s + p[1], 0) / n;
+    const c = B.v(cx, cy, R.z, cx, cy, k), f0 = B.pos.length / 3;
+    for (let i = 0; i < n; i++) B.v(R.pts[i][0], R.pts[i][1], R.z, R.pts[i][0], R.pts[i][1], k);
+    for (let i = 0; i < n; i++) B.tri(c, f0 + i, f0 + ((i + 1) % n), new THREE.Vector3(0, 0, dir));
+  };
+  const dir = Math.sign(rings[rings.length - 1].z - rings[0].z) || 1;
+  if (capStart !== false) cap(rings[0], -dir, capStart);
+  if (capEnd !== false) cap(rings[rings.length - 1], dir, capEnd);
+  return [first, skin];
+}
+
+/**
+ * Smooth the normals of a vertex range across its split seams: every vertex in [first, end)
+ * takes the mean of the face normals meeting at its position within that range (the geometry's
+ * other parts, box corners and all, keep their own).
+ */
+export function smoothRange(geo, first, end) {
+  const p = geo.attributes.position.array, nrm = geo.attributes.normal.array, idx = geo.index.array;
+  const key = (i) => `${Math.round(p[i * 3] * 100)},${Math.round(p[i * 3 + 1] * 100)},${Math.round(p[i * 3 + 2] * 100)}`;
+  const acc = new Map();
+  for (let t = 0; t < idx.length; t += 3) {
+    const a = idx[t], b = idx[t + 1], c = idx[t + 2];
+    if (a < first || a >= end || b < first || b >= end || c < first || c >= end) continue;
+    const ux = p[b * 3] - p[a * 3], uy = p[b * 3 + 1] - p[a * 3 + 1], uz = p[b * 3 + 2] - p[a * 3 + 2];
+    const vx = p[c * 3] - p[a * 3], vy = p[c * 3 + 1] - p[a * 3 + 1], vz = p[c * 3 + 2] - p[a * 3 + 2];
+    const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+    for (const v of [a, b, c]) { const k = key(v); const s = acc.get(k); if (s) { s[0] += nx; s[1] += ny; s[2] += nz; } else acc.set(k, [nx, ny, nz]); }
+  }
+  for (let v = first; v < end; v++) {
+    const s = acc.get(key(v));
+    if (!s) continue;
+    const l = Math.hypot(s[0], s[1], s[2]) || 1;
+    nrm[v * 3] = s[0] / l; nrm[v * 3 + 1] = s[1] / l; nrm[v * 3 + 2] = s[2] / l;
+  }
+  geo.attributes.normal.needsUpdate = true;
+  return geo;
+}

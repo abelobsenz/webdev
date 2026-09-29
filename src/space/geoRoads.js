@@ -11,6 +11,7 @@ import { StoreWorks } from './storeWorks.js';
 import { WaterRun } from './waterRun.js';
 import { DynLamps } from './lifeKit.js';
 import { HS } from './harbour.js';
+import { quadLoft, smoothRange } from './portMaterial.js';
 
 // THE GEOSTATIONARY ROADS: the Harbour's neighbourhood along the geostationary arc.
 //
@@ -81,12 +82,18 @@ export function buildConcordYard() {
     const f = linerF(z);
     rings.push({ z, pts: sectionEllipse(LA * f, LB * f, NR, 2.3, 0, 0.8) });
   }
-  H.loft(rings, (i, j) => {
-    const t = i / NR, side = Math.abs(Math.cos(t * TAU));
-    if (j % 9 === 0 && j > 0 && j < N) return CK.BRONZE;
-    if (j > 10 && side > 0.9 && Math.abs(Math.sin(t * TAU)) < 0.22) return CK.LANTERN;
+  // one kind per plate (quadLoft): the old per-vertex kinds blended glazing (0) into livery (20)
+  // through every kind between, drawing thin bands of foil, hazard and lantern along each seam.
+  // Toward the construction front the paint gives out: the last eight rings of plate go ragged
+  // from painted to bare working plate, the newest few still dark unfaired insulation.
+  const hsh = (i, j) => { const x = Math.sin(i * 127.1 + j * 311.7) * 43758.5453; return x - Math.floor(x); };
+  const skin = quadLoft(H, rings, (i, j) => {
+    const t = (i + 0.5) / NR, c = Math.cos(t * TAU), sn = Math.sin(t * TAU), side = Math.abs(c);
+    const front = (j - (N - 8)) / 8;
+    if (front > 0 && hsh(i, j) < front * 1.15) return front > 0.6 && hsh(i + 7, j) < 0.4 ? CK.DARK : DK.GRIME;
+    if (j > 10 && side > 0.9 && Math.abs(sn) < 0.22) return CK.LANTERN;
     if (side > 0.55 && side < 0.8) return CK.GLASS;
-    return Math.sin(t * TAU) < -0.35 ? DK.GRIME : j % 3 === 1 ? DK.PORTS : DK.LIVERY;
+    return sn < -0.35 ? DK.GRIME : j % 3 === 1 ? DK.PORTS : DK.LIVERY;
   }, { capStart: CK.DARK, capEnd: CK.DARK });
   // the garden atrium over the plated part: planted deck under its colonnade of ribs
   const zA0 = -600, zA1 = 200;
@@ -139,16 +146,37 @@ export function buildConcordYard() {
     if ((k + Math.round(t * 2)) % 3) continue;
     lamps.push({ p: sectionPoint(z, t).multiplyScalar(1).add(V(0, 0, 0)).addScaledVector(sectionPoint(z, t).setZ(0).normalize(), 6), r: 2.4, color: (k % 2) ? LAMP.TEAL : LAMP.WHITE, i: 3.2, breathe: 0.6, phase: (k * 0.37 + t) % 1 });
   }
-  const hullGeo = H.geometry();
+  const hullGeo = smoothRange(H.geometry(), skin[0], skin[1]);
 
   // ---- the dock: nine octagonal portal frames, four rails, surveyed clamps
   const probe = new THREE.Mesh(hullGeo, new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }));
   probe.updateMatrixWorld(true);
   const ray = new THREE.Raycaster();
+  // Each portal frame is a box truss 26 m deep and 13 m thick (it was a single 16 m pipe, and
+  // read as a wire cage): four oxide-red chords, Warren lacing in working grey on its two
+  // faces, ties across them at every panel point, bronze nodes at the corners. The inner chords
+  // keep the old tube's inner face (apothem 250 m), so the clamps, hatches and walkway brackets
+  // still seat on them; the truss deepens outward, clear of the ship.
+  const FA = YARD.frameR, FD = 26, FZ = 6.5, NP = 9;
+  const corner = (k, a, z) => { const ang = Math.PI / 8 + (k % 8) * Math.PI / 4, r = a / Math.cos(Math.PI / 8); return V(Math.cos(ang) * r, Math.sin(ang) * r, z); };
   for (const z of YARD.frames) {
-    const loop = []; for (let k = 0; k < 8; k++) loop.push(octV(k, z)); loop.push(loop[0].clone());
-    B.tube(loop, 8, 8, CK.HULL);
-    for (let k = 0; k < 8; k++) { const p = octV(k, z); B.box(p.x, p.y, p.z, 26, 26, 26, CK.BRONZE); }
+    for (const a of [FA, FA + FD]) for (const dz of [-FZ, FZ]) {
+      const loop = []; for (let k = 0; k < 8; k++) loop.push(corner(k, a, z + dz)); loop.push(loop[0].clone());
+      B.tube(loop, 2.4, 8, DK.LIVERY);
+    }
+    for (let k = 0; k < 8; k++) {
+      const at = (a, u, dz) => corner(k, a, z + dz).lerp(corner(k + 1, a, z + dz), u);
+      for (const dz of [-FZ, FZ]) for (let m = 0; m < NP; m++) {
+        const u0 = m / NP + 0.004, u1 = (m + 1) / NP - 0.004;      // (ends inside the chord, each its own cap)
+        const [a0, a1] = m % 2 ? [FA + FD, FA] : [FA, FA + FD];
+        B.tube([at(a0, u0, dz), at(a1, u1, dz)], 1.1, 6, DK.GRIME);
+      }
+      for (let m = 1; m < NP; m++) for (const a of [FA, FA + FD]) B.tube([at(a, m / NP, -FZ), at(a, m / NP, FZ)], 0.9, 6, DK.GRIME);
+      const p = octV(k, z), q = corner(k, FA + FD, z);
+      B.box(p.x, p.y, p.z, 26, 26, 26, CK.BRONZE);
+      B.box(q.x, q.y, q.z, 18, 18, 18, CK.BRONZE);
+      lamps.push({ p: q.clone().multiplyScalar((FA + FD + 12) / (FA + FD)), r: 2.2, color: k % 2 ? LAMP.RED : LAMP.WHITE, i: 2.6, breathe: 0.8, phase: (k * 0.13 + z * 0.0007) % 1 });
+    }
   }
   for (const k of [1, 2, 5, 6]) B.tube([octV(k, YARD.frames[0]), octV(k, YARD.frames[8])], 6, 8, CK.DARK);
   // cross bracing on the port and starboard faces between frames (the sides stay open above and below)
