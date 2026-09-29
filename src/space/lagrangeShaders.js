@@ -195,6 +195,12 @@ void main() {
 const MIR_FRAG = /* glsl */ `
 uniform vec3 uSunView;
 uniform float uSunE;
+uniform vec3 uCylC;         // the cylinder's centre, view space (km)
+uniform vec3 uCylA;         // its axis, view space
+uniform vec3 uCylX;         // its rotor frame's x, view space (the land strips' zero)
+uniform float uCylR;        // radius (km)
+uniform float uCylHL;       // half length (km)
+uniform float uDay;
 varying vec2 vMir;
 varying vec3 vView;
 varying vec3 vN;
@@ -219,14 +225,40 @@ void main() {
   float rough = mix(0.5, g, det);
   vec3 sun = vec3(1.0, 0.97, 0.92) * uSunE;
   vec3 spec = sun * (pow(sd, 2000.0) * 60.0 + pow(sd, 60.0 + 200.0 * rough) * 0.35 + pow(sd, 8.0) * 0.012);
-  vec3 film = vec3(0.012, 0.014, 0.02) + spec * (1.0 - 0.6 * mix(0.05, seam, det)) + vec3(0.05) * sun * ndl * 0.003;
+  // what the film shows besides the Sun: its own cylinder. Cast the reflected ray at the
+  // cylinder (view space, km): where it meets a window strip the valley's light comes back
+  // (daylight thrown in by the mirrors, or the towns at night), where it meets a land strip
+  // the dim shielding hull; elsewhere the black sky. Closed form, no loops or derivatives.
+  vec3 P0 = vView - uCylC;
+  vec3 dP = P0 - dot(P0, uCylA) * uCylA;
+  vec3 dR = R3 - dot(R3, uCylA) * uCylA;
+  float qa = max(dot(dR, dR), 1e-8), qb = dot(dP, dR), qc = dot(dP, dP) - uCylR * uCylR;
+  float qd = qb * qb - qa * qc;
+  vec3 seen = vec3(0.0);
+  if (qd > 0.0) {
+    float tHit = (-qb - sqrt(qd)) / qa;
+    vec3 H = P0 + R3 * tHit;
+    float ax = dot(H, uCylA);
+    if (tHit > 0.0 && abs(ax) < uCylHL) {
+      vec3 radial = H - ax * uCylA;
+      vec3 Y = cross(uCylA, uCylX);
+      float ang = atan(dot(radial, Y), dot(radial, uCylX));
+      float m = mod(ang + 0.5235988, 2.0943951) - 0.5235988;          // from the nearest land strip's centre
+      float win = smoothstep(0.50, 0.53, abs(m));
+      vec3 valley = mix(vec3(0.020, 0.032, 0.016) * uSunE * 0.11, vec3(0.9, 0.62, 0.36) * 0.018, 1.0 - uDay);
+      valley += vec3(0.30, 0.42, 0.56) * uSunE * 0.006 * uDay;     // the lit air over the land
+      vec3 hull = vec3(0.012, 0.012, 0.013);
+      seen = mix(hull, valley, win) * 0.88;
+    }
+  }
+  vec3 film = vec3(0.012, 0.014, 0.02) + seen + spec * (1.0 - 0.6 * mix(0.05, seam, det)) + vec3(0.05) * sun * ndl * 0.003;
   vec3 back = vec3(0.07, 0.068, 0.065) * sun * ndl / 3.14159 + vec3(0.006);
   back *= 1.0 - 0.3 * mix(0.1, max(lineAA(f.x, 700.0, 6.0, fw.x), lineAA(f.y, 1600.0, 8.0, fw.y)), det);
   gl_FragColor = vec4(mix(back, film, front), 1.0);
 }
 `;
 
-const _m = new THREE.Matrix4();
+const _m = new THREE.Matrix4(), _mv = new THREE.Matrix4();
 
 export function createWindowMaterial(seed = 0) {
   return new THREE.ShaderMaterial({
@@ -242,7 +274,11 @@ export function createWindowMaterial(seed = 0) {
 export function createMirrorMaterial() {
   return new THREE.ShaderMaterial({
     vertexShader: MIR_VERT, fragmentShader: MIR_FRAG,
-    uniforms: { uSunView: { value: new THREE.Vector3(0, 0, 1) }, uSunE: U.uSunIlluminance },
+    uniforms: {
+      uSunView: { value: new THREE.Vector3(0, 0, 1) }, uSunE: U.uSunIlluminance,
+      uCylC: { value: new THREE.Vector3() }, uCylA: { value: new THREE.Vector3(0, 0, 1) }, uCylX: { value: new THREE.Vector3(1, 0, 0) },
+      uCylR: { value: COL.R * 0.001 }, uCylHL: { value: COL.HL * 0.001 }, uDay: { value: 1 },
+    },
     side: THREE.DoubleSide,
   });
 }
@@ -261,10 +297,23 @@ export function bindWindow(mesh, sunDir) {
   };
 }
 
-export function bindMirror(mesh, sunDir) {
+/**
+ * Hook a mirror sheet: the Sun in view space, and (when given the rotor it hangs from and the
+ * pair's day uniform) the cylinder it faces, in view space, for the film's reflection of it.
+ * The material is shared, so each sheet sets its own cylinder as it draws. No allocation.
+ */
+export function bindMirror(mesh, sunDir, rotor = null, day = null) {
   const u = mesh.material.uniforms;
   mesh.onBeforeRender = (r, s, cam) => {
     u.uSunView.value.copy(sunDir).transformDirection(cam.matrixWorldInverse);
+    if (rotor) {
+      _mv.multiplyMatrices(cam.matrixWorldInverse, rotor.matrixWorld);
+      u.uCylC.value.setFromMatrixPosition(_mv);
+      u.uCylA.value.set(0, 0, 1).transformDirection(_mv);
+      u.uCylX.value.set(1, 0, 0).transformDirection(_mv);
+      u.uCylR.value = COL.R * 0.001; u.uCylHL.value = COL.HL * 0.001;
+      u.uDay.value = day ? day.value : 1;
+    } else u.uCylR.value = 0;
     mesh.material.uniformsNeedUpdate = true;
   };
 }

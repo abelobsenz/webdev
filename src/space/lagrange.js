@@ -86,28 +86,65 @@ function dockRoute(berth, dir, side, far, k) {
 }
 
 /**
- * Gate rings and corridor buoys (km, station frame): gates [{ c, r, n, from, to }], the ring in
- * the plane normal to the corridor, alternating port red / starboard green round it, and a
- * wave of light running down the buoy string toward the station.
+ * One beacon buoy (metres, into B at p, its spar along `up`): a spar hull with a bronze collar,
+ * a ring of photovoltaic skirt on three struts, and a lantern crown. Returns the crown's point.
  */
-function approachLamps(gates, color) {
-  const lamps = [];
+function beaconBuoy(B, p, up, size) {
+  const f = V().crossVectors(up, Math.abs(up.y) < 0.9 ? V(0, 1, 0) : V(1, 0, 0)).normalize();
+  const g = V().crossVectors(up, f);
+  B.push(new THREE.Matrix4().makeBasis(f, g, up).setPosition(p).scale(V(size, size, size)));
+  B.lathe([[0.1, -40, CK.DARK], [8, -37, CK.DARK], [11, -30, CK.BRONZE], [11, 14, CK.HULL], [14, 18, CK.BRONZE], [14, 22, CK.BRONZE], [8, 26, CK.HULL], [4.5, 34, CK.LANTERN], [0.1, 38, CK.LANTERN]], 12);
+  B.torus(26, 1.8, 24, 5, CK.BRONZE);
+  B.box(0, 0, -6, 44, 44, 0.6, CK.PANEL);
+  for (let k = 0; k < 3; k++) {
+    const a = (k / 3) * TAU;
+    B.tube([V(Math.cos(a) * 10, Math.sin(a) * 10, 0), V(Math.cos(a) * 25, Math.sin(a) * 25, 0)], 1.2, 5, CK.DARK);
+  }
+  B.pop();
+  return p.clone().addScaledVector(up, 40 * size);
+}
+
+/**
+ * The approach to a port (km, station frame): gates [{ c, r, from, to, size }]. Four marker buoys
+ * stand at the corners of each entry gate, port red and starboard green, flashing together; a
+ * single line of buoys runs down the corridor, one every 30-40 km, their white strobes chasing
+ * toward the station. Physical buoys (craft kinds, metres) with small lamps on their crowns: a
+ * navigation aid, not a drawn ring. Returns a group in km.
+ */
+function approachBeacons(gates, color, mat) {
+  const lamps = [], B = new CB(), buoys = [];
   for (const g of gates) {
-    const d = V().subVectors(g.from, g.to).normalize();
+    const d = V().subVectors(g.from, g.to).normalize();              // down the corridor, toward the port
     const e1 = V().crossVectors(d, Math.abs(d.y) < 0.9 ? V(0, 1, 0) : V(1, 0, 0)).normalize(), e2 = V().crossVectors(d, e1);
-    for (let i = 0; i < g.n; i++) {
-      const a = (i / g.n) * TAU;
-      lamps.push({ p: g.c.clone().addScaledVector(e1, Math.cos(a) * g.r).addScaledVector(e2, Math.sin(a) * g.r), r: 0.12, color: Math.cos(a) > 0 ? LAMP.GREEN : LAMP.RED, i: 5, breathe: 0.3, phase: i / g.n });
+    const lampR = 0.012 * g.size;
+    for (let i = 0; i < 4; i++) {
+      const a = ((i + 0.5) / 4) * TAU;
+      const p = g.c.clone().addScaledVector(e1, Math.cos(a) * g.r).addScaledVector(e2, Math.sin(a) * g.r);
+      buoys.push({ p, up: e2.clone(), size: g.size * 1.5 });
+      const crown = p.clone().addScaledVector(e2, 0.042 * g.size * 1.5);
+      lamps.push({ p: crown, r: lampR * 1.6, color: Math.cos(a) > 0 ? LAMP.GREEN : LAMP.RED, i: 4.5, breathe: 0.9, phase: 0 });
+      lamps.push({ p: p.clone().addScaledVector(e1, Math.cos(a) * 0.04 * g.size), r: lampR * 0.6, color: LAMP.WHITE, i: 2.0 });
     }
-    const L = g.from.distanceTo(g.to), n = Math.max(2, Math.round(L / 12));
+    const L = g.from.distanceTo(g.to), n = Math.max(2, Math.round(L / 35));
     for (let i = 0; i <= n; i++) {
-      const p = g.to.clone().lerp(g.from, i / n);
-      for (const s of [-1, 1]) lamps.push({ p: p.clone().addScaledVector(e1, s * 1.5), r: 0.06, color: color, i: 4, breathe: 0.9, phase: 1 - i / n });
+      const p = g.to.clone().lerp(g.from, i / n).addScaledVector(e1, (i % 2 ? 1 : -1) * 1.2);
+      buoys.push({ p, up: e2.clone(), size: g.size });
+      lamps.push({ p: p.clone().addScaledVector(e2, 0.042 * g.size), r: lampR, color: i % 2 ? color : LAMP.WHITE, i: 3.2, breathe: 0.95, phase: 1 - i / n });
     }
   }
-  const m = createLamps(lamps, { minPx: 1.1 });
-  m.renderOrder = 17;
-  return m;
+  for (const b of buoys) beaconBuoy(B, b.p.clone().multiplyScalar(1000), b.up, b.size);
+  const group = new THREE.Group();
+  const m = new THREE.Group();
+  m.scale.setScalar(KM);
+  group.add(m);
+  const hull = craftMesh(B.geometry(), { scale: 1 }, mat);
+  m.add(hull);
+  const lm = createLamps(lamps, { minPx: 0.9 });
+  lm.renderOrder = 17;
+  group.add(lm);
+  group.userData.buoys = buoys.length;
+  group.userData.lamps = lamps.length;
+  return group;
 }
 
 // long lanes between the bodies: [from, to, colour out, colour back]
@@ -222,7 +259,7 @@ export class LagrangeColonies {
         piv.add(hinge);
         const sheet = new THREE.Mesh(pt.mirror.sheet, this.mirMat);
         sheet.frustumCulled = false; sheet.renderOrder = 3;
-        bindMirror(sheet, this.sunDir);
+        bindMirror(sheet, this.sunDir, rotor, winMat.uniforms.uDay);
         hinge.add(sheet, craftMesh(pt.mirror.back, { scale: 1 }, mat));
         return hinge;
       });
@@ -243,7 +280,7 @@ export class LagrangeColonies {
     }
     // the approach: a gate ring of beacons 200 km out on the anti-sun side of each twin, and a
     // string of buoys down the corridor to the port (km, pair frame)
-    const approach = this._approach(group.name, approachLamps([-1, 1].map((s) => ({ c: V(s * COL.PAIR_X * KM, 0, -200), r: 10, n: 18, from: V(s * COL.PAIR_X * KM, 0, -28), to: V(s * COL.PAIR_X * KM, 0, -190) })), name === 'L4' ? LAMP.BLUE : LAMP.TEAL), 215);
+    const approach = this._approach(group.name, approachBeacons([-1, 1].map((s) => ({ c: V(s * COL.PAIR_X * KM, 0, -200), r: 6, size: 1.6, from: V(s * COL.PAIR_X * KM, 0, -28), to: V(s * COL.PAIR_X * KM, 0, -190) })), name === 'L4' ? LAMP.BLUE : LAMP.TEAL, mat), 215);
     space.scene.add(group);
     const P = { name, group, approach, m, mat, winMat, cyls, lampSets, dayOffset, day: 1, alpha: COL.MIRROR_MAX, ramAlpha: -1, pos: new THREE.Vector3() };
     this._rams(P);
@@ -313,7 +350,7 @@ export class LagrangeColonies {
       g.add(lifts);
       return { g, spin: w.spin, lifts, range: liftRange(w) };
     });
-    const approach = this._approach('lagrange-L1', approachLamps([-1, 1].map((s) => ({ c: V(0, 0, s * 150), r: 3, n: 12, from: V(0, 0, s * 12), to: V(0, 0, s * 140) })), LAMP.AMBER), 155);
+    const approach = this._approach('lagrange-L1', approachBeacons([-1, 1].map((s) => ({ c: V(0, 0, s * 150), r: 2.2, size: 1, from: V(0, 0, s * 12), to: V(0, 0, s * 140) })), LAMP.AMBER, mat), 155);
     space.scene.add(group);
     const G = { name: 'L1', approach, group, m, mat, wheels, pos: new THREE.Vector3() };
     G.body = space.addBody('lagrange-L1', [group], (o) => (o || _a).copy(G.pos), 1.6, { solid: true, minNear: 0.005 });
@@ -321,9 +358,7 @@ export class LagrangeColonies {
   }
 
   /** The approach beacons as their own top-level body (they reach far beyond the station's bound). */
-  _approach(name, mesh, reach) {
-    const g = new THREE.Group();
-    g.add(mesh);
+  _approach(name, g, reach) {
     this.space.scene.add(g);
     this.space.addBody(`${name}-approach`, [g], (o) => (o || _a).copy(g.position), reach, { minNear: 0.02 });
     return g;

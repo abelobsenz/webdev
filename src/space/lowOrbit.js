@@ -710,7 +710,10 @@ void main() {
     }
     gl.mat.uniforms.uSun.value.copy(sun);
     gl.commit();
-    // trails follow their precessing planes and mark where each station is on its lap
+    // trails follow their precessing planes and mark where each station is on its lap. They
+    // are a map, not a thing: drawn only once the camera has left the shell (from a few
+    // thousand km up, where the shell reads as a whole), never across a station's close view
+    const mapGain = cam ? smooth(R_EARTH + 4000, R_EARTH + 14000, cam.position.length()) : 1;
     for (const tr of this.trails) {
       const o = tr.orbit;
       o._solve(t);
@@ -721,7 +724,9 @@ void main() {
       tr.mat.uniforms.uSunDir.value.copy(sun);
       // the trace fades out as you close on the station (it is a map, not a thing)
       const d = cam ? cam.position.distanceTo(tr.station.root.position) : 1e4;
-      tr.mat.uniforms.uGainT.value = (tr.station.name.startsWith('gleaner') ? 0.45 : 1) * smooth(80, 2500, d);
+      const gain = (tr.station.name.startsWith('gleaner') ? 0.45 : 1) * smooth(80, 2500, d) * mapGain;
+      tr.mat.uniforms.uGainT.value = gain;
+      tr.mesh.visible = gain > 0.002;
     }
     this.constellations.update(t, realTime, sun, cam, H);
   }
@@ -846,12 +851,12 @@ export function leoTargets(space) {
     frame: (q) => (space.lowOrbit ? space.lowOrbit.pose(name, space.sim, null, q) : q.identity()),
   });
   return {
-    halcyon: { ...P('halcyon'), minDist: 1.4, maxDist: 40000, defaultDist: 3.8, view: { az: 0.5, el: 0.45 } },
-    aurelia: { ...P('aurelia'), minDist: 0.45, maxDist: 40000, defaultDist: 1.25, view: { az: 0.8, el: 0.35 } },
-    demeter: { ...P('demeter'), minDist: 1.1, maxDist: 40000, defaultDist: 3.2, view: { az: 2.3, el: 0.4 } },
-    boreal: { ...P('boreal'), minDist: 0.35, maxDist: 40000, defaultDist: 0.95, view: { az: 0.6, el: 0.15 } },
-    dawnline: { ...P('dawnline'), minDist: 1.2, maxDist: 40000, defaultDist: 3.4, view: { az: 2.8, el: 0.5 } },
-    anansi: { ...P('anansi'), minDist: 0.3, maxDist: 60000, defaultDist: 1.1, view: { az: 0.4, el: 0.3 } },
+    halcyon: { ...P('halcyon'), minDist: 1.4, maxDist: 40000, defaultDist: 2.9, view: { az: 0.55, el: 0.38 } },
+    aurelia: { ...P('aurelia'), minDist: 0.45, maxDist: 40000, defaultDist: 0.82, view: { az: 0.8, el: 0.3 } },
+    demeter: { ...P('demeter'), minDist: 1.0, maxDist: 40000, defaultDist: 2.05, view: { az: 2.2, el: 0.32 } },
+    boreal: { ...P('boreal'), minDist: 0.35, maxDist: 40000, defaultDist: 0.72, view: { az: 0.6, el: 0.18 } },
+    dawnline: { ...P('dawnline'), minDist: 1.1, maxDist: 40000, defaultDist: 2.4, view: { az: 2.6, el: 0.42 } },
+    anansi: { ...P('anansi'), minDist: 0.3, maxDist: 60000, defaultDist: 0.55, view: { az: 0.4, el: 0.3 } },
   };
 }
 

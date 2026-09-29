@@ -199,7 +199,7 @@ export class SpaceMode {
       minDist:.12,maxDist:1e8,defaultDist:6,view:{az:1,el:.4},
     });
     // the Lagrange colonies (src/space/lagrange.js): the pairs at L4 and L5, the L1 gateway
-    for (const [name, pt, dist, view] of [['lagrangeL4', 'L4', 120, { az: 0.7, el: 0.35 }], ['lagrangeL5', 'L5', 120, { az: 2.3, el: 0.3 }], ['lagrangeL1', 'L1', 5.5, { az: 0.9, el: 0.25 }]]) {
+    for (const [name, pt, dist, view] of [['lagrangeL4', 'L4', 64, { az: 0.62, el: 0.3 }], ['lagrangeL5', 'L5', 64, { az: 2.35, el: 0.26 }], ['lagrangeL1', 'L1', 3.0, { az: 0.9, el: 0.25 }]]) {
       T(name, { position: (o) => lagrangePoint(sim, pt, o), frame: (q) => lagrangeFrame(sim, pt, q), minDist: pt === 'L1' ? 1.2 : 12, maxDist: 500000, defaultDist: dist, view });
     }
     T('hearthworks', {
