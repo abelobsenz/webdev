@@ -8,7 +8,7 @@ import { stationFrame } from './stations.js';
 import { addLamps, pixelRadius } from './craftMesh.js';
 import { TOWNS } from './moonBake.js';
 import { FAR_TOWNS } from './lunarNetwork.js';
-import { buildSettlementQuarter, QuarterLife } from './lunarSettlement.js';
+import { buildSettlementQuarter, buildLandmarks, QuarterLife } from './lunarSettlement.js';
 import { R_MOON } from './sim.js';
 import { Path, LunarTraffic, plumeMesh } from './lunarTraffic.js';
 
@@ -48,7 +48,7 @@ export function hopPad(seed, weight) {
  * Lay out one outpost (pure data + geometry, no renderer): returns { geo, lamps, inst, plan,
  * loops, radius }. weight (0.3..0.6) scales it; seed makes it its own.
  */
-export function buildOutpost(seed, weight = 0.5, lat = 0) {
+export function buildOutpost(seed, weight = 0.5, lat = 0, feature = null) {
   const rnd = mulberry(seed * 7919 + 13);
   const B = new CB();
   const lamps = [];
@@ -266,6 +266,9 @@ export function buildOutpost(seed, weight = 0.5, lat = 0) {
   }
 
   // --- the town quarter: terraces on a lit main street, a plaza, a tram, greenhouses, people ---
+  // (and first the settlement's own landmark: polar light towers and ice mine, the far side's
+  // observatory or arcology)
+  if (feature) buildLandmarks(feature, seed, weight, plan, B, lamps, put, loops);
   const quarter = buildSettlementQuarter(seed, weight, plan, B, lamps, put, loops);
 
   // --- the ground: craters and boulders beyond the works ---
@@ -318,7 +321,8 @@ export class LunarOutposts {
       stationFrame(up, g.quaternion);
       g.visible = false;
       parent.add(g);
-      return { lat, lon, w, up, group: g, built: false, data: null, rovers: null, riders: null };
+      const feature = Math.abs(lat) > 80 ? 'polar' : name === 'Daedalus' ? 'observatory' : Math.abs(lon) > 90 ? 'farside' : null;
+      return { lat, lon, w, up, feature, group: g, built: false, data: null, rovers: null, riders: null };
     });
     this._wp = new THREE.Vector3();
     this._local = new THREE.Vector3();
@@ -329,7 +333,7 @@ export class LunarOutposts {
   /** Build one outpost now (its geometry and instanced furniture). */
   build(site, idx) {
     const t0 = performance.now();
-    const d = buildOutpost(idx + 101, site.w, site.lat);
+    const d = buildOutpost(idx + 101, site.w, site.lat, site.feature);
     site.data = d;
     const mesh = lunarMesh(d.geo, {}, this.mat);
     mesh.name = `${site.group.name}: works, pads, domes and ground`;

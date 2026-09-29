@@ -209,6 +209,147 @@ export function buildSettlementQuarter(seed, weight = 0.5, plan = [], B = null, 
 }
 const _m2 = new THREE.Matrix4();
 
+// ------------------------------------------------------------------ landmarks --
+
+/** Find a free circle of radius r on the ring d0..d1 round the outpost (clear of the plan and the roads). */
+function findSpot(rnd, plan, roads, r, d0, d1) {
+  for (let k = 0; k < 300; k++) {
+    const a = rnd() * TAU, d = d0 + (d1 - d0) * rnd() + k * 3;
+    const x = Math.cos(a) * d, z = Math.sin(a) * d;
+    if (plan.every((p) => Math.hypot(p.x - x, p.z - z) > p.r + r + 8) && roads.every((pts) => pts.every((p) => Math.hypot(p.x - x, p.z - z) > r + 45))) return [x, z, a];
+  }
+  return null;
+}
+
+/**
+ * The feature that makes a settlement its own (lunarNetwork.js FAR_TOWNS): 'polar' - the
+ * eternal-light solar towers on the rim, the ice mine in the crater's shadow and the tall
+ * beacon mast; 'observatory' - the far side's great radio dish on its mount and the Y of the
+ * array; 'farside' - a terraced arcology, glazed gardens stepping up its flanks. Built into
+ * the outpost's builder; returns the circles it claimed.
+ */
+export function buildLandmarks(feature, seed, weight, plan, B, lamps, put, roads = []) {
+  const rnd = mulberry(seed * 6007 + 29);
+  const claimed = [];
+  const claim = (kind, x, z, r) => { const c = { kind, x, z, r }; plan.push(c); claimed.push(c); };
+  const lampW = (x, y, z, color, i = 1, r = 1, extra = {}) => { seat(_m2, x, z); lamps.push({ p: V(x, y + _m2.elements[13], z), r, color, i, ...extra }); };
+  if (feature === 'polar') {
+    // the eternal-light towers: vertical arrays 90 m tall on masts, turned to the low Sun that
+    // circles the horizon (each on its own bearing round the rim), with their beacons
+    const s = findSpot(rnd, plan, roads, 330, 700, 1300);
+    if (s) {
+      const [cx, cz] = s;
+      claim('light towers', cx, cz, 330);
+      for (let k = 0; k < 8; k++) {
+        const a = k / 8 * TAU, x = cx + Math.cos(a) * 250, z = cz + Math.sin(a) * 250, yaw = a + Math.PI / 2 + 0.3;
+        B.push(seat(_m, x, z, yaw, 0));
+        B.box(0, 1, 0, 10, 2, 10, LK.WALL);
+        B.box(0, 55, 0, 2.2, 110, 2.2, LK.PAINT);
+        for (let j = 0; j < 4; j++) {
+          B.box(0, 24 + j * 22, 0.9, 26, 20, 0.35, LK.SOLAR);
+          B.box(0, 24 + j * 22 + 10.2, 0.9, 27, 0.5, 0.6, LK.HULL);
+        }
+        B.box(0, 112, 0, 1.2, 4, 1.2, LK.HULL);
+        B.pop();
+        lampW(x, 114.5, z, LAMP.RED, 2.2, 1.6, { breathe: 0.8, phase: k / 8 });
+      }
+      // the beacon mast in the middle: 180 m of lattice, guyed, three tiers of lamps
+      const H = 180;
+      B.push(seat(_m, cx, cz, 0, 0));
+      for (const [sx, sz] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) B.box(sx * 2.4, H / 2, sz * 2.4, 0.5, H, 0.5, LK.PAINT);
+      for (let y = 0; y <= H; y += 6) { B.box(0, y, -2.4, 4.8, 0.3, 0.3, LK.PAINT); B.box(0, y, 2.4, 4.8, 0.3, 0.3, LK.PAINT); B.box(-2.4, y, 0, 0.3, 0.3, 4.8, LK.PAINT); B.box(2.4, y, 0, 0.3, 0.3, 4.8, LK.PAINT); }
+      for (let g = 0; g < 3; g++) {
+        const ga = g / 3 * TAU, gx = Math.cos(ga) * 110, gz = Math.sin(ga) * 110;
+        B.tube([V(0, H * 0.8, 0), V(gx, 0.5, gz)], 0.12, 4, LK.BRONZE);
+        B.box(gx, 0.8, gz, 4, 1.6, 4, LK.WALL);
+      }
+      B.pop();
+      for (const y of [H * 0.35, H * 0.7, H + 1.5]) lampW(cx, y, cz, y > H ? LAMP.WHITE : LAMP.RED, y > H ? 3.5 : 2, y > H ? 2.4 : 1.4, { breathe: 1 });
+    }
+    // the ice mine: a cold trap dug into the crater floor, its gantry, the insulated line home
+    const m = findSpot(rnd, plan, roads, 180, 500, 1400);
+    if (m) {
+      const [mx, mz] = m;
+      claim('ice mine', mx, mz, 180);
+      B.push(seat(_m, mx, mz, rnd() * TAU, 0));
+      B.push(X90);
+      B.lathe([[0, -14, LK.GROUND], [60, -14, LK.GROUND], [95, -3, LK.REGOLITH], [120, 2.5, LK.REGOLITH], [150, 0.2, LK.REGOLITH]], 40);
+      B.pop();
+      // ice faces: pale benches in the pit wall
+      for (let k = 0; k < 10; k++) { const a = k / 10 * TAU; B.at(Math.cos(a) * 78, -8, Math.sin(a) * 78, 0, -a, 0); B.box(0, 0, 0, 5, 3, 26, LK.PAVE); B.pop(); }
+      // the gantry across the pit, its trolley and the hoist
+      for (const s of [-1, 1]) { B.box(s * 128, 10, 0, 6, 20, 6, LK.PAINT); B.box(s * 128, 21, 0, 8, 2, 14, LK.HAZARD); }
+      B.box(0, 22, -5, 262, 3, 2, LK.PAINT); B.box(0, 22, 5, 262, 3, 2, LK.PAINT);
+      B.box(20, 20, 0, 10, 5, 12, LK.HULL);
+      B.tube([V(20, 18, 0), V(20, -10, 0)], 0.15, 4, LK.BRONZE);
+      // the processing plant on the rim: domes and a heat-exchanger stack, steam-lit at night
+      B.box(170, 9, 0, 34, 18, 24, LK.HULL);
+      B.box(170, 20, 0, 6, 8, 6, LK.RADIATOR);
+      for (const z of [-24, 24]) B.box(170, 6, z, 22, 12, 14, LK.STONE);
+      B.pop();
+      lampW(mx, 26, mz, LAMP.AMBER, 1.6, 1.4);
+      for (let k = 0; k < 6; k++) { const a = k / 6 * TAU; lampW(mx + Math.cos(a) * 140, 8, mz + Math.sin(a) * 140, LAMP.WHITE, 1.3, 1.2); }
+    }
+  } else if (feature === 'observatory') {
+    // the great dish: 140 m, on an alt-azimuth mount turning on a ring rail; the Y of the array
+    const s = findSpot(rnd, plan, roads, 460, 700, 1300);
+    if (s) {
+      const [cx, cz] = s;
+      claim('observatory', cx, cz, 460);
+      B.push(seat(_m, cx, cz, rnd() * TAU, 0));
+      B.push(X90);
+      B.lathe([[52, 0, LK.WALL], [52, 1.5, LK.WALL], [48, 1.5, LK.DARK], [0, 1.5, LK.DARK]], 48);
+      B.pop();
+      for (const s2 of [-1, 1]) { B.box(s2 * 30, 40, 0, 8, 80, 18, LK.PAINT); B.box(s2 * 30, 2, 0, 16, 4, 30, LK.HULL); }
+      B.box(0, 3, 0, 68, 6, 14, LK.HULL);
+      B.push(new THREE.Matrix4().makeTranslation(0, 80, 0).multiply(new THREE.Matrix4().makeRotationX(-0.7)));
+      const prof = [];
+      for (let i = 0; i <= 10; i++) { const r = i * 7; prof.push([r, r * r / 280, LK.HULL]); }
+      prof.push([70, 70 * 70 / 280 + 1.2, LK.DARK], [0, 1.2, LK.DARK]);
+      B.lathe(prof, 48);
+      for (let k = 0; k < 4; k++) { const a = k / 4 * TAU + 0.785; B.tube([V(Math.cos(a) * 44, Math.sin(a) * 44, 7), V(0, 0, 52)], 0.6, 5, LK.PAINT); }
+      B.box(0, 0, 52, 5, 5, 8, LK.BRONZE);
+      B.pop();
+      B.pop();
+      lampW(cx, 150, cz, LAMP.RED, 2.6, 1.6, { breathe: 1 });
+      // the array: three arms of dishes (smaller, 22 m) out from the great one
+      for (let arm = 0; arm < 3; arm++) for (let k = 1; k <= 4; k++) {
+        const a = arm / 3 * TAU + 0.3, d = 110 + k * 80, x = cx + Math.cos(a) * d, z = cz + Math.sin(a) * d;
+        if (!plan.every((p) => p.kind === 'observatory' || Math.hypot(p.x - x, p.z - z) > p.r + 16)) continue;
+        B.push(seat(_m, x, z, a, 0));
+        B.box(0, 7, 0, 2.4, 14, 2.4, LK.PAINT);
+        B.push(new THREE.Matrix4().makeTranslation(0, 14, 0).multiply(new THREE.Matrix4().makeRotationX(-0.75)));
+        B.lathe([[0, 0, LK.HULL], [4, 0.3, LK.HULL], [8, 1.2, LK.HULL], [11, 2.7, LK.HULL], [10.8, 3.1, LK.DARK], [0, 0.8, LK.DARK]], 20);
+        B.pop();
+        B.pop();
+        lampW(x, 1.5, z, LAMP.AMBER, 0.6, 0.6);
+      }
+    }
+  } else if (feature === 'farside') {
+    // the arcology: a stepped pyramid of five terraces, lit stone faces, glazed gardens on each step
+    const s = findSpot(rnd, plan, roads, 140, 450, 1100);
+    if (s) {
+      const [cx, cz, a] = s;
+      claim('arcology', cx, cz, 140);
+      B.push(seat(_m, cx, cz, a, 0));
+      let w = 190 + weight * 40;
+      for (let t = 0; t < 5; t++) {
+        const y0 = t * 14, h = 12;
+        B.box(0, y0 + h / 2, 0, w, h, w, LK.STONE);
+        B.box(0, y0 + h + 1.2, 0, w - 4, 2.4, w - 4, LK.CONSERVATORY);
+        B.box(0, y0 + h + 0.2, w / 2 - 3, w - 8, 0.4, 5, LK.ROOFG);
+        w -= 34;
+      }
+      B.box(0, 74, 0, 14, 8, 14, LK.GLASS);
+      B.box(0, 82, 0, 2, 10, 2, LK.PAINT);
+      B.pop();
+      lampW(cx, 88, cz, LAMP.WHITE, 2.2, 1.6, { breathe: 1 });
+      for (let k = 0; k < 8; k++) { const b = k / 8 * TAU; lampW(cx + Math.cos(b) * 110, 1.5, cz + Math.sin(b) * 110, LAMP.AMBER, 1, 1); }
+    }
+  }
+  return claimed;
+}
+
 /** The quarter's people and its tram, animated near the camera. */
 export class QuarterLife {
   constructor(q, mat, group, seed) {

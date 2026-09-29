@@ -168,7 +168,27 @@ ok(report.orbitalTris > 30000 && report.orbitalTris < 1.5e6, `orbital triangles 
   report.settlementQuarterMs = +(performance.now() - t0).toFixed(1);
   ok(q.geo.getAttribute('position').array.every(Number.isFinite), 'settlement quarter finite');
   ok(tris(q.geo) > 3000, `settlement quarter triangles ${tris(q.geo)}`);
-  for (const p of SETTLEMENT_PARTS) ok(p in q.inst || true, p);
+  for (const p of SETTLEMENT_PARTS) ok(p in q.inst, `quarter has ${p}`);
+  report.quarterTris = tris(q.geo);
+  // each kind of settlement: its landmark claimed, clear of the roads; the quarter's people and
+  // tram stay inside its circle
+  const LAND = ['quarter', 'light towers', 'ice mine', 'observatory', 'arcology'];
+  const want = { polar: ['light towers', 'ice mine'], observatory: ['observatory'], farside: ['arcology'] };
+  for (const [feature, lat] of [['polar', 88.4], ['observatory', -6], ['farside', 21], [null, 12]]) for (const seed of [114, 117, 120]) {
+    t0 = performance.now();
+    const d = buildOutpost(seed, 0.45, lat, feature);
+    const ms = performance.now() - t0;
+    ok(ms < 120, `outpost ${seed}/${feature} built in ${ms.toFixed(0)} ms`);
+    const kinds = new Set(d.plan.map((p) => p.kind));
+    ok(kinds.has('quarter'), `outpost ${seed}/${feature} has its quarter`);
+    for (const k of want[feature] || []) ok(kinds.has(k), `outpost ${seed}/${feature} has its ${k}`);
+    for (const p of d.plan.filter((c) => LAND.includes(c.kind))) for (const pts of d.loops) for (const r of pts) ok(Math.hypot(r.x - p.x, r.z - p.z) > p.r + 20, `outpost ${seed}: road through the ${p.kind}`);
+    const Q = d.plan.find((c) => c.kind === 'quarter');
+    const inQ = ([x, z]) => Math.hypot(x - Q.x, z - Q.z) < Q.r;
+    ok(inQ(d.quarter.tram.a) && inQ(d.quarter.tram.b), `outpost ${seed}: tram inside its quarter`);
+    for (const w of d.quarter.walkers) ok(w.circle ? inQ(w.circle) : inQ(w.a) && inQ(w.b), `outpost ${seed}: walker beat inside the quarter`);
+    ok(d.geo.getAttribute('position').array.every(Number.isFinite), `outpost ${seed}/${feature} finite`);
+  }
 }
 
 // ------------------------------------------------------------ run it, then buffer sanity --
