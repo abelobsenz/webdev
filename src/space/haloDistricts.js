@@ -660,7 +660,7 @@ function buildPod() {
 }
 
 // ------------------------------------------------------------ the module ----
-const _m = new THREE.Matrix4(), _c = new THREE.Vector3(), _q = new THREE.Quaternion();
+const _m = new THREE.Matrix4(), _c = new THREE.Vector3(), _q = new THREE.Quaternion(), _x = new THREE.Vector3(), _z = new THREE.Vector3();
 
 export class HaloDistricts {
   /**
@@ -811,6 +811,7 @@ export class HaloDistricts {
     const G = rotorGeometry(S);
     this.rotorCrawlers = [-1, 1].map((sg) => inst(buildCrawler(sg, G), 64));
     this.aircars = inst(buildAircar(), 1400);
+    this.lineMeshes = [this.trains, this.trams, this.aircars, ...this.rotorCrawlers];
     // services: [x (m), y above radius (m), speed (m/s), spacing (m), cars, car pitch (m), seed]
     const yT = S.deck(0) + 34 + 1.6 + 0.1;
     this.lines = [
@@ -875,8 +876,8 @@ export class HaloDistricts {
     const { a, b } = this.basis;
     const th = this.anchorAngle;
     const Y = _c.copy(a).multiplyScalar(Math.cos(th)).addScaledVector(b, Math.sin(th));
-    const Z = new THREE.Vector3().copy(a).multiplyScalar(-Math.sin(th)).addScaledVector(b, Math.cos(th));
-    const X = new THREE.Vector3().crossVectors(Y, Z);
+    const Z = _z.copy(a).multiplyScalar(-Math.sin(th)).addScaledVector(b, Math.cos(th));
+    const X = _x.crossVectors(Y, Z);
     _m.makeBasis(X, Y, Z);
     this.anchor.quaternion.setFromRotationMatrix(_m);
     this.anchor.position.copy(Y).multiplyScalar(this.basis.R);
@@ -902,21 +903,21 @@ export class HaloDistricts {
 
   _life(t) {
     const R = this.Rm, u0 = this.anchorAngle * R, C = TAU * R;
-    const tileOk = (u) => { const k = Math.floor((((u % C) + C) % C) / TILE_L); return k < this.nTiles && this.tileVariant[k] >= 0; };
     // trains and trams: each service is a lattice of vehicles u = off + v t + i gap
-    for (const im of [this.trains, this.trams, this.aircars, ...this.rotorCrawlers]) im.count = 0;
+    const lineMeshes = this.lineMeshes;
+    for (let i = 0; i < lineMeshes.length; i++) lineMeshes[i].count = 0;
     for (const L of this.lines) {
       const im = L.im, head = L.off + L.v * t;
       const i0 = Math.ceil((u0 - MOVER_RANGE - head) / L.gap), i1 = Math.floor((u0 + MOVER_RANGE - head) / L.gap);
       for (let i = i0; i <= i1; i++) {
         const u = head + i * L.gap;
-        if (!tileOk(u)) continue;
+        if (!this.tileOk(u, C)) continue;
         for (let c = 0; c < L.cars && im.count < im.instanceMatrix.count; c++) {
           im.setMatrixAt(im.count++, this._place(_m, u - Math.sign(L.v) * c * L.pitch, L.x, L.y, L.v));
         }
       }
     }
-    for (const im of [this.trains, this.trams, this.aircars, ...this.rotorCrawlers]) im.instanceMatrix.needsUpdate = true;
+    for (let i = 0; i < lineMeshes.length; i++) lineMeshes[i].instanceMatrix.needsUpdate = true;
     // gantries and their crawler pods
     let g = 0;
     this.pods.count = 0;
@@ -942,7 +943,8 @@ export class HaloDistricts {
     for (const s of this.slots) {
       if (!s.g.visible) continue;
       const uk = this.tileAngle(s.k) * R;
-      for (const sg of [-1, 1]) for (const zb of [-1000, 1000]) {
+      for (let q = 0; q < 4; q++) {
+        const sg = q & 1 ? 1 : -1, zb = q & 2 ? 1000 : -1000;
         const x = this.shipOffset(s.k, sg, zb, t);
         if (x === null) continue;
         const cls = this.shipClass(s.k, sg, zb);
@@ -958,6 +960,7 @@ export class HaloDistricts {
     for (const im of this.ships) im.instanceMatrix.needsUpdate = true;
   }
 
+  tileOk(u, C) { const k = Math.floor((((u % C) + C) % C) / TILE_L); return k < this.nTiles && this.tileVariant[k] >= 0; }
   shipClass(k, sg, zb) { return hash2(k * 4 + (sg > 0 ? 2 : 0) + (zb > 0 ? 1 : 0), 5) < 0.7 ? 0 : 1; }
   gantryU(bay, t) { return bay.u + GANTRY.range * Math.sin((TAU * t) / GANTRY.period + bay.phase); }
   podX(bay, p, t) { return (this.S.hw - 600) * Math.sin(t * (0.0011 + 0.00023 * p) + bay.phase * 3 + p * 1.7); }
