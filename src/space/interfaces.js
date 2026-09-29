@@ -331,11 +331,22 @@ function embarkationTerrace() {
   const supports=[];
   for(const x of [-420,0,420])for(const z of [-195,195]) {
     const root=V(x+Math.sign(z)*25,-190,-320),end=V(x,-10,z);
-    B.tube([root,end],15,10,CK.HULL);supports.push({root,end,radius:15});
+    // working-grey struts banded in bronze every 30 m (plain pearl tubes read as white rods)
+    B.tube([root,end],15,12,DK.GRIME);supports.push({root,end,radius:15});
+    const dir=end.clone().sub(root),len=dir.length(),q=new THREE.Quaternion().setFromUnitVectors(V(0,0,1),dir.normalize());
+    for(let s=24;s<len-20;s+=30){B.push(new THREE.Matrix4().compose(root.clone().addScaledVector(dir,s),q,V(1,1,1)));B.torus(15.4,1.3,24,6,CK.BRONZE);B.pop();}
   }
   // An inhabited lift core rises out of the old gallery, with two separate enclosed walks.
   B.at(0,-190,-320);B.push(TO_Y);
-  B.lathe([[22,0,CK.HULL],[24,18,CK.BRONZE],[21,200,CK.GLASS],[26,212,CK.BRONZE],[0,222,CK.HULL]],24);B.pop();B.pop();
+  // the lift tower: a plated shaft in five storeys, each with a lit gallery band and bronze
+  // string courses, a glazed lantern at the top under a zinc cap (it was one pale glass drum)
+  {
+    const prof=[[24,0,DK.GRIME],[26,12,CK.BRONZE],[22,18,PK.GALLERY]];
+    for(let k=0;k<5;k++){const z0=22+k*35;prof.push([22,z0+22,PK.GALLERY],[23.4,z0+23,CK.BRONZE],[23.4,z0+30,DK.CONCOURSE],[22,z0+31,CK.BRONZE]);}
+    prof.push([21,200,PK.GALLERY],[27,203,CK.BRONZE],[27,212,CK.GLASS],[29,214,PK.ROOF],[0,222,PK.ROOF]);
+    B.lathe(prof,24);
+  }
+  B.pop();B.pop();
   closedWalk(B,[V(0,17,-320),V(0,17,-101)],7);
   B.box(0,8.995,-287.45,20,4,95.1,CK.HULL);
   passengerPaths.push({min:V(-2,11.1,-291),max:V(2,14,-155)});
@@ -468,6 +479,18 @@ function embarkationTerrace() {
     if(((x+330)/22)%2===1)lampPost(B,x+11,yb,207,lamps);
   }
   for(const [x0,x1] of [[-190,-42],[42,190]])for(let x=x0+12;x<x1;x+=24)for(const z of [-24,24])lampPost(B,x,floor,z,lamps);
+  // The lit concourse: where the glazed walk runs in the open it is flanked by a stone kerb with
+  // a lit brass line along its face and a strip of dark granite (the walk's own shadow line), so
+  // the spine of the terrace reads as a lit street from the rim and after dark.
+  for(const [x0,x1] of [[-336,-268],[-192,-10],[10,192],[268,378]]) {
+    const cx=(x0+x1)/2,L=x1-x0;
+    for(const s of [-1,1]) {
+      B.box(cx,floor+.3,s*9.4,L,.6,1.2,PK.STONE);
+      B.box(cx,floor+.32,s*10.05,L-.4,.28,.1,CK.LANTERN);
+      B.box(cx,floor+.08,s*11.8,L,.16,2.4,CK.DARK);
+    }
+    for(let x=x0+6;x<x1-3;x+=12)for(const s of [-1,1])lamps.push({p:V(x,floor+.4,s*10.3),r:.3,color:LAMP.AMBER,i:1});
+  }
   const geo=placeMerge([{geo:B.geometry(),m:new THREE.Matrix4()},{geo:courier.geo,m:courier.matrix}]);
   // Baked contact shading: walls dusky toward the deck, the paving darkened round every room,
   // planter, kerb and tree pit and under the canopies, undersides in their own shade.

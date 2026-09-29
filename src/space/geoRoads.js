@@ -443,6 +443,17 @@ export function buildWaterStore() {
     B.push(new THREE.Matrix4().makeTranslation(c.x, c.y, c.z).multiply(new THREE.Matrix4().makeRotationX(Math.PI / 2)));
     B.torus(STORE.tankR + 1.5, 3.2, 48, 6, ri % 2 ? CK.HULL : CK.BRONZE);
     B.pop();
+    // manway domes at both poles (working plate, a bronze seat ring) and two latitude weld bands:
+    // each tank reads as a pressure vessel with a top and a bottom, not a plain ball
+    for (const s of [-1, 1]) {
+      B.push(new THREE.Matrix4().makeTranslation(c.x, c.y + s * (STORE.tankR - 6), c.z).multiply(new THREE.Matrix4().makeRotationX(-s * Math.PI / 2)));
+      lathe(B, [[30, 0, DK.GRIME], [31.5, 5, CK.BRONZE], [27, 9, DK.GRIME], [8, 12, DK.GRIME], [0.1, 12.5, CK.DARK]], 24);
+      B.pop();
+      const yb = s * STORE.tankR * 0.62, rb = Math.sqrt(STORE.tankR * STORE.tankR - yb * yb);
+      B.push(new THREE.Matrix4().makeTranslation(c.x, c.y + yb, c.z).multiply(new THREE.Matrix4().makeRotationX(Math.PI / 2)));
+      B.torus(rb + 0.6, 1.8, 40, 5, ri % 2 ? CK.HULL : DK.GRIME);
+      B.pop();
+    }
     tanks.push({ center: c, radius: STORE.tankR, root: v });
   }
   // the crew wheel below the cage: a hollow transfer collar round the tether, spokes, a glazed rim
