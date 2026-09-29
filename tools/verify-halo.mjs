@@ -331,6 +331,21 @@ assert.ok(out.closestApproachTris < 12e6, 'District tiles within 12M rendered tr
     for (let i = 0; i < codes.length; i++) assert.equal(P.cells.image.data[(vi * codes.length + i) * 4], codes[i], 'cell texel');
     assert.ok(codes.filter((c) => CELL_NAMES[c] === 'canal').length <= 4, 'At most four canal quarters a tile');
   });
+  // the ring meshes (built from typed arrays): whole triangles inside their vertex buffers, each
+  // wound toward its vertex normals, finite
+  for (const mesh of [...rings.meshes, ...rings.roofs]) {
+    const g = mesh.geometry, Pp = g.attributes.position.array, Nn = g.attributes.normal.array, I = g.index.array;
+    assert.ok(Pp.every(Number.isFinite) && Nn.every(Number.isFinite), 'Ring buffers finite');
+    let bad = 0, mx = 0;
+    for (let k = 0; k < I.length; k += 3) {
+      const i0 = I[k] * 3, i1 = I[k + 1] * 3, i2 = I[k + 2] * 3;
+      mx = Math.max(mx, I[k], I[k + 1], I[k + 2]);
+      const bx = Pp[i1] - Pp[i0], by = Pp[i1 + 1] - Pp[i0 + 1], bz = Pp[i1 + 2] - Pp[i0 + 2], cx = Pp[i2] - Pp[i0], cy = Pp[i2 + 1] - Pp[i0 + 1], cz = Pp[i2 + 2] - Pp[i0 + 2];
+      if ((by * cz - bz * cy) * Nn[i0] + (bz * cx - bx * cz) * Nn[i0 + 1] + (bx * cy - by * cx) * Nn[i0 + 2] < 0) bad++;
+    }
+    assert.ok(I.length % 3 === 0 && mx < g.attributes.position.count, 'Ring index inside its vertices');
+    assert.ok(bad <= I.length / 3 * 1e-4, `Ring triangles wind toward their normals (${bad} of ${I.length / 3})`);
+  }
   const hc = cellKinds(HARBOUR_V);
   for (let ix = 0; ix < CELLS_X; ix++) { const cx = -15000 + ix * 1000; for (let iz = 0; iz < CELLS_Z; iz++) assert.equal(hc[iz * CELLS_X + ix] === 0, cx >= -HARBOUR.ground && cx < HARBOUR.ground, 'Harbour ground left open'); }
   out.planSeam = [D.seamK, +(D.seamLen / 1000).toFixed(3)];

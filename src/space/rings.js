@@ -741,45 +741,52 @@ export function buildRing(def, basis, segs, roof = false) {
     for (const x of [-2.52,2.52]) angles.push(junctionAngle+x/R);
     angles.sort((x,y)=>x-y); segs=angles.length-1;
   }
-  const pos = [], nor = [], ring = [], idx = [];
-  const P = new THREE.Vector3(), rad = new THREE.Vector3(), tan = new THREE.Vector3();
+  // (typed arrays sized up front and scalar maths: four rings of a million vertices were built
+  // through per-vertex Vector3 calls, pushes and a destructured array per triangle, a good part
+  // of the space mode's entry time)
+  let nv = 0, ni = 0;
+  for (const prof of profiles) { nv += prof.length * (segs + 1); ni += (prof.length - 1) * segs * 6; }
+  const pos = new Float64Array(nv * 3), nor = new Float32Array(nv * 3), ring = new Float32Array(nv * 3), idx = new Uint32Array(ni);
+  let vp = 0, ip = 0;
+  const cut = roof && def.name === 'Halo';
   for (const prof of profiles) {
-    const base = pos.length / 3;
+    const base = vp / 3;
     const M = prof.length;
     for (let j = 0; j <= segs; j++) {
-      const th = angles[j];
-      rad.copy(a).multiplyScalar(Math.cos(th)).addScaledVector(b, Math.sin(th));
-      for (const [s, dr, ns, nr, v, part] of prof) {
-        P.copy(rad).multiplyScalar(R + dr).addScaledVector(n, s);
-        pos.push(P.x, P.y, P.z);
-        tan.copy(rad).multiplyScalar(nr).addScaledVector(n, ns).normalize();
-        nor.push(tan.x, tan.y, tan.z);
-        ring.push(th * R, v, part);
+      const th = angles[j], c = Math.cos(th), sn = Math.sin(th);
+      const rx = a.x * c + b.x * sn, ry = a.y * c + b.y * sn, rz = a.z * c + b.z * sn;
+      for (let q = 0; q < M; q++) {
+        const pq = prof[q], sAx = pq[0], rr = R + pq[1], ns = pq[2], nr = pq[3];
+        pos[vp] = rx * rr + n.x * sAx; pos[vp + 1] = ry * rr + n.y * sAx; pos[vp + 2] = rz * rr + n.z * sAx;
+        const tx = rx * nr + n.x * ns, ty = ry * nr + n.y * ns, tz = rz * nr + n.z * ns, tl = Math.hypot(tx, ty, tz) || 1;
+        nor[vp] = tx / tl; nor[vp + 1] = ty / tl; nor[vp + 2] = tz / tl;
+        ring[vp] = th * R; ring[vp + 1] = pq[4]; ring[vp + 2] = pq[5];
+        vp += 3;
       }
     }
     for (let j = 0; j < segs; j++) {
       for (let i = 0; i < M - 1; i++) {
-        if (roof && def.name === 'Halo' && Math.abs(((angles[j]+angles[j+1])/2-junctionAngle)*R)<2.52 && Math.abs((prof[i][0]+prof[i+1][0])/2)<2.67) continue;
+        if (cut && Math.abs(((angles[j] + angles[j + 1]) / 2 - junctionAngle) * R) < 2.52 && Math.abs((prof[i][0] + prof[i + 1][0]) / 2) < 2.67) continue;
         const i0 = base + j * M + i, i1 = i0 + M, i2 = i0 + 1, i3 = i1 + 1;
-        idx.push(i0, i1, i2, i2, i1, i3);
+        idx[ip] = i0; idx[ip + 1] = i1; idx[ip + 2] = i2; idx[ip + 3] = i2; idx[ip + 4] = i1; idx[ip + 5] = i3;
+        ip += 6;
       }
     }
   }
-  // make every triangle wind counter-clockwise when seen from its normal side
-  const vA = new THREE.Vector3(), vB = new THREE.Vector3(), vC = new THREE.Vector3(), nn = new THREE.Vector3();
-  for (let k = 0; k < idx.length; k += 3) {
-    const [i0, i1, i2] = [idx[k], idx[k + 1], idx[k + 2]];
-    vA.fromArray(pos, i0 * 3); vB.fromArray(pos, i1 * 3); vC.fromArray(pos, i2 * 3);
-    vB.sub(vA); vC.sub(vA);
-    nn.crossVectors(vB, vC);
-    const dn = nn.x * (nor[i0 * 3] + nor[i1 * 3]) + nn.y * (nor[i0 * 3 + 1] + nor[i1 * 3 + 1]) + nn.z * (nor[i0 * 3 + 2] + nor[i1 * 3 + 2]);
-    if (dn < 0) { idx[k + 1] = i2; idx[k + 2] = i1; }
+  // make every triangle wind counter-clockwise when seen from its normal side (in doubles)
+  for (let k = 0; k < ip; k += 3) {
+    const i0 = idx[k] * 3, i1 = idx[k + 1] * 3, i2 = idx[k + 2] * 3;
+    const bx = pos[i1] - pos[i0], by = pos[i1 + 1] - pos[i0 + 1], bz = pos[i1 + 2] - pos[i0 + 2];
+    const cx = pos[i2] - pos[i0], cy = pos[i2 + 1] - pos[i0 + 1], cz = pos[i2 + 2] - pos[i0 + 2];
+    const nx = by * cz - bz * cy, ny = bz * cx - bx * cz, nz = bx * cy - by * cx;
+    const dn = nx * (nor[i0] + nor[i1]) + ny * (nor[i0 + 1] + nor[i1 + 1]) + nz * (nor[i0 + 2] + nor[i1 + 2]);
+    if (dn < 0) { const t = idx[k + 1]; idx[k + 1] = idx[k + 2]; idx[k + 2] = t; }
   }
   const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-  g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
-  g.setAttribute('aRing', new THREE.Float32BufferAttribute(ring, 3));
-  g.setIndex(idx);
+  g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pos), 3));
+  g.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
+  g.setAttribute('aRing', new THREE.BufferAttribute(ring, 3));
+  g.setIndex(new THREE.BufferAttribute(ip === ni ? idx : idx.slice(0, ip), 1));
   g.boundingSphere = new THREE.Sphere(new THREE.Vector3(), R + wall + rise + 5);
   return g;
 }
