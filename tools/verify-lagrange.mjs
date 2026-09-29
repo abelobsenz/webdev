@@ -8,7 +8,7 @@ import { COL, WINDOW_CENTRES, buildRotor, buildStator, buildAgriRing, buildPairF
 import { GATE, buildGateway, buildGatewayWheel } from '../src/space/lagrangeGateway.js';
 import { LagrangeColonies, lagrangePoint } from '../src/space/lagrange.js';
 import { shipPose } from '../src/space/fleetTraffic.js';
-import { LAGRANGE_SHADERS } from '../src/space/lagrangeShaders.js';
+import { LAGRANGE_SHADERS, createWindowMaterial, createMirrorMaterial } from '../src/space/lagrangeShaders.js';
 
 let fails = 0;
 const ok = (c, msg) => { if (!c) { fails++; console.log('FAIL', msg); } else console.log('ok  ', msg); };
@@ -332,7 +332,9 @@ ok(tri.total < 12e6, `rendered at closest: pair ${(tri.pair / 1e3).toFixed(0)}k,
   const src = Object.values(LAGRANGE_SHADERS).join('\n');
   const frag = LAGRANGE_SHADERS.WIN_FRAG + LAGRANGE_SHADERS.MIR_FRAG;
   const uniformsDeclared = [...frag.matchAll(/uniform\s+\w+\s+(\w+);/g)].map((m) => m[1]);
-  const supplied = ['uCam', 'uSunView', 'uSunE', 'uDay', 'uTime', 'uSeed'];
+  const wm = createWindowMaterial(1), mm = createMirrorMaterial();
+  const supplied = [...Object.keys(wm.uniforms), ...Object.keys(mm.uniforms)];
+  ok([...LAGRANGE_SHADERS.WIN_FRAG.matchAll(/uniform\s+\w+\s+(\w+);/g)].every((m) => m[1] in wm.uniforms) && [...LAGRANGE_SHADERS.MIR_FRAG.matchAll(/uniform\s+\w+\s+(\w+);/g)].every((m) => m[1] in mm.uniforms), 'each shader\'s uniforms supplied by its own material');
   ok(uniformsDeclared.every((u) => supplied.includes(u)), `every uniform declared is supplied (${[...new Set(uniformsDeclared)].join(', ')})`);
   ok(!/dFdx|dFdy/.test(src), 'no raw derivatives (fwidth only, at the top of main); loops only in the shared noise chunk');
   const fwAt = [...frag.matchAll(/fwidth/g)].length;

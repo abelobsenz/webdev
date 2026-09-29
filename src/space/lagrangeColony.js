@@ -255,6 +255,19 @@ export function buildRotor(seed = 7) {
       const pts = P.slice(1, 10).map((p) => { const [r0, z0] = off(p, 14); return V(c * r0, sn * r0, z0); });
       B.tube(pts, 9, 6, CK.CONDUIT);
     }
+    // six buttress girders down the cap from the hub collar to the rim, over the longerons'
+    // ends (the cap's air load goes into them), and a ring girder where the cap meets the hull:
+    // the structure that reads on the sunlit cap from tens of kilometres
+    for (let k = 0; k < 6; k++) {
+      const a = Math.PI / 6 + (k * TAU) / 6, c = Math.cos(a), sn = Math.sin(a);
+      const pts = P.slice(1, 10).map((p) => { const [r0, z0] = off(p, 70); return V(c * r0, sn * r0, z0); });
+      B.tube(pts, 52, 6, CK.BRONZE);
+      for (let j = 1; j < 9; j += 2) {
+        const [r0, z0] = off(P[j], 30);
+        lamps.push({ p: V(c * (r0 + 60), sn * (r0 + 60), z0 + s * 40), r: 12, color: LAMP.WHITE, i: 2.6, breathe: 0.5, phase: j / 9 });
+      }
+    }
+    { const [r0, z0] = off(P[2], 40); B.push(new THREE.Matrix4().makeTranslation(0, 0, z0)); B.torus(r0, 46, 192, 8, CK.BRONZE); B.pop(); }
     P.forEach((p) => {
       if (p[2] !== CK.GLASS) return;
       const [r0, z0] = off(p, 8), n = Math.max(12, Math.round(r0 / 110));
@@ -373,7 +386,8 @@ export function buildStator(seed = 3) {
     B.pop();
     for (const l of dc.lamps) lamps.push(l);
     berths.push({ p, dir: V(0, 0, -1), a });
-    for (let k = 1; k <= 5; k++) lamps.push({ p: V(c * BERTH_R, s * BERTH_R, zP - 24 - k * 160), r: 7, color: i % 3 ? LAMP.AMBER : LAMP.GREEN, i: 2.4, phase: k * 0.12, breathe: 0.8 });
+    // lead-in lights either side of the collar face (a string of lamps hanging in empty space read as a gizmo)
+    for (const x of [-24, 24]) lamps.push({ p: V(c * BERTH_R - s * x, s * BERTH_R + c * x, zP - 30), r: 6, color: i % 3 ? LAMP.AMBER : LAMP.GREEN, i: 2.6, phase: i / BERTHS, breathe: 0.8 });
   }
   // the harbour hall: a drum of hangar decks with a dark door ring
   B.at(0, 0, zP - 1500);

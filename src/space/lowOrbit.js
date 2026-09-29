@@ -12,6 +12,9 @@ import {
 } from './leoStations.js';
 import { Constellations } from './constellations.js';
 import { droneGeo, DynLamps } from './lifeKit.js';
+import { createMirrorMaterial, bindMirror } from './lagrangeShaders.js';
+
+const FARM_LAND_X = new THREE.Vector3(0, 1, 0);   // Demeter drums: a land strip's centre (the glazing lies between)
 
 // The low and middle shell: Meridian's orbital neighbourhood above the Halo. Everything here
 // flies a real orbit from the sim clock (src/space/kepler.js), in the inertial frame:
@@ -36,7 +39,9 @@ const DEG = Math.PI / 180;
 const HALO_R = R_EARTH + 620;
 export const APRON_ALT = 9;                // km over the Halo deck (its vault crests at 5.5 km)
 const APRON_LON = THREE.MathUtils.degToRad(0.35);
-const APPROACH = { n: 10, d0: 70, step: 55 };   // strobes per port, first at 70 m, then every 55 m
+// strobes per port, first at 60 m, then every 45 m: a sequenced 'rabbit' that is dark between
+// its runs, so the approach reads as a flash chasing into the port, never a column of beads
+const APPROACH = { n: 6, d0: 60, step: 45 };
 const TETHER_KEEP = 20;                    // km: the elevator tether's exclusion zone
 const _tu = new THREE.Vector3(), _tp = new THREE.Vector3(), _tq = new THREE.Quaternion();
 const EARTH_W = TAU / 86400;            // the sim turns the Earth once per 86,400 s
@@ -222,13 +227,19 @@ export class LowOrbit {
     {
       const o = new Orbit({ alt: 1050, inc: 28 * DEG, node: 2.3, M0: 2.1 });
       const s = new Station('demeter', o, 0.9, 1400, [0.75, 1.0, 0.55], 0.6);
-      const fr = buildFarmFrame(), dr = buildFarmDrum();
+      const fr = buildFarmFrame(), dr = buildFarmDrum(), mirMat = createMirrorMaterial();
       s.fixed = craftMesh(fr.geo, {}, s.mat);
       lampSet(s.fixed, fr.lamps);
       s.drums = [-1, 1].map((sx) => {
         const d = craftPart(s.fixed, dr.geo);
         d.position.set(sx * FARM.sep, 0, 0);
         lampSet(d, dr.lamps);
+        // the louvre-mirrors' film: the Lagrange mirror shader, reflecting the Sun's glint and,
+        // near the hinge, the drum's own glazing and land strips (land centred on local +y)
+        const film = new THREE.Mesh(dr.mirrors, mirMat);
+        film.frustumCulled = false; film.renderOrder = 3;
+        bindMirror(film, this.sun, d, null, { R: FARM.R, HL: FARM.halfL, xAxis: FARM_LAND_X });
+        d.add(film);
         s.fixed.add(d);
         return d;
       });
@@ -508,7 +519,7 @@ void main() {
       // the pulse runs inward (outermost lamp first) once every 2.4 s, each port offset in time
       const u = (((rt / 2.4 + k * 0.29 - (per - 1 - j) / per) % 1) + 1) % 1;
       const flash = u < 0.08 ? 1 - u / 0.08 : 0;
-      A.lamps.gain(i, 0.12 + 1.6 * flash);
+      A.lamps.gain(i, 1.8 * flash * flash);
     }
     A.lamps.commit();
   }
@@ -710,7 +721,10 @@ void main() {
     }
     gl.mat.uniforms.uSun.value.copy(sun);
     gl.commit();
-    // trails follow their precessing planes and mark where each station is on its lap
+    // trails follow their precessing planes and mark where each station is on its lap. They
+    // are a map, not a thing: drawn only once the camera has left the shell (from a few
+    // thousand km up, where the shell reads as a whole), never across a station's close view
+    const mapGain = cam ? smooth(R_EARTH + 4000, R_EARTH + 14000, cam.position.length()) : 1;
     for (const tr of this.trails) {
       const o = tr.orbit;
       o._solve(t);
@@ -721,7 +735,9 @@ void main() {
       tr.mat.uniforms.uSunDir.value.copy(sun);
       // the trace fades out as you close on the station (it is a map, not a thing)
       const d = cam ? cam.position.distanceTo(tr.station.root.position) : 1e4;
-      tr.mat.uniforms.uGainT.value = (tr.station.name.startsWith('gleaner') ? 0.45 : 1) * smooth(80, 2500, d);
+      const gain = (tr.station.name.startsWith('gleaner') ? 0.45 : 1) * smooth(80, 2500, d) * mapGain;
+      tr.mat.uniforms.uGainT.value = gain;
+      tr.mesh.visible = gain > 0.002;
     }
     this.constellations.update(t, realTime, sun, cam, H);
   }
@@ -846,12 +862,12 @@ export function leoTargets(space) {
     frame: (q) => (space.lowOrbit ? space.lowOrbit.pose(name, space.sim, null, q) : q.identity()),
   });
   return {
-    halcyon: { ...P('halcyon'), minDist: 1.4, maxDist: 40000, defaultDist: 3.8, view: { az: 0.5, el: 0.45 } },
-    aurelia: { ...P('aurelia'), minDist: 0.45, maxDist: 40000, defaultDist: 1.25, view: { az: 0.8, el: 0.35 } },
-    demeter: { ...P('demeter'), minDist: 1.1, maxDist: 40000, defaultDist: 3.2, view: { az: 2.3, el: 0.4 } },
-    boreal: { ...P('boreal'), minDist: 0.35, maxDist: 40000, defaultDist: 0.95, view: { az: 0.6, el: 0.15 } },
-    dawnline: { ...P('dawnline'), minDist: 1.2, maxDist: 40000, defaultDist: 3.4, view: { az: 2.8, el: 0.5 } },
-    anansi: { ...P('anansi'), minDist: 0.3, maxDist: 60000, defaultDist: 1.1, view: { az: 0.4, el: 0.3 } },
+    halcyon: { ...P('halcyon'), minDist: 1.4, maxDist: 40000, defaultDist: 2.9, view: { az: 0.55, el: 0.38 } },
+    aurelia: { ...P('aurelia'), minDist: 0.45, maxDist: 40000, defaultDist: 0.82, view: { az: 0.8, el: 0.3 } },
+    demeter: { ...P('demeter'), minDist: 1.0, maxDist: 40000, defaultDist: 2.05, view: { az: 2.2, el: 0.32 } },
+    boreal: { ...P('boreal'), minDist: 0.35, maxDist: 40000, defaultDist: 0.72, view: { az: 0.6, el: 0.18 } },
+    dawnline: { ...P('dawnline'), minDist: 1.1, maxDist: 40000, defaultDist: 2.4, view: { az: 2.6, el: 0.42 } },
+    anansi: { ...P('anansi'), minDist: 0.3, maxDist: 60000, defaultDist: 0.55, view: { az: 0.4, el: 0.3 } },
   };
 }
 

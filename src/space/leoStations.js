@@ -43,6 +43,21 @@ function sphereZ(B, r, kindAt, seg = 32, rings = 16) {
   B.lathe(prof, seg);
 }
 
+/**
+ * A triangulated hoop girder about local z at radius r, axial position z: four chords (radial
+ * depth d, axial width w) laced with alternating diagonals and a strut at every bay.
+ */
+function hoopGirder(B, r, z, d, w, n, rad, k = CK.DARK) {
+  for (const dr of [-d / 2, d / 2]) for (const dz of [-w / 2, w / 2]) { B.push(tr(0, 0, z + dz)); B.torus(r + dr, rad, n, 4, k); B.pop(); }
+  const P = (a, rr, zz) => V(Math.cos(a) * rr, Math.sin(a) * rr, z + zz);
+  for (let i = 0; i < n; i++) {
+    const a0 = (i / n) * TAU, a1 = ((i + 1) / n) * TAU, s = i % 2 ? 1 : -1;
+    B.tube([P(a0, r - d / 2, s * w / 2), P(a1, r + d / 2, s * w / 2)], rad * 0.6, 3, k);
+    B.tube([P(a0, r + d / 2, s * w / 2), P(a1, r + d / 2, -s * w / 2)], rad * 0.6, 3, k);
+    B.tube([P(a0, r - d / 2, 0), P(a0, r + d / 2, 0)], rad * 0.7, 3, k);
+  }
+}
+
 /** A pressurised module along +z from the current frame: windowed bands between bronze frames. */
 function habModule(B, r, len, { glass = 3, seg = 20 } = {}) {
   const prof = [[0.02, 0, CK.DARK], [r * 0.72, len * 0.02, CK.HULL], [r, len * 0.08, CK.HULL]];
@@ -88,6 +103,11 @@ function dockPort(B, lamps, ports, p0, dir, len, r) {
 // -------------------------------------------------------------- hotel ----
 export const HOTEL = { R: 250, depth: 20, halfW: 15, hubR: 37, hubIn: 18, spindle: 12, segs: 144, spokes: 6 };
 export const hotelOmega = () => Math.sqrt(9.81 / HOTEL.R);
+// the roof vault's facets across the rim: [z centre, rise, length, tilt] (half-width 15 m, 5 m rise)
+const HOTEL_VAULT = (() => {
+  const P = [[-14.4, 0], [-7, 4], [7, 4], [14.4, 0]];
+  return P.slice(1).map(([z1, h1], i) => { const [z0, h0] = P[i]; return [(z0 + z1) / 2, (h0 + h1) / 2, Math.hypot(z1 - z0, h1 - h0), Math.atan2(h1 - h0, z1 - z0)]; });
+})();
 
 export function buildHotel() {
   const F = new CB(), W = new CB();
@@ -104,8 +124,6 @@ export function buildHotel() {
     for (const s of [-1, 1]) {
       W.box(0, R - depth / 2, s * hw, arcM, depth, 0.8, CK.GLASS);                   // five decks of suites
       W.box(0, R + 0.6, s * (hw + 0.6), arcO, 1.4, 1.4, CK.BRONZE);                 // floor edge beam
-      W.box(0, r0 - 1.4, s * (hw - 0.9), arcI, 0.08, 0.08, CK.BRONZE);              // roof walk handrail
-      W.box(0, r0 - 0.9, s * (hw - 0.9), 0.08, 1.0, 0.08, CK.DARK);                 // rail post
       if (k % 2 === 0) {
         W.box(0, R - 7.5, s * (hw + 1.6), arcM * 0.62, 7.4, 2.4, CK.GLASS);          // bay-window suites
         W.box(0, R - 3.6, s * (hw + 1.8), arcM * 0.7, 0.5, 3.0, CK.DARK);            // hood
@@ -113,14 +131,25 @@ export function buildHotel() {
       }
       if (k % 6 === 3) W.box(0, R + 2.3, s * 7, 3.2, 0.6, 2.4, CK.DARK);            // service hatch
     }
-    W.box(0, r0 - 0.5, 0, arcI, 1, 2 * hw - 2, k % 8 < 5 ? CK.ROOF : CK.CONSERVATORY);
+    // the roof garden under a three-facet glass vault (bronze arch every fourth bay)
+    for (const [zm, hm, len, tilt] of HOTEL_VAULT) {
+      W.push(tr(0, r0 - 0.5 - hm, zm).multiply(new THREE.Matrix4().makeRotationX(tilt)));
+      W.box(0, 0, 0, arcI, 0.6, len + 0.3, k % 8 < 5 ? CK.ROOF : CK.CONSERVATORY);
+      if (k % 4 === 0) W.box(0, -0.6, 0, 0.9, 1.0, len + 0.6, CK.BRONZE);
+      W.pop();
+    }
+    // radiator fins on the floor's outer face every twelfth bay, edge-on along the spin axis
+    if (k % 12 === 6) for (const s of [-1, 1]) {
+      W.box(0, R + 8, s * 8, 0.5, 12, 11, CK.RADIATOR);
+      W.box(0, R + 2.6, s * 8, 1.6, 1.2, 12, CK.BRONZE);
+    }
     W.box(0, r0 - 1.1, 0, arcI, 0.3, 1.6, CK.DECK);                                   // roof promenade
     if (k % 4 === 0) {
       W.box(arcM / 2, R - depth / 2, 0, 0.9, depth + 3, 2 * hw + 1.8, CK.BRONZE);  // structural rib
       W.box(arcM / 2, r0 - 2.2, 0, 0.5, 2.4, 2 * hw - 1, CK.DARK);                  // rib crown
     }
     W.pop();
-    if (k % 3 === 0) for (const s of [-1, 1]) {
+    if (k % 4 === 0) for (const s of [-1, 1]) {
       const c = Math.cos(a), sn = Math.sin(a);
       wheelLamps.push({ p: V(-sn * (R + 2.4), c * (R + 2.4), s * (hw + 1.6)), r: 0.7, color: LAMP.AMBER, i: 1.7, breathe: 0.15, phase: k / segs });
     }
@@ -140,6 +169,22 @@ export function buildHotel() {
     }
     for (const z of [-1, 1]) W.tube([V(c * 30, s * 30, z * 28), V(c * (r0 - 1), s * (r0 - 1), z * (hw - 2))], 0.35, 4, CK.DARK);
     wheelLamps.push({ p: V(c * (R + 3), s * (R + 3), 0), r: 1.4, color: k % 2 ? LAMP.RED : LAMP.GREEN, i: 3.0 });
+  }
+  // the rim's structure, outside the pressure hull: a laced keel girder under the floor, glazed
+  // promenade galleries along both faces at mid-deck, on brackets every third bay
+  hoopGirder(W, R + 5, 0, 5, 2 * hw - 6, segs / 2, 0.35, CK.DARK);
+  for (const s of [-1, 1]) {
+    W.push(tr(0, 0, s * (hw + 5.2))); W.torus(R - depth * 0.62, 2.1, segs * 2, 8, CK.GLASS); W.pop();
+    W.push(tr(0, 0, s * (hw + 5.2))); W.torus(R - depth * 0.62 - 2.4, 0.5, segs * 2, 4, CK.BRONZE); W.pop();
+    for (let k = 0; k < segs; k += 3) {
+      const a = (k / segs) * TAU, c = Math.cos(a), sn = Math.sin(a), rr = R - depth * 0.62;
+      W.tube([V(c * rr, sn * rr, s * (hw + 0.4)), V(c * rr, sn * rr, s * (hw + 3.2))], 0.45, 4, CK.BRONZE);
+    }
+  }
+  // each spoke sheathed in a laced truss round its lift shaft
+  for (let k = 0; k < HOTEL.spokes; k++) {
+    const a = (k / HOTEL.spokes) * TAU + TAU / (HOTEL.spokes * 2), c = Math.cos(a), s = Math.sin(a);
+    truss(W, V(c * (HOTEL.hubR + 4), s * (HOTEL.hubR + 4), 0), V(c * (r0 - 8), s * (r0 - 8), 0), 17, 16, 0.3, CK.DARK);
   }
   W.lathe([[HOTEL.hubIn, -32, CK.DARK], [HOTEL.hubR - 3, -32, CK.HULL], [HOTEL.hubR, -28, CK.BRONZE], [HOTEL.hubR, -20, CK.HULL], [HOTEL.hubR + 1, -12, CK.GLASS],
     [HOTEL.hubR + 1, 12, CK.GLASS], [HOTEL.hubR, 20, CK.HULL], [HOTEL.hubR, 28, CK.BRONZE], [HOTEL.hubR - 3, 32, CK.HULL], [HOTEL.hubIn, 32, CK.DARK]], 48, 0, { closedProfile: true });
@@ -184,6 +229,7 @@ export function buildHotel() {
 // ------------------------------------------------------------ habitat ----
 export const HAB = { R: 960, depth: 110, halfW: 65, hubR: 90, axle: 30, segs: 240, spokes: 6 };
 export const habOmega = () => Math.sqrt(9.81 / HAB.R);
+export const HAB_COLLECTOR = { petals: 40, rIn: 300, rOut: 1060, cone: THREE.MathUtils.degToRad(11), z: 340 };
 
 /**
  * Halcyon: a town-sized torus (1.9 km across, one turn a minute for 1 g) on six spokes, its axis
@@ -196,25 +242,54 @@ export function buildHabitat() {
   const lamps = [], wheelLamps = [], ports = [];
   const { R, depth, halfW: hw, segs } = HAB;
   const r0 = R - depth;
+  // The wheel's section, from the rim in: a thick shielding floor with radiator fins standing
+  // edge-on to the Sun; side walls stepped back in four terraces of glazed apartments, each
+  // tier's roof a planted balcony; a vaulted glass roof over the park, on bronze arch ribs.
+  const TIERS = 4, tierH = depth / TIERS, step = 7;
+  const vault = [[-(hw - 22), 0], [-(hw - 30), 6], [-(hw - 44), 12], [hw - 44, 12], [hw - 30, 6], [hw - 22, 0]];
   for (let k = 0; k < segs; k++) {
     const a = (k / segs) * TAU;
     W.push(rotZ(a));
     const arcO = (TAU * (R + 6)) / segs * 1.01, arcM = (TAU * R) / segs * 1.01, arcI = (TAU * r0) / segs * 1.01;
     W.box(0, R + 3, 0, arcO, 6, 2 * hw + 6, CK.HULL);                               // shielding floor
     W.box(0, R + 6.4, 0, arcO, 0.8, 3, CK.CONDUIT);
-    for (const s of [-1, 1]) {
-      W.box(0, R - depth / 2, s * hw, arcM, depth, 2, CK.GLASS);                   // terraced apartments
-      if (k % 3 === 0) W.box(0, R - depth / 2, s * (hw + 1.4), 1.2, depth, 1.4, CK.BRONZE);   // mullion piers
-      if (k % 2 === 0) for (const dy of [-30, 0, 30]) W.box(0, R - depth / 2 + dy, s * (hw + 3), arcM * 0.8, 4, 4, CK.DECK);   // balconies
-      W.box(0, r0 - 2, s * (hw - 3), arcI, 4, 6, CK.BRONZE);                        // roof edge beam
+    for (const s of [-1, 1]) W.box(0, R + 7.5, s * (hw - 10), arcO, 3, 8, CK.DARK);   // keel rails
+    // radiator fins every eighth bay, in planes that hold the spin axis (edge-on to the Sun)
+    if (k % 8 === 4) for (const s of [-1, 1]) {
+      W.box(0, R + 26, s * (hw - 30), 1.4, 40, 44, CK.RADIATOR);
+      W.box(0, R + 8, s * (hw - 30), 5, 4, 48, CK.BRONZE);                           // manifold
     }
-    W.box(0, r0 - 1, 0, arcI, 2, 2 * hw - 10, k % 10 < 7 ? CK.ROOF : CK.CONSERVATORY);
-    if (k % 2 === 1) W.box(0, r0 - 5, 0, arcI * 0.25, 1, 2 * hw - 14, CK.DARK);    // chevron louvre
-    if (k % 6 === 0) W.box(arcM / 2, R - depth / 2, 0, 3, depth + 10, 2 * hw + 8, CK.BRONZE);   // frame
+    for (const s of [-1, 1]) {
+      // terraces: the lowest tier (at the rim, full gravity) stands furthest out
+      for (let t = 0; t < TIERS; t++) {
+        const y = R - tierH * (t + 0.5), z = s * (hw - step * t);   // tier 0 on the floor edge, each one above set back 7 m
+        W.box(0, y, z, arcM * (1 - t * 0.02), tierH - 2.4, 2, CK.GLASS);             // glazed apartments
+        W.box(0, y - tierH / 2 + 0.2, z - s * 3.6, arcM, 1.6, 7.2, t === TIERS - 1 ? CK.BRONZE : CK.DECK);   // floor slab / balcony
+        if (t < TIERS - 1 && k % 2 === 0) W.box(0, y - tierH / 2 - 1.2, z - s * 5.0, arcM * 0.86, 1.4, 3.4, CK.CONSERVATORY);   // planters on the terrace above
+        if (k % 3 === 0) W.box(0, y, z + s * 0.9, 1.2, tierH - 2.4, 1.4, CK.BRONZE);  // mullion piers
+      }
+      W.box(0, R - depth / 2, s * (hw - 25), arcM, depth, 3, CK.HULL);              // pressure wall behind the terraces
+      W.box(0, r0 - 2, s * (hw - 22), arcI, 4, 6, CK.BRONZE);                       // roof edge beam, over the top tier
+    }
+    // the park roof: a five-facet glass vault, bronze arch ribs every sixth bay
+    for (let v = 0; v < vault.length - 1; v++) {
+      const [z0, h0] = vault[v], [z1, h1] = vault[v + 1];
+      const zm = (z0 + z1) / 2, hm = (h0 + h1) / 2, len = Math.hypot(z1 - z0, h1 - h0), tilt = Math.atan2(h1 - h0, z1 - z0);
+      W.push(tr(0, r0 - 1 - hm, zm).multiply(new THREE.Matrix4().makeRotationX(tilt)));
+      W.box(0, 0, 0, arcI, 1.2, len + 0.6, k % 10 < 7 ? CK.ROOF : CK.CONSERVATORY);
+      if (k % 6 === 0) W.box(0, -1.2, 0, 2.4, 2.4, len + 1.2, CK.BRONZE);
+      W.pop();
+    }
+    if (k % 2 === 1) W.box(0, r0 - 14.6, 0, arcI * 0.22, 1, 2 * hw - 90, CK.DARK);  // chevron louvre, just over the crown glass
+    if (k % 6 === 0) {
+      W.box(arcM / 2, R - depth / 2, 0, 3, depth + 10, 2 * (hw - 23), CK.BRONZE);   // bulkhead frame, inside the terraces
+      for (const s of [-1, 1]) for (let t = 0; t < TIERS; t++) W.box(arcM / 2, R - tierH * (t + 0.5), s * (hw - step * t + 1.4), 3, tierH, 2.8, CK.BRONZE);   // terrace frame, stepped with the tiers
+    }
     W.pop();
     const c = Math.cos(a), sn = Math.sin(a);
-    if (k % 2 === 0) for (const s of [-1, 1]) wheelLamps.push({ p: V(-sn * (R + 7), c * (R + 7), s * (hw + 3)), r: 2.2, color: LAMP.AMBER, i: 1.8, breathe: 0.12, phase: k / segs });
-    if (k % 4 === 1) wheelLamps.push({ p: V(-sn * (r0 - 7), c * (r0 - 7), 0), r: 2.6, color: WARM, i: 1.7 });
+    if (k % 6 === 0) for (const s of [-1, 1]) wheelLamps.push({ p: V(-sn * (R + 7), c * (R + 7), s * (hw + 3.2)), r: 2.2, color: LAMP.AMBER, i: 1.6, breathe: 0.12, phase: k / segs });   // on the frames only
+    if (k % 4 === 1) wheelLamps.push({ p: V(-sn * (r0 - 16), c * (r0 - 16), 0), r: 2.6, color: WARM, i: 1.7 });
+    if (k % 8 === 4) for (const s of [-1, 1]) wheelLamps.push({ p: V(-sn * (R + 47), c * (R + 47), s * (hw - 30)), r: 1.8, color: LAMP.RED, i: 2.4, breathe: 0.5, phase: k / 40 });
   }
   for (let k = 0; k < HAB.spokes; k++) {
     const a = (k / HAB.spokes) * TAU + TAU / 12, c = Math.cos(a), s = Math.sin(a);
@@ -222,6 +297,8 @@ export function buildHabitat() {
     W.tube([p0, p1], 13, 16, CK.HULL);
     for (const z of [-17, 17]) W.tube([p0.clone().setZ(z), p1.clone().setZ(z)], 4, 10, CK.GLASS);
     for (let j = 1; j < 8; j++) { atAim(W, p0.clone().lerp(p1, j / 8), V(c, s, 0)); W.lathe([[13, -2, CK.BRONZE], [18, -1, CK.BRONZE], [18, 1, CK.HULL], [13, 2, CK.BRONZE]], 20, 0, { closedProfile: true }); W.pop(); }
+    // the spoke's load-bearing truss round its lift shafts (the pressure tube only carries air)
+    truss(W, V(c * (HAB.hubR + 6), s * (HAB.hubR + 6), 0), V(c * (r0 - 24), s * (r0 - 24), 0), 48, 40, 1.0, CK.DARK);
     wheelLamps.push({ p: V(c * (R + 8), s * (R + 8), 0), r: 4, color: k % 2 ? LAMP.RED : LAMP.GREEN, i: 3.2 });
   }
   W.lathe([[HAB.axle + 8, -60, CK.DARK], [HAB.hubR - 6, -60, CK.HULL], [HAB.hubR, -50, CK.BRONZE], [HAB.hubR, -20, CK.HULL], [HAB.hubR + 2, -10, CK.GLASS],
@@ -235,23 +312,74 @@ export function buildHabitat() {
     const a = (k / 6) * TAU, d = V(Math.cos(a), Math.sin(a), 0);
     dockPort(F, lamps, ports, d.clone().multiplyScalar(62).setZ(-195), d, 26, 6);
   }
+  // the collector, sunward: forty petals of reflective film on a shallow cone, parted so the
+  // wheel and the stars show between them, each on its own spar from a hub girder ring, the
+  // lip held by stays from a guyed mast on the axis (an umbrella, not a plate)
   truss(F, V(0, 0, 290), V(0, 0, 330), 20, 20, 0.8, CK.DARK);
-  F.push(tr(0, 0, 340));
-  F.lathe([[36, -6, CK.BRONZE], [760, -6, CK.DARK], [1060, -4, CK.BRONZE], [1060, 4, CK.PANEL], [760, 6, CK.PANEL], [36, 6, CK.BRONZE]], 128, 0, { closedProfile: true });
-  for (let k = 0; k < 12; k++) { const a = (k / 12) * TAU; F.tube([V(Math.cos(a) * 40, Math.sin(a) * 40, 0), V(Math.cos(a) * 1050, Math.sin(a) * 1050, 8)], 2.5, 6, CK.BRONZE); lamps.push({ p: V(Math.cos(a) * 1066, Math.sin(a) * 1066, 0), r: 4, color: k % 3 ? LAMP.WHITE : LAMP.RED, i: 3.2, breathe: 0.6, phase: k / 12 }); }
+  F.push(tr(0, 0, HAB_COLLECTOR.z));
+  const { petals: nP, rIn, rOut, cone } = HAB_COLLECTOR, cc = Math.cos(cone), sc = Math.sin(cone);
+  hoopGirder(F, rIn, 0, 18, 12, 64, 2.2, CK.DARK);
+  for (let k = 0; k < 12; k++) {
+    const a = (k / 12) * TAU;
+    F.tube([V(Math.cos(a) * 40, Math.sin(a) * 40, 0), V(Math.cos(a) * (rIn - 8), Math.sin(a) * (rIn - 8), 0)], 3, 6, CK.BRONZE);
+    F.tube([V(Math.cos(a) * 40, Math.sin(a) * 40, -20), V(Math.cos(a) * (rIn - 8), Math.sin(a) * (rIn - 8), 0)], 1.2, 4, CK.DARK);
+  }
+  const span = rOut - rIn, strips = 6, dl = span / strips;
+  for (let k = 0; k < nP; k++) {
+    const a = ((k + 0.5) / nP) * TAU;
+    F.push(rotZ(a - Math.PI / 2).multiply(tr(0, 0, 0)).multiply(new THREE.Matrix4().makeRotationZ(Math.PI / 2)).multiply(tr(rIn, 0, 0)).multiply(new THREE.Matrix4().makeRotationY(-cone)));
+    for (let j = 0; j < strips; j++) {
+      const x = 12 + (j + 0.5) * dl, rr = rIn + x * cc, w = (TAU * rr) / nP * 0.84;
+      F.box(x, 0, 1.2, dl - 2.5, w, 0.8, CK.PANEL);                                  // film gore (sunward)
+      F.box(x, 0, 0.1, dl - 2.5, w * 0.98, 0.5, CK.DARK);                             // backing
+      F.box(x - dl / 2, 0, -0.2, 1.4, w + 2, 1.4, CK.BRONZE);                         // cross batten
+    }
+    F.box(12 + span / 2, 0, -2.5, span, 5, 4, CK.BRONZE);                              // spar
+    F.tube([V(0, 0, -4), V(12 + span * 0.5, 0, -18), V(12 + span, 0, -4)], 0.9, 4, CK.DARK);   // king-post truss under it
+    if (k % 4 === 0) lamps.push({ p: here(F, 14 + span, 0, 2), r: 4, color: k % 8 ? LAMP.WHITE : LAMP.RED, i: 3.2, breathe: 0.6, phase: k / nP });
+    F.pop();
+  }
+  const lipR = rIn + (12 + span) * cc, lipZ = (12 + span) * sc;
+  F.push(tr(0, 0, lipZ)); F.torus(lipR, 2.6, 160, 5, CK.BRONZE); F.pop();
+  truss(F, V(0, 0, 10), V(0, 0, 260), 14, 22, 0.6, CK.DARK);                          // the guyed mast
+  for (let k = 0; k < 20; k++) {
+    const a = ((k + 0.5) / 20) * TAU;
+    F.tube([V(0, 0, 262), V(Math.cos(a) * lipR, Math.sin(a) * lipR, lipZ)], 0.7, 3, CK.DARK);
+  }
+  lamps.push({ p: V(0, 0, HAB_COLLECTOR.z + 268), r: 4, color: LAMP.WHITE, i: 3.6, breathe: 0.8 });
   F.pop();
   for (let k = 0; k < 12; k++) { const a = (k / 12) * TAU; lamps.push({ p: V(Math.cos(a) * 65.2, Math.sin(a) * 65.2, -195 + ((k % 2) ? 12 : -12)), r: 1.4, color: WARM, i: 1.8 }); }
   lamps.push({ p: V(0, 0, -266), r: 4, color: LAMP.RED, i: 3.4, breathe: 0.7 });
   return { fixed: F.geometry(), wheel: W.geometry(), lamps, wheelLamps, ports };
 }
 
+/**
+ * A flat mirror film (w across x, L along +z from the hinge, at local height y, its reflective
+ * face down -y) appended to sheet { pos, nrm, uv, idx } through matrix M; aMir holds the film
+ * coordinates in metres for the mirror shader's gores and seams.
+ */
+function mirrorSheet(sheet, M, w, L, y, nx = 4, nz = 16) {
+  const base = sheet.pos.length / 3, p = new THREE.Vector3(), n = new THREE.Vector3(0, -1, 0).transformDirection(M);
+  for (let j = 0; j <= nz; j++) for (let i = 0; i <= nx; i++) {
+    const x = -w / 2 + (w * i) / nx, z = (L * j) / nz;
+    p.set(x, y, z).applyMatrix4(M);
+    sheet.pos.push(p.x, p.y, p.z); sheet.nrm.push(n.x, n.y, n.z); sheet.uv.push(x, z);
+  }
+  for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) {
+    const a = base + j * (nx + 1) + i, b = a + 1, c = a + nx + 1, d = c + 1;
+    sheet.idx.push(a, b, d, a, d, c);
+  }
+}
+
 // --------------------------------------------------------------- farm ----
 export const FARM = { R: 160, halfL: 320, sep: 290, mirrorLen: 520, tilt: THREE.MathUtils.degToRad(12), strips: 3 };
 export const farmOmega = () => Math.sqrt(9.81 / FARM.R);
+// the drums' end-cap profile beyond the hull's end [radius m, distance beyond the end m, kind]
+const FARM_CAP = [[163, 4, CK.HULL], [146, 16, CK.HULL], [118, 26, CK.GLASS], [82, 33, CK.HULL], [45, 37, 'crown'], [9.9, 38, CK.DARK]];   // (the last point: the axle stub, inside the bearing bore)
 
 /** One drum (axis z): alternating land and glazed strips, hoops and mullion ribs, louvre-mirrors. */
 export function buildFarmDrum() {
-  const B = new CB(), lamps = [];
+  const B = new CB(), lamps = [], sheet = { pos: [], nrm: [], uv: [], idx: [] };
   const { R, halfL: L } = FARM;
   const K = 72, rings = [];
   for (let j = 0; j <= 16; j++) {
@@ -272,10 +400,23 @@ export function buildFarmDrum() {
     B.pop();
     for (const zt of [-L + 40, L - 40]) for (const da of [-0.06, 0, 0.06]) lamps.push({ p: V(Math.cos(a + da) * (R + 1.2), Math.sin(a + da) * (R + 1.2), zt + da * 300), r: 1.6, color: WARM, i: 2.0 });
   }
+  // end caps: shallow domes, a glazed ring of the cap towns between plated shoulders, the sun
+  // cap's crown in photovoltaic film and the shadow cap's in radiator, ribbed with bronze
   for (const s of [-1, 1]) {
-    latheAt(B, tr(0, 0, 0), [[R, s * L, CK.BRONZE], [R + 3, s * (L - 2), CK.BRONZE], [R + 3, s * (L + 4), CK.HULL], [R * 0.7, s * (L + 16), CK.HULL], [R * 0.3, s * (L + 22), s > 0 ? CK.PANEL : CK.RADIATOR], [12, s * (L + 24), CK.DARK], [10, s * (L + 44), CK.BRONZE], [0.02, s * (L + 44), CK.DARK]], 72);
+    const cap = FARM_CAP.map(([r, dz, k]) => [r, s * (L + dz), k === 'crown' ? (s > 0 ? CK.PANEL : CK.RADIATOR) : k]);
+    latheAt(B, tr(0, 0, 0), [[R, s * L, CK.BRONZE], [R + 3, s * (L - 2), CK.BRONZE], ...cap, [10, s * (L + 44), CK.BRONZE], [0.02, s * (L + 44), CK.DARK]], 72);
+    for (let k = 0; k < 12; k++) {
+      const a = (k / 12) * TAU, c = Math.cos(a), sn = Math.sin(a);
+      B.tube(FARM_CAP.slice(0, -2).map(([r, dz]) => V(c * (r + 1.1), sn * (r + 1.1), s * (L + dz + 1.1))), 0.9, 4, CK.BRONZE);   // (they stop at the crown, clear of the bearing)
+    }
+    for (let k = 0; k < 16; k++) {
+      const a = (k / 16) * TAU, r = FARM_CAP[2][0] - 2;
+      lamps.push({ p: V(Math.cos(a) * r, Math.sin(a) * r, s * (L + FARM_CAP[2][1] + 2)), r: 1.2, color: WARM, i: 1.9, breathe: 0.2, phase: k / 16 });
+    }
   }
-  for (let h = 1; h < 8; h++) { B.push(tr(0, 0, -L + (h / 8) * 2 * L)); B.torus(R + 1.2, 1.3, 144, 6, CK.BRONZE); B.pop(); }
+  // ring girders round the drum every eighth of its length: the hoops that carry the hull's
+  // hoop stress, laced box sections standing proud of the glazing
+  for (let h = 1; h < 8; h++) hoopGirder(B, R + 4.5, -L + (h / 8) * 2 * L, 6, 5, 72, 0.55, CK.BRONZE);
   for (let k = 0; k < 6; k++) {
     const a = (k / 6) * TAU;
     B.push(rotZ(a - Math.PI / 2));
@@ -295,7 +436,9 @@ export function buildFarmDrum() {
     const m = rotZ(a - Math.PI / 2).multiply(tr(0, R + 4, -L + 6)).multiply(new THREE.Matrix4().makeRotationX(-FARM.tilt));
     B.push(m);
     const w = R * (TAU / 6) * 0.94;
-    for (let j = 0; j < 8; j++) B.box(0, 0.8, (j + 0.5) * (Lm / 8), w, 0.5, Lm / 8 - 2, CK.PANEL);
+    // aluminised film facing the drum (a shader sheet, below), on a dark ribbed backing
+    for (let j = 0; j < 8; j++) B.box(0, 1.3, (j + 0.5) * (Lm / 8), w, 0.3, Lm / 8 - 2, CK.DARK);
+    mirrorSheet(sheet, B.M, w - 1, Lm - 1, 0.95);
     for (const s of [-1, 1]) B.box(s * w / 2, 0, Lm / 2, 2, 2, Lm, CK.DARK);
     for (let j = 0; j <= 8; j++) B.box(0, 0, j * (Lm / 8), w + 2, 1.4, 1.4, CK.BRONZE);
     B.box(0, -1, 0, w * 0.7, 3.6, 5, CK.BRONZE);                                  // hinge
@@ -306,7 +449,13 @@ export function buildFarmDrum() {
     const tipLocal = V(0, R + 4 + Math.sin(FARM.tilt) * Lm, -L + 6 + Math.cos(FARM.tilt) * Lm).applyMatrix4(rotZ(a - Math.PI / 2));
     B.tube([V(Math.cos(a) * (R + 3), Math.sin(a) * (R + 3), L - 20), tipLocal], 0.6, 4, CK.DARK);
   }
-  return { geo: B.geometry(), lamps, sweep: R + 4 + Math.sin(FARM.tilt) * Lm + 2 };
+  const mirrors = new THREE.BufferGeometry();
+  mirrors.setAttribute('position', new THREE.Float32BufferAttribute(sheet.pos, 3));
+  mirrors.setAttribute('normal', new THREE.Float32BufferAttribute(sheet.nrm, 3));
+  mirrors.setAttribute('aMir', new THREE.Float32BufferAttribute(sheet.uv, 2));
+  mirrors.setIndex(sheet.idx);
+  mirrors.computeBoundingSphere();
+  return { geo: B.geometry(), mirrors, lamps, sweep: R + 4 + Math.sin(FARM.tilt) * Lm + 2 };
 }
 
 /** The fixed frame: end trusses and bearings, the sunward dock, the granary stacks astern. */
@@ -393,6 +542,20 @@ export function buildPolar() {
   lamps.push({ p: tip, r: 2, color: LAMP.RED, i: 3.6, breathe: 0.7 });
   dish(B, V(8, 258, 0), V(1, 1, 0).normalize(), 6);
   catwalk(B, V(5.6, -220, 5.6), V(5.6, 250, 5.6), V(1, 0, 1).normalize(), 1.2, 1.1);
+  // the pressurised tunnel inside the spine truss, node to zenith through the centrifuge's
+  // bearing, ringed every 18 m; a lit coolant conduit and a power bus down the truss faces
+  // (the pieces of the station read as one body instead of a stack of separate parts)
+  for (const [y0, y1] of [[-44, POLAR.ringY - 7], [POLAR.ringY + 7, 250]]) {
+    B.tube([V(0, y0, 0), V(0, y1, 0)], 3.2, 14, CK.HULL);
+    for (let y = y0 + 9; y < y1 - 4; y += 18) { B.push(tr(0, y, 0).multiply(toY)); B.torus(3.4, 0.35, 16, 4, CK.BRONZE); B.pop(); }
+  }
+  B.tube([V(-5.9, -224, 0), V(-5.9, 256, 0)], 0.8, 6, CK.CONDUIT);
+  B.tube([V(0, -224, -5.9), V(0, 256, -5.9)], 0.6, 6, CK.BRONZE);
+  // a baffle ring over the nadir deck: it shades the instruments' optics from the Earth's limb glare
+  B.push(tr(0, -224, 0).multiply(toY));
+  B.lathe([[52, 0, CK.DARK], [66, 6, CK.HULL], [66, 9, CK.BRONZE], [52, 3, CK.HULL], [52, 0, CK.DARK]], 48, Math.PI / 48);
+  B.pop();
+  for (let k = 0; k < 8; k++) { const a = (k / 8) * TAU; B.tube([V(Math.cos(a) * 40, -228, Math.sin(a) * 40), V(Math.cos(a) * 60, -221.6, Math.sin(a) * 60)], 0.6, 4, CK.DARK); }
   // the centrifuge (spins about y): a glazed torus on four spokes
   Rg.push(tr(0, POLAR.ringY, 0).multiply(new THREE.Matrix4().makeRotationX(Math.PI / 2)));
   Rg.torus(POLAR.ringR, POLAR.ringTube, 96, 14, CK.GLASS);
@@ -415,6 +578,7 @@ export function buildPolar() {
 
 // -------------------------------------------------------------- power ----
 export const POWER = { half: 950, height: 360, pivotZ: -300, disc: 120, discOff: 64, tramY: 12, tramZ: -16.5 };
+export const EMITTER_HEX = { r: 4.6, pitch: 9, tiles: 0 };   // tile circumradius, centre spacing (m)
 
 /** The Dawnline inspection tram (+x along the rail), 14 m. */
 export function buildTram() {
@@ -451,6 +615,31 @@ export function buildPower() {
     B.tube([V(0, s * 90, -40), V(s * half * 0.5, s * (h / 2), -2)], 0.5, 4, CK.DARK);
     B.tube([V(0, s * 90, -40), V(-s * half * 0.5, s * (h / 2), -2)], 0.5, 4, CK.DARK);
   }
+  // the back frame that makes the blanket a structure: edge longerons, a rib truss at every
+  // fourth bay, king posts behind the spine with stays to the longerons (a deep, stiff
+  // tension frame), and radiator fins standing edge-on to the Sun behind the spine
+  for (const s of [-1, 1]) truss(B, V(-half - 4, s * (h / 2 + 3), -7), V(half + 4, s * (h / 2 + 3), -7), 6, 18, 0.3, CK.DARK);
+  for (let i = 0; i <= n; i += 4) {
+    const x = -half + i * w;
+    truss(B, V(x, -h / 2, -7), V(x, h / 2, -7), 5, 15, 0.25, CK.DARK);
+    if (i % 8 === 4 && Math.abs(x) > 200) {
+      B.tube([V(x, 0, -13), V(x, 0, -62)], 1.2, 6, CK.BRONZE);
+      for (const s of [-1, 1]) {
+        B.tube([V(x, 0, -62), V(x, s * (h / 2 + 3), -10)], 0.4, 4, CK.DARK);
+        B.tube([V(x, 0, -62), V(x + s * w * 4, 0, -13)], 0.4, 4, CK.DARK);
+      }
+      lamps.push({ p: V(x, 0, -64), r: 1.4, color: LAMP.AMBER, i: 2.2, breathe: 0.4, phase: i / n });
+    }
+    if (i % 8 === 0 && Math.abs(x + w * 2) > 330) for (const sy of [-1, 1]) {
+      B.box(x + w * 2, sy * h / 4, -38, w * 2.4, 0.6, 46, CK.RADIATOR);
+      B.box(x + w * 2, sy * h / 4, -14.5, w * 2.5, 1.8, 2, CK.BRONZE);
+    }
+  }
+  // the blankets' tensioning booms at both wing tips, with their reels
+  for (const s of [-1, 1]) {
+    B.box(s * (half + 6), 0, -3, 4, h + 10, 4, CK.BRONZE);
+    for (const sy of [-1, 1]) { B.push(tr(s * (half + 6), sy * (h / 2 + 5), -3).multiply(new THREE.Matrix4().makeRotationY(Math.PI / 2))); B.lathe([[3.5, -3, CK.DARK], [3.5, 3, CK.DARK]], 16); B.pop(); }
+  }
   // the hub behind the array: crew drum, docks, mast to the emitter gimbal
   B.push(tr(0, 0, -20).multiply(new THREE.Matrix4().makeRotationX(Math.PI)));
   habModule(B, 26, 80, { glass: 3, seg: 36 });
@@ -471,14 +660,21 @@ export function buildPower() {
   const { disc: R, discOff: d } = POWER;
   E.tube([V(0, 0, 0), V(0, 0, d - 6)], 3.2, 12, CK.BRONZE);
   E.lathe([[0.02, d - 8, CK.HULL], [R * 0.2, d - 6, CK.HULL], [R, d - 1, CK.BRONZE], [R + 1, d, CK.BRONZE], [R, d + 1.6, CK.DARK], [0.02, d + 1.6, CK.DARK]], 64);
-  for (let ring = 1; ring < 6; ring++) {
-    const rr = (ring / 6) * R, m = Math.round(ring * 8);
-    for (let k = 0; k < m; k++) {
-      const a = (k / m) * TAU + ring * 0.3;
-      E.box(Math.cos(a) * rr, Math.sin(a) * rr, d + 2, 13, 13, 0.8, (ring + k) % 3 ? CK.PANEL : CK.DARK);
-    }
-    E.push(tr(0, 0, d + 2.6)); E.torus(rr + 7, 0.5, 96, 4, CK.BRONZE); E.pop();
+  // the aperture: hexagonal radiating tiles close-packed on a hex grid (8 m across the flats,
+  // 1 m gaps), every seventh a darker phase-reference tile, sub-array frames in rings
+  const hexR = EMITTER_HEX.r, pitch = EMITTER_HEX.pitch;
+  let tiles = 0;
+  for (let q = -12; q <= 12; q++) for (let r = -12; r <= 12; r++) {
+    const x = pitch * (q + r / 2), y = pitch * r * Math.sqrt(3) / 2;
+    if (Math.hypot(x, y) > R - hexR - 2) continue;
+    const ref = ((q - r) % 7 + 7) % 7 === 0;
+    E.push(tr(x, y, d + 1.6));
+    E.lathe([[0.02, 0, CK.DARK], [hexR, 0, CK.DARK], [hexR, ref ? 0.8 : 1.4, ref ? CK.DARK : CK.PANEL], [0.02, ref ? 0.8 : 1.4, CK.PANEL]], 6, Math.PI / 6);
+    E.pop();
+    tiles++;
   }
+  EMITTER_HEX.tiles = tiles;
+  for (let ring = 2; ring < 6; ring += 1) { const rr = (ring / 6) * R; E.push(tr(0, 0, d + 3.2)); E.torus(rr, 0.45, 96, 4, CK.BRONZE); E.pop(); }
   for (let k = 0; k < 16; k++) { const a = (k / 16) * TAU; E.tube([V(0, 0, 4), V(Math.cos(a) * R * 0.95, Math.sin(a) * R * 0.95, d - 2)], 0.7, 4, CK.DARK); }
   for (let k = 0; k < 24; k++) { const a = (k / 24) * TAU; emitterLamps.push({ p: V(Math.cos(a) * (R + 2), Math.sin(a) * (R + 2), d + 1), r: 1.6, color: LAMP.RED, i: 2.6, breathe: 0.5, phase: k / 24 }); }
   emitterLamps.push({ p: V(0, 0, d + 3.4), r: 3.2, color: [1.0, 0.45, 0.25], i: 2.4, breathe: 0.4 });
@@ -503,6 +699,16 @@ export function buildSkyhookHub() {
     solarWing(B, lamps, s, SKYHOOK.hubR + 6, 150, 50, 4, 0);
     radiatorWing(B, V(0, 0, s * SKYHOOK.hubR), V(0, 0, s), V(0, 1, 0), 90, 30, lamps, s > 0 ? LAMP.GREEN : LAMP.RED);
   }
+  // the drum's structure: sixteen longerons carrying the tether load from spool to spool past
+  // the bearing band, hoop frames between them, and a lit tension gauge band at each shoulder
+  for (let k = 0; k < 16; k++) {
+    const a = (k / 16) * TAU, c = Math.cos(a), sn = Math.sin(a), r0 = SKYHOOK.hubR + 1.6;
+    for (const s of [-1, 1]) B.box(c * r0, s * 37, sn * r0, 2.4, 34, 2.4, CK.BRONZE);
+    B.tube([V(c * 30, -66, sn * 30), V(c * r0, -54, sn * r0)], 1.0, 4, CK.BRONZE);
+    B.tube([V(c * 30, 66, sn * 30), V(c * r0, 54, sn * r0)], 1.0, 4, CK.BRONZE);
+  }
+  for (const y of [-46, -30, 30, 46]) { B.push(tr(0, y, 0).multiply(toY)); B.torus(SKYHOOK.hubR + 1.2, 1.1, 64, 4, CK.DARK); B.pop(); }
+  for (const s of [-1, 1]) { B.push(tr(0, s * 56, 0).multiply(toY)); B.torus(SKYHOOK.hubR - 1, 1.4, 64, 6, CK.CONDUIT); B.pop(); }
   B.push(tr(0, 34, 0).multiply(new THREE.Matrix4().makeRotationX(Math.PI / 2)));
   B.torus(SKYHOOK.hubR + 14, 6, 96, 12, CK.GLASS);
   for (let k = 0; k < 6; k++) { const a = (k / 6) * TAU + 0.3; B.tube([V(Math.cos(a) * SKYHOOK.hubR, Math.sin(a) * SKYHOOK.hubR, 0), V(Math.cos(a) * (SKYHOOK.hubR + 8), Math.sin(a) * (SKYHOOK.hubR + 8), 0)], 2, 8, CK.HULL); }

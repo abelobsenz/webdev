@@ -1,0 +1,223 @@
+// Invariants of the low-orbit stations (src/space/leoStations.js) after the refinement wave:
+// buffer sanity and finite values for every generator, triangle budgets, the Halcyon terraces,
+// vault and collector petals clear of each other and of the wheel's sweep, the Aurelia galleries
+// and spoke trusses clear of the suites, the Demeter caps clear of the bearings, the Dawnline
+// back frame clear of the hub's radiators, and build timings. Run: node tools/verify-habitats.mjs
+import * as THREE from 'three';
+import {
+  buildHotel, HOTEL, buildHabitat, HAB, HAB_COLLECTOR, buildFarmDrum, buildFarmFrame, FARM, buildPolar, POLAR, buildPower, POWER,
+  buildSkyhookHub, buildGrapple, buildTram, EMITTER_HEX,
+} from '../src/space/leoStations.js';
+import { LowOrbit, leoTargets } from '../src/space/lowOrbit.js';
+import { SpaceSim, R_EARTH } from '../src/space/sim.js';
+
+let fails = 0;
+const ok = (c, msg) => { if (!c) { fails++; console.log('FAIL', msg); } else console.log('ok  ', msg); };
+
+function sane(name, g) {
+  const pos = g.attributes.position, idx = g.index;
+  let max = 0, finite = true;
+  for (let i = 0; i < idx.count; i++) if (idx.array[i] > max) max = idx.array[i];
+  for (let i = 0; i < pos.array.length; i++) if (!Number.isFinite(pos.array[i])) { finite = false; break; }
+  const fac = g.attributes.aFacade;
+  let fin2 = true;
+  if (fac) for (let i = 0; i < fac.array.length; i++) if (!Number.isFinite(fac.array[i])) { fin2 = false; break; }
+  ok(max < pos.count && idx.count % 3 === 0, `${name}: index max ${max} < ${pos.count} vertices, ${idx.count / 3} triangles`);
+  ok(finite && fin2, `${name}: positions and facade coordinates finite`);
+  ok(!fac || fac.count === pos.count, `${name}: facade attribute covers every vertex`);
+  return idx.count / 3;
+}
+/** Radial and axial extent (about z) of every vertex whose kind matches, in a z window. */
+function extent(g, kinds, pred = () => true) {
+  const p = g.attributes.position.array, f = g.attributes.aFacade.array;
+  let rMin = Infinity, rMax = 0, zMin = Infinity, zMax = -Infinity, n = 0;
+  for (let i = 0; i < p.length / 3; i++) {
+    const k = Math.round(f[i * 3 + 2]);
+    if (kinds && !kinds.includes(k)) continue;
+    const x = p[i * 3], y = p[i * 3 + 1], z = p[i * 3 + 2];
+    if (!pred(x, y, z)) continue;
+    const r = Math.hypot(x, y);
+    rMin = Math.min(rMin, r); rMax = Math.max(rMax, r); zMin = Math.min(zMin, z); zMax = Math.max(zMax, z); n++;
+  }
+  return { rMin, rMax, zMin, zMax, n };
+}
+
+const T = {};
+const time = (name, fn) => { const t0 = performance.now(); const r = fn(); T[name] = performance.now() - t0; return r; };
+
+// ---- Halcyon
+const hab = time('halcyon', buildHabitat);
+let tri = sane('halcyon wheel', hab.wheel) + sane('halcyon fixed', hab.fixed);
+ok(tri < 1.4e6, `halcyon ${Math.round(tri)} triangles (< 1.4M)`);
+{
+  const w = extent(hab.wheel);
+  const f = extent(hab.fixed, null, (x, y, z) => z > HAB_COLLECTOR.z - 30);
+  ok(w.zMax < HAB_COLLECTOR.z - 150, `halcyon wheel z <= ${w.zMax.toFixed(0)} m, collector from ${HAB_COLLECTOR.z} m: petals clear of the turning wheel`);
+  ok(f.rMax < HAB_COLLECTOR.rOut + 40 && f.rMax > HAB_COLLECTOR.rOut - 20, `halcyon collector reaches ${f.rMax.toFixed(0)} m (lip near ${HAB_COLLECTOR.rOut} m)`);
+  // the collector is parted into petals: along a ring at mid-span most directions pass between them
+  const g = hab.fixed, p = g.attributes.position.array, ix = g.index.array, fac = g.attributes.aFacade.array;
+  const bins = new Uint8Array(720);
+  for (let t = 0; t < ix.length; t += 3) {
+    const a = ix[t], k = Math.round(fac[a * 3 + 2]);
+    if (k !== 7) continue;                                      // film gores
+    for (const v of [ix[t], ix[t + 1], ix[t + 2]]) {
+      const r = Math.hypot(p[v * 3], p[v * 3 + 1]);
+      if (r < 600 || r > 760) continue;
+      const ang = (Math.atan2(p[v * 3 + 1], p[v * 3]) + 2 * Math.PI) % (2 * Math.PI);
+      bins[Math.floor((ang / (2 * Math.PI)) * 720) % 720] = 1;
+    }
+  }
+  let edges = 0; for (let i = 0; i < 720; i++) if (bins[i] !== bins[(i + 1) % 720]) edges++;
+  ok(edges >= HAB_COLLECTOR.petals * 2, `halcyon collector parted into petals (${edges / 2} film runs round mid-span, >= ${HAB_COLLECTOR.petals})`);
+  // terraces: the rim tier stands further out than the crown tier, all within the frame edge
+  const glass = extent(hab.wheel, [0], (x, y, z) => Math.abs(z) > HAB.halfW - 20);
+  ok(glass.n > 0 && Math.abs(glass.zMax) <= HAB.halfW + 3, `halcyon terraces reach |z| ${glass.zMax.toFixed(1)} m (on the floor, whose edge is ${HAB.halfW + 3} m)`);
+  const vault = extent(hab.wheel, [12, 13], (x, y, z) => Math.abs(z) < 30);
+  const r0 = HAB.R - HAB.depth;
+  ok(vault.rMin > r0 - 20 && vault.rMin < r0 - 10, `halcyon park vault crown at ${vault.rMin.toFixed(1)} m (roof line ${r0} m, the vault rises 12 m)`);
+  const hub = extent(hab.fixed, null, (x, y, z) => Math.abs(z) < 75);
+  ok(hub.n > 0 && hub.rMax < HAB.hubR - 5, `halcyon despun axle and bearings within the hub bore (${hub.rMax.toFixed(1)} m < ${HAB.hubR - 5})`);
+  ok(hab.lamps.every((l) => Number.isFinite(l.p.x + l.p.y + l.p.z)) && hab.wheelLamps.every((l) => Number.isFinite(l.p.x + l.p.y + l.p.z)), 'halcyon lamps finite');
+}
+
+// ---- Aurelia
+const hot = time('aurelia', buildHotel);
+tri = sane('aurelia wheel', hot.wheel) + sane('aurelia fixed', hot.fixed);
+ok(tri < 700000, `aurelia ${Math.round(tri)} triangles (< 700k)`);
+{
+  const gal = extent(hot.wheel, [0], (x, y, z) => Math.abs(z) > HOTEL.halfW + 3);
+  ok(gal.n > 0 && gal.zMax < HOTEL.halfW + 7.6, `aurelia promenade galleries at |z| <= ${gal.zMax.toFixed(1)} m`);
+  const r0 = HOTEL.R - HOTEL.depth;
+  const spokes = extent(hot.wheel, [10], (x, y, z) => { const r = Math.hypot(x, y); return r > HOTEL.hubR + 2 && r < r0 - 4; });
+  ok(spokes.n > 0 && spokes.zMax < 13 && spokes.zMin > -13, `aurelia spoke trusses within |z| ${Math.max(spokes.zMax, -spokes.zMin).toFixed(1)} m (tension stays run outside)`);
+  const fixed = extent(hot.fixed, null, (x, y, z) => Math.abs(z) < 32);
+  ok(fixed.rMax < HOTEL.hubIn + 14, `aurelia bearings inside the hub (${fixed.rMax.toFixed(1)} m)`);
+}
+
+// ---- Demeter
+const drum = time('demeter drum', buildFarmDrum), frame = time('demeter frame', buildFarmFrame);
+tri = 2 * sane('demeter drum', drum.geo) + sane('demeter frame', frame.geo);
+ok(tri < 900000, `demeter ${Math.round(tri)} triangles (< 900k)`);
+{
+  const cap = extent(drum.geo, null, (x, y, z) => Math.abs(z) > FARM.halfL + 2 && Math.hypot(x, y) > 30);
+  // the frame's bearings sit L+56-10 +- 6 from the drum centre, radius 11..28
+  ok(cap.zMax < FARM.halfL + 40, `demeter cap domes end at ${(cap.zMax - FARM.halfL).toFixed(1)} m past the hull, bearings from 40 m`);
+  {
+    const mp = drum.mirrors.attributes.position.array, mi = drum.mirrors.index.array;
+    let mMax = 0, rMin = Infinity; for (const i of mi) mMax = Math.max(mMax, i);
+    for (let i = 0; i < mp.length / 3; i++) rMin = Math.min(rMin, Math.hypot(mp[i * 3], mp[i * 3 + 1]));
+    ok(mMax < drum.mirrors.attributes.position.count && drum.mirrors.attributes.aMir.count === drum.mirrors.attributes.position.count && mp.every(Number.isFinite), `demeter mirror film: ${mi.length / 3} triangles, buffers sane`);
+    ok(rMin > FARM.R + 4, `demeter mirror film ${(rMin - FARM.R).toFixed(1)} m off the drum (clear of the ring girders' hinge bay)`);
+  }
+  ok(drum.sweep < FARM.sep - 4, `demeter drums' sweep ${drum.sweep.toFixed(0)} m < half separation ${FARM.sep}`);
+  const ring = extent(drum.geo, [8], (x, y, z) => Math.abs(z) < FARM.halfL - 30 && Math.hypot(x, y) > FARM.R + 1 && Math.hypot(x, y) < FARM.R + 30 && Math.abs(((z + FARM.halfL) % (FARM.halfL / 4)) - FARM.halfL / 8) > FARM.halfL / 8 - 5);
+  ok(ring.rMax < FARM.R + 9, `demeter ring girders stand ${(ring.rMax - FARM.R).toFixed(1)} m proud (< mirror hinge line ${FARM.R + 4 + 1.8} + lacing)`);
+}
+
+// ---- Boreal, Dawnline, Anansi
+const pol = time('boreal', buildPolar);
+tri = sane('boreal body', pol.body) + sane('boreal ring', pol.ring) + sane('boreal wings', pol.wings);
+{
+  // the spine's tunnel, conduit and bus pass inside the centrifuge's bearing collar (inner 7.5 m)
+  const p = pol.body.attributes.position.array, f = pol.body.attributes.aFacade.array;
+  let rMax = 0;
+  for (let i = 0; i < p.length / 3; i++) {
+    const y = p[i * 3 + 1], k = Math.round(f[i * 3 + 2]);
+    if ((k === 1 || k === 4) && Math.abs(y - POLAR.ringY) < 12 && Math.hypot(p[i * 3], p[i * 3 + 2]) < 12) rMax = Math.max(rMax, Math.hypot(p[i * 3], p[i * 3 + 2]));
+  }
+  ok(rMax < 7.5, `boreal tunnel and conduit through the bearing collar at r <= ${rMax.toFixed(2)} m (< 7.5)`);
+  const rp = pol.ring.attributes.position.array; let bore = Infinity;
+  for (let i = 0; i < rp.length / 3; i++) bore = Math.min(bore, Math.hypot(rp[i * 3], rp[i * 3 + 2]));
+  const ring = { rMin: bore };
+  ok(ring.rMin > 12.5, `boreal centrifuge hub bore ${ring.rMin.toFixed(1)} m clear of the collar (12 m)`);
+  const shade = extent(pol.body, null, (x, y, z) => y > -226 && y < -212 && Math.hypot(x, z) > 50);
+  ok(shade.n > 0, 'boreal baffle ring above the nadir deck (deck top -228 m)');
+}
+const pw = time('dawnline', buildPower);
+tri = sane('dawnline body', pw.body) + sane('dawnline emitter', pw.emitter);
+ok(tri < 500000, `dawnline ${Math.round(tri)} triangles (< 500k)`);
+{
+  // the back frame stays behind the blanket (sunward face at z ~ +0.5) and clear of the emitter's sweep
+  const back = extent(pw.body, [10, 11], (x, y, z) => Math.abs(x) > 250);
+  ok(back.zMax < 2.5 && back.zMin > -70, `dawnline back frame in z ${back.zMin.toFixed(1)}..${back.zMax.toFixed(1)} m (behind the blanket)`);
+  const sweep = POWER.disc + 4;
+  const near = extent(pw.body, null, (x, y, z) => z < POWER.pivotZ + POWER.discOff + 8 && z > POWER.pivotZ - 10 && Math.hypot(x, y) > 14);
+  ok(near.n === 0 || near.rMin > sweep, `dawnline nothing but the mast inside the emitter's sweep (${near.n} vertices)`);
+  // hub radiators (x 26..~200, y 0, z -82..-38) clear of the frame's king posts and fins
+  const p = pw.body.attributes.position.array, f = pw.body.attributes.aFacade.array;
+  let clash = 0;
+  for (let i = 0; i < p.length / 3; i++) {
+    const x = p[i * 3], y = p[i * 3 + 1], z = p[i * 3 + 2], k = Math.round(f[i * 3 + 2]);
+    if (k === 11 && Math.abs(y) > 20 && Math.abs(x) < 230 && z < -30) clash++;
+  }
+  ok(clash === 0, `dawnline back-frame fins keep off the hub radiators (${clash})`);
+  const flats = 2 * EMITTER_HEX.r * Math.cos(Math.PI / 6);
+  ok(EMITTER_HEX.tiles > 400 && EMITTER_HEX.pitch - flats > 0.5, `dawnline emitter ${EMITTER_HEX.tiles} hex tiles, ${(EMITTER_HEX.pitch - flats).toFixed(2)} m gaps`);
+}
+sane("anansi hub", buildSkyhookHub().geo); sane("anansi grapple", buildGrapple().geo);
+sane('tram', buildTram());
+
+// ---- the shell at run time: trails, approach strobes, the Demeter film, framing, buffers, cost
+{
+  const sim = new SpaceSim();
+  sim.syncFromHours(21);
+  const space = {
+    scene: new THREE.Scene(), bodies: [], camera: new THREE.PerspectiveCamera(50, 16 / 9, 0.01, 1e7), size: new THREE.Vector2(960, 540), sim,
+    addBody(name, objects, center, radius, opts) { const b = { name, objects, center, radius, ...opts }; this.bodies.push(b); return b; },
+  };
+  const t0 = performance.now();
+  const lo = new LowOrbit(space);
+  ok(performance.now() - t0 < 1500, `low orbit built in ${(performance.now() - t0).toFixed(0)} ms`);
+  space.lowOrbit = lo;
+  space.scene.add(lo.group);
+  const targets = leoTargets(space), cam = space.camera, p = new THREE.Vector3(), q = new THREE.Quaternion();
+  sim.step(0);
+  lo.update(sim, 0, 0.016, space);
+  for (const [name, T] of Object.entries(targets)) {
+    const st = lo.byName[name];
+    const bound = st.radius * 1.15 + 0.05;
+    ok(T.defaultDist > bound * 1.3 && T.defaultDist < bound * 4.5, `${name} framed at ${T.defaultDist} km (bound ${bound.toFixed(2)} km): fills the view without clipping`);
+  }
+  // camera parked at Halcyon's default view: every orbit trace is hidden (they are a map)
+  targets.halcyon.position(p); targets.halcyon.frame(q);
+  cam.position.copy(p).add(new THREE.Vector3(0, 0, targets.halcyon.defaultDist).applyQuaternion(q));
+  cam.updateMatrixWorld();
+  lo.update(sim, 10, 0.016, space);
+  ok(lo.trails.every((t) => !t.mesh.visible), 'orbit traces hidden while the camera is inside the shell');
+  cam.position.set(R_EARTH + 30000, 0, 0); cam.updateMatrixWorld();
+  lo.update(sim, 11, 0.016, space);
+  ok(lo.trails.some((t) => t.mesh.visible), 'orbit traces drawn from 30,000 km out');
+  // approach strobes: dark between runs (no permanent bead string)
+  const hal = lo.byName.halcyon;
+  if (hal.approach) {
+    let lit = 0;
+    const g = hal.approach.lamps;
+    lo._animateApproach(hal, 1.0);
+    for (let i = 0; i < hal.approach.n; i++) if (g.C.array[i * 4] > 0.05 * Math.max(g.base[i * 4], 1e-6)) lit++;
+    ok(lit < hal.approach.n / 3, `approach strobes mostly dark between runs (${lit} of ${hal.approach.n} lit)`);
+  }
+  // Demeter's film meshes: one per drum, the mirror material, sheets clear of the drum
+  const dem = lo.byName.demeter;
+  const films = dem.drums.map((d) => d.children.find((c) => c.material && c.material.uniforms && c.material.uniforms.uCylR));
+  ok(films.every(Boolean), 'demeter drums carry their mirror film meshes');
+  // buffer sanity for everything the shell draws
+  let badIdx = 0, badInst = 0, badAttr = 0;
+  lo.group.traverse((o) => {
+    if (!o.isMesh) return;
+    const g = o.geometry, pos = g.attributes.position;
+    if (g.index && !g.isInstancedBufferGeometry) { let m = 0; const a = g.index.array; for (let i = 0; i < a.length; i++) if (a[i] > m) m = a[i]; if (m >= pos.count) badIdx++; }
+    if (o.isInstancedMesh && o.count > o.instanceMatrix.count) badInst++;
+    if (g.isInstancedBufferGeometry) for (const k in g.attributes) { const at = g.attributes[k]; if (at.isInstancedBufferAttribute && at.count < (g.instanceCount === Infinity ? 0 : g.instanceCount)) badAttr++; }
+  });
+  ok(!badIdx && !badInst && !badAttr, `shell buffers sane (index ${badIdx}, instance counts ${badInst}, instanced attributes ${badAttr})`);
+  // per-frame cost near a station
+  cam.position.copy(p).add(new THREE.Vector3(0, 0, 2).applyQuaternion(q)); cam.updateMatrixWorld();
+  const n = 200, t1 = performance.now();
+  for (let i = 0; i < n; i++) { sim.step(0.016); lo.update(sim, 20 + i * 0.016, 0.016, space); }
+  const ms = (performance.now() - t1) / n;
+  ok(ms < 0.6, `low orbit update ${ms.toFixed(3)} ms per frame (headless; the app's budget is 0.3 ms for this domain's additions)`);
+}
+
+for (const [k, v] of Object.entries(T)) ok(v < 900, `${k} built in ${v.toFixed(0)} ms (< 900)`);
+console.log(fails ? `${fails} FAILED` : 'all passed');
+process.exit(fails ? 1 : 0);
