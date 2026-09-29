@@ -99,7 +99,22 @@ export function pixelRadius(cam, p, rKm, viewH) {
 // phased-array emitter tiles. Kinds 20..26 (above the base palette's 0..13; the plain craft
 // material falls back to pearl plate for them, so a dressed hull still draws with it).
 
-export const DK = { LIVERY: 20, PORTS: 21, FOIL: 22, HAZARD: 23, GRIME: 24, CONCOURSE: 25, ARRAY: 26 };
+export const DK = { LIVERY: 20, PORTS: 21, FOIL: 22, HAZARD: 23, GRIME: 24, CONCOURSE: 25, ARRAY: 26, HOTRAD: 27, MARK: 28, NOZZLE: 29, TANK: 38 };
+
+// The wave-4 finishes (27, 28, 29, 38; 30..37 belong to the port material, 40.. to the Halo's):
+//   HOTRAD  finned radiator panel: facade x across the panel, y out from the manifold. Pale
+//           ceramic fins over dark coolant tubes, the tubes glowing orange at the root, dull
+//           red at mid-span and cold at the tip, panel headers every 40 m; the glow is broad
+//           (tens of metres), so it reads at the targets' framing, not just close to
+//   MARK    the livery band of a large hull, with its registration: facade x is the hull's
+//           normalised girth (the band centred on 45 m of every 90 m period), y along. The
+//           livery colour between cream pinstripes, and block registration glyphs of 4.6 m
+//           cells (23 m tall) every 260 m along, large enough to read at kilometres
+//   NOZZLE  an engine bell: y along the bell (0 at the throat), heat-tint bands from straw
+//           through bronze and violet to blued steel, the throat faintly hot
+//   TANK    insulated propellant tank: y from the tank's girth line, x round it. White
+//           insulation in gores, girth welds, a livery band at the girth and a dark saddle
+//           line either side, the gores a shade apart so the curvature reads when lit flat`;
 
 export const DRESS_GLSL = /* glsl */ `
 uniform vec3 uLivery;
@@ -112,7 +127,84 @@ float beltGlyph(vec2 q, float seed) {
   float inside = step(0.0, c.x) * step(c.x, 15.0) * step(0.0, c.y) * step(c.y, 4.0) * step(col, 2.5);
   return inside * step(0.42, hash12(vec2(ch * 3.0 + seed, col * 5.0 + c.y)));
 }
+// block registration glyphs of 4.6 m cells: 3 x 5 cells a glyph, four glyphs a mark
+float markGlyph(vec2 q, float seed) {
+  vec2 c = floor(q / 4.6);
+  float ch = floor(c.x / 4.0);
+  float col = c.x - ch * 4.0;
+  float inside = step(0.0, c.x) * step(c.x, 15.0) * step(0.0, c.y) * step(c.y, 4.0) * step(col, 2.5);
+  // every glyph keeps its top and bottom bar or its stems, so the blocks read as letters
+  float bar = step(3.5, c.y) + step(c.y, 0.5) + step(col, 0.5);
+  return inside * max(step(0.45, hash12(vec2(ch * 3.0 + seed, col * 5.0 + c.y))), step(0.5, bar) * step(0.3, hash12(vec2(ch + seed, 3.0))));
+}
+void wave4Kinds(float k, vec2 f, vec2 fw, float px, inout vec3 alb, inout float rough, inout float metal, inout vec3 em, inout vec2 bump) {
+  float det = 1.0 - smoothstep(0.4, 1.2, px);
+  float detP = 1.0 - smoothstep(0.8, 2.3, px);
+  if (k < 27.5) {
+    // finned radiator: 6 m coolant tubes under 1.5 m fins, 40 m panels, hot at the manifold
+    float span = max(f.y, 0.0);
+    float tube = cLine(f.x, 6.0, 0.9, fw.x);
+    float fin = mix(0.3, gridLine(f.x, 1.5, 0.18, fw.x), det);
+    float hdr = cLine(f.y, 40.0, 1.2, fw.y);
+    float pn = hash12(floor(f / vec2(40.0, 40.0)) + 9.0);
+    alb = vec3(0.55, 0.55, 0.53) * mix(1.0, 0.9 + 0.18 * pn, 1.0 - smoothstep(6.0, 14.0, px));
+    alb = mix(alb, vec3(0.09, 0.085, 0.08), 0.75 * tube);
+    alb = mix(alb, vec3(0.28, 0.27, 0.26), 0.5 * fin);
+    alb = mix(alb, vec3(0.2, 0.18, 0.16), 0.8 * hdr);
+    rough = 0.62 - 0.2 * tube; metal = 0.1 + 0.5 * tube;
+    // heat: a temperature falling off along the span (orange -> red -> cold)
+    float T = exp(-span / 95.0);
+    vec3 hot = mix(vec3(0.55, 0.06, 0.02), vec3(1.0, 0.45, 0.13), clamp(T * 1.3 - 0.2, 0.0, 1.0));
+    float flick = 0.92 + 0.08 * sin(uTime * 0.4 + f.x * 0.02);
+    em = hot * T * (0.08 + 0.55 * tube + 0.25 * hdr) * flick;
+    bump.x += 0.35 * sin(f.x * 4.18879) * (1.0 - smoothstep(0.2, 0.6, fw.x));
+  } else if (k < 28.5) {
+    // livery band with pinstripes and registration (girth period 90 m, band centred at 45 m)
+    float g = fract(f.x / 90.0) * 90.0 - 45.0;
+    float h = hash12(floor(f / vec2(18.0, 30.0)) + 3.0);
+    vec3 base = uLivery * mix(1.0, 0.9 + 0.2 * h, 1.0 - smoothstep(5.0, 11.0, px));
+    float ag = abs(g);
+    float pin = clamp(1.0 - abs(ag - 20.0) / max(1.3, fw.x), 0.0, 1.0) * min(1.0, 1.3 / fw.x);
+    float edge = clamp(1.0 - abs(ag - 23.5) / max(0.7, fw.x), 0.0, 1.0) * min(1.0, 0.7 / fw.x);
+    alb = mix(base, uLivery2, pin);
+    alb = mix(alb, vec3(0.08, 0.08, 0.09), edge * 0.8);
+    // registration: 4 glyphs every 260 m along, 23 m tall, centred in the band
+    vec2 gq = vec2(fract(f.y / 260.0) * 260.0 - 40.0, g + 11.5);
+    float mark = markGlyph(gq, floor(f.y / 260.0) * 7.0 + 3.0) * (1.0 - smoothstep(4.0, 9.0, px));
+    mark = max(mark, 0.12 * smoothstep(4.0, 9.0, px) * step(0.0, gq.x) * step(gq.x, 73.6) * step(0.0, gq.y) * step(gq.y, 23.0));
+    alb = mix(alb, uLivery2 * 1.05, mark);
+    float streak = smoothstep(0.55, 0.92, vnoise(vec2(f.x * 0.05, f.y * 0.008) + h * 3.0));
+    alb *= 1.0 - 0.14 * streak;
+    rough = 0.4 + 0.12 * h + 0.1 * streak - 0.1 * mark;
+    metal = 0.05;
+  } else if (k < 29.5) {
+    // engine bell: heat-tint bands along the bell, blued at the lip, the throat faintly hot
+    float y = max(f.y, 0.0);
+    float b = fract(y / 26.0);
+    vec3 straw = vec3(0.62, 0.5, 0.3), bronze = vec3(0.48, 0.3, 0.18), violet = vec3(0.3, 0.2, 0.34), blue = vec3(0.16, 0.22, 0.36);
+    vec3 tint = b < 0.33 ? mix(straw, bronze, b / 0.33) : b < 0.66 ? mix(bronze, violet, (b - 0.33) / 0.33) : mix(violet, blue, (b - 0.66) / 0.34);
+    tint = mix(tint, vec3(0.39, 0.31, 0.27), smoothstep(3.0, 9.0, px));
+    float ring = cLine(y, 13.0, 0.5, fw.y);
+    alb = tint * (1.0 - 0.4 * ring);
+    rough = 0.3 + 0.15 * ring; metal = 0.9;
+    em = vec3(1.0, 0.42, 0.14) * 0.12 * exp(-y / 9.0);
+  } else {
+    // insulated tank: white gores round it, girth welds along it, the livery at the girth
+    float gy = abs(f.y);
+    float gore = hash12(vec2(floor(f.x / 9.0), floor(f.y / 18.0)) + 21.0);
+    alb = vec3(0.8, 0.79, 0.75) * mix(1.0, 0.92 + 0.14 * gore, 1.0 - smoothstep(4.0, 10.0, px));
+    float weld = max(cLine(f.x, 9.0, 0.25, fw.x), cLine(f.y, 18.0, 0.35, fw.y));
+    alb *= 1.0 - 0.28 * weld;
+    float band = clamp((5.0 - gy) / max(fw.y, 0.5) + 0.5, 0.0, 1.0);
+    float saddle = clamp(1.0 - abs(gy - 7.5) / max(1.2, fw.y), 0.0, 1.0) * min(1.0, 1.2 / fw.y);
+    alb = mix(alb, uLivery, band);
+    alb = mix(alb, vec3(0.1, 0.1, 0.11), 0.85 * saddle);
+    rough = 0.52 + 0.08 * gore - 0.1 * band; metal = 0.04;
+    bump += vec2(0.0, sin(f.y * 0.349) * 0.25) * (1.0 - smoothstep(0.15, 0.5, fw.y));
+  }
+}
 void beltKinds(float k, vec2 f, vec2 fw, float px, inout vec3 alb, inout float rough, inout float metal, inout vec3 em, inout vec2 bump) {
+  if (k > 26.5 && (k < 29.5 || (k > 37.5 && k < 38.5))) { wave4Kinds(k, f, fw, px, alb, rough, metal, em, bump); return; }
   if (k < 19.5 || k > 26.5) return;
   float det = 1.0 - smoothstep(0.4, 1.2, px);
   float detP = 1.0 - smoothstep(0.8, 2.3, px);
@@ -304,7 +396,7 @@ float craftKind(float m1, float m2, float P) {
   float q = (m2 - P * P) / d - P;
   if (abs(q - P) < 0.5) return floor(m1 + 0.5);
   float w = d / (q - P);
-  return clamp(floor((w > 0.5 ? q : P) + 0.5), 0.0, 40.0);
+  return clamp(floor((w > 0.5 ? q : P) + 0.5), 0.0, 127.0);   // (the Halo's kinds reach 66)
 }
 void craftRefine(float k, vec2 f, vec2 fw, float px, inout vec3 alb, inout float rough, inout float metal, inout vec3 em, inout vec2 bump, inout float cav) {
   float det = 1.0 - smoothstep(0.4, 1.2, px);
@@ -322,10 +414,26 @@ void craftRefine(float k, vec2 f, vec2 fw, float px, inout vec3 alb, inout float
     alb *= mix(1.0, 0.95 + 0.14 * rep + 0.06 * (fam - 0.5), famOn);
     float soot = smoothstep(0.62, 0.9, vnoise(vec2(f.x * 0.011, f.y * 0.0024) + 9.1));
     alb *= 1.0 - 0.16 * soot;
-    float seamM = max(cLine(f.y, 126.0, 0.9, fw.y), cLine(f.x, 108.0, 0.8, fw.x));
-    alb *= 1.0 - 0.3 * seamM;
-    cav *= 1.0 - 0.35 * seamM;
-    rough = clamp(rough + 0.16 * (w2 - 0.5) + 0.1 * soot - 0.08 * rep * famOn, 0.12, 0.9);
+    // module joints: recessed 2 m frames every 126 m along and 108 m round, dark enough to
+    // carry the hull's structural rhythm at 1-5 km (cLine keeps its mean once subpixel)
+    float seamM = max(cLine(f.y, 126.0, 2.2, fw.y), cLine(f.x, 108.0, 1.6, fw.x));
+    alb *= 1.0 - 0.38 * seamM;
+    cav *= 1.0 - 0.4 * seamM;
+    // strakes: plate courses 18 m round, plates 30 m along in a brick bond, each from one of
+    // four families (bleached, cream, cool grey, the odd graphite replacement), with its own
+    // sheen: the patchwork of a hull kept in service for centuries. Tones are normalised to a
+    // mean of one and settle to it past ~6 px a plate
+    float sOn = 1.0 - smoothstep(5.0, 11.0, px);
+    float srow = floor(f.x / 18.0);
+    float sodd = srow - 2.0 * floor(srow * 0.5);
+    float scol = floor(f.y / 30.0 + 0.5 * sodd);
+    float hs = hash12(vec2(srow, scol) + 57.0);
+    vec3 tone = hs < 0.18 ? vec3(0.86, 0.86, 0.88) : hs < 0.5 ? vec3(1.04, 1.02, 0.97) : hs < 0.9 ? vec3(0.99, 1.0, 1.03) : vec3(0.64, 0.645, 0.66);
+    alb *= mix(vec3(1.0), tone * 1.056, sOn);
+    float sseam = max(cLine(f.x, 18.0, 0.35, fw.x), cLine(f.y + 15.0 * sodd, 30.0, 0.35, fw.y));
+    alb *= 1.0 - 0.3 * sseam;
+    cav *= 1.0 - 0.2 * sseam;
+    rough = clamp(rough + 0.16 * (w2 - 0.5) + 0.1 * soot - 0.08 * rep * famOn + 0.24 * (hs - 0.5) * sOn, 0.12, 0.9);
     metal += 0.06 * (1.0 - w1);
   } else if (k < 0.5) {
     // glazing: rooms with blinds, corridor strips, warm and cool apartments (mean kept)
