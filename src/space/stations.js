@@ -85,6 +85,35 @@ export function buildPortStation({ junction = false } = {}) {
     }
     ctube(B, pts, 45, 6, CK.BRONZE);
   }
+  // secondary ribs, ring girders and a lantern band at the dome's foot
+  for (let k = 0; k < 24; k++) {
+    const a = ((k + 0.5) / 24) * TAU, pts = [];
+    for (let i = 0; i <= 8; i++) {
+      const t = (i / 8) * 0.8, r = 3200 * Math.cos(t * Math.PI / 2) + 700 * t + 20, y = 1650 * Math.sin(t * Math.PI / 2) + 20;
+      pts.push(V(Math.cos(a) * r, y, Math.sin(a) * r));
+    }
+    ctube(B, pts, 16, 5, CK.BRONZE);
+  }
+  for (const t of [0.25, 0.5, 0.75]) {
+    const r = 3200 * Math.cos(t * Math.PI / 2) + 700 * t + 30, y = 1650 * Math.sin(t * Math.PI / 2) + 30;
+    B.push(new THREE.Matrix4().makeTranslation(0, y, 0).multiply(new THREE.Matrix4().makeRotationX(Math.PI / 2)));
+    B.torus(r, 18, 96, 6, CK.BRONZE);
+    B.pop();
+  }
+  // the terminal podium: a lit drum of concourse levels round the dome, down to the deck,
+  // a railed promenade on its roof and glazed kiosks round the promenade
+  B.push(toY);
+  lathe(B, [[3300, -175, CK.DARK], [4200, -175, CK.HULL], [4200, -150, CK.BRONZE], [4210, -140, CK.GLASS], [4210, -80, CK.GLASS], [4220, -74, CK.LANTERN], [4220, -66, CK.BRONZE], [4210, -60, CK.GLASS], [4210, -8, CK.GLASS], [4200, 0, CK.BRONZE], [4200, 12, CK.BRONZE], [3300, 12, CK.DECK]], 96);
+  B.pop();
+  B.push(new THREE.Matrix4().makeTranslation(0, 14, 0).multiply(new THREE.Matrix4().makeRotationX(Math.PI / 2)));
+  B.torus(4185, 1.2, 160, 4, CK.BRONZE);
+  B.pop();
+  for (let k = 0; k < 16; k++) {
+    const a = ((k + 0.5) / 16) * TAU;
+    if (Math.abs(Math.cos(a)) > 0.93) continue;                  // leave the wings' mouths clear
+    B.box(Math.cos(a) * 3800, 36, Math.sin(a) * 3800, 90, 48, 90, CK.GLASS);
+    B.box(Math.cos(a) * 3800, 62, Math.sin(a) * 3800, 100, 4, 100, CK.BRONZE);
+  }
   // concourse wings along the ring (east and west)
   for (const s of [-1, 1]) {
     gallery(B, s * 3100, s * 9800, 480, 260, 170, (i, j) => (i < 4 || i > 13 ? CK.GLASS : (i === 4 || i === 13 ? CK.LANTERN : CK.HULL)));
@@ -120,9 +149,14 @@ export function buildPortStation({ junction = false } = {}) {
     B.torus(720, 70, 48, 10, CK.BRONZE);
     B.torus(640, 22, 48, 6, CK.CONDUIT);
     B.pop();
-    // docking platform beside the gate
+    // docking platform beside the gate, its control cabin, railings and a lit gate rim
     B.box(x, y + 900, 0, 1400, 160, 900, CK.HULL);
     B.box(x, y + 990, 0, 1200, 30, 700, CK.DECK);
+    B.box(x - s * 420, y + 1065, 0, 200, 120, 200, CK.GLASS);
+    B.box(x - s * 420, y + 1128, 0, 220, 6, 220, CK.BRONZE);
+    for (const dz of [-340, 340]) B.box(x, y + 1011, dz, 1180, 12, 2, CK.BRONZE);
+    B.box(x, y + 900, 451, 1300, 8, 2, CK.LANTERN);
+    B.box(x, y + 900, -451, 1300, 8, 2, CK.LANTERN);
     gates.push(V(x, y, 0));
   }
   // Piers descend into the service keel before crossing beneath the rotor tubes.
