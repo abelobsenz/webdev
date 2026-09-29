@@ -171,7 +171,7 @@ export class Hearth {
       uniforms: {
         tDisc: { value: this.bhRT.textures[0] }, tLens: { value: this.bhRT.textures[1] }, uInvProj: u.uInvProj, uCamRot: u.uCamRot,
         uCamW: { value: new THREE.Vector3() }, uSunDir: { value: new THREE.Vector3(1, 0, 0) }, uSunE: U.uSunIlluminance,
-        uEarthPos: { value: new THREE.Vector3() }, uMoonPos: { value: new THREE.Vector3() }, ...SKY_UNIFORMS,
+        uEarthPos: { value: new THREE.Vector3() }, uMoonPos: { value: new THREE.Vector3() }, uDiscRes: { value: new THREE.Vector2(1, 1) }, ...SKY_UNIFORMS,
       },
       depthTest: false, depthWrite: false, transparent: true, blending: THREE.CustomBlending, blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor,
     });
@@ -240,6 +240,7 @@ export class Hearth {
   _resize() {
     const w = Math.max(1, Math.round(this.size.x * this.scale)), h = Math.max(1, Math.round(this.size.y * this.scale));
     if (this.bhRT.width !== w || this.bhRT.height !== h) this.bhRT.setSize(w, h);
+    this.compMat.uniforms.uDiscRes.value.set(w, h);
     this.hullMat.uniforms.uHearthRes.value.set(this.size.x, this.size.y);
   }
 

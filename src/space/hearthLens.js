@@ -39,7 +39,7 @@ export const R_ISCO = (() => {
 })();
 export const R_DISC = 30;                                // outer edge (M): 15 RS, 450 km
 const R_INT = 120;                                       // integrate inside this sphere (M)
-export const T_EDGE = 9500;                              // disc temperature at the ISCO (K)
+export const T_EDGE = 11000;                              // disc temperature at the ISCO (K)
 export const VIS_OMEGA = 2.2;                            // film speed: Omega (1/M) -> rad/s
 const FLOW_P = 11.0;                                     // turbulence cross-fade period (s)
 const f = (x, d = 5) => x.toFixed(d);
@@ -55,7 +55,7 @@ export function keplerKerr(r, a = SPIN) {
  * along +Z). Used by tools/verify-hearth.mjs to check the constants of motion, the shadow's
  * size and the redshift, so the shader's physics has an independent test.
  */
-export function traceKerr(pos, dir, { a = SPIN, steps = 600, dpsi = 0.05, rOut = R_INT } = {}) {
+export function traceKerr(pos, dir, { a = SPIN, steps = 600, dpsi = null, rOut = R_INT, sweep = SWEEP } = {}) {
   const [x, y, z] = pos, a2 = a * a, q2 = x * x + y * y + z * z - a2;
   const r = Math.sqrt(0.5 * q2 + Math.sqrt(0.25 * q2 * q2 + a2 * z * z));
   let u = z / r, ph = Math.atan2(y, x);
@@ -76,19 +76,50 @@ export function traceKerr(pos, dir, { a = SPIN, steps = 600, dpsi = 0.05, rOut =
   let err = 0, n = 0;
   for (; n < steps; n++) {
     if (p > pH) return { captured: true, hits, L, Q, Eloc, steps: n, err };
-    let dt = dpsi / bEff * (p > 0.22 ? 0.5 : 1);
-    if (vpr < 0) dt = Math.min(dt, 0.5 * p / -vpr + 1e-4);
-    const p0 = p, u0 = u, ph0 = ph;
+    let dt = (dpsi ?? sweepStep(p, sweep)) / bEff;
+    // rho changes by at most ~40% a step either way: near-radial rays (b ~ 0) would otherwise leap
+    // across the disc and into the hole in one sweep-sized step
+    if (dpsi === null) dt = Math.min(dt, 0.4 * p / Math.max(Math.abs(vpr), 1e-6) + 1e-4); else if (vpr < 0) dt = Math.min(dt, 0.5 * p / -vpr + 1e-4);
+    const p0 = p, u0 = u, ph0 = ph, vu0 = vu, vpr0 = vpr;
     vpr += 0.5 * dt * Fp(p); vu += 0.5 * dt * (C * u - 2 * a2 * u ** 3);
     p += dt * vpr; u += dt * vu;
     const pm = 0.5 * (p + p0), um = 0.5 * (u + u0);
     ph -= dt * (a * (1 + B * pm * pm) / (1 - 2 * pm + a2 * pm * pm) - a + L / Math.max(1 - um * um, 1e-4));
     vpr += 0.5 * dt * Fp(p); vu += 0.5 * dt * (C * u - 2 * a2 * u ** 3);
     err = Math.max(err, Math.abs(vpr * vpr - Pp(p)) / Math.max(1, Math.abs(Pp(p))), Math.abs(vu * vu - Uu(u)) / Math.max(1, Q + L * L));
-    if (u0 * u < 0) { const k = u0 / (u0 - u); hits.push({ r: 1 / (p0 + (p - p0) * k), phi: ph0 + (ph - ph0) * k }); }
+    if (u0 * u < 0) {
+      const k = hermiteRoot(u0, vu0 * dt, u, vu * dt);
+      hits.push({ r: 1 / hermite(p0, vpr0 * dt, p, vpr * dt, k), phi: ph0 + (ph - ph0) * k });
+    }
     if (p < 1 / rOut && vpr < 0) break;
   }
   return { captured: false, hits, L, Q, Eloc, steps: n, err, p, u, ph, vpr, vu };
+}
+
+/**
+ * Angle swept per step (rad) at rho = 1/r. Far out the photon runs nearly straight and the
+ * leapfrog is exact to third order in the sweep, so the step grows with r; round the photon
+ * sphere it is fine enough to hold the ring. Shared with the shader (SWEEP_* below), so a
+ * low-quality step budget still carries a ray right round the hole instead of running out
+ * mid-orbit (which used to paint stair-stepped black notches into the photon ring).
+ */
+export const SWEEP = { k: 0.016, min: 0.034, max: 0.1 };
+export const sweepStep = (p, s = SWEEP) => Math.min(s.max, Math.max(s.min, s.k / Math.max(p, 1e-6)));
+/** Cubic Hermite through (0, y0, slope m0) and (1, y1, m1): value at s. */
+export function hermite(y0, m0, y1, m1, s) {
+  const s2 = s * s, s3 = s2 * s;
+  return (2 * s3 - 3 * s2 + 1) * y0 + (s3 - 2 * s2 + s) * m0 + (-2 * s3 + 3 * s2) * y1 + (s3 - s2) * m1;
+}
+/** Root of that cubic in [0, 1], from the linear guess and two Newton steps (as the shader). */
+export function hermiteRoot(y0, m0, y1, m1) {
+  let s = y0 / (y0 - y1);
+  for (let i = 0; i < 2; i++) {
+    const s2 = s * s;
+    const d = (6 * s2 - 6 * s) * y0 + (3 * s2 - 4 * s + 1) * m0 + (-6 * s2 + 6 * s) * y1 + (3 * s2 - 2 * s) * m1;
+    const v = hermite(y0, m0, y1, m1, s);
+    if (Math.abs(d) > 1e-9) s = Math.min(1, Math.max(0, s - v / d));
+  }
+  return s;
 }
 
 export const BH_FRAG = /* glsl */ `
@@ -118,6 +149,24 @@ ${SNOISE_GLSL}
 #define VIS_OMEGA ${f(VIS_OMEGA)}
 #define FLOW_P ${f(FLOW_P, 2)}
 #define TWO_PI 6.28318530718
+#define SWEEP_K ${f(SWEEP.k)}
+#define SWEEP_MIN ${f(SWEEP.min)}
+#define SWEEP_MAX ${f(SWEEP.max)}
+
+float hermite(float y0, float m0, float y1, float m1, float s) {
+  float s2 = s * s, s3 = s2 * s;
+  return (2.0 * s3 - 3.0 * s2 + 1.0) * y0 + (s3 - 2.0 * s2 + s) * m0 + (3.0 * s2 - 2.0 * s3) * y1 + (s3 - s2) * m1;
+}
+float hermiteRoot(float y0, float m0, float y1, float m1) {
+  float s = y0 / (y0 - y1);
+  for (int i = 0; i < 2; i++) {
+    float s2 = s * s;
+    float d = (6.0 * s2 - 6.0 * s) * y0 + (3.0 * s2 - 4.0 * s + 1.0) * m0 + (6.0 * s - 6.0 * s2) * y1 + (3.0 * s2 - 2.0 * s) * m1;
+    float v = hermite(y0, m0, y1, m1, s);
+    if (abs(d) > 1e-9) s = clamp(s - v / d, 0.0, 1.0);
+  }
+  return s;
+}
 
 vec3 bendToward(vec3 d, vec3 pos, float ang) {
   // rotate d toward the centre (-pos) by 'ang' radians, in the plane of d and pos
@@ -136,14 +185,20 @@ float kUt(float r) {
   return (r15 + A_SPIN) / (s * sqrt(s) * sqrt(max(r15 - 3.0 * s + 2.0 * A_SPIN, 1e-3)));
 }
 
-// ---- the gas: sheared turbulence in co-rotating coordinates (fp: pixel footprint in ln r)
+// ---- the gas: sheared turbulence in co-rotating coordinates
+// Each octave is a filament field, longer along the flow than across it (Keplerian shear draws
+// every clump out, more so at finer scales). An octave fades to its mean once its radial
+// wavelength spans under ~2.5 pixels of this pass (fp: a pixel's footprint across the disc in
+// ln r), so the far and lensed images, which are squeezed hardest, go smooth instead of grainy.
 float discNoise(vec2 cs, float lr, float seed, float fp) {
-  float n = snoise(vec3(cs * 2.3, lr * 8.0 + seed));
-  float w2 = 1.0 - smoothstep(0.08, 0.3, fp * 19.0);
-  float w3 = 1.0 - smoothstep(0.08, 0.3, fp * 43.0);
-  n += 0.5 * w2 * snoise(vec3(cs * 5.2, lr * 19.0 + seed + 3.1));
-  n += 0.25 * w3 * snoise(vec3(cs * 11.5, lr * 43.0 + seed + 7.7));
-  return n / (1.0 + 0.5 * w2 + 0.25 * w3) * (1.0 + 0.35 * (1.0 - w3));
+  float n = 0.0, vsum = 0.0, fa = 1.7, fr = 4.6, amp = 1.0;
+  for (int o = 0; o < 4; o++) {
+    float w = 1.0 - smoothstep(0.12, 0.42, fp * fr);
+    if (w > 0.0) n += amp * w * snoise(vec3(cs * fa, lr * fr + seed + float(o) * 5.3));
+    vsum += amp * amp;
+    fa *= 2.05; fr *= 2.6; amp *= 0.55;
+  }
+  return n * inversesqrt(vsum);
 }
 float discTex(float r, float phi, float fp) {
   float lr = log(r);
@@ -155,10 +210,12 @@ float discTex(float r, float phi, float fp) {
   float n2 = discNoise(vec2(cos(a2), sin(a2)), lr, 23.0, fp);
   // equal-power cross-fade: the mix of two independent fields keeps the same contrast
   float n = (w1 * n1 + w2 * n2) * inversesqrt(max(w1 * w1 + w2 * w2, 1e-4));
+  // the inner annuli, where the shear is strongest, are the most turbulent; the outer disc calmer
+  float amp = mix(0.95, 0.55, smoothstep(1.3, 3.2, lr));
   // a slow two-armed trailing density wave (pitch ~14 degrees), strongest mid-disc
   float arm = 0.5 + 0.5 * cos(2.0 * (phi - VIS_OMEGA * 0.042 * uTime) + 8.0 * lr);
   float armW = smoothstep(1.6, 2.1, lr) * (1.0 - smoothstep(2.9, 3.4, lr));
-  return exp(0.62 * n) * (1.0 + 0.5 * armW * (arm * arm - 0.33));
+  return exp(amp * n) * (1.0 + 0.4 * armW * (arm * arm - 0.375));
 }
 
 // light and opacity of the disc where the photon crosses the equator (r in M, phi BL azimuth,
@@ -173,7 +230,7 @@ vec4 discEmit(float r, float phi, float Lz, float cc, float fp) {
   float x = R_ISCO / rk;
   // viscous heating with a small stress at the inner edge (hottest right at the ISCO), and the
   // flared outer disc warmed by the inner disc's light (F ~ r^-2)
-  float F = x * x * x * max(1.0 - 0.75 * sqrt(x), 0.0) * 4.0 + 0.1 * x * x;
+  float F = x * x * x * max(1.0 - 0.75 * sqrt(x), 0.0) * 4.0 + 0.16 * x * x;
   // the feeder's stream strikes the rim: a hot spot, its heat sheared out downstream
   float dS = mod(phi - uFeed.y, TWO_PI);
   float dr = r - uFeed.x;
@@ -183,9 +240,12 @@ vec4 discEmit(float r, float phi, float Lz, float cc, float fp) {
   F += uFeed.z * (0.22 * spot + 0.018 * tail);
   float tex = discTex(r, phi, fp);
   float outer = 1.0 - smoothstep(R_DISC * 0.7, R_DISC, r);
-  float T = T_EDGE * pow(max(F * inner, 1e-6), 0.25) * mix(1.0, pow(tex, 0.18), 0.8);
+  float T = T_EDGE * pow(max(F * inner, 1e-6), 0.25) * mix(1.0, pow(tex, 0.14), 0.8);
   float g2 = g * g;
-  vec3 col = blackbody(g * T) * (F * inner * tex * g2 * g2 * uDiscGain);
+  // an electron-scattering atmosphere is limb darkened (Chandrasekhar: 1 + 2.06 mu), normalised
+  // at mu = 0.5: the disc seen edge-on is dimmer and redder at its rim than seen face-on
+  float limb = (1.0 + 2.06 * cc) / 2.03;
+  vec3 col = blackbody(g * T) * (F * inner * tex * g2 * g2 * uDiscGain * limb);
   float tau = (0.35 + 2.4 * tex) * inner * outer * (0.3 + 0.7 * smoothstep(0.0, 0.25, F + 0.2 * x)) / max(cc, 0.04);
   float al = 1.0 - exp(-tau);
   return vec4(col * al, al);
@@ -239,16 +299,18 @@ void main() {
     float Qc = ptv * ptv + u * u * (Lz * Lz / (st * st) - a2);
     float K = Qc + (Lz - a) * (Lz - a), C = a2 - Qc - Lz * Lz, B = a2 - a * Lz;
     float p = 1.0 / r, vpr = -p * p * De * prv, vu = -st * ptv;
-    float dt0 = 0.05 / sqrt(max(Qc + Lz * Lz, 1e-3));
+    float ib = 1.0 / sqrt(max(Qc + Lz * Lz, 1e-3));
     float pH = 1.0 / (R_H * 1.02);
     // a pixel's footprint at the disc (M), for the turbulence's level of detail
     float fpM = uPixAng * rCam;
+    float nCross = 0.0;
     bool out_ = false;
     for (int i = 0; i < STEPS; i++) {
       if (p > pH) { captured = true; break; }
-      float dt = dt0 * (p > 0.22 ? 0.5 : 1.0);
-      if (vpr < 0.0) dt = min(dt, 0.5 * p / -vpr + 1e-4);
-      float p0 = p, u0 = u, ph0 = ph;
+      // the angle swept per step grows with r (sweepStep() in the JS twin)
+      float dt = clamp(SWEEP_K / max(p, 1e-6), SWEEP_MIN, SWEEP_MAX) * ib;
+      dt = min(dt, 0.4 * p / max(abs(vpr), 1e-6) + 1e-4);
+      float p0 = p, u0 = u, ph0 = ph, vu0 = vu, vpr0 = vpr;
       vpr += 0.5 * dt * (2.0 * B * p + 2.0 * B * B * p * p * p - K * p + 3.0 * K * p * p - 2.0 * a2 * K * p * p * p);
       vu += 0.5 * dt * (C * u - 2.0 * a2 * u * u * u);
       p += dt * vpr;
@@ -258,13 +320,19 @@ void main() {
       vpr += 0.5 * dt * (2.0 * B * p + 2.0 * B * B * p * p * p - K * p + 3.0 * K * p * p - 2.0 * a2 * K * p * p * p);
       vu += 0.5 * dt * (C * u - 2.0 * a2 * u * u * u);
       if (u0 * u < 0.0) {
-        float k = u0 / (u0 - u);
-        float rh = 1.0 / mix(p0, p, k);
-        float pc = 1.0 / rh;
-        float cc = clamp(abs(vu) * pc * sqrt(max(1.0 - 2.0 * pc, 0.05)), 0.0, 1.0);
-        vec4 d = discEmit(rh, mix(ph0, ph, k), Lz, cc, fpM / (rh * max(cc, 0.12)));
+        // the equator crossing on the cubic through both ends and their velocities: a linear
+        // guess moved the crossing by up to a step, which rippled the disc into bands
+        float k = hermiteRoot(u0, vu0 * dt, u, vu * dt);
+        float pc = clamp(hermite(p0, vpr0 * dt, p, vpr * dt, k), min(p0, p), max(p0, p));
+        float rh = 1.0 / pc;
+        float vuc = mix(vu0, vu, k);
+        float cc = clamp(abs(vuc) * pc * sqrt(max(1.0 - 2.0 * pc, 0.05)), 0.0, 1.0);
+        // each further image is squeezed ~ e^pi-fold more round the photon ring
+        float fp = fpM / (rh * max(cc, 0.12)) * (1.0 + 5.0 * nCross);
+        vec4 d = discEmit(rh, mix(ph0, ph, k), Lz, cc, fp);
         col += (1.0 - alpha) * d.rgb;
         alpha += (1.0 - alpha) * d.a;
+        nCross += 1.0;
         if (alpha > 0.985) break;
       }
       if (p < 1.0 / R_INT && vpr < 0.0) { out_ = true; break; }
@@ -347,15 +415,33 @@ uniform vec3 uSunDir;
 uniform float uSunE;
 uniform vec3 uEarthPos;
 uniform vec3 uMoonPos;
+uniform vec2 uDiscRes;         // size of the reduced-resolution lens pass (px)
 varying vec2 vUv;
 ${SPACE_UTIL_GLSL}
 ${SNOISE_GLSL}
 ${SPACE_SKY_GLSL}
 ${BACKGROUND_GLSL}
+// Catmull-Rom upsampling of the reduced-resolution disc in nine bilinear taps: the thin photon
+// ring and the shadow's rim stay crisp instead of going blocky at half resolution
+vec4 discCR(vec2 uv) {
+  vec2 sp = uv * uDiscRes - 0.5;
+  vec2 tc = floor(sp) + 0.5, fr = sp - floor(sp);
+  vec2 w0 = fr * (-0.5 + fr * (1.0 - 0.5 * fr));
+  vec2 w1 = 1.0 + fr * fr * (-2.5 + 1.5 * fr);
+  vec2 w2 = fr * (0.5 + fr * (2.0 - 1.5 * fr));
+  vec2 w3 = fr * fr * (-0.5 + 0.5 * fr);
+  vec2 w12 = w1 + w2;
+  vec2 t0 = (tc - 1.0) / uDiscRes, t3 = (tc + 2.0) / uDiscRes, t12 = (tc + w2 / w12) / uDiscRes;
+  vec4 c = textureLod(tDisc, vec2(t0.x, t0.y), 0.0) * (w0.x * w0.y) + textureLod(tDisc, vec2(t12.x, t0.y), 0.0) * (w12.x * w0.y) + textureLod(tDisc, vec2(t3.x, t0.y), 0.0) * (w3.x * w0.y)
+         + textureLod(tDisc, vec2(t0.x, t12.y), 0.0) * (w0.x * w12.y) + textureLod(tDisc, vec2(t12.x, t12.y), 0.0) * (w12.x * w12.y) + textureLod(tDisc, vec2(t3.x, t12.y), 0.0) * (w3.x * w12.y)
+         + textureLod(tDisc, vec2(t0.x, t3.y), 0.0) * (w0.x * w3.y) + textureLod(tDisc, vec2(t12.x, t3.y), 0.0) * (w12.x * w3.y) + textureLod(tDisc, vec2(t3.x, t3.y), 0.0) * (w3.x * w3.y);
+  // the kernel's small negative lobes must not ring into negative light or opacity
+  return vec4(max(c.rgb, vec3(0.0)), clamp(c.a, 0.0, 1.0));
+}
 void main() {
-  vec4 L = texture2D(tLens, vUv);
+  vec4 L = textureLod(tLens, vUv, 0.0);
   if (L.w < 0.002) discard;
-  vec4 D = texture2D(tDisc, vUv);
+  vec4 D = discCR(vUv);
   vec4 v = uInvProj * vec4(vUv * 2.0 - 1.0, 1.0, 1.0);
   vec3 dirW = normalize(uCamRot * (v.xyz / v.w));
   // the sky along the bent ray, at full resolution: sharp round stars, lensed
