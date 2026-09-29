@@ -21,7 +21,7 @@ import { HALO_PORTS } from '../src/space/earthData.js';
 import { Rings } from '../src/space/rings.js';
 import { DRONES, TILE_L, WINDOW, GANTRY, MAJOR_RANGE_KM, MINOR_RANGE_KM, FINE_RANGE_KM, FRAME_RANGE_KM } from '../src/space/haloDistricts.js';
 import { VAULT_FRAME, HARBOUR } from '../src/space/haloArchitecture.js';
-import { HARBOUR_V } from '../src/space/haloDistricts.js';
+import { HARBOUR_V, LAMP_DAY_DIM } from '../src/space/haloDistricts.js';
 import { buildPortStation } from '../src/space/stations.js';
 import { createHaloMaterial, HK } from '../src/space/haloMaterial.js';
 
@@ -365,6 +365,15 @@ assert.ok(out.closestApproachTris < 12e6, 'District tiles within 12M rendered tr
   const jw = new THREE.Vector3(); D2.anchor.updateMatrixWorld(true); D2.junctionQuarter.updateMatrixWorld(true); D2.junctionQuarter.getWorldPosition(jw);
   const jExpect = up.clone().multiplyScalar(D2.basis.R).applyQuaternion(sim.earthQuat);
   out.junctionQuarterPlacementM = Math.round(jw.distanceTo(jExpect) * 1000);
+  // lamps: full strength on the night side, dimmed under the Sun, the base gains kept
+  const sun0 = sim.sunDir.clone();
+  sim.sunDir.copy(space.camera.position).normalize().negate(); R2.update(sim, 1.1, 0.016, space);
+  const nightGains = D2.lampMats.map((m) => m.uniforms.uGain.value);
+  assert.ok(D2.lampMats.length >= 10 && nightGains.every((g, i) => Math.abs(g - D2.lampGain[i]) < 1e-6), 'Night: district lamps at full strength');
+  sim.sunDir.copy(space.camera.position).normalize(); R2.update(sim, 1.2, 0.016, space);
+  assert.ok(D2.lampMats.every((m, i) => Math.abs(m.uniforms.uGain.value - D2.lampGain[i] * (1 - LAMP_DAY_DIM)) < 1e-6), 'Day: district lamps dimmed');
+  sim.sunDir.copy(sun0);
+  out.lampMaterials = D2.lampMats.length;
   assert.ok(jw.distanceTo(jExpect) < 0.05, 'Junction quarter centred on the junction');
   // far out on the approach: a few milliseconds a frame, not the whole build
   const R3 = new Rings(space, { ringSegs: 0.25 }), D3 = R3.districts;

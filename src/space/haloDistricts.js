@@ -47,6 +47,7 @@ export const PEOPLE = { max: 1600, range: 900, spacing: 38, speed: 1.3 };   // w
 export const HARBOUR_V = VARIANTS.length;        // the harbour town under each hub arch (tile variant 6)
 const MOVER_RANGE = (WINDOW + 0.5) * TILE_L; // m either side of the anchor
 export const BUILD_START_KM = 3000;          // district building starts this far off the band
+export const LAMP_DAY_DIM = 0.66;            // district lamps dim by this much under the Sun
 const BUILD_BUDGET_MS = 5;                   // per frame while approaching (at least one piece)
 const ROT_YM90 = new THREE.Matrix4().makeRotationY(-Math.PI / 2);
 
@@ -824,7 +825,33 @@ export class HaloDistricts {
       const nearMajor = dKm < MAJOR_RANGE_KM;
       s.major.visible = nearMajor; s.mid.visible = !nearMajor && dKm < NEAR_RANGE_KM; s.cMajor.visible = dKm < NEAR_RANGE_KM;
     }
+    this._lampDaylight(sim, space);
     this._life(realTime);
+  }
+
+  /**
+   * The districts' lamps are lost in daylight: while the Sun stands over the band round the
+   * camera they dim to a third (a tile's hundreds of beacons and crowns read as a pale speckle
+   * over sunlit roofs), and come up through dusk to full strength on the night side.
+   */
+  _lampDaylight(sim, space) {
+    if (!this.lampMats) {
+      const set = new Set();
+      const add = (o) => { if (o && o.material && o.material.uniforms && o.material.uniforms.uGain) set.add(o.material); };
+      for (const v of this.variants) { add(v.lamps); add(v.flamps); }
+      for (const c of this.crests) add(c.lamps);
+      add(this.vaultFrame.lamps);
+      for (const m of [this.junctionQuarter, ...this.gantries]) if (m) for (const ch of m.children) add(ch);
+      this.lampMats = [...set];
+      this.lampGain = this.lampMats.map((m) => m.uniforms.uGain.value);
+      this.lampK = 1;
+    }
+    const cp = space.camera.position, cl = Math.hypot(cp.x, cp.y, cp.z), sd = sim.sunDir;
+    const sunUp = cl > 0 ? (cp.x * sd.x + cp.y * sd.y + cp.z * sd.z) / cl : 0;
+    const k = 1 - LAMP_DAY_DIM * THREE.MathUtils.smoothstep(sunUp, -0.06, 0.14);
+    if (Math.abs(k - this.lampK) < 1e-3) return;
+    this.lampK = k;
+    for (let i = 0; i < this.lampMats.length; i++) this.lampMats[i].uniforms.uGain.value = this.lampGain[i] * k;
   }
 
   _recentre(kc) {
