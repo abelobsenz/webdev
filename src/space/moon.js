@@ -262,6 +262,30 @@ void main() {
   vec3 g = mix(lawn, vec3(0.34, 0.31, 0.26), walks);
   g = mix(g, trees, tr.x * (1.0 - walks));
   g = mix(g, vec3(0.012, 0.025, 0.03), pond);
+  // each district's terraces their own kind of garden (so 17 km of deck is not one stripe
+  // repeated): parkland, allotments on the inner and outer terraces, an orchard, water meadow
+  float dI = floor(u / 17.32 + 0.5);
+  float dk = hash12(vec2(dI, 11.0));
+  float alK = step(0.25, dk) * step(dk, 0.55) * clamp(band1(s, 3.1, 0.25, px) + band1(s, 4.6, 0.3, px), 0.0, 1.0);
+  vec2 ap = vec2(u / 0.06, s / 0.03);
+  vec2 aid = floor(ap);
+  float ah = hash12(aid + dI * 3.0);
+  vec3 alC = ah < 0.3 ? vec3(0.07, 0.1, 0.035) : ah < 0.5 ? vec3(0.11, 0.1, 0.05) : ah < 0.7 ? vec3(0.09, 0.07, 0.045) : ah < 0.85 ? vec3(0.05, 0.08, 0.03) : vec3(0.13, 0.11, 0.06);
+  vec2 ae = min(fract(ap), 1.0 - fract(ap)) * vec2(0.06, 0.03);            // km to the plot's edge
+  float alH = 1.0 - smoothstep(0.0015, 0.0015 + px, min(ae.x, ae.y));
+  float alRes = 1.0 - smoothstep(0.01, 0.03, px);
+  vec3 allot = mix(vec3(0.085, 0.088, 0.045), mix(alC, vec3(0.03, 0.05, 0.02), alH * 0.8), alRes);
+  g = mix(g, allot, alK * (1.0 - walks));
+  float orK = step(0.55, dk) * step(dk, 0.8) * band1(s, 3.9, 0.45, px);
+  vec2 oc = fract(vec2(u, s) / 0.012) - 0.5;
+  float orT = 1.0 - smoothstep(0.33, 0.33 + px / 0.012, length(oc));
+  float orch = mix(0.34, orT, 1.0 - smoothstep(0.004, 0.01, px));
+  g = mix(g, mix(lawn * 0.9, vec3(0.03, 0.055, 0.025), orch), orK * (1.0 - walks));
+  // water meadow: the outer terrace wetter and bluer-green, with its channels
+  float wmK = step(0.8, dk) * band1(s, 4.4, 0.4, px);
+  float chan = stripe(u + 0.2 * sin(s * 9.0), 0.18, 0.004, px);
+  g = mix(g, mix(vec3(0.05, 0.085, 0.05), vec3(0.015, 0.03, 0.035), chan), wmK * (1.0 - walks));
+  gloss = max(gloss, chan * wmK * garden * 0.5);
   gloss = max(gloss, pond * garden);
   float ringsP = stripe(length(vec2(dU, s - 3.5)), 0.06, 0.006, px);
   vec3 plazaC = mix(vec3(0.42, 0.4, 0.36), vec3(0.3, 0.28, 0.25), ringsP);
@@ -284,6 +308,10 @@ void main() {
     float h2 = blockH(u + off.x, across + off.y, blk2);
     shadow = step(hs * 0.6, h2) * (1.0 - step(0.001, hb)) * (1.0 - smoothstep(0.3, 0.6, px / 0.24));
   }
+  // contact darkening: the streets and lanes darken toward the terrace blocks' feet
+  float dEdge = min(abs(s - 2.2), abs(s - 2.78));
+  float feet = (1.0 - smoothstep(0.0, 0.03 + px, dEdge)) * (1.0 - step(0.001, hb)) * (1.0 - smoothstep(0.03, 0.1, px));
+  alb *= 1.0 - 0.3 * feet;
   alb = mix(vec3(0.28, 0.29, 0.3) * (0.9 + 0.1 * stripe(u, 0.05, 0.002, fu)), alb, top);
   // ---- light ----
   // relief: the block roofs and the tree crowns tilt the normal a little toward the Sun's side
@@ -294,7 +322,9 @@ void main() {
   float mu = dot(radial, uSunDir);
   float Fm = ${(R_MOON * R_MOON).toFixed(1)} / max(rp * rp, 1.0);
   vec3 moonL = uSunE * vec3(0.105, 0.13, 0.115) * Fm * clamp(mu + 0.3 * (1.0 - Fm), 0.0, 1.0) * clamp(0.5 - 0.5 * dot(N, radial), 0.0, 1.0);
-  vec3 col = alb / PI * (sunL * ndl * (1.0 - 0.75 * shadow) * treeLit + moonL);
+  // earthlight and the deck's own bounce: shade is dim, not black
+  vec3 fillL = uSunE * (vec3(0.55, 0.7, 1.0) * 0.0012 + vec3(1.0) * 0.004 * sh * (0.5 + 0.5 * max(mu, 0.0)));
+  vec3 col = alb / PI * (sunL * ndl * (1.0 - 0.75 * shadow) * treeLit + moonL + fillL);
   vec3 V = normalize(cameraPosition - vWorld);
   vec3 H = normalize(V + uSunDir);
   float spec = pow(max(dot(N, H), 0.0), mix(55.0, 400.0, gloss)) * mix(0.045, 1.2, gloss);
