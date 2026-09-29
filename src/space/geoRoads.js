@@ -6,6 +6,7 @@ import { craftMesh, craftPart, addEngines, addLamps, placeMerge, placeLamps, pix
 import { LAMP } from './lamps.js';
 import { R_EARTH, GEO_ALT, MERIDIAN_LON, bodyDir } from './sim.js';
 import { stationFrame, CORRIDORS } from './stations.js';
+import { YardWorks } from './yardWorks.js';
 
 // THE GEOSTATIONARY ROADS: the Harbour's neighbourhood along the geostationary arc.
 //
@@ -36,7 +37,7 @@ const LA = 170, LB = 118;
 const linerProf = (u) => (u < 0.4 ? 0.62 + 0.38 * Math.sin((Math.PI / 2) * (u / 0.4)) : Math.pow(Math.max(Math.cos((Math.PI / 2) * ((u - 0.4) / 0.6)), 0), 0.8));
 const linerF = (z) => Math.max(linerProf((z + 1150) / 2400), 0.02);
 /** A point of the hull section at angle t (the superellipse of the liner's loft). */
-function sectionPoint(z, t) {
+export function sectionPoint(z, t) {
   const f = linerF(z), c = Math.cos(t), s = Math.sin(t);
   const x = Math.sign(c) * Math.pow(Math.abs(c), 2 / 2.3) * LA * f;
   let y = Math.sign(s) * Math.pow(Math.abs(s), 2 / 2.3) * LB * f;
@@ -537,6 +538,8 @@ export class GeoRoads {
     addLamps(ym, this.yardData.lamps, { minPx: 1.2 });
     this.yard.add(ym);
     this.yardMesh = ym;
+    // the work on her: plating, bay cranes, welders, drones, crew pods, platforms (yardWorks.js)
+    this.yardWorks = new YardWorks(ym);
     const _c = new THREE.Vector3();
     this.yardBody = space.addBody('concordYard', [this.yard], () => this.yard.getWorldPosition(_c), this.yardData.radius, { solid: true, hint: 0.5 });
     // ---- Water Store, south-west of the Harbour, its spine along the arc
@@ -623,7 +626,9 @@ export class GeoRoads {
     // the crew wheel turns slowly (0.3 g at its rim, a comfortable working weight)
     this.yardWheel.rotation.z = (realTime * Math.sqrt(2.94 / (YARD.wheelR + 38))) % TAU;
     // (body objects are shown per depth slice: cull through the body record)
-    if (this.yardBody) this.yardBody.visible = pixelRadius(space.camera, this.yard.getWorldPosition(this._w), this.yardData.radius, space.size.y) > 0.5;
+    const yardPx = pixelRadius(space.camera, this.yard.getWorldPosition(this._w), this.yardData.radius, space.size.y);
+    if (this.yardBody) this.yardBody.visible = yardPx > 0.5;
+    this.yardWorks.update(realTime, yardPx);
     if (this.storeBody) this.storeBody.visible = pixelRadius(space.camera, this.store.getWorldPosition(this._w), this.storeData.radius, space.size.y) > 0.5;
   }
 }
