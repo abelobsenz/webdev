@@ -1,7 +1,7 @@
 // Invariants of the low and middle shell (src/space/lowOrbit.js and friends), headless.
 // Run: node tools/verify-lift.mjs
 import * as THREE from 'three';
-import { SpaceSim, R_EARTH } from '../src/space/sim.js';
+import { SpaceSim, R_EARTH, bodyDir, MERIDIAN_LON } from '../src/space/sim.js';
 import { Orbit, MU, sunSyncInclination, sunlitFraction, periodOf } from '../src/space/kepler.js';
 import { LowOrbit } from '../src/space/lowOrbit.js';
 import { buildHotel, HOTEL, buildPolar, POLAR, buildFarmDrum, buildFarmFrame, FARM, buildPower, POWER, SKYHOOK } from '../src/space/leoStations.js';
@@ -102,8 +102,8 @@ for (const T of ts) {
 buffers(lo.group);
 log('min shuttle altitude (km)', +minShuttleAlt.toFixed(1));
 log('min hopper altitude (km)', +minHopperAlt.toFixed(1));
-ok(minShuttleAlt > 600, 'shuttles stay above the Halo deck');
-ok(minHopperAlt > 600, 'hoppers stay above the Halo deck');
+ok(minShuttleAlt > 626, 'shuttles stay above the Halo and its vault');
+ok(minHopperAlt > 626, 'hoppers stay above the Halo and its vault');
 
 // ---- nothing orbits through the Halo's altitude band (600-640 km), nothing below it
 for (const s of [...lo.stations, lo.skyhook]) {
@@ -268,6 +268,26 @@ function sweptHits(moving, fixed, ax, c = new THREE.Vector3(), cell = 1) {
     log(`${s.name} drone clearance (m)`, +worst.toFixed(1));
     ok(worst > 12, `${s.name} drones clear of the structure`);
   }
+}
+
+// ---- shuttles and hoppers keep clear of Meridian's tether (a line up from the equator, turning with the Earth)
+{
+  const up0 = bodyDir(0, MERIDIAN_LON);
+  const q = new THREE.Quaternion(), u = new THREE.Vector3(), p = new THREE.Vector3();
+  let worst = Infinity;
+  for (let T = 0; T < 86400 * 2; T += 20) {
+    sim.t = T; sim.update();
+    lo.update(sim, T * 0.01, 0.016, space);
+    u.copy(up0).applyQuaternion(sim.earthQuat);
+    for (const c of [...lo.shuttles.map((s) => s.root.position), ...lo.hoppers.filter((h) => h.active).map((h) => h.root.position)]) {
+      const along = c.dot(u);
+      if (along <= 0) continue;
+      p.copy(c).addScaledVector(u, -along);
+      worst = Math.min(worst, p.length());
+    }
+  }
+  log('closest pass to the tether (km)', +worst.toFixed(1));
+  ok(worst > 8, 'traffic keeps clear of the elevator tether');
 }
 
 // ---- relay crawlers run the ribbon's faces through the collar bore without meeting it

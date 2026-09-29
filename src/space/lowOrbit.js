@@ -33,6 +33,10 @@ import { droneGeo, DynLamps } from './lifeKit.js';
 const TAU = Math.PI * 2;
 const DEG = Math.PI / 180;
 const HALO_R = R_EARTH + 620;
+export const APRON_ALT = 9;                // km over the Halo deck (its vault crests at 5.5 km)
+const APRON_LON = THREE.MathUtils.degToRad(0.35);
+const TETHER_KEEP = 20;                    // km: the elevator tether's exclusion zone
+const _tu = new THREE.Vector3(), _tp = new THREE.Vector3(), _tq = new THREE.Quaternion();
 const EARTH_W = TAU / 86400;            // the sim turns the Earth once per 86,400 s
 const _p = new THREE.Vector3(), _q = new THREE.Quaternion(), _a = new THREE.Vector3(), _b = new THREE.Vector3(), _c = new THREE.Vector3();
 const _x = new THREE.Vector3(), _y = new THREE.Vector3(), _z = new THREE.Vector3(), _m = new THREE.Matrix4(), _w = new THREE.Vector3();
@@ -481,8 +485,10 @@ void main() {
       this.group.add(n);
       return { root: n, mesh: m, engine: e, len: d.length };
     };
-    // halo terminals: Meridian's junction and the Nauru port (Earth-fixed, on the Halo deck)
-    this.haloDirs = [bodyDir(0, MERIDIAN_LON), bodyDir(0, THREE.MathUtils.degToRad(166.9))];
+    // Halo terminals: aprons 43 km east of the Meridian junction and of the Quito port, held 9 km
+    // over the deck (above the crest of its glass vault, clear of the ports and their tethers)
+    this.tetherDir0 = bodyDir(0, MERIDIAN_LON);
+    this.haloDirs = [bodyDir(0, MERIDIAN_LON + APRON_LON), bodyDir(0, THREE.MathUtils.degToRad(-78.5) + APRON_LON)];
     const routes = [
       ['halo0', 'aurelia', 'halo1', 'aurelia'], ['halo1', 'demeter', 'halo0', 'boreal'], ['halo0', 'dawnline', 'aurelia', 'halo1'],
       ['halo1', 'aurelia', 'demeter', 'halo0'], ['halo0', 'boreal', 'dawnline', 'halo1'], ['halo0', 'demeter', 'halo1', 'dawnline'],
@@ -511,7 +517,7 @@ void main() {
       // the Halo deck turns with the Earth: its inertial position now, and the deck's velocity
       const th = (sim.theta0 || 0) + (t / 86400) * TAU;
       _q.setFromAxisAngle(Y, th);
-      out.copy(d).applyQuaternion(_q).multiplyScalar(HALO_R + 3.5);
+      out.copy(d).applyQuaternion(_q).multiplyScalar(HALO_R + APRON_ALT);
       if (dir) dir.copy(out).normalize();
       if (vel) vel.crossVectors(Y, out).multiplyScalar(EARTH_W);
       return out;
@@ -578,6 +584,17 @@ void main() {
       if (_p.lengthSq() < 1e-12) _p.set(0, 0, 1);
       basisQ(_p, _y.copy(root.position).normalize(), root.quaternion);
       thr = u < 0.12 || (u > 0.45 && u < 0.52) || u > 0.9 ? 1 : 0.15;
+    }
+    // the elevator's exclusion zone: traffic control holds every flight path 20 km off the tether
+    const tu = _tu.copy(this.tetherDir0).applyQuaternion(_tq.setFromAxisAngle(Y, (sim.theta0 || 0) + (t / 86400) * TAU));
+    const along = root.position.dot(tu);
+    if (along > 0) {
+      _tp.copy(root.position).addScaledVector(tu, -along);
+      const d = _tp.length();
+      if (d < TETHER_KEEP) {
+        if (d < 1e-6) _tp.crossVectors(Y, tu); else _tp.divideScalar(d);
+        root.position.addScaledVector(_tp, TETHER_KEEP - d);
+      }
     }
     sh.engine.material.uniforms.uGain.value = thr;
     const px = pixelRadius(cam, root.position, sh.len * KM, H);
@@ -670,7 +687,7 @@ void main() {
         _y.copy(_b).setY(0).normalize();
         _x.copy(_c).setY(0).normalize();
         _a.copy(_y).addScaledVector(_x, -0.19).normalize();
-        _a.multiplyScalar(HALO_R + 1.5);                   // launch rail on the Halo deck
+        _a.multiplyScalar(HALO_R + APRON_ALT);             // launch apron over the Halo deck
         _w.crossVectors(Y, _a).multiplyScalar(EARTH_W);
         const u = (t - tA) / Ta;
         hermiteLocal(_a, _w, _b, _c, Ta, u, root.position, _p);
