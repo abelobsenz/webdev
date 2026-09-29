@@ -237,10 +237,78 @@ export const PORT_LIFE = {
 };
 
 /**
+ * A port station's working parts, in the station mesh's metres: court cranes slewing over the
+ * container stacks, shuttles climbing the port columns to the gate rings and dropping away,
+ * freight pods riding the port tethers. Shared by the Halo's ports and Meridian's junction.
+ */
+export class PortLife {
+  constructor(mesh, st, { seed = 0, tethers = PORT_LIFE.tetherX } = {}) {
+    PortLife.shared ||= { crane: buildCourtCrane(), mast: buildCraneMast(PORT_LIFE.craneY), shuttle: buildShuttle(110).geo, pod: buildTetherPod() };
+    const K = PortLife.shared;
+    this.seed = seed;
+    this.tethers = tethers;
+    this.group = new THREE.Group();
+    this.seats = [];
+    for (const sd of [-1, 1]) for (const x of [-1050, 1050]) this.seats.push(V(x, st.pierY + 90 + PORT_LIFE.craneY, sd * PORT_LIFE.craneZ));
+    this.cranes = this.seats.map((c) => {
+      const head = craftPart(mesh, K.crane.geo);
+      head.position.copy(c);
+      addLamps(head, K.crane.lamps, { minPx: 1.2 });
+      const mast = craftPart(mesh, K.mast);
+      mast.position.copy(c);
+      this.group.add(head, mast);
+      return head;
+    });
+    const inst = (geo, n) => {
+      const im = new THREE.InstancedMesh(geo, mesh.material, n);
+      im.frustumCulled = false; im.renderOrder = 3; im.onBeforeRender = mesh.onBeforeRender;
+      this.group.add(im);
+      return im;
+    };
+    this.shuttles = inst(K.shuttle, 2);
+    this.pods = inst(K.pod, Math.max(1, 2 * tethers.length));
+    this.pods.count = 2 * tethers.length;
+    mesh.add(this.group);
+  }
+
+  /** Shuttle at gate side s (0 west/departures, 1 east/arrivals): y (m) of its centre, or null. */
+  static shuttleY(t, side, seed) {
+    const L = PORT_LIFE, ph = ((t / L.shuttlePeriod + side * 0.5 + (seed % 97) / 97) % 1 + 1) % 1;
+    const berth = L.gateY - 150, far = berth - L.approachKm * 1000;
+    if (ph < 0.3) { const e = 1 - ph / 0.3; return berth - (berth - far) * e * e; }        // rising, braking into the gate
+    if (ph < 0.55) return berth;                                                            // at the gate
+    if (ph < 0.85) { const e = (ph - 0.55) / 0.3; return berth - (berth - far) * e * e; }  // dropping away
+    return null;
+  }
+  static podY(t, k, seed) {
+    const L = PORT_LIFE, span = L.podSpan;
+    const u = (((t * L.podSpeed + k * span / 2 + seed) % span) + span) % span;
+    return (k % 2 ? L.tetherTopY - 300 - u : L.tetherTopY - 300 - (span - u));
+  }
+
+  update(t) {
+    for (let i = 0; i < this.cranes.length; i++) this.cranes[i].rotation.y = 0.6 * Math.sin(t * 0.02 + i * 1.9 + this.seed) + (i < 2 ? 0 : Math.PI);
+    let n = 0;
+    for (let side = 0; side < 2; side++) {
+      const y = PortLife.shuttleY(t, side, this.seed);
+      if (y === null) continue;
+      // nose up the column (+y), belly toward +z
+      _mm.set(1, 0, 0, side ? 12000 : -12000, 0, 0, 1, y, 0, -1, 0, 0, 0, 0, 0, 1);
+      this.shuttles.setMatrixAt(n++, _mm);
+    }
+    this.shuttles.count = n;
+    this.shuttles.instanceMatrix.needsUpdate = true;
+    for (let k = 0; k < this.pods.count; k++) {
+      _mm.makeTranslation(this.tethers[k % this.tethers.length], PortLife.podY(t, k, this.seed), 0);
+      this.pods.setMatrixAt(k, _mm);
+    }
+    this.pods.instanceMatrix.needsUpdate = true;
+  }
+}
+
+/**
  * The Halo's ports as scene objects: one station at each ground port (Meridian's is the
- * junction, built by the elevator). Each is its own depth-sliced body. Close in, each port is
- * working: shuttles climb the port columns to the gate rings and drop away again, the cargo
- * courts' cranes slew over the containers, freight pods ride the three port tethers.
+ * junction, built by the elevator). Each is its own depth-sliced body, working when close.
  */
 export class HaloPorts {
   constructor(space, ports) {
@@ -248,11 +316,6 @@ export class HaloPorts {
     const st = buildPortStation({ junction: false });
     this.station = st;
     const mat = createCraftMaterial({ accent: [0.55, 0.9, 1.0], lit: 0.6 });
-    const crane = buildCourtCrane(), mastGeo = buildCraneMast(PORT_LIFE.craneY);
-    const shuttleGeo = buildShuttle(110).geo, podGeo = buildTetherPod();
-    // crane seats: on the cargo courts outboard of the rotor (x = +-1050, z = +-20100)
-    this.craneSeats = [];
-    for (const sd of [-1, 1]) for (const x of [-1050, 1050]) this.craneSeats.push(V(x, st.pierY + 90 + PORT_LIFE.craneY, sd * PORT_LIFE.craneZ));
     for (const p of ports) {
       if (p.name === 'Meridian') continue;
       const lon = THREE.MathUtils.degToRad(p.lon);
@@ -264,46 +327,18 @@ export class HaloPorts {
       const s = craftPart(m, st.ships);
       m.add(s);
       addLamps(m, st.lamps, { minPx: 1.3 });
-      // working parts (all in the station's metres)
-      const life = new THREE.Group();
-      const cranes = this.craneSeats.map((c) => {
-        const head = craftPart(m, crane.geo);
-        head.position.copy(c);
-        addLamps(head, crane.lamps, { minPx: 1.2 });
-        life.add(head);
-        return head;
-      });
-      const mastList = this.craneSeats.map((c) => { const mm = craftPart(m, mastGeo); mm.position.copy(c); life.add(mm); return mm; });
-      const inst = (geo, n) => {
-        const im = new THREE.InstancedMesh(geo, mat, n);
-        im.frustumCulled = false; im.renderOrder = 3; im.onBeforeRender = m.onBeforeRender;
-        life.add(im);
-        return im;
-      };
-      const shuttles = inst(shuttleGeo, 2), pods = inst(podGeo, 6);
-      m.add(life);
+      const life = new PortLife(m, st, { seed: (lon * 1000) | 0 });
       g.add(m);
       space.earthFixed.add(g);
       const _p = new THREE.Vector3();
       space.addBody(`port-${p.name}`, [g], () => g.getWorldPosition(_p), 24, { solid: true, hint: 0.6 });
-      this.list.push({ name: p.name, group: g, mesh: m, ships: s, life, cranes, masts: mastList, shuttles, pods, seed: (lon * 1000) | 0 });
+      this.list.push({ name: p.name, group: g, mesh: m, ships: s, life });
     }
+    this.craneSeats = this.list.length ? this.list[0].life.seats : [];
   }
 
-  /** Shuttle at gate side s (0 west/departures, 1 east/arrivals): y (m) of its centre, or null. */
-  shuttleY(t, side, seed) {
-    const L = PORT_LIFE, ph = ((t / L.shuttlePeriod + side * 0.5 + (seed % 97) / 97) % 1 + 1) % 1;
-    const berth = L.gateY - 150, far = berth - L.approachKm * 1000;
-    if (ph < 0.3) { const e = 1 - ph / 0.3; return berth - (berth - far) * e * e; }        // rising, braking into the gate
-    if (ph < 0.55) return berth;                                                            // at the gate
-    if (ph < 0.85) { const e = (ph - 0.55) / 0.3; return berth - (berth - far) * e * e; }  // dropping away
-    return null;
-  }
-  podY(t, k, seed) {
-    const L = PORT_LIFE, span = L.podSpan;
-    const u = (((t * L.podSpeed + k * span / 2 + seed) % span) + span) % span;
-    return (k % 2 ? L.tetherTopY - 300 - u : L.tetherTopY - 300 - (span - u));
-  }
+  shuttleY(t, side, seed) { return PortLife.shuttleY(t, side, seed); }
+  podY(t, k, seed) { return PortLife.podY(t, k, seed); }
 
   update(sim, realTime, dt, space) {
     // berthed craft only when a station is big enough on screen to show them
@@ -311,27 +346,8 @@ export class HaloPorts {
       const px = pixelRadius(space.camera, p.group.getWorldPosition(_w), 22, space.size.y);
       p.ships.visible = px > 120;
       p.group.visible = px > 0.6;
-      p.life.visible = px > 160;
-      if (!p.life.visible) continue;
-      const t = realTime;
-      for (let i = 0; i < p.cranes.length; i++) p.cranes[i].rotation.y = 0.6 * Math.sin(t * 0.02 + i * 1.9 + p.seed) + (i < 2 ? 0 : Math.PI);
-      let n = 0;
-      for (let side = 0; side < 2; side++) {
-        const y = this.shuttleY(t, side, p.seed);
-        if (y === null) continue;
-        const x = side ? 12000 : -12000;
-        // nose up the column (+y), belly toward +z
-        _mm.set(1, 0, 0, x, 0, 0, 1, y, 0, -1, 0, 0, 0, 0, 0, 1);
-        p.shuttles.setMatrixAt(n++, _mm);
-      }
-      p.shuttles.count = n;
-      p.shuttles.instanceMatrix.needsUpdate = true;
-      for (let k = 0; k < 6; k++) {
-        const x = PORT_LIFE.tetherX[k % 3];
-        _mm.makeTranslation(x, this.podY(t, k, p.seed), 0);
-        p.pods.setMatrixAt(k, _mm);
-      }
-      p.pods.instanceMatrix.needsUpdate = true;
+      p.life.group.visible = px > 160;
+      if (p.life.group.visible) p.life.update(realTime);
     }
   }
 }

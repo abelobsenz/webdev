@@ -245,7 +245,12 @@ for (let t = 0; t < 900; t += 3) for (const side of [0, 1]) {
 for (let t = 0; t < 400; t += 5) for (let k = 0; k < 6; k++) { const y = ports.podY(t, k, 7); assert.ok(y < -1700 && y > -24000, 'Tether pods ride below the sheaves, inside the port body'); }
 space.camera.position.copy(bodyDir(0, THREE.MathUtils.degToRad(HALO_PORTS[1].lon)).multiplyScalar(R_EARTH + 640)).applyQuaternion(sim.earthQuat);
 ports.update(sim, 50, 0.016, space);
-assert.ok(ports.list[0].life.visible && ports.list[0].pods.count === 6, 'Port life runs when the station fills the view');
+assert.ok(ports.list[0].life.group.visible && ports.list[0].life.pods.count === 6, 'Port life runs when the station fills the view');
+// the junction: cranes and gate shuttles, no pods on the climbers' tether
+space.earthFixed.add(el.group); space.earthFixed.updateMatrixWorld(true);
+space.camera.position.copy(el.junction.position).applyQuaternion(sim.earthQuat).addScaledVector(V(0, 0, 1), 5);
+el.update(sim, 300, 0.016, space);
+assert.ok(el.junctionLife.group.visible && el.junctionLife.pods.count === 0 && el.junctionLife.cranes.length === 4, 'The junction works too, leaving the main tether to the climbers');
 
 console.log(JSON.stringify(out));
 console.log('RING_VERIFIED');

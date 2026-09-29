@@ -3,8 +3,9 @@ import { createRibbonMaterial, buildRibbonGeometry } from './lines.js';
 import { createHullMaterial, tag, merge, beam, KIND } from './hull.js';
 import { R_EARTH, GEO_ALT, COUNTERWEIGHT_ALT, MERIDIAN_LON, bodyDir } from './sim.js';
 import { HarbourStation } from './harbour.js';
-import { stationFrame, buildPortStation, buildCounterworks } from './stations.js';
-import { craftMesh, craftPart, addLamps } from './craftMesh.js';
+import { stationFrame, buildPortStation, buildCounterworks, PortLife } from './stations.js';
+import { craftMesh, craftPart, addLamps, pixelRadius } from './craftMesh.js';
+const _jw = new THREE.Vector3();
 import { ClimberCars } from './climbers.js';
 import { buildCounterweightRock } from './counterweightRock.js';
 import { CounterLife } from './counterLife.js';
@@ -149,6 +150,9 @@ export class Elevator {
     this.junctionShips = craftPart(this.junctionMesh, jn.ships);
     this.junctionMesh.add(this.junctionShips);
     addLamps(this.junctionMesh, jn.lamps, { minPx: 1.3 });
+    // the junction works like the other ports (its one tether is the main tether, whose
+    // climbers are the cars of climbers.js, so it carries no port pods)
+    this.junctionLife = new PortLife(this.junctionMesh, jn, { seed: 157, tethers: [] });
     this.junction = new THREE.Group();
     this.junction.add(this.junctionMesh);
     this.junction.position.copy(up).multiplyScalar(R_EARTH + 620);
@@ -186,5 +190,10 @@ export class Elevator {
     if (space) this.station.update(sim, realTime, space);
     if (space) this.cars.update(sim, realTime, dt, space);
     this.counterLife.update(realTime);
+    if (space && space.camera && space.size) {
+      const px = pixelRadius(space.camera, this.junction.getWorldPosition(_jw), 22, space.size.y);
+      this.junctionLife.group.visible = px > 160;
+      if (px > 160) this.junctionLife.update(realTime);
+    }
   }
 }
