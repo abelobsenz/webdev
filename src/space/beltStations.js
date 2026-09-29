@@ -388,6 +388,54 @@ function buildDepot(c) {
   pvWing(c, V(0, -w / 2, 0), V(0, -1, 0), X, r.range(70, 120), 28);
 }
 
+/**
+ * Plate a rectangular portal frame (Wd x Hd, in the plane z) in part: knee plates boxing the
+ * truss in for a sixth of each side from every corner, in working grey with a bronze capping
+ * strip, and a painted name panel mid-span on the top and bottom. At the yard's framing a portal
+ * of open lacing read as a bare coloured cage; the plates give it mass and the lacing shows
+ * between them.
+ */
+function portalPlates(B, z, Wd, Hd, depth = 6.6) {
+  const kx = Wd / 6, ky = Hd / 6;
+  for (const sx of [-1, 1]) for (const sy of [-1, 1]) {
+    const x = sx * Wd / 2, y = sy * Hd / 2;
+    B.box(x - sx * kx / 2, y, z, kx, depth, depth, DK.GRIME);
+    B.box(x, y - sy * ky / 2, z, depth, ky, depth, DK.GRIME);
+    B.box(x - sx * kx / 2, y + sy * (depth / 2 + 0.3), z, kx, 0.6, depth + 0.6, CK.BRONZE);
+    B.box(x + sx * (depth / 2 + 0.3), y - sy * ky / 2, z, 0.6, ky, depth + 0.6, CK.BRONZE);
+  }
+  for (const sy of [-1, 1]) B.box(0, sy * Hd / 2, z, Wd * 0.3, depth + 0.2, depth + 0.2, DK.LIVERY);
+}
+
+/**
+ * A web frame round a closed section loop [[x, y], ...] in the plane z: a closed ring of
+ * rectangular section, `depth` inward toward the loop's centroid and `thick` along z. Every
+ * face quad owns its vertices (hard edges).
+ */
+function webRing(B, loop, z, depth, thick, kind) {
+  const n = loop.length;
+  let cx = 0, cy = 0;
+  for (const [x, y] of loop) { cx += x / n; cy += y / n; }
+  const O = loop, I = loop.map(([x, y]) => { const dx = x - cx, dy = y - cy, r = Math.hypot(dx, dy) || 1, s = Math.max(r - depth, 0.2) / r; return [cx + dx * s, cy + dy * s]; });
+  const z0 = z - thick / 2, z1 = z + thick / 2, h = new THREE.Vector3();
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n, a = O[i], b = O[j], c = I[j], d = I[i];
+    const mx = (a[0] + b[0]) / 2 - cx, my = (a[1] + b[1]) / 2 - cy, ml = Math.hypot(mx, my) || 1;
+    const quad = (p, q, zp, zq, sg) => {
+      h.set(mx / ml * sg, my / ml * sg, 0);
+      const v = [B.v(p[0], p[1], zp, i, zp, kind), B.v(q[0], q[1], zp, i + 1, zp, kind), B.v(q[0], q[1], zq, i + 1, zq, kind), B.v(p[0], p[1], zq, i, zq, kind)];
+      B.tri(v[0], v[1], v[2], h); B.tri(v[0], v[2], v[3], h);
+    };
+    quad(a, b, z0, z1, 1);
+    quad(d, c, z0, z1, -1);
+    for (const [zz, sg] of [[z0, -1], [z1, 1]]) {
+      h.set(0, 0, sg);
+      const v = [B.v(a[0], a[1], zz, i, 0, kind), B.v(b[0], b[1], zz, i + 1, 0, kind), B.v(c[0], c[1], zz, i + 1, depth, kind), B.v(d[0], d[1], zz, i, depth, kind)];
+      B.tri(v[0], v[1], v[2], h); B.tri(v[0], v[2], v[3], h);
+    }
+  }
+}
+
 function buildShipyard(c) {
   const { B, r } = c;
   const nF = r.int(5, 8), pitch = r.range(60, 90), Wd = r.range(90, 140), Hd = r.range(80, 120);
@@ -399,6 +447,7 @@ function buildShipyard(c) {
     // deep portal trusses painted in the owner's livery (each slipway known by its colour)
     truss(B, a, b, 6.5, 11, 0.5, DK.LIVERY); truss(B, b, cc, 6.5, 11, 0.5, DK.LIVERY); truss(B, cc, d, 6.5, 11, 0.5, DK.LIVERY); truss(B, d, a, 6.5, 11, 0.5, DK.LIVERY);
     for (const p of [a, b, cc, d]) B.box(p.x, p.y, p.z, 9, 9, 9, CK.BRONZE);
+    portalPlates(B, z, Wd, Hd);
   }
   for (const [x, y] of [[-Wd / 2, -Hd / 2], [Wd / 2, -Hd / 2], [Wd / 2, Hd / 2], [-Wd / 2, Hd / 2]]) truss(B, V(x, y, -L / 2), V(x, y, L / 2), 5, 12, 0.42, DK.GRIME);
   // crane rails along the top stringers
@@ -425,9 +474,11 @@ function buildShipyard(c) {
   const zP = -hl / 2 + plated * hl;
   for (let z = zP + 12; z < hl / 2; z += 14) {
     const f = 1 - Math.max(0, (z - hl * 0.3) / (hl * 0.2)) * 0.6;
-    const pts = sectionEllipse(hw * f, hh * f, 20, 2.4).map(([x, y]) => V(x, y, z));
+    const loop = sectionEllipse(hw * f, hh * f, 20, 2.4), pts = loop.map(([x, y]) => V(x, y, z));
     pts.push(pts[0].clone());
     B.tube(pts, 0.9, 5, CK.BRONZE);
+    // each rib a web frame 3.5 m deep inboard of its bronze flange (the flange alone was a hairline)
+    webRing(B, sectionEllipse(hw * f, hh * f, 32, 2.4), z, Math.min(3.5, 0.25 * hh * f), 1.4, DK.GRIME);
   }
   for (let s = 0; s < 8; s++) {
     const t = (s / 8) * TAU;
@@ -458,7 +509,11 @@ function buildShipyard(c) {
   truss(B, V(Wd / 2 + 2, 0, -L / 4), V(Wd / 2 + 15, 0, -L / 4), 4, 5, 0.3);
   berth(c, V(Wd / 2 + 45, 0, -L / 4), X, 2.6, 6);
   berth(c, V(Wd / 2 + 30, 17, -L / 4 + 12), Y, 2.4, 5);
-  B.box(0, -Hd / 2 - 16, 0, Wd * 0.8, 2, L * 0.7, CK.DECK);
+  // the stock deck: working plate with hazard-banded edges and dark tie-down rails (a bare white
+  // slab read as the brightest thing in the yard)
+  B.box(0, -Hd / 2 - 16, 0, Wd * 0.8, 2, L * 0.7, DK.GRIME);
+  for (const s of [-1, 1]) { B.box(s * (Wd * 0.4 - 1.5), -Hd / 2 - 14.9, 0, 3, 0.2, L * 0.7 - 1, DK.HAZARD); B.box(0, -Hd / 2 - 14.9, s * (L * 0.35 - 1.5), Wd * 0.8 - 7, 0.2, 3, DK.HAZARD); }
+  for (let x = -Wd * 0.3; x <= Wd * 0.3 + 1e-6; x += Wd * 0.15) B.box(x, -Hd / 2 - 14.95, 0, 0.8, 0.1, L * 0.62, CK.DARK);
   railing(B, -Wd * 0.4, Wd * 0.4, -L * 0.35, L * 0.35, -Hd / 2 - 15);
   for (const s of [-1, 1]) c.walks.push({ a: V(s * Wd * 0.39, -Hd / 2 - 15, -L * 0.33), b: V(s * Wd * 0.39, -Hd / 2 - 15, L * 0.33), up: Y });
   truss(B, V(0, -Hd / 2 - 2, 0), V(0, -Hd / 2 - 15, 0), 4, 6, 0.3);
@@ -474,7 +529,11 @@ function buildShipyard(c) {
   for (let i = 0; i < nc; i++) {
     const z0 = -L / 2 + L * (0.25 + 0.5 * i);
     c.part(V(0, Hd / 2 + 6, z0), new THREE.Quaternion(), 'rail', 0, (Bp, lamps) => {   // (clear over the portal trusses)
-      truss(Bp, V(-Wd / 2, 0, 0), V(Wd / 2, 0, 0), 5, 8, 0.35, CK.BRONZE);
+      // twin box girders (a livery one and a grey one) with hazard-banded end carriages: the thin
+      // bronze lattice bridge vanished against the frame at the yard's framing
+      for (const dz of [-2.6, 2.6]) Bp.box(0, 0, dz, Wd, 3.6, 1.6, dz < 0 ? DK.LIVERY : DK.GRIME);
+      Bp.box(0, 1.9, 0, Wd, 0.3, 6.8, CK.DARK);
+      for (const s of [-1, 1]) Bp.box(s * (Wd / 2 - 3), 0, 0, 6, 3.8, 7, DK.HAZARD);
       Bp.box(0, -4, 0, 10, 4, 8, DK.HAZARD);
       Bp.box(0, -2, 0, 7, 3, 7, CK.GLASS);
       Bp.tube([V(0, -6, 0), V(0, -Hd * 0.18, 0)], 0.3, 4, CK.DARK);
