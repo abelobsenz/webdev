@@ -1,8 +1,7 @@
 import * as THREE from 'three';
 import { CB, CK } from '../craft/craftGeometry.js';
 import { lathe } from '../craft/craftClasses.js';
-import { createCraftMaterial } from '../craft/craftMaterial.js';
-import { craftMesh, craftPart, addLamps, KM } from './craftMesh.js';
+import { craftMesh, craftPart, addLamps, KM, DK, createDressedMaterial } from './craftMesh.js';
 import { LAMP } from './lamps.js';
 import { R_EARTH, GEO_ALT, COUNTERWEIGHT_ALT } from './sim.js';
 import { stationFrame } from './stations.js';
@@ -50,7 +49,7 @@ function latheY(B, y, prof, seg, closed = false) {
 
 /** Drive clamp: a collar round the bore and six trucks of paired wheels on the cable. */
 function driveClamp(B, D, y, flip) {
-  latheY(B, y, [[BORE_R + 0.5, -7, CK.DARK], [34, -6, CK.HULL], [36, -3, CK.BRONZE], [36, 3, CK.BRONZE], [34, 6, CK.HULL], [BORE_R + 0.5, 7, CK.DARK]], 36, true);
+  latheY(B, y, [[BORE_R + 0.5, -7, CK.DARK], [34, -6, DK.LIVERY], [36, -3, CK.BRONZE], [36, 3, CK.BRONZE], [34, 6, DK.LIVERY], [BORE_R + 0.5, 7, CK.DARK]], 36, true);
   for (let k = 0; k < 6; k++) {
     const a = (k / 6) * TAU + Math.PI / 6, c = Math.cos(a), s = Math.sin(a);
     B.push(new THREE.Matrix4().makeRotationY(-a).setPosition(0, y + flip * 16, 0));
@@ -75,12 +74,12 @@ export function buildPassengerClimber() {
   // sleeve through the whole car
   latheY(B, 0, [[BORE_R, -104, CK.DARK], [BORE_R + 1, -104, CK.DARK], [BORE_R + 1, 104, CK.DARK], [BORE_R, 104, CK.DARK]], 28, true);
   // machinery drum (bottom): radiators, batteries, the power pickups
-  latheY(B, 0, [[BORE_R + 1, -84, CK.HULL], [40, -84, CK.HULL], [42, -80, CK.BRONZE], [42, -52, CK.HULL], [46, -48, CK.BRONZE], [BORE_R + 1, -48, CK.HULL]], 36, true);
+  latheY(B, 0, [[BORE_R + 1, -84, DK.GRIME], [40, -84, DK.GRIME], [42, -80, CK.BRONZE], [42, -52, DK.GRIME], [46, -48, CK.BRONZE], [BORE_R + 1, -48, DK.GRIME]], 36, true);
   // passenger decks: ten 9 m decks under bronze rims and lantern soffits
-  const prof = [[BORE_R + 1, -48, CK.HULL], [48, -46, CK.HULL], [50, -44, CK.BRONZE]];
+  const prof = [[BORE_R + 1, -48, DK.GRIME], [48, -46, DK.GRIME], [50, -44, CK.BRONZE]];
   let y = -42;
   for (let d = 0; d < 10; d++) {
-    prof.push([50, y, CK.HULL], [50.5, y + 1, CK.GLASS], [50.5, y + 7, CK.GLASS], [51.5, y + 7.5, CK.LANTERN], [51.5, y + 8.5, CK.BRONZE], [50, y + 9, CK.HULL]);
+    prof.push([50, y, DK.PORTS], [50.5, y + 1, CK.GLASS], [50.5, y + 7, CK.GLASS], [51.5, y + 7.5, CK.LANTERN], [51.5, y + 8.5, CK.BRONZE], [50, y + 9, DK.PORTS]);
     y += 9;
   }
   // observation lounge: flared glass ring under a shallow dome, the promenade outside it
@@ -105,7 +104,7 @@ export function buildPassengerClimber() {
   for (let k = 0; k < 8; k++) {
     const a = (k / 8) * TAU, c = Math.cos(a), s = Math.sin(a);
     B.push(new THREE.Matrix4().makeTranslation(c * 46.2, -64, s * 46.2).multiply(toY));
-    lathe(B, [[0.1, -9, CK.HULL], [3.6, -8, CK.HULL], [4.2, -3, CK.GLASS], [4.2, 5, CK.HULL], [2.4, 9, CK.BRONZE], [0.1, 9.5, CK.BRONZE]], 14);
+    lathe(B, [[0.1, -9, DK.LIVERY], [3.6, -8, DK.LIVERY], [4.2, -3, CK.GLASS], [4.2, 5, DK.LIVERY], [2.4, 9, CK.BRONZE], [0.1, 9.5, CK.BRONZE]], 14);
     B.pop();
     lamps.push({ p: V(c * 53, -64, s * 53), r: 0.9, color: LAMP.AMBER, i: 1.6 });
   }
@@ -145,7 +144,7 @@ export function buildFreightClimber(seed = 3) {
   const posts = 8, Rf = 46;
   for (let k = 0; k < posts; k++) {
     const a = (k / posts) * TAU;
-    B.tube([V(Math.cos(a) * Rf, -80, Math.sin(a) * Rf), V(Math.cos(a) * Rf, 70, Math.sin(a) * Rf)], 1.6, 6, CK.HULL);
+    B.tube([V(Math.cos(a) * Rf, -80, Math.sin(a) * Rf), V(Math.cos(a) * Rf, 70, Math.sin(a) * Rf)], 1.6, 6, DK.GRIME);
   }
   for (let yy = -80; yy <= 70; yy += 30) {
     B.push(new THREE.Matrix4().makeTranslation(0, yy, 0).multiply(new THREE.Matrix4().makeRotationX(Math.PI / 2)));
@@ -159,7 +158,7 @@ export function buildFreightClimber(seed = 3) {
     }
   }
   // containers: 12 x 12 x 24 m modules, radial, four tiers in eight bays (a few bays empty)
-  const kinds = [CK.HULL, CK.BRONZE, CK.PANEL, CK.RADIATOR, CK.HULL];
+  const kinds = [DK.LIVERY, CK.BRONZE, CK.PANEL, CK.RADIATOR, DK.LIVERY];
   for (let tier = 0; tier < 5; tier++) for (let k = 0; k < posts; k++) {
     if (rnd() < 0.18) continue;
     const a = ((k + 0.5) / posts) * TAU;
@@ -169,7 +168,7 @@ export function buildFreightClimber(seed = 3) {
     B.pop();
   }
   // crew cab and its glazing, clamps, a pickup skirt
-  latheY(B, 0, [[BORE_R + 1, 72, CK.HULL], [30, 74, CK.HULL], [32, 78, CK.GLASS], [32, 84, CK.GLASS], [28, 88, CK.BRONZE], [BORE_R + 1, 90, CK.HULL]], 32, true);
+  latheY(B, 0, [[BORE_R + 1, 72, DK.PORTS], [30, 74, DK.PORTS], [32, 78, CK.GLASS], [32, 84, CK.GLASS], [28, 88, CK.BRONZE], [BORE_R + 1, 90, DK.PORTS]], 32, true);
   driveClamp(B, D, -88, -1);
   driveClamp(B, D, 96, 1);
   for (let k = 0; k < 8; k++) {
@@ -183,7 +182,7 @@ export function buildFreightClimber(seed = 3) {
 /** A 4 km length of tether in metres (+y up): the ribbon and both guide cables. */
 export function buildTetherSegment(len = 4000) {
   const B = new CB(), lamps = [];
-  B.box(0, 0, 0, RIBBON.thick, len, RIBBON.width, CK.HULL);
+  B.box(0, 0, 0, RIBBON.thick, len, RIBBON.width, DK.GRIME);
   for (const z of [-RIBBON.width / 2, RIBBON.width / 2]) B.box(0, 0, z, 2.4, len, 1.2, CK.BRONZE);
   for (const x of [-GUIDE_OFFSET, GUIDE_OFFSET]) B.tube([V(x, -len / 2, 0), V(x, len / 2, 0)], CABLE_R, 10, CK.DARK);
   for (let y = -len / 2 + 125; y < len / 2; y += 250) {
@@ -208,7 +207,8 @@ export class ClimberCars {
     this.group = new THREE.Group();
     const classes = [buildPassengerClimber(), buildFreightClimber()];
     this.classes = classes;
-    const mats = [createCraftMaterial({ accent: [1.0, 0.78, 0.5], lit: 0.72 }), createCraftMaterial({ accent: [1.0, 0.62, 0.35], lit: 0.4 })];
+    // dressed: the Concord's lift livery (cream plate, oxide-red bands), worn plate on the frames, rows of lit ports
+    const mats = [createDressedMaterial({ accent: [1.0, 0.78, 0.5], lit: 0.72, livery: [0.84, 0.8, 0.7], livery2: [0.58, 0.2, 0.12] }), createDressedMaterial({ accent: [1.0, 0.62, 0.35], lit: 0.4, livery: [0.3, 0.3, 0.33], livery2: [0.86, 0.56, 0.12] })];
     this.cars = [];
     const q = stationFrame(this.up);
     for (let i = 0; i < count; i++) {
@@ -230,7 +230,7 @@ export class ClimberCars {
     // the tether as structure near the camera: 9 segments round the nearest point
     const seg = buildTetherSegment();
     this.segLen = seg.len * KM;
-    const segMat = createCraftMaterial({ accent: [1.0, 0.72, 0.45], lit: 0.5 });
+    const segMat = createDressedMaterial({ accent: [1.0, 0.72, 0.45], lit: 0.5, livery: [0.5, 0.48, 0.44], livery2: [0.86, 0.56, 0.12] });
     this.segments = [];
     for (let i = 0; i < 9; i++) {
       const m = craftMesh(seg.geo, {}, segMat);

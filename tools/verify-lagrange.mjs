@@ -4,7 +4,7 @@
 // Run: node tools/verify-lagrange.mjs
 import * as THREE from 'three';
 import { SpaceSim, MOON_DIST } from '../src/space/sim.js';
-import { COL, WINDOW_CENTRES, buildRotor, buildStator, buildAgriRing, buildPairFrame, buildMirror } from '../src/space/lagrangeColony.js';
+import { COL, WINDOW_CENTRES, capTerraces, buildRotor, buildStator, buildAgriRing, buildPairFrame, buildMirror } from '../src/space/lagrangeColony.js';
 import { GATE, buildGateway, buildGatewayWheel } from '../src/space/lagrangeGateway.js';
 import { LagrangeColonies, lagrangePoint } from '../src/space/lagrange.js';
 import { shipPose } from '../src/space/fleetTraffic.js';
@@ -101,7 +101,7 @@ ok(rMax <= COL.ROTOR_MAX_R, `rotor's outer works within ${COL.ROTOR_MAX_R} m of 
 }
 {
   // pair frame trusses meet the spindles and clear the rotors
-  const a = P(frame.geo); let bad = 0;
+  const a = Float32Array.from([...P(frame.geo), ...P(frame.chords)]); let bad = 0;
   for (let i = 0; i < a.length; i += 3) for (const s of [-1, 1]) { const x = a[i] - s * COL.PAIR_X; if (Math.abs(a[i + 2]) < zMaxRotor + 4 && Math.hypot(x, a[i + 1]) < rMax + 20) bad++; }
   ok(bad === 0, 'pair trusses clear both rotors');
 }
@@ -111,7 +111,7 @@ ok(rMax <= COL.ROTOR_MAX_R, `rotor's outer works within ${COL.ROTOR_MAX_R} m of 
   const pts = [];
   const add = (geo, mx) => { const a = P(geo), v = new THREE.Vector3(); for (let i = 0; i < a.length; i += 3) { v.set(a[i], a[i + 1], a[i + 2]); if (mx) v.applyMatrix4(mx); pts.push(v.x / 1000, v.y / 1000, v.z / 1000); } };
   for (const s of [-1, 1]) add(stator.geo, new THREE.Matrix4().makeRotationZ(s > 0 ? 0 : Math.PI / COL.BERTHS).setPosition(s * COL.PAIR_X, 0, 0));
-  add(frame.geo);
+  add(frame.geo); add(frame.chords);
   for (const s of [-1, 1]) for (const z of COL.AGRI_Z) add(agri.geo, new THREE.Matrix4().makeTranslation(s * COL.PAIR_X, 0, z));
   const cell = 0.5, grid = new Map();
   const key = (x, y, z) => `${Math.floor(x / cell)},${Math.floor(y / cell)},${Math.floor(z / cell)}`;
@@ -280,6 +280,19 @@ for (let k = 0; k < 240; k++) {
   if (k >= 40) { upd += performance.now() - a; frames++; }
 }
 const perFrame = upd / frames;
+// the pair-frame trusses hand over: geometry close, one anti-aliased thread from the default view out
+{
+  const P = lag.pairs[0], lg0 = [];
+  for (const [d, wantChords, wantLine] of [[8, true, false], [60, false, true], [140, false, true]]) {
+    space.camera.position.copy(P.pos).add(new THREE.Vector3(0, 0, d)); space.camera.updateMatrixWorld(true);
+    lag.update(sim, 2000, 0.016, space);
+    lg0.push(P.lampSets.filter(Boolean)[0].material.uniforms.uGain.value);
+    ok(P.chords.visible === wantChords && P.trussLine.visible === wantLine, `truss hand-over at ${d} km: chords ${P.chords.visible ? 'shown' : 'hidden'}, thread ${P.trussLine.visible ? 'shown' : 'hidden'}`);
+  }
+  const g = P.trussLine.geometry;
+  ok(g.index && Math.max(...g.index.array) < g.attributes.position.count, 'truss thread buffers sane');
+  ok(lg0[1] < 0.1 && lg0[0] > 0.9, `hull lamps for the close view: gain ${lg0[0].toFixed(2)} at 8 km, ${lg0[1].toFixed(2)} at 60 km`);
+}
 ok(perFrame < 0.6, `update ${perFrame.toFixed(3)} ms per frame (target 0.3, traffic included)`);
 let bad = 0, inst = 0, meshes = 0;
 for (const r of roots) {
@@ -339,6 +352,36 @@ ok(tri.total < 12e6, `rendered at closest: pair ${(tri.pair / 1e3).toFixed(0)}k,
   ok(!/dFdx|dFdy/.test(src), 'no raw derivatives (fwidth only, at the top of main); loops only in the shared noise chunk');
   const fwAt = [...frag.matchAll(/fwidth/g)].length;
   ok(fwAt === 2, 'fwidth used once per shader, in uniform control flow');
+}
+
+// ---- the end caps: a closed stair of terraces, and a sunward face that cannot blow out
+{
+  const st = capTerraces();
+  let mono = true;
+  for (let i = 1; i < st.length; i++) if (!(st[i][0] < st[i - 1][0] && st[i][1] > st[i - 1][1])) mono = false;
+  ok(st.length >= 17 && mono, `cap stair: ${st.length - 1} terraces, radii falling and rising outward monotonically`);
+  ok(st[st.length - 1][1] < COL.CAP && st[st.length - 1][0] > 520, 'the stair meets the hub collar below its bearing face');
+  // mean albedo of the sunward cap as the Sun sees it (projected area x kind's mean albedo):
+  // the old pearl-and-glass cap was ~0.45 over an 8 km disc facing the Sun head-on and bloomed
+  const ALB = { 0: 0.08, 1: 0.72, 2: 0.8, 3: 0.14, 4: 0.08, 7: 0.1, 8: 0.6, 9: 0.6, 10: 0.13, 11: 0.1, 12: 0.15, 13: 0.2, 20: 0.6, 21: 0.66, 22: 0.7, 23: 0.45, 24: 0.38, 25: 0.2, 26: 0.1 };
+  for (const [ri, rot] of rotors.entries()) {
+    const g = rot.geo, p = g.getAttribute('position').array, f = g.getAttribute('aFacade').array, idx = g.index.array;
+    let A = 0, AA = 0, hull = 0;
+    const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3(), n = new THREE.Vector3();
+    for (let t = 0; t < idx.length; t += 3) {
+      const i0 = idx[t], i1 = idx[t + 1], i2 = idx[t + 2];
+      a.fromArray(p, i0 * 3); b.fromArray(p, i1 * 3); c.fromArray(p, i2 * 3);
+      if (Math.min(a.z, b.z, c.z) < COL.HL + 35) continue;
+      n.crossVectors(b.clone().sub(a), c.clone().sub(a));
+      const proj = n.z * 0.5;                // (faces turned to the Sun: the builder winds them to their normals)
+      if (proj <= 0) continue;
+      const k = Math.round(f[i0 * 3 + 2]);
+      if (k === 1) hull += proj;
+      A += proj; AA += proj * (ALB[k] ?? 0.5);
+    }
+    ok(A > 0.8 * Math.PI * (COL.R ** 2), `rotor ${ri}: the sunward cap covers the disc (${(A / 1e6).toFixed(1)} km2 projected)`);
+    ok(AA / A < 0.28 && hull / A < 0.02, `rotor ${ri}: sunward cap mean albedo ${(AA / A).toFixed(2)} (< 0.28), pearl plate ${(100 * hull / A).toFixed(1)}%`);
+  }
 }
 
 console.log(fails ? `LAGRANGE_VERIFY_FAILED (${fails})` : 'LAGRANGE_VERIFY_OK');

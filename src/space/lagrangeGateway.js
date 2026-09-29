@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { CB, CK } from '../craft/craftGeometry.js';
 import { LAMP } from './lamps.js';
+import { DK } from './craftMesh.js';
 import { V, dockingCollar, radiatorWing, dish, truss, catwalk } from './shipKit.js';
 
 // THE FULCRUM: the Earth-Moon L1 gateway (metres; local +Z points at the Moon, +Y the orbit
@@ -35,7 +36,7 @@ export function buildGateway() {
   const prof = [[rs * 0.6, -HALF - 40, CK.DARK]];
   for (let z = -HALF; z <= HALF; z += 190) {
     const glass = Math.abs(z) < 120 || Math.abs(Math.abs(z) - 570) < 100;
-    prof.push([rs, z - 60, CK.HULL], [rs + 12, z - 40, CK.BRONZE], [rs + 12, z - 20, CK.BRONZE], [rs + (glass ? 18 : 0), z, glass ? CK.GLASS : CK.HULL]);
+    prof.push([rs, z - 60, DK.GRIME], [rs + 12, z - 40, CK.BRONZE], [rs + 12, z - 20, CK.BRONZE], [rs + (glass ? 18 : 0), z, glass ? CK.GLASS : DK.LIVERY]);
   }
   prof.push([rs * 0.6, HALF + 40, CK.DARK]);
   B.lathe(prof, 40);
@@ -44,12 +45,12 @@ export function buildGateway() {
   // docks: four arms at each end
   for (const s of [-1, 1]) {
     const z = s * (HALF - 60);
-    B.at(0, 0, z); ring(B, [[rs + 2, -50, CK.HULL], [rs + 50, -30, CK.HULL], [rs + 50, 30, CK.GLASS], [rs + 2, 50, CK.HULL]], 32); B.pop();
+    B.at(0, 0, z); ring(B, [[rs + 2, -50, DK.GRIME], [rs + 50, -30, DK.PORTS], [rs + 50, 30, CK.GLASS], [rs + 2, 50, DK.PORTS]], 32); B.pop();
     for (let i = 0; i < 4; i++) {
       const a = (i / 4) * TAU + (s > 0 ? Math.PI / 4 : 0);
       const c = Math.cos(a), sn = Math.sin(a);
       const root = V(c * (rs + 50), sn * (rs + 50), z), tip = V(c * (rs + 50 + ARM), sn * (rs + 50 + ARM), z);
-      B.tube([root, tip], 14, 10, CK.HULL);
+      B.tube([root, tip], 14, 10, DK.LIVERY);
       catwalk(B, root.clone().add(V(0, 0, 18)), tip.clone().add(V(0, 0, 18)), V(0, 0, 1), 2.4, 1.2);
       // side berths along the arm, facing away from the station (+-z)
       for (const f of [0.36, 0.92]) {
@@ -69,7 +70,7 @@ export function buildGateway() {
   for (let i = 0; i < 8; i++) {
     const a = (i / 8) * TAU + 0.2;
     const c = Math.cos(a), sn = Math.sin(a);
-    B.at(c * 190, sn * 190, 0); B.lathe([[0.1, -48, CK.HULL], [34, -34, CK.HULL], [48, 0, CK.BRONZE], [34, 34, CK.HULL], [0.1, 48, CK.HULL]], 20); B.pop();
+    B.at(c * 190, sn * 190, 0); B.lathe([[0.1, -48, DK.FOIL], [34, -34, DK.FOIL], [48, 0, CK.BRONZE], [34, 34, DK.FOIL], [0.1, 48, DK.FOIL]], 20); B.pop();
     truss(B, V(c * (rs + 10), sn * (rs + 10), 0), V(c * 145, sn * 145, 0), 10, 14, 0.8, CK.DARK);
   }
   // radiators edge-on to the Sun, photovoltaic wings, dishes
@@ -126,7 +127,7 @@ export function buildGatewayWheel(w) {
     const a = (i / segR) * TAU;
     for (let j = 0; j <= segT; j++) {
       const b = (j / segT) * TAU, rr = w.R + w.r * Math.cos(b);
-      const k = Math.cos(b) > 0.35 ? CK.GLASS : Math.abs(Math.sin(b)) > 0.8 ? CK.BRONZE : CK.HULL;
+      const k = Math.cos(b) > 0.35 ? CK.GLASS : Math.abs(Math.sin(b)) > 0.8 ? CK.BRONZE : Math.cos(b) < -0.6 ? DK.GRIME : DK.PORTS;
       B.v(Math.cos(a) * rr, Math.sin(a) * rr, w.r * Math.sin(b), a * w.R, b * w.r, k);
     }
   }
@@ -138,11 +139,11 @@ export function buildGatewayWheel(w) {
     B.tri(a, c, d, h); B.tri(a, d, b, h);
   }
   // spokes with lift shafts, a hub on the bearing
-  ring(B, [[GATE.SPINE_R + 24, -34, CK.BRONZE], [GATE.SPINE_R + 60, -26, CK.HULL], [GATE.SPINE_R + 60, 26, CK.HULL], [GATE.SPINE_R + 24, 34, CK.BRONZE]], 32);
+  ring(B, [[GATE.SPINE_R + 24, -34, CK.BRONZE], [GATE.SPINE_R + 60, -26, DK.LIVERY], [GATE.SPINE_R + 60, 26, DK.LIVERY], [GATE.SPINE_R + 24, 34, CK.BRONZE]], 32);
   for (let i = 0; i < 4; i++) {
     const a = (i / 4) * TAU;
     const c = Math.cos(a), s = Math.sin(a);
-    B.tube([V(c * (GATE.SPINE_R + 58), s * (GATE.SPINE_R + 58), 0), V(c * (w.R - w.r + 4), s * (w.R - w.r + 4), 0)], 9, 8, CK.HULL);
+    B.tube([V(c * (GATE.SPINE_R + 58), s * (GATE.SPINE_R + 58), 0), V(c * (w.R - w.r + 4), s * (w.R - w.r + 4), 0)], 9, 8, DK.LIVERY);
     B.tube([V(c * (GATE.SPINE_R + 58), s * (GATE.SPINE_R + 58), 10), V(c * (w.R - w.r + 4), s * (w.R - w.r + 4), 10)], 2.5, 5, CK.CONDUIT);
   }
   // hoop frames round the rim's section every 7.5 degrees, heavier at each spoke, and the

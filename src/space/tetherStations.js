@@ -1,8 +1,7 @@
 import * as THREE from 'three';
 import { CB, CK } from '../craft/craftGeometry.js';
 import { lathe } from '../craft/craftClasses.js';
-import { createCraftMaterial } from '../craft/craftMaterial.js';
-import { craftMesh, craftPart, addLamps, pixelRadius, KM } from './craftMesh.js';
+import { craftMesh, craftPart, addLamps, pixelRadius, KM, DK, createDressedMaterial } from './craftMesh.js';
 import { LAMP } from './lamps.js';
 import { R_EARTH } from './sim.js';
 import { stationFrame } from './stations.js';
@@ -35,7 +34,7 @@ export function buildRelayCollar() {
   const R = RELAY.bore + RELAY.collarTube;
   for (const y of [-60, 60]) {
     B.push(new THREE.Matrix4().makeTranslation(0, y, 0).multiply(new THREE.Matrix4().makeRotationX(Math.PI / 2)));
-    B.torus(R, RELAY.collarTube, 64, 8, CK.HULL);
+    B.torus(R, RELAY.collarTube, 64, 8, DK.GRIME);
     B.pop();
   }
   // bearing race joining the two collar rings (outside the bore)
@@ -48,21 +47,21 @@ export function buildRelayCollar() {
   // capacitor drums on the collar's top, clear of the climber lanes (on the ribbon's axis)
   for (const s of [-1, 1]) {
     B.push(new THREE.Matrix4().makeTranslation(0, 80, s * 200).multiply(toY));
-    lathe(B, [[0.1, 0, CK.BRONZE], [40, 0, CK.BRONZE], [40, 90, CK.LANTERN], [36, 96, CK.HULL], [0.1, 98, CK.HULL]], 20);
+    lathe(B, [[0.1, 0, CK.BRONZE], [40, 0, CK.BRONZE], [40, 90, CK.LANTERN], [36, 96, DK.FOIL], [0.1, 98, DK.FOIL]], 20);
     B.pop();
     lamps.push({ p: V(0, 184, s * 200), r: 6, color: LAMP.BLUE, i: 2.4, breathe: 0.5, phase: s > 0 ? 0 : 0.5 });
   }
   // radiators above the ring plane on four masts
   for (let k = 0; k < 4; k++) {
     const a = (k / 4) * TAU + TAU / 8, c = Math.cos(a), s = Math.sin(a);
-    B.tube([V(c * R, 60, s * R), V(c * 700, 420, s * 700)], 10, 8, CK.HULL);
+    B.tube([V(c * R, 60, s * R), V(c * 700, 420, s * 700)], 10, 8, DK.LIVERY);
     B.push(new THREE.Matrix4().makeRotationY(-a));
     B.box(560, 460, 0, 380, 320, 4, CK.RADIATOR);
     B.box(560, 300, 0, 380, 8, 8, CK.CONDUIT);
     B.pop();
   }
   // tug dock below the ring plane
-  B.tube([V(0, -60, R), V(0, -300, R + 200)], 14, 8, CK.HULL);
+  B.tube([V(0, -60, R), V(0, -300, R + 200)], 14, 8, DK.GRIME);
   B.box(0, -320, R + 230, 90, 40, 90, CK.DECK);
   lamps.push({ p: V(0, -300, R + 280), r: 8, color: LAMP.AMBER, i: 2.4, breathe: 0.4 });
   // the relay crew's working quarters: four glazed modules standing on the collar between the
@@ -73,7 +72,7 @@ export function buildRelayCollar() {
     if (Math.abs(c) > 0.5) continue;            // at the ribbon-edge ends (z), away from the climber lanes (x)
     B.box(c * rr, 72, s * rr, 34, 12, 34, CK.BRONZE);
     B.push(new THREE.Matrix4().makeTranslation(c * rr, 72, s * rr).multiply(toY));
-    lathe(B, [[0.1, 0, CK.DARK], [15, 1, CK.HULL], [16, 6, CK.BRONZE], [16, 10, CK.GLASS], [16, 26, CK.GLASS], [16.5, 29, CK.BRONZE], [16, 32, CK.GLASS], [16, 46, CK.GLASS], [15.5, 50, CK.HULL], [9, 58, CK.HULL], [4, 64, CK.BRONZE], [0.1, 66, CK.LANTERN]], 24);
+    lathe(B, [[0.1, 0, CK.DARK], [15, 1, DK.PORTS], [16, 6, CK.BRONZE], [16, 10, CK.GLASS], [16, 26, CK.GLASS], [16.5, 29, CK.BRONZE], [16, 32, CK.GLASS], [16, 46, CK.GLASS], [15.5, 50, DK.PORTS], [9, 58, DK.PORTS], [4, 64, CK.BRONZE], [0.1, 66, CK.LANTERN]], 24);
     B.pop();
     lamps.push({ p: V(c * rr, 140, s * rr), r: 3.2, color: LAMP.RED, i: 3.2, breathe: 0.7, phase: k / 4 });
     for (let j = 0; j < 6; j++) { const b = (j / 6) * TAU; lamps.push({ p: V(c * rr + Math.cos(b) * 16.6, 90 + (j % 2) * 20, s * rr + Math.sin(b) * 16.6), r: 1.6, color: [1.0, 0.8, 0.55], i: 1.8 }); }
@@ -97,17 +96,17 @@ export function buildRelayCollar() {
 /** The spinning crew ring: hub on the bearing, four spokes, a glazed torus. */
 export function buildRelayRing() {
   const B = new CB(), lamps = [];
-  latheY(B, 0, [[RELAY.bearingOut, -40, CK.HULL], [RELAY.bearingOut + 40, -40, CK.HULL], [RELAY.bearingOut + 40, 40, CK.BRONZE], [RELAY.bearingOut, 40, CK.HULL]], 64, true);
+  latheY(B, 0, [[RELAY.bearingOut, -40, DK.GRIME], [RELAY.bearingOut + 40, -40, DK.GRIME], [RELAY.bearingOut + 40, 40, CK.BRONZE], [RELAY.bearingOut, 40, DK.GRIME]], 64, true);
   // the torus section: floor outboard, windows on the faces, a lit arcade inboard
   const n = 16, prof = [];
   for (let i = 0; i < n; i++) {
     const a = (i / n) * TAU, x = RELAY.ringR + Math.cos(a) * RELAY.ringTube, y = Math.sin(a) * RELAY.ringTube;
-    prof.push([x, y, Math.abs(Math.sin(a)) > 0.5 ? CK.GLASS : Math.cos(a) < 0 ? CK.LANTERN : CK.HULL]);
+    prof.push([x, y, Math.abs(Math.sin(a)) > 0.5 ? CK.GLASS : Math.cos(a) < 0 ? CK.LANTERN : DK.PORTS]);
   }
   latheY(B, 0, prof, 96, true);
   for (let k = 0; k < RELAY.spokes; k++) {
     const a = (k / RELAY.spokes) * TAU, c = Math.cos(a), s = Math.sin(a);
-    B.tube([V(c * (RELAY.bearingOut + 40), 0, s * (RELAY.bearingOut + 40)), V(c * (RELAY.ringR - RELAY.ringTube + 4), 0, s * (RELAY.ringR - RELAY.ringTube + 4))], 16, 10, CK.HULL);
+    B.tube([V(c * (RELAY.bearingOut + 40), 0, s * (RELAY.bearingOut + 40)), V(c * (RELAY.ringR - RELAY.ringTube + 4), 0, s * (RELAY.ringR - RELAY.ringTube + 4))], 16, 10, DK.LIVERY);
     lamps.push({ p: V(c * (RELAY.ringR + RELAY.ringTube + 6), 0, s * (RELAY.ringR + RELAY.ringTube + 6)), r: 7, color: k % 2 ? LAMP.RED : LAMP.GREEN, i: 2.6 });
   }
   // bay-window pods on the torus's outer face (cabins with a view down the tether)
@@ -122,7 +121,7 @@ export function buildRelayRing() {
   for (let k = 0; k < RELAY.spokes; k++) {
     const a = (k / RELAY.spokes) * TAU;
     B.push(new THREE.Matrix4().makeRotationY(-a));
-    B.box(RELAY.ringR - RELAY.ringTube + 8, 0, 0, 30, 44, 44, CK.HULL);
+    B.box(RELAY.ringR - RELAY.ringTube + 8, 0, 0, 30, 44, 44, DK.PORTS);
     B.box(RELAY.ringR - RELAY.ringTube - 7.5, 0, 0, 1, 30, 30, CK.GLASS);
     B.pop();
   }
@@ -133,7 +132,7 @@ export function buildRelayRing() {
 /** An inspection crawler that runs on the ribbon's face: a low car on tracks, a lit cab, a sensor boom. */
 export function buildCrawler() {
   const B = new CB();
-  B.box(1.6, 0, 0, 2.2, 7, 5.2, CK.HULL);                 // body on the ribbon's face (x = 0 the face)
+  B.box(1.6, 0, 0, 2.2, 7, 5.2, DK.LIVERY);                 // body on the ribbon's face (x = 0 the face)
   B.box(2.9, 1.2, 0, 0.6, 2.6, 3.6, CK.GLASS);             // cab
   for (const z of [-2.2, 2.2]) B.box(0.45, 0, z, 0.9, 6.4, 1.1, CK.DARK);   // tracks
   B.box(1.6, -3.9, 0, 1.2, 0.8, 4, CK.BRONZE);             // bumper
@@ -158,7 +157,7 @@ export class TetherStations {
     this.list = [];
     const collar = buildRelayCollar(), ring = buildRelayRing(), crawlerGeo = buildCrawler();
     this.collarGeo = collar.geo; this.ringGeo = ring.geo;
-    const mat = createCraftMaterial({ accent: [0.6, 0.85, 1.0], lit: 0.6 });
+    const mat = createDressedMaterial({ accent: [0.6, 0.85, 1.0], lit: 0.6, livery: [0.66, 0.66, 0.68], livery2: [0.16, 0.34, 0.56] });
     const q = stationFrame(up);
     this.omega = relayOmega();
     RELAY_ALTS.forEach((alt, i) => {

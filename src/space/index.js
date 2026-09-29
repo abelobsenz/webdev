@@ -110,7 +110,7 @@ export class SpaceMode {
     T('geo', {
       position: (o) => o.copy(merid).multiplyScalar(R_EARTH + GEO_ALT).applyQuaternion(sim.earthQuat),
       frame: (q) => q.setFromUnitVectors(_v2.set(0, 1, 0), _v.copy(merid).applyQuaternion(sim.earthQuat)).multiply(_q.setFromAxisAngle(_v2.set(1, 0, 0), 0)),
-      minDist: 8, maxDist: 200000, defaultDist: 36, view: { az: 0.7, el: 0.32 },
+      minDist: 8, maxDist: 200000, defaultDist: 27, view: { az: 0.7, el: 0.3 },
     });
     // the default view of the Moon keeps a little of the night side, the terminator's relief across it
     T('moon', { position: (o) => o.copy(sim.moonPos), frame: (q) => q.copy(sim.moonQuat), minDist: R_MOON + 250, maxDist: 400000, defaultDist: 7400, view: { az: 1.3, el: 0.24 } });

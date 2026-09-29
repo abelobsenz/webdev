@@ -5,14 +5,22 @@ import { R_EARTH } from './sim.js';
 import { MU, J2, sunSyncInclination } from './kepler.js';
 
 // The working satellites of the low and middle shell: Walker constellations on real circular
-// orbits, every plane precessing under J2. Far off they are points computed on the GPU from
-// their elements (one draw for all of them): sunlit ones glint in the colour of their skins,
-// the occasional panel flares as it catches the Sun, and in the Earth's shadow only their
-// beacons show, breathing slowly. Within a few tens of km of the camera the nearest are real
-// models (instanced, three designs), placed by a CPU mirror of the same orbit maths.
+// orbits, every plane precessing under J2. They are drawn the way the eye would see them from
+// orbit, which is mostly not at all: a satellite a few metres across is a faint moving star
+// within a few hundred km, and nothing beyond. What does carry is the flare: each satellite
+// has a flat panel (an antenna face or a radiator, fixed in its orbital frame) that throws the
+// Sun at the viewer for a few seconds when the geometry lines up, like the old Iridium flares.
+// So far off, the shell is a scatter of brief sunlit glints that come and go, never a traced
+// ring; in the Earth's shadow there is nothing but, close to, the nav strobes.
 //
-// Shells (altitude km, inclination, planes x per plane, kind, walker phasing F). All above
-// the Halo (620 km): its deck and tethers are where every lower orbit would cross the equator.
+// One draw for all of them (points computed on the GPU from their elements; the dim ones are
+// clipped in the vertex shader so they cost no fill). Within a few tens of km of the camera the
+// nearest are real models (instanced, three designs), placed by a CPU mirror of the same maths;
+// apparent() mirrors the brightness model for the checks.
+//
+// Shells (altitude km, inclination, planes x per plane, kind, walker phasing F, size m). All
+// above the Halo (620 km): its deck and tethers are where every lower orbit would cross the
+// equator.
 
 const TAU = Math.PI * 2;
 const DEG = Math.PI / 180;
@@ -32,9 +40,20 @@ export const NEAR_KM = 32;        // real models inside this range
 const SCAN_KM = 420;              // candidates kept inside this range
 const NEAR_MAX = 64;
 
+// The brightness model (shared by the shader and apparent()): diffuse light from a Lambert
+// body of the satellite's size, and a specular flare off its panel. K scales m^2 / km^2 to
+// display radiance: a 9 m satellite is a faint star (0.3) at 150 km and gone by 700 km; its
+// flare, a sixty-fold specular peak in a lobe about two degrees wide, carries to ~2,500 km.
+export const SAT = {
+  K: 280, ALBEDO: 0.3, FLARE: 60, LOBE: 3000, MAXB: 1.4, CUT: 0.004,
+  PEN: 8,                          // km: half-width of the penumbra at the umbra's edge
+  STROBE_KM: 40,                   // nav strobes only read inside this range
+};
+
 const VERT = /* glsl */ `
 attribute vec4 aOrb;     // radius (km), inclination, node at t = 0, phase at t = 0
 attribute vec4 aInfo;    // shell, kind, seed, size (m)
+attribute vec2 aPanel;   // the flare panel's tilt off nadir, and the heading of that tilt (rad, 0 along the track)
 uniform float uAng[${NS}];
 uniform float uNode[${NS}];
 uniform vec3 uSun;
@@ -49,32 +68,51 @@ void main() {
   float ci = cos(aOrb.y), si = sin(aOrb.y), cW = cos(W), sW = sin(W);
   vec3 N = vec3(cW, 0.0, -sW);
   vec3 E = vec3(-sW * ci, si, -cW * ci);
-  vec3 p = aOrb.x * (N * cos(u) + E * sin(u));
+  vec3 rh = N * cos(u) + E * sin(u);
+  vec3 tv = -N * sin(u) + E * cos(u);
+  vec3 p = aOrb.x * rh;
   vec4 mv = modelViewMatrix * vec4(p, 1.0);
-  gl_Position = projectionMatrix * mv;
-  float d = max(length(mv.xyz), 1e-3);
-  // in the Earth's shadow? (cylindrical umbra, soft over 80 km)
+  vec3 toCam = cameraPosition - p;
+  float d = max(length(toCam), 1e-3);
+  vec3 v = toCam / d;
+  // the Earth's shadow: a cylindrical umbra with a thin penumbra
   float along = dot(p, uSun);
   float q = length(p - along * uSun);
-  float lit = along > 0.0 ? 1.0 : smoothstep(${(R_EARTH - 40).toFixed(1)}, ${(R_EARTH + 40).toFixed(1)}, q);
-  vec3 toCam = (cameraPosition - p) / max(length(cameraPosition - p), 1e-3);
-  float phase = 0.3 + 0.7 * (0.5 + 0.5 * dot(toCam, uSun));
+  float lit = along > 0.0 ? 1.0 : smoothstep(${(R_EARTH - SAT.PEN).toFixed(1)}, ${(R_EARTH + SAT.PEN).toFixed(1)}, q);
+  // diffuse: a Lambert sphere's phase law (full when the Sun is behind the viewer)
+  float ca = clamp(dot(v, uSun), -1.0, 1.0);
+  float al = acos(ca);
+  float phase = max(((3.14159265 - al) * ca + sin(al)) / 3.14159265, 0.0);
+  float area = aInfo.w * aInfo.w;
+  float inv = 1.0 / (d * d);
+  float diff = ${SAT.K.toFixed(1)} * ${SAT.ALBEDO.toFixed(2)} * area * phase * inv;
+  // flare: the panel's normal, off nadir by aPanel.x toward heading aPanel.y in the local
+  // horizontal, mirrors the Sun at the viewer when it bisects the two
+  vec3 ct = cross(rh, tv);
+  vec3 hz = tv * cos(aPanel.y) + ct * sin(aPanel.y);
+  vec3 pn = -rh * cos(aPanel.x) + hz * sin(aPanel.x);
+  vec3 H = normalize(v + uSun);
+  float hn = clamp(dot(H, pn), 0.0, 1.0);
+  float facing = step(0.0, dot(v, pn)) * step(0.0, dot(uSun, pn));
+  float flare = ${SAT.K.toFixed(1)} * ${SAT.FLARE.toFixed(1)} * area * pow(hn, ${SAT.LOBE.toFixed(1)}) * facing * inv;
+  float b = min((diff + flare) * lit, ${SAT.MAXB.toFixed(2)});
   float kind = aInfo.y;
   float seed = aInfo.z;
-  vec3 skin = kind < 0.5 ? vec3(1.0, 0.93, 0.8) : (kind < 1.5 ? vec3(1.0, 0.74, 0.5) : vec3(0.78, 0.88, 1.0));
-  // reflected light: size / distance, a floor so the shell still shows as dust from the Moon
-  float refl = clamp(aInfo.w * 0.02 / d, 0.0, 1.2) + 0.012;
-  // panel flares: a few seconds of bright glint now and then, only when sunlit
-  float g = fract(seed * 17.13 + uTime * (0.012 + 0.02 * fract(seed * 7.7)));
-  float flare = smoothstep(0.0, 0.015, g) * (1.0 - smoothstep(0.015, 0.05, g)) * step(0.72, fract(seed * 3.3));
-  vec3 day = skin * refl * phase * (1.0 + 7.0 * flare) * lit;
-  // beacons in shadow: nav sats blue-white, the rest a dim red/green pair breathing
-  float br = 0.5 + 0.5 * sin(uTime * (0.9 + 0.6 * fract(seed * 5.1)) + seed * 40.0);
-  vec3 bc = kind > 1.5 ? vec3(0.55, 0.75, 1.0) : (fract(seed * 11.0) > 0.5 ? vec3(1.0, 0.18, 0.1) : vec3(0.2, 1.0, 0.4));
-  vec3 night = bc * (1.0 - lit) * br * clamp(90.0 / d, 0.0, 0.5) * (kind > 1.5 ? 1.6 : 0.6);
-  float fadeNear = smoothstep(uNearKm * 0.6, uNearKm * 1.2, d);
-  vC = (day + night) * 2.2 * fadeNear;
-  gl_PointSize = uPx * clamp(1.5 + 2.5 * flare * lit + 20.0 / d, 1.5, 3.2);
+  vec3 skin = kind < 0.5 ? vec3(1.0, 0.95, 0.86) : (kind < 1.5 ? vec3(1.0, 0.84, 0.64) : vec3(0.86, 0.92, 1.0));
+  vec3 col = skin * b;
+  // nav strobes: a double flash every couple of seconds, only close in (they are small lamps)
+  float ph = fract(uTime * (0.45 + 0.1 * fract(seed * 5.1)) + seed * 13.0);
+  float strobe = (1.0 - smoothstep(0.0, 0.03, ph)) + (1.0 - smoothstep(0.1, 0.13, ph)) * step(0.1, ph);
+  float nearL = 1.0 - smoothstep(${(SAT.STROBE_KM * 0.5).toFixed(1)}, ${SAT.STROBE_KM.toFixed(1)}, d);
+  col += (fract(seed * 11.0) > 0.5 ? vec3(1.0, 0.25, 0.15) : vec3(0.85, 0.92, 1.0)) * strobe * nearL * 0.5;
+  // near in, the real model takes over
+  col *= smoothstep(uNearKm * 0.6, uNearKm * 1.2, d);
+  vC = col;
+  float m = max(col.r, max(col.g, col.b));
+  // too faint to see: clipped here (behind the far plane), so the thousands out of sight cost no fill
+  bool dim = m < ${SAT.CUT.toFixed(4)};
+  gl_Position = dim ? vec4(0.0, 0.0, 2.0, 1.0) : projectionMatrix * mv;
+  gl_PointSize = dim ? 0.0 : uPx * clamp(1.2 + 0.9 * sqrt(m), 1.2, 2.6);
 }
 `;
 const FRAG = /* glsl */ `
@@ -83,35 +121,51 @@ void main() {
   vec2 q = gl_PointCoord * 2.0 - 1.0;
   float r2 = dot(q, q);
   if (r2 > 1.0) discard;
-  gl_FragColor = vec4(vC * exp(-r2 * 5.0), 0.0);
+  gl_FragColor = vec4(vC * exp(-r2 * 4.0), 0.0);
 }
 `;
+
+const _pn = new THREE.Vector3(), _rh = new THREE.Vector3(), _tv = new THREE.Vector3(), _ct = new THREE.Vector3();
+const _hz = new THREE.Vector3(), _vv = new THREE.Vector3(), _hh = new THREE.Vector3(), _pp = new THREE.Vector3();
+
+function hash(n) { const v = Math.sin(n * 12.9898) * 43758.5453; return v - Math.floor(v); }
 
 export class Constellations {
   constructor(designs) {
     this.group = new THREE.Group();
     this.group.name = 'constellations';
-    const orb = [], info = [];
+    const n = SHELLS.reduce((a, sh) => a + sh.P * sh.S, 0);
+    const orb = new Float32Array(n * 4), info = new Float32Array(n * 4), panel = new Float32Array(n * 2);
+    this.orb = new Float64Array(n * 4);
+    let i = 0;
     this.shells = SHELLS.map((sh, si) => {
       const a = R_EARTH + sh.alt;
       const inc = sh.inc === 'sso' ? sunSyncInclination(a) : sh.inc * DEG;
-      const n = Math.sqrt(MU / (a * a * a));
-      const nodeRate = -1.5 * n * J2 * (R_J2 / a) ** 2 * Math.cos(inc);
+      const nn = Math.sqrt(MU / (a * a * a));
+      const nodeRate = -1.5 * nn * J2 * (R_J2 / a) ** 2 * Math.cos(inc);
       const node0 = si * 0.37;
-      for (let p = 0; p < sh.P; p++) for (let k = 0; k < sh.S; k++) {
+      for (let p = 0; p < sh.P; p++) for (let k = 0; k < sh.S; k++, i++) {
         const seed = ((si * 977 + p * 131 + k * 17) * 0.618034) % 1;
-        orb.push(a, inc, node0 + (p / sh.P) * TAU, (k / sh.S) * TAU + (p * sh.F / (sh.P * sh.S)) * TAU);
-        info.push(si, sh.kind, seed, sh.size);
+        const o = [a, inc, node0 + (p / sh.P) * TAU, (k / sh.S) * TAU + (p * sh.F / (sh.P * sh.S)) * TAU];
+        for (let c = 0; c < 4; c++) { this.orb[i * 4 + c] = o[c]; orb[i * 4 + c] = o[c]; }
+        info[i * 4] = si; info[i * 4 + 1] = sh.kind; info[i * 4 + 2] = seed; info[i * 4 + 3] = sh.size;
+        // the flare panel: comms birds look down with their antennas canted up to 40 deg off
+        // nadir, fore or aft or abeam; the sun-synchronous imagers carry radiators abeam, the
+        // navigation birds broad nadir arrays
+        const h1 = hash(i * 1.37 + 0.5), h2 = hash(i * 2.91 + 7.1);
+        panel[i * 2] = sh.kind === 2 ? 0.08 + 0.2 * h1 : sh.kind === 1 ? 0.5 + 0.5 * h1 : 0.12 + 0.58 * h1;
+        panel[i * 2 + 1] = sh.kind === 1 ? (h2 < 0.5 ? 0.5 : -0.5) * Math.PI : h2 * TAU;
       }
-      return { a, inc, n, nodeRate, kind: sh.kind };
+      return { a, inc, n: nn, nodeRate, kind: sh.kind, size: sh.size };
     });
-    this.count = orb.length / 4;
-    this.orb = Float64Array.from(orb);
-    this.info = Float32Array.from(info);
+    this.count = n;
+    this.info = info;
+    this.panel = panel;
     const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(this.count * 3), 3));
-    g.setAttribute('aOrb', new THREE.Float32BufferAttribute(Float32Array.from(orb), 4));
-    g.setAttribute('aInfo', new THREE.Float32BufferAttribute(this.info, 4));
+    g.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(n * 3), 3));
+    g.setAttribute('aOrb', new THREE.Float32BufferAttribute(orb, 4));
+    g.setAttribute('aInfo', new THREE.Float32BufferAttribute(info, 4));
+    g.setAttribute('aPanel', new THREE.Float32BufferAttribute(panel, 2));
     g.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1e9);
     this.mat = new THREE.ShaderMaterial({
       vertexShader: VERT, fragmentShader: FRAG,
@@ -159,6 +213,36 @@ export class Constellations {
     out.set(r * (Nx * cu + Ex * su), r * (Ey * su), r * (Nz * cu + Ez * su));
     if (vel) vel.set(-Nx * su + Ex * cu, Ey * cu, -Nz * su + Ez * cu);
     return out;
+  }
+
+  /**
+   * CPU mirror of the shader's brightness (before the near-model fade and the strobes):
+   * satellite i seen from camPos with the Sun along sun. Returns the display radiance; the
+   * shader clips anything under SAT.CUT.
+   */
+  apparent(i, camPos, sun) {
+    const p = this.position(i, _pp, _tv);
+    _rh.copy(p).normalize();
+    const d = Math.max(_vv.subVectors(camPos, p).length(), 1e-3);
+    _vv.divideScalar(d);
+    const along = p.dot(sun);
+    const q = Math.sqrt(Math.max(p.lengthSq() - along * along, 0));
+    const t = Math.min(Math.max((q - (R_EARTH - SAT.PEN)) / (2 * SAT.PEN), 0), 1);
+    const lit = along > 0 ? 1 : t * t * (3 - 2 * t);
+    if (lit <= 0) return 0;
+    const ca = Math.min(Math.max(_vv.dot(sun), -1), 1), al = Math.acos(ca);
+    const phase = Math.max(((Math.PI - al) * ca + Math.sin(al)) / Math.PI, 0);
+    const size = this.info[i * 4 + 3], area = size * size, inv = 1 / (d * d);
+    const diff = SAT.K * SAT.ALBEDO * area * phase * inv;
+    _ct.crossVectors(_rh, _tv);
+    const tilt = this.panel[i * 2], head = this.panel[i * 2 + 1];
+    _hz.copy(_tv).multiplyScalar(Math.cos(head)).addScaledVector(_ct, Math.sin(head));
+    _pn.copy(_rh).multiplyScalar(-Math.cos(tilt)).addScaledVector(_hz, Math.sin(tilt));
+    _hh.addVectors(_vv, sun).normalize();
+    const hn = Math.min(Math.max(_hh.dot(_pn), 0), 1);
+    const facing = _vv.dot(_pn) >= 0 && sun.dot(_pn) >= 0 ? 1 : 0;
+    const flare = SAT.K * SAT.FLARE * area * Math.pow(hn, SAT.LOBE) * facing * inv;
+    return Math.min((diff + flare) * lit, SAT.MAXB);
   }
 
   update(t, realTime, sun, cam, H) {

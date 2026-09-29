@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { CB, CK } from '../craft/craftGeometry.js';
 import { LAMP } from './lamps.js';
+import { DK } from './craftMesh.js';
+import { moduleDressing, sphereDressing, torusKinds, ringModuleKinds } from './stationKit.js';
 import { V, here, atAim, truss, catwalk, radiatorWing, dish, mast, dockingCollar, container, rcsQuad, flood, bell, sphereTank } from './shipKit.js';
 
 // The stations of the low and middle shell, in metres, drawn with the craft builder (facade
@@ -29,6 +31,20 @@ const rotZ = (a) => new THREE.Matrix4().makeRotationZ(a);
 const toY = new THREE.Matrix4().makeRotationX(-Math.PI / 2);   // lathe axis z -> +y
 const tr = (x, y, z) => new THREE.Matrix4().makeTranslation(x, y, z);
 export const GROW = [1.0, 0.32, 0.82];
+// Owners' colours for the dressed plating (main plate, band): the shell's stations were one
+// pearl white; now each carries its operator's livery on its service plating, the crew
+// sections rows of lit ports, the tanks gold foil, the shielding and docks worn plate.
+export const STATION_LIVERY = {
+  aurelia: [[0.8, 0.74, 0.62], [0.52, 0.2, 0.16]],      // hotel: champagne, claret bands
+  halcyon: [[0.7, 0.68, 0.62], [0.18, 0.36, 0.44]],     // town: stone, harbour teal
+  demeter: [[0.64, 0.66, 0.56], [0.26, 0.42, 0.22]],    // farm: sage, field green
+  boreal: [[0.74, 0.76, 0.78], [0.16, 0.26, 0.5]],      // observatory: cold white, survey blue
+  dawnline: [[0.5, 0.48, 0.46], [0.86, 0.46, 0.14]],    // power: graphite, signal orange
+  anansi: [[0.62, 0.58, 0.5], [0.72, 0.52, 0.18]],      // skyhook: sandstone, ochre
+  gleaner: [[0.82, 0.62, 0.16], [0.1, 0.1, 0.11]],      // sweepers: works yellow, black
+  shuttle: [[0.84, 0.83, 0.8], [0.14, 0.26, 0.46]],     // Halo shuttles: pearl, Harbour blue
+  hopper: [[0.3, 0.3, 0.34], [0.86, 0.36, 0.16]],       // skyhook hoppers: graphite, orange
+};
 export const WARM = [1.0, 0.78, 0.5];
 
 function latheAt(B, m, prof, seg, closed = false) { B.push(m); B.lathe(prof, seg, 0, { closedProfile: closed }); B.pop(); }
@@ -59,15 +75,20 @@ function hoopGirder(B, r, z, d, w, n, rad, k = CK.DARK) {
 }
 
 /** A pressurised module along +z from the current frame: windowed bands between bronze frames. */
-function habModule(B, r, len, { glass = 3, seg = 20 } = {}) {
-  const prof = [[0.02, 0, CK.DARK], [r * 0.72, len * 0.02, CK.HULL], [r, len * 0.08, CK.HULL]];
+function habModule(B, r, len, { glass = 3, seg = 20, dress = true, seed = 1, lamps = null } = {}) {
+  const prof = [[0.02, 0, CK.DARK], [r * 0.72, len * 0.02, DK.LIVERY], [r, len * 0.08, DK.LIVERY]];
   const n = glass;
   for (let i = 0; i < n; i++) {
     const z0 = len * (0.12 + (0.76 * i) / n), z1 = len * (0.12 + (0.76 * (i + 1)) / n);
-    prof.push([r * 1.03, z0, CK.BRONZE], [r * 1.03, z0 + len * 0.02, CK.BRONZE], [r, z0 + len * 0.025, CK.HULL], [r, z0 + len * 0.04, CK.GLASS], [r, z1 - len * 0.02, CK.GLASS], [r, z1 - len * 0.01, CK.HULL]);
+    prof.push([r * 1.03, z0, CK.BRONZE], [r * 1.03, z0 + len * 0.02, CK.BRONZE], [r, z0 + len * 0.025, DK.PORTS], [r, z0 + len * 0.04, CK.GLASS], [r, z1 - len * 0.02, CK.GLASS], [r, z1 - len * 0.01, DK.PORTS]);
   }
-  prof.push([r * 1.03, len * 0.9, CK.BRONZE], [r, len * 0.92, CK.HULL], [r * 0.72, len * 0.98, CK.HULL], [0.02, len, CK.DARK]);
+  prof.push([r * 1.03, len * 0.9, CK.BRONZE], [r, len * 0.92, DK.LIVERY], [r * 0.72, len * 0.98, DK.LIVERY], [0.02, len, CK.DARK]);
   B.lathe(prof, seg);
+  // the plating's frames, shield panels and kit, clear of the window bands
+  if (dress) {
+    const inGlass = (a, z) => { const u = ((z / len - 0.12) / 0.76) * n, f = u - Math.floor(u); return u > 0 && u < n && f > 0.02 && f < 0.98; };
+    moduleDressing(B, r, len * 0.1, len * 0.9, { skip: inGlass, windows: 0, kit: 4, seed, lamps, pitch: len * 0.76 / n, stringers: Math.max(8, Math.round(r * 0.9)) });
+  }
 }
 
 /** Photovoltaic wing in the builder's xz plane (normal +y), from x0 outward along +x (sign s). */
@@ -91,7 +112,7 @@ function solarWing(B, lamps, s, x0, span, chord, blankets = 5, z = 0) {
 function dockPort(B, lamps, ports, p0, dir, len, r) {
   const d = dir.clone().normalize();
   const p1 = p0.clone().addScaledVector(d, len);
-  B.tube([p0, p1], r * 0.8, 12, CK.HULL);
+  B.tube([p0, p1], r * 0.8, 12, DK.GRIME);
   B.tube([p0.clone().addScaledVector(d, len * 0.3), p0.clone().addScaledVector(d, len * 0.34)], r * 0.95, 12, CK.BRONZE);
   atAim(B, p1, d);
   const c = dockingCollar(B, r);
@@ -119,7 +140,7 @@ export function buildHotel() {
     const a = (k / segs) * TAU;
     W.push(rotZ(a));
     const arcO = (TAU * (R + 2)) / segs * 1.01, arcM = (TAU * R) / segs * 1.01, arcI = (TAU * r0) / segs * 1.01;
-    W.box(0, R + 1, 0, arcO, 2, 2 * hw + 2, CK.HULL);
+    W.box(0, R + 1, 0, arcO, 2, 2 * hw + 2, DK.GRIME);
     W.box(0, R + 2.2, 0, arcO, 0.5, 1.2, CK.CONDUIT);                               // rim conduit
     for (const s of [-1, 1]) {
       W.box(0, R - depth / 2, s * hw, arcM, depth, 0.8, CK.GLASS);                   // five decks of suites
@@ -160,7 +181,7 @@ export function buildHotel() {
   for (let k = 0; k < HOTEL.spokes; k++) {
     const a = (k / HOTEL.spokes) * TAU + TAU / (HOTEL.spokes * 2), c = Math.cos(a), s = Math.sin(a);
     const p0 = V(c * (HOTEL.hubR - 1), s * (HOTEL.hubR - 1), 0), p1 = V(c * (r0 - 0.8), s * (r0 - 0.8), 0);
-    W.tube([p0, p1], 4.5, 14, CK.HULL);
+    W.tube([p0, p1], 4.5, 14, DK.LIVERY);
     for (const z of [-6.2, 6.2]) W.tube([p0.clone().setZ(z), p1.clone().setZ(z)], 1.5, 8, CK.GLASS);
     for (const t of [0.12, 0.5, 0.88]) {
       atAim(W, p0.clone().lerp(p1, t), V(c, s, 0));
@@ -186,18 +207,20 @@ export function buildHotel() {
     const a = (k / HOTEL.spokes) * TAU + TAU / (HOTEL.spokes * 2), c = Math.cos(a), s = Math.sin(a);
     truss(W, V(c * (HOTEL.hubR + 4), s * (HOTEL.hubR + 4), 0), V(c * (r0 - 8), s * (r0 - 8), 0), 17, 16, 0.3, CK.DARK);
   }
-  W.lathe([[HOTEL.hubIn, -32, CK.DARK], [HOTEL.hubR - 3, -32, CK.HULL], [HOTEL.hubR, -28, CK.BRONZE], [HOTEL.hubR, -20, CK.HULL], [HOTEL.hubR + 1, -12, CK.GLASS],
-    [HOTEL.hubR + 1, 12, CK.GLASS], [HOTEL.hubR, 20, CK.HULL], [HOTEL.hubR, 28, CK.BRONZE], [HOTEL.hubR - 3, 32, CK.HULL], [HOTEL.hubIn, 32, CK.DARK]], 48, 0, { closedProfile: true });
+  W.lathe([[HOTEL.hubIn, -32, CK.DARK], [HOTEL.hubR - 3, -32, DK.PORTS], [HOTEL.hubR, -28, CK.BRONZE], [HOTEL.hubR, -20, DK.PORTS], [HOTEL.hubR + 1, -12, CK.GLASS],
+    [HOTEL.hubR + 1, 12, CK.GLASS], [HOTEL.hubR, 20, DK.PORTS], [HOTEL.hubR, 28, CK.BRONZE], [HOTEL.hubR - 3, 32, DK.PORTS], [HOTEL.hubIn, 32, CK.DARK]], 48, 0, { closedProfile: true });
 
   // ---- fixed: spindle, bearing races, docking drum, wings, radiators, ballroom sphere
   const sp = HOTEL.spindle;
-  F.lathe([[sp, -130, CK.HULL], [sp, -42, CK.HULL], [sp + 1, -41, CK.BRONZE], [sp + 1, 41, CK.BRONZE], [sp, 42, CK.HULL], [sp, 98, CK.HULL]], 28);
+  F.lathe([[sp, -130, DK.LIVERY], [sp, -42, DK.LIVERY], [sp + 1, -41, CK.BRONZE], [sp + 1, 41, CK.BRONZE], [sp, 42, DK.LIVERY], [sp, 98, DK.LIVERY]], 28);
   for (const s of [-1, 1]) latheAt(F, tr(0, 0, 0), [[sp, s * 33.5, CK.BRONZE], [31, s * 33.5, CK.BRONZE], [31, s * 41, CK.DARK], [sp, s * 41, CK.DARK]], 40, true);
-  F.lathe([[sp, -58, CK.HULL], [26, -64, CK.HULL], [28, -70, CK.BRONZE], [28, -80, CK.HULL], [28.6, -84, CK.GLASS], [28.6, -104, CK.GLASS], [28, -108, CK.HULL], [28, -118, CK.BRONZE], [24, -124, CK.HULL], [sp, -130, CK.DARK]], 40);
+  F.lathe([[sp, -58, DK.PORTS], [26, -64, DK.PORTS], [28, -70, CK.BRONZE], [28, -80, DK.PORTS], [28.6, -84, CK.GLASS], [28.6, -104, CK.GLASS], [28, -108, DK.PORTS], [28, -118, CK.BRONZE], [24, -124, DK.PORTS], [sp, -130, CK.DARK]], 40);
   for (let k = 0; k < 4; k++) {
     const a = (k / 4) * TAU + TAU / 8, d = V(Math.cos(a), Math.sin(a), 0);
     dockPort(F, lamps, ports, d.clone().multiplyScalar(27).setZ(-94), d, 18, 4.2);
   }
+  moduleDressing(F, sp, 44, 94, { seed: 11, windows: 0.2, kit: 6, pitch: 8, lamps });
+  moduleDressing(F, 28, -117, -71, { seed: 12, windows: 0, kit: 3, pitch: 9, skip: (a, z) => z < -81 && z > -107, lamps });
   for (let k = 0; k < 8; k++) { const a = (k / 8) * TAU; lamps.push({ p: V(Math.cos(a) * 29.2, Math.sin(a) * 29.2, -70), r: 0.6, color: WARM, i: 1.4 }); }
   // power mast aft, wings in x (normal y: the whole fixed frame rolls about z to face the Sun)
   truss(F, V(0, 0, -130), V(0, 0, -300), 9, 10, 0.35, CK.DARK);
@@ -251,7 +274,7 @@ export function buildHabitat() {
     const a = (k / segs) * TAU;
     W.push(rotZ(a));
     const arcO = (TAU * (R + 6)) / segs * 1.01, arcM = (TAU * R) / segs * 1.01, arcI = (TAU * r0) / segs * 1.01;
-    W.box(0, R + 3, 0, arcO, 6, 2 * hw + 6, CK.HULL);                               // shielding floor
+    W.box(0, R + 3, 0, arcO, 6, 2 * hw + 6, DK.GRIME);                               // shielding floor
     W.box(0, R + 6.4, 0, arcO, 0.8, 3, CK.CONDUIT);
     for (const s of [-1, 1]) W.box(0, R + 7.5, s * (hw - 10), arcO, 3, 8, CK.DARK);   // keel rails
     // radiator fins every eighth bay, in planes that hold the spin axis (edge-on to the Sun)
@@ -268,7 +291,7 @@ export function buildHabitat() {
         if (t < TIERS - 1 && k % 2 === 0) W.box(0, y - tierH / 2 - 1.2, z - s * 5.0, arcM * 0.86, 1.4, 3.4, CK.CONSERVATORY);   // planters on the terrace above
         if (k % 3 === 0) W.box(0, y, z + s * 0.9, 1.2, tierH - 2.4, 1.4, CK.BRONZE);  // mullion piers
       }
-      W.box(0, R - depth / 2, s * (hw - 25), arcM, depth, 3, CK.HULL);              // pressure wall behind the terraces
+      W.box(0, R - depth / 2, s * (hw - 25), arcM, depth, 3, DK.PORTS);              // pressure wall behind the terraces
       W.box(0, r0 - 2, s * (hw - 22), arcI, 4, 6, CK.BRONZE);                       // roof edge beam, over the top tier
     }
     // the park roof: a five-facet glass vault, bronze arch ribs every sixth bay
@@ -294,24 +317,27 @@ export function buildHabitat() {
   for (let k = 0; k < HAB.spokes; k++) {
     const a = (k / HAB.spokes) * TAU + TAU / 12, c = Math.cos(a), s = Math.sin(a);
     const p0 = V(c * (HAB.hubR - 2), s * (HAB.hubR - 2), 0), p1 = V(c * (r0 - 2), s * (r0 - 2), 0);
-    W.tube([p0, p1], 13, 16, CK.HULL);
+    W.tube([p0, p1], 13, 16, DK.LIVERY);
     for (const z of [-17, 17]) W.tube([p0.clone().setZ(z), p1.clone().setZ(z)], 4, 10, CK.GLASS);
     for (let j = 1; j < 8; j++) { atAim(W, p0.clone().lerp(p1, j / 8), V(c, s, 0)); W.lathe([[13, -2, CK.BRONZE], [18, -1, CK.BRONZE], [18, 1, CK.HULL], [13, 2, CK.BRONZE]], 20, 0, { closedProfile: true }); W.pop(); }
     // the spoke's load-bearing truss round its lift shafts (the pressure tube only carries air)
     truss(W, V(c * (HAB.hubR + 6), s * (HAB.hubR + 6), 0), V(c * (r0 - 24), s * (r0 - 24), 0), 48, 40, 1.0, CK.DARK);
     wheelLamps.push({ p: V(c * (R + 8), s * (R + 8), 0), r: 4, color: k % 2 ? LAMP.RED : LAMP.GREEN, i: 3.2 });
   }
-  W.lathe([[HAB.axle + 8, -60, CK.DARK], [HAB.hubR - 6, -60, CK.HULL], [HAB.hubR, -50, CK.BRONZE], [HAB.hubR, -20, CK.HULL], [HAB.hubR + 2, -10, CK.GLASS],
-    [HAB.hubR + 2, 10, CK.GLASS], [HAB.hubR, 20, CK.HULL], [HAB.hubR, 50, CK.BRONZE], [HAB.hubR - 6, 60, CK.HULL], [HAB.axle + 8, 60, CK.DARK]], 64, 0, { closedProfile: true });
+  W.lathe([[HAB.axle + 8, -60, CK.DARK], [HAB.hubR - 6, -60, DK.PORTS], [HAB.hubR, -50, CK.BRONZE], [HAB.hubR, -20, DK.PORTS], [HAB.hubR + 2, -10, CK.GLASS],
+    [HAB.hubR + 2, 10, CK.GLASS], [HAB.hubR, 20, DK.PORTS], [HAB.hubR, 50, CK.BRONZE], [HAB.hubR - 6, 60, DK.PORTS], [HAB.axle + 8, 60, CK.DARK]], 64, 0, { closedProfile: true });
   // ---- despun: axle, bearings, the docks astern, the collector annulus sunward
   const ax = HAB.axle;
-  F.lathe([[ax, -260, CK.HULL], [ax, -70, CK.HULL], [ax + 1, -68, CK.BRONZE], [ax + 1, 68, CK.BRONZE], [ax, 70, CK.HULL], [ax, 290, CK.HULL]], 40);
+  F.lathe([[ax, -260, DK.LIVERY], [ax, -70, DK.LIVERY], [ax + 1, -68, CK.BRONZE], [ax + 1, 68, CK.BRONZE], [ax, 70, DK.LIVERY], [ax, 290, DK.LIVERY]], 40);
   for (const s of [-1, 1]) latheAt(F, tr(0, 0, 0), [[ax, s * 63, CK.BRONZE], [HAB.hubR - 10, s * 63, CK.BRONZE], [HAB.hubR - 10, s * 74, CK.DARK], [ax, s * 74, CK.DARK]], 48, true);
-  F.lathe([[ax, -150, CK.HULL], [60, -160, CK.HULL], [64, -170, CK.BRONZE], [64.5, -176, CK.GLASS], [64.5, -214, CK.GLASS], [64, -220, CK.BRONZE], [56, -236, CK.HULL], [ax, -260, CK.DARK]], 48);
+  F.lathe([[ax, -150, DK.PORTS], [60, -160, DK.PORTS], [64, -170, CK.BRONZE], [64.5, -176, CK.GLASS], [64.5, -214, CK.GLASS], [64, -220, CK.BRONZE], [56, -236, DK.PORTS], [ax, -260, CK.DARK]], 48);
   for (let k = 0; k < 6; k++) {
     const a = (k / 6) * TAU, d = V(Math.cos(a), Math.sin(a), 0);
     dockPort(F, lamps, ports, d.clone().multiplyScalar(62).setZ(-195), d, 26, 6);
   }
+  moduleDressing(F, ax, 74, 282, { seed: 21, windows: 0.15, kit: 4, pitch: 14, lamps });
+  moduleDressing(F, ax, -148, -74, { seed: 22, windows: 0.1, kit: 4, pitch: 12, lamps });
+  for (const s of [-1, 1]) moduleDressing(W, HAB.hubR, s > 0 ? 27 : -48, s > 0 ? 48 : -27, { seed: 23 + s, windows: 0.3, kit: 2, pitch: 10.5, stringers: 48, lamps: wheelLamps });
   // the collector, sunward: forty petals of reflective film on a shallow cone, parted so the
   // wheel and the stars show between them, each on its own spar from a hub girder ring, the
   // lip held by stays from a guyed mast on the axis (an umbrella, not a plate)
@@ -329,7 +355,7 @@ export function buildHabitat() {
     const a = ((k + 0.5) / nP) * TAU;
     F.push(rotZ(a - Math.PI / 2).multiply(tr(0, 0, 0)).multiply(new THREE.Matrix4().makeRotationZ(Math.PI / 2)).multiply(tr(rIn, 0, 0)).multiply(new THREE.Matrix4().makeRotationY(-cone)));
     for (let j = 0; j < strips; j++) {
-      const x = 12 + (j + 0.5) * dl, rr = rIn + x * cc, w = (TAU * rr) / nP * 0.84;
+      const x = 12 + (j + 0.5) * dl, rr = rIn + x * cc, w = (TAU * rr) / nP * 0.5;
       F.box(x, 0, 1.2, dl - 2.5, w, 0.8, CK.PANEL);                                  // film gore (sunward)
       F.box(x, 0, 0.1, dl - 2.5, w * 0.98, 0.5, CK.DARK);                             // backing
       F.box(x - dl / 2, 0, -0.2, 1.4, w + 2, 1.4, CK.BRONZE);                         // cross batten
@@ -375,7 +401,7 @@ function mirrorSheet(sheet, M, w, L, y, nx = 4, nz = 16) {
 export const FARM = { R: 160, halfL: 320, sep: 290, mirrorLen: 520, tilt: THREE.MathUtils.degToRad(12), strips: 3 };
 export const farmOmega = () => Math.sqrt(9.81 / FARM.R);
 // the drums' end-cap profile beyond the hull's end [radius m, distance beyond the end m, kind]
-const FARM_CAP = [[163, 4, CK.HULL], [146, 16, CK.HULL], [118, 26, CK.GLASS], [82, 33, CK.HULL], [45, 37, 'crown'], [9.9, 38, CK.DARK]];   // (the last point: the axle stub, inside the bearing bore)
+const FARM_CAP = [[163, 4, DK.LIVERY], [146, 16, DK.LIVERY], [118, 26, CK.GLASS], [82, 33, DK.LIVERY], [45, 37, 'crown'], [9.9, 38, CK.DARK]];   // (the last point: the axle stub, inside the bearing bore)
 
 /** One drum (axis z): alternating land and glazed strips, hoops and mullion ribs, louvre-mirrors. */
 export function buildFarmDrum() {
@@ -390,13 +416,13 @@ export function buildFarmDrum() {
   // six sectors: glazed (gardens under glass) and land (the plated outer shell)
   const sector = (i) => Math.floor((i / K) * 6);
   // land strips are the plated shell, except the towns at their ends, where the hull is glazed
-  B.loft(rings, (i, j) => (sector(i) % 2 === 0 ? CK.ROOF : (j === 1 || j === 15 ? CK.GLASS : CK.HULL)), { capStart: false, capEnd: false });
+  B.loft(rings, (i, j) => (sector(i) % 2 === 0 ? CK.ROOF : (j === 1 || j === 15 ? CK.GLASS : DK.GRIME)), { capStart: false, capEnd: false });
   for (let k = 0; k < 3; k++) {
     const a = ((2 * k + 1.5) / 6) * TAU;
     B.push(rotZ(a - Math.PI / 2));
     B.box(0, R + 0.5, 0, 1.6, 1, 2 * L - 8, CK.DARK);                               // service ladder
     for (let j = 0; j < 32; j++) B.box(0, R + 1.2, -L + 10 + j * ((2 * L - 20) / 31), 3.4, 0.5, 0.4, CK.BRONZE);
-    for (const zt of [-L + 40, L - 40]) { B.box(-12, R + 1.6, zt, 8, 3, 10, CK.HULL); B.box(-12, R + 3.2, zt, 6, 0.4, 8, CK.DECK); }   // airlocks
+    for (const zt of [-L + 40, L - 40]) { B.box(-12, R + 1.6, zt, 8, 3, 10, DK.GRIME); B.box(-12, R + 3.2, zt, 6, 0.4, 8, CK.DECK); }   // airlocks
     B.pop();
     for (const zt of [-L + 40, L - 40]) for (const da of [-0.06, 0, 0.06]) lamps.push({ p: V(Math.cos(a + da) * (R + 1.2), Math.sin(a + da) * (R + 1.2), zt + da * 300), r: 1.6, color: WARM, i: 2.0 });
   }
@@ -466,14 +492,14 @@ export function buildFarmFrame() {
     const z = s * (L + 56);
     truss(B, V(-sep - 30, 0, z), V(sep + 30, 0, z), 16, 24, 0.7, CK.DARK);
     for (const x of [-sep, sep]) {
-      latheAt(B, tr(x, 0, z - s * 10), [[11, -6, CK.BRONZE], [26, -6, CK.BRONZE], [28, -3, CK.HULL], [28, 3, CK.HULL], [26, 6, CK.DARK], [11, 6, CK.DARK]], 36, true);
+      latheAt(B, tr(x, 0, z - s * 10), [[11, -6, CK.BRONZE], [26, -6, CK.BRONZE], [28, -3, DK.LIVERY], [28, 3, DK.LIVERY], [26, 6, CK.DARK], [11, 6, CK.DARK]], 36, true);
       lamps.push({ p: V(x, 30, z), r: 1.6, color: LAMP.AMBER, i: 2.2, breathe: 0.3 });
     }
     lamps.push({ p: V(sep + 32, 0, z), r: 1.8, color: LAMP.GREEN, i: 3 }, { p: V(-sep - 32, 0, z), r: 1.8, color: LAMP.RED, i: 3 });
   }
   // sunward: the dock on the forward truss
   B.push(tr(0, 0, L + 64));
-  B.lathe([[8, 0, CK.DARK], [22, 4, CK.HULL], [24, 10, CK.BRONZE], [24.5, 14, CK.GLASS], [24.5, 40, CK.GLASS], [24, 44, CK.BRONZE], [22, 70, CK.HULL], [8, 76, CK.DARK]], 36);
+  B.lathe([[8, 0, CK.DARK], [22, 4, DK.PORTS], [24, 10, CK.BRONZE], [24.5, 14, CK.GLASS], [24.5, 40, CK.GLASS], [24, 44, CK.BRONZE], [22, 70, DK.PORTS], [8, 76, CK.DARK]], 36);
   B.pop();
   for (let k = 0; k < 4; k++) { const a = (k / 4) * TAU + TAU / 8, d = V(Math.cos(a), Math.sin(a), 0); dockPort(B, lamps, ports, d.clone().multiplyScalar(23).setZ(L + 64 + 56), d, 16, 4); }
   dockPort(B, lamps, ports, V(0, 0, L + 64 + 76), V(0, 0, 1), 10, 5);
@@ -483,21 +509,21 @@ export function buildFarmFrame() {
     const z0 = -L - 90 - i * 84;
     for (const sx of [-1, 1]) {
       B.push(tr(sx * 48, 0, z0).multiply(new THREE.Matrix4().makeRotationX(Math.PI)));
-      habModule(B, 30, 70, { glass: 3, seg: 28 });
+      habModule(B, 30, 70, { glass: 3, seg: 28, seed: 31 + i * 2 + (sx > 0 ? 1 : 0) });
       B.pop();
-      B.tube([V(sx * 6, 0, z0 - 35), V(sx * 18, 0, z0 - 35)], 5, 10, CK.HULL);
+      B.tube([V(sx * 6, 0, z0 - 35), V(sx * 18, 0, z0 - 35)], 5, 10, DK.LIVERY);
       for (let j = 0; j < 10; j++) {
         const a = (j / 10) * TAU;
         lamps.push({ p: V(sx * 48 + Math.cos(a) * 31, Math.sin(a) * 31, z0 - 20 - (j % 2) * 30), r: 1.4, color: GROW, i: 2.2, breathe: 0.25, phase: (i + j) / 7 });
       }
     }
     // silos above and below the spine
-    for (const sy of [-1, 1]) { B.tube([V(0, sy * 5, z0 - 35), V(0, sy * 20, z0 - 35)], 3, 8, CK.BRONZE); B.push(tr(0, sy * 32, z0 - 35)); sphereTank(B, 14, CK.HULL, 18); B.pop(); }
+    for (const sy of [-1, 1]) { B.tube([V(0, sy * 5, z0 - 35), V(0, sy * 20, z0 - 35)], 3, 8, CK.BRONZE); B.push(tr(0, sy * 32, z0 - 35)); sphereTank(B, 14, DK.FOIL, 18); B.pop(); }
   }
   // granary radiators: edge-on to the Sun (their planes contain the drum axis)
   for (const s of [-1, 1]) for (let i = 0; i < 2; i++) radiatorWing(B, V(0, s * 8, -L - 167 - i * 168), V(0, s, 0), V(1, 0, 0), 150, 40, lamps, i ? LAMP.AMBER : null);
   // cargo court: containers on the aft truss
-  for (let i = 0; i < 6; i++) for (let j = 0; j < 2; j++) container(B, (j ? 1 : -1) * 8.6, 0, -L - 470 - i * 8, 5, 5, 7, (i + j) % 3 === 0 ? CK.BRONZE : CK.HULL);
+  for (let i = 0; i < 6; i++) for (let j = 0; j < 2; j++) container(B, (j ? 1 : -1) * 8.6, 0, -L - 470 - i * 8, 5, 5, 7, (i + j) % 3 === 0 ? CK.BRONZE : DK.LIVERY);
   lamps.push({ p: V(0, 0, -L - 530), r: 2, color: LAMP.RED, i: 3.4, breathe: 0.7 });
   return { geo: B.geometry(), lamps, ports };
 }
@@ -512,12 +538,12 @@ export function buildPolar() {
   const lamps = [], ringLamps = [], wingLamps = [], ports = [];
   truss(B, V(0, -226, 0), V(0, 262, 0), 10, 12, 0.4, CK.DARK);
   // nadir deck: instruments looking down
-  B.box(0, -232, 0, 96, 8, 96, CK.HULL);
+  B.box(0, -232, 0, 96, 8, 96, DK.GRIME);
   B.box(0, -237, 0, 88, 2, 88, CK.DARK);
   for (const [x, z] of [[-30, -28], [30, -28], [0, 34]]) dish(B, V(x, -240, z), V(0, -1, 0), 14);
   for (const [x, z] of [[-32, 26], [32, 26]]) {
     B.push(tr(x, -236, z).multiply(new THREE.Matrix4().makeRotationX(Math.PI / 2)));
-    B.lathe([[7, 0, CK.BRONZE], [7.4, 2, CK.HULL], [7.4, 30, CK.HULL], [8.2, 32, CK.BRONZE], [8.2, 40, CK.DARK], [6.6, 40, CK.DARK], [6.6, 36, CK.GLASS], [0.02, 36, CK.GLASS]], 24);
+    B.lathe([[7, 0, CK.BRONZE], [7.4, 2, DK.PORTS], [7.4, 30, DK.PORTS], [8.2, 32, CK.BRONZE], [8.2, 40, CK.DARK], [6.6, 40, CK.DARK], [6.6, 36, CK.GLASS], [0.02, 36, CK.GLASS]], 24);
     B.pop();
     lamps.push({ p: V(x, -277, z), r: 1.2, color: LAMP.TEAL, i: 2.4, breathe: 0.5 });
   }
@@ -526,11 +552,11 @@ export function buildPolar() {
   // crew stack: four modules round the spine, a node on top and a ram-face dock
   for (let k = 0; k < 4; k++) {
     const a = (k / 4) * TAU + TAU / 8, x = Math.cos(a) * 24, z = Math.sin(a) * 24;
-    B.push(tr(x, -150, z).multiply(toY)); habModule(B, 11, 90, { glass: 4 }); B.pop();
-    B.tube([V(x * 0.25, -110, z * 0.25), V(x * 0.62, -110, z * 0.62)], 3, 8, CK.HULL);
+    B.push(tr(x, -150, z).multiply(toY)); habModule(B, 11, 90, { glass: 4, seed: 41 + k }); B.pop();
+    B.tube([V(x * 0.25, -110, z * 0.25), V(x * 0.62, -110, z * 0.62)], 3, 8, DK.LIVERY);
     for (let j = 0; j < 4; j++) lamps.push({ p: V(x * 1.48, -140 + j * 20, z * 1.48), r: 0.6, color: WARM, i: 1.6 });
   }
-  B.push(tr(0, -58, 0)); sphereZ(B, 14, (u) => (u > 0.4 && u < 0.6 ? CK.GLASS : CK.HULL), 24, 12); B.pop();
+  B.push(tr(0, -58, 0)); sphereZ(B, 14, (u) => (u > 0.4 && u < 0.6 ? CK.GLASS : DK.LIVERY), 24, 12); sphereDressing(B, 14, { lat0: -1.25, lat1: 1.25, rings: 5, ribs: 12, t: 0.35 }); B.pop();
   dockPort(B, lamps, ports, V(0, -58, 13), V(0, 0, 1), 14, 3.6);
   dockPort(B, lamps, ports, V(0, -58, -13), V(0, 0, -1), 14, 3.6);
   // radiators on the spine (along track)
@@ -546,19 +572,20 @@ export function buildPolar() {
   // bearing, ringed every 18 m; a lit coolant conduit and a power bus down the truss faces
   // (the pieces of the station read as one body instead of a stack of separate parts)
   for (const [y0, y1] of [[-44, POLAR.ringY - 7], [POLAR.ringY + 7, 250]]) {
-    B.tube([V(0, y0, 0), V(0, y1, 0)], 3.2, 14, CK.HULL);
+    B.tube([V(0, y0, 0), V(0, y1, 0)], 3.2, 14, DK.LIVERY);
     for (let y = y0 + 9; y < y1 - 4; y += 18) { B.push(tr(0, y, 0).multiply(toY)); B.torus(3.4, 0.35, 16, 4, CK.BRONZE); B.pop(); }
   }
   B.tube([V(-5.9, -224, 0), V(-5.9, 256, 0)], 0.8, 6, CK.CONDUIT);
   B.tube([V(0, -224, -5.9), V(0, 256, -5.9)], 0.6, 6, CK.BRONZE);
   // a baffle ring over the nadir deck: it shades the instruments' optics from the Earth's limb glare
   B.push(tr(0, -224, 0).multiply(toY));
-  B.lathe([[52, 0, CK.DARK], [66, 6, CK.HULL], [66, 9, CK.BRONZE], [52, 3, CK.HULL], [52, 0, CK.DARK]], 48, Math.PI / 48);
+  B.lathe([[52, 0, CK.DARK], [66, 6, DK.PORTS], [66, 9, CK.BRONZE], [52, 3, DK.PORTS], [52, 0, CK.DARK]], 48, Math.PI / 48);
   B.pop();
   for (let k = 0; k < 8; k++) { const a = (k / 8) * TAU; B.tube([V(Math.cos(a) * 40, -228, Math.sin(a) * 40), V(Math.cos(a) * 60, -221.6, Math.sin(a) * 60)], 0.6, 4, CK.DARK); }
   // the centrifuge (spins about y): a glazed torus on four spokes
   Rg.push(tr(0, POLAR.ringY, 0).multiply(new THREE.Matrix4().makeRotationX(Math.PI / 2)));
-  Rg.torus(POLAR.ringR, POLAR.ringTube, 96, 14, CK.GLASS);
+  // twelve modules: plated decks with a glazed band on the trailing face, bronze frames between
+  torusKinds(Rg, POLAR.ringR, POLAR.ringTube, 96, 14, ringModuleKinds(12, { glassAt: Math.PI / 2, glassW: 0.7 }));
   for (let k = 0; k < 12; k++) {
     const a = (k / 12) * TAU;
     atAim(Rg, V(Math.cos(a) * POLAR.ringR, Math.sin(a) * POLAR.ringR, 0), V(-Math.sin(a), Math.cos(a), 0));
@@ -567,7 +594,7 @@ export function buildPolar() {
     ringLamps.push({ p: V(Math.cos(a) * (POLAR.ringR + POLAR.ringTube + 1), POLAR.ringY, -Math.sin(a) * (POLAR.ringR + POLAR.ringTube + 1)), r: 0.8, color: k % 3 ? LAMP.AMBER : WARM, i: 1.9 });
   }
   for (let k = 0; k < 4; k++) { const a = (k / 4) * TAU; Rg.tube([V(Math.cos(a) * 14, Math.sin(a) * 14, 0), V(Math.cos(a) * (POLAR.ringR - POLAR.ringTube + 1), Math.sin(a) * (POLAR.ringR - POLAR.ringTube + 1), 0)], 2.2, 8, CK.HULL); }
-  Rg.lathe([[14, -5, CK.HULL], [16, -4, CK.BRONZE], [16, 4, CK.BRONZE], [14, 5, CK.HULL]], 32, 0, { closedProfile: true });
+  Rg.lathe([[14, -5, DK.LIVERY], [16, -4, CK.BRONZE], [16, 4, CK.BRONZE], [14, 5, DK.LIVERY]], 32, 0, { closedProfile: true });
   Rg.pop();
   // the wings (turn about x on a gimbal at POLAR.wingY to hold on the Sun)
   solarWing(Wg, wingLamps, 1, 20, 160, 52, 4, 0);
@@ -603,7 +630,7 @@ export function buildPower() {
     if (Math.abs(cx) < w) continue;                                  // the hub bay
     for (const s of [-1, 1]) {
       B.box(cx, s * (h / 4 + 6), 0, w * 0.95, h / 2 - 12, 0.5, CK.PANEL);
-      B.box(cx, s * (h / 2), -1, w, 2, 2, CK.DARK);
+      B.box(cx, s * (h / 2), -1, w, 2, 2, DK.LIVERY);                     // edge beams in the operator's colours
     }
     B.box(cx - w / 2, 0, -1, 1.4, h + 2, 1.4, CK.BRONZE);
     if (i % 4 === 0) for (const s of [-1, 1]) lamps.push({ p: V(cx - w / 2, s * (h / 2 + 2), 0.6), r: 1.6, color: LAMP.AMBER, i: 2.2, breathe: 0.3, phase: i / n });
@@ -637,15 +664,15 @@ export function buildPower() {
   }
   // the blankets' tensioning booms at both wing tips, with their reels
   for (const s of [-1, 1]) {
-    B.box(s * (half + 6), 0, -3, 4, h + 10, 4, CK.BRONZE);
+    B.box(s * (half + 6), 0, -3, 4, h + 10, 4, DK.HAZARD);            // tip booms: hazard aprons
     for (const sy of [-1, 1]) { B.push(tr(s * (half + 6), sy * (h / 2 + 5), -3).multiply(new THREE.Matrix4().makeRotationY(Math.PI / 2))); B.lathe([[3.5, -3, CK.DARK], [3.5, 3, CK.DARK]], 16); B.pop(); }
   }
   // the hub behind the array: crew drum, docks, mast to the emitter gimbal
   B.push(tr(0, 0, -20).multiply(new THREE.Matrix4().makeRotationX(Math.PI)));
-  habModule(B, 26, 80, { glass: 3, seg: 36 });
+  habModule(B, 26, 80, { glass: 3, seg: 36, seed: 51, lamps });
   B.pop();
   B.tube([V(0, -90, -40), V(0, 90, -40)], 3, 10, CK.BRONZE);
-  B.tube([V(0, 0, -22), V(0, 0, -5)], 9, 16, CK.HULL);
+  B.tube([V(0, 0, -22), V(0, 0, -5)], 9, 16, DK.GRIME);
   for (const s of [-1, 1]) dockPort(B, lamps, ports, V(0, s * 25, -60), V(0, s, 0), 16, 4.2);
   for (const s of [-1, 1]) radiatorWing(B, V(s * 26, 0, -60), V(s, 0, 0), V(0, 1, 0), 130, 44, lamps, LAMP.AMBER);
   truss(B, V(0, 0, -100), V(0, 0, POWER.pivotZ + 6), 8, 12, 0.4, CK.DARK);
@@ -659,7 +686,7 @@ export function buildPower() {
   // the emitter (+z toward the ground station): a phased array of hexagonal tiles on a yoke
   const { disc: R, discOff: d } = POWER;
   E.tube([V(0, 0, 0), V(0, 0, d - 6)], 3.2, 12, CK.BRONZE);
-  E.lathe([[0.02, d - 8, CK.HULL], [R * 0.2, d - 6, CK.HULL], [R, d - 1, CK.BRONZE], [R + 1, d, CK.BRONZE], [R, d + 1.6, CK.DARK], [0.02, d + 1.6, CK.DARK]], 64);
+  E.lathe([[0.02, d - 8, DK.LIVERY], [R * 0.2, d - 6, DK.LIVERY], [R, d - 1, CK.BRONZE], [R + 1, d, CK.BRONZE], [R, d + 1.6, CK.DARK], [0.02, d + 1.6, CK.DARK]], 64);
   // the aperture: hexagonal radiating tiles close-packed on a hex grid (8 m across the flats,
   // 1 m gaps), every seventh a darker phase-reference tile, sub-array frames in rings
   const hexR = EMITTER_HEX.r, pitch = EMITTER_HEX.pitch;
@@ -688,12 +715,12 @@ export const SKYHOOK = { halfKm: 450, hubR: 44 };
 export function buildSkyhookHub() {
   const B = new CB(), lamps = [];
   B.push(toY);
-  B.lathe([[0.02, -70, CK.DARK], [30, -66, CK.BRONZE], [SKYHOOK.hubR, -54, CK.HULL], [SKYHOOK.hubR, -20, CK.DARK], [SKYHOOK.hubR + 1, -18, CK.BRONZE], [SKYHOOK.hubR + 1, 18, CK.BRONZE],
-    [SKYHOOK.hubR, 20, CK.DARK], [SKYHOOK.hubR, 54, CK.HULL], [30, 66, CK.BRONZE], [0.02, 70, CK.DARK]], 48);
+  B.lathe([[0.02, -70, CK.DARK], [30, -66, CK.BRONZE], [SKYHOOK.hubR, -54, DK.PORTS], [SKYHOOK.hubR, -20, CK.DARK], [SKYHOOK.hubR + 1, -18, CK.BRONZE], [SKYHOOK.hubR + 1, 18, CK.BRONZE],
+    [SKYHOOK.hubR, 20, CK.DARK], [SKYHOOK.hubR, 54, DK.PORTS], [30, 66, CK.BRONZE], [0.02, 70, CK.DARK]], 48);
   B.pop();
   for (const s of [-1, 1]) {
     // spool housings and fairleads where the tether leaves each end
-    latheAt(B, tr(0, s * 70, 0).multiply(toY), [[0.02, 0, CK.DARK], [26, s * 2, CK.HULL], [28, s * 10, CK.CONDUIT], [28, s * 26, CK.HULL], [16, s * 34, CK.BRONZE], [6, s * 60, CK.BRONZE], [0.02, s * 64, CK.DARK]], 36);
+    latheAt(B, tr(0, s * 70, 0).multiply(toY), [[0.02, 0, CK.DARK], [26, s * 2, DK.LIVERY], [28, s * 10, CK.CONDUIT], [28, s * 26, DK.LIVERY], [16, s * 34, CK.BRONZE], [6, s * 60, CK.BRONZE], [0.02, s * 64, CK.DARK]], 36);
     for (let k = 0; k < 4; k++) { const a = (k / 4) * TAU; B.tube([V(Math.cos(a) * 26, s * 72, Math.sin(a) * 26), V(Math.cos(a) * 5, s * 128, Math.sin(a) * 5)], 1.1, 6, CK.DARK); }
     lamps.push({ p: V(0, s * 136, 0), r: 2.2, color: LAMP.AMBER, i: 3.2, breathe: 0.6, phase: s > 0 ? 0 : 0.5 });
     solarWing(B, lamps, s, SKYHOOK.hubR + 6, 150, 50, 4, 0);
@@ -710,7 +737,7 @@ export function buildSkyhookHub() {
   for (const y of [-46, -30, 30, 46]) { B.push(tr(0, y, 0).multiply(toY)); B.torus(SKYHOOK.hubR + 1.2, 1.1, 64, 4, CK.DARK); B.pop(); }
   for (const s of [-1, 1]) { B.push(tr(0, s * 56, 0).multiply(toY)); B.torus(SKYHOOK.hubR - 1, 1.4, 64, 6, CK.CONDUIT); B.pop(); }
   B.push(tr(0, 34, 0).multiply(new THREE.Matrix4().makeRotationX(Math.PI / 2)));
-  B.torus(SKYHOOK.hubR + 14, 6, 96, 12, CK.GLASS);
+  torusKinds(B, SKYHOOK.hubR + 14, 6, 96, 12, ringModuleKinds(16, { glassAt: 0, glassW: 0.8 }));
   for (let k = 0; k < 6; k++) { const a = (k / 6) * TAU + 0.3; B.tube([V(Math.cos(a) * SKYHOOK.hubR, Math.sin(a) * SKYHOOK.hubR, 0), V(Math.cos(a) * (SKYHOOK.hubR + 8), Math.sin(a) * (SKYHOOK.hubR + 8), 0)], 2, 8, CK.HULL); }
   B.pop();
   for (let k = 0; k < 16; k++) { const a = (k / 16) * TAU; lamps.push({ p: V(Math.cos(a) * (SKYHOOK.hubR + 20.6), 34, Math.sin(a) * (SKYHOOK.hubR + 20.6)), r: 0.9, color: WARM, i: 1.8 }); }
@@ -725,9 +752,9 @@ export function buildGrapple() {
   const B = new CB(), lamps = [];
   // tether stub and fairlead
   B.push(toY);
-  B.lathe([[0.02, 150, CK.DARK], [2.2, 150, CK.DARK], [2.6, 60, CK.DARK], [9, 40, CK.BRONZE], [16, 30, CK.HULL], [16, 26, CK.CONDUIT], [18, 18, CK.HULL], [18, 16, CK.BRONZE], [0.02, 14, CK.HULL]], 28);
+  B.lathe([[0.02, 150, CK.DARK], [2.2, 150, CK.DARK], [2.6, 60, CK.DARK], [9, 40, CK.BRONZE], [16, 30, DK.HAZARD], [16, 26, CK.CONDUIT], [18, 18, DK.HAZARD], [18, 16, CK.BRONZE], [0.02, 14, DK.HAZARD]], 28);
   // crew cab: decks under the fairlead, windows all round
-  B.lathe([[0.02, 14, CK.HULL], [15, 13, CK.HULL], [15.4, 10, CK.BRONZE], [15.4, 8, CK.GLASS], [15.4, -6, CK.GLASS], [15.4, -8, CK.BRONZE], [15.4, -10, CK.GLASS], [15.4, -22, CK.GLASS], [15, -24, CK.BRONZE], [12, -30, CK.HULL], [0.02, -32, CK.DARK]], 36);
+  B.lathe([[0.02, 14, DK.PORTS], [15, 13, DK.PORTS], [15.4, 10, CK.BRONZE], [15.4, 8, CK.GLASS], [15.4, -6, CK.GLASS], [15.4, -8, CK.BRONZE], [15.4, -10, CK.GLASS], [15.4, -22, CK.GLASS], [15, -24, CK.BRONZE], [12, -30, DK.PORTS], [0.02, -32, CK.DARK]], 36);
   B.pop();
   // the cradle ring and jaws
   B.push(tr(0, -46, 0).multiply(new THREE.Matrix4().makeRotationX(Math.PI / 2)));
@@ -735,7 +762,7 @@ export function buildGrapple() {
   B.pop();
   for (let k = 0; k < 3; k++) {
     const a = (k / 3) * TAU, c = Math.cos(a), s = Math.sin(a);
-    B.tube([V(c * 10, -30, s * 10), V(c * 26, -46, s * 26)], 1.6, 8, CK.HULL);
+    B.tube([V(c * 10, -30, s * 10), V(c * 26, -46, s * 26)], 1.6, 8, DK.GRIME);
     B.tube([V(c * 26, -46, s * 26), V(c * 16, -62, s * 16), V(c * 8, -66, s * 8)], 1.4, 8, CK.BRONZE);
     B.box(c * 8, -66, s * 8, 3, 3, 3, CK.DARK);
     lamps.push({ p: V(c * 27.5, -46, s * 27.5), r: 1.2, color: LAMP.AMBER, i: 3, breathe: 0.5, phase: k / 3 });
@@ -743,7 +770,7 @@ export function buildGrapple() {
   for (const d of [V(0, -1, 0.2), V(0.2, -1, 0), V(-0.2, -1, -0.1)]) lamps.push(flood(B, V(d.x * 40, -32, d.z * 40), d.clone().normalize(), 1.6, LAMP.WHITE, 3.4));
   // side galleries and thrusters that trim the tip's swing
   for (const s of [-1, 1]) {
-    B.box(s * 21, -4, 0, 12, 8, 26, CK.HULL);
+    B.box(s * 21, -4, 0, 12, 8, 26, DK.FOIL);
     B.box(s * 27.2, -4, 0, 0.6, 5, 22, CK.GLASS);
     rcsQuad(B, V(s * 27.5, -4, 12), V(s, 0, 0), V(0, 1, 0), 2.2);
     rcsQuad(B, V(s * 27.5, -4, -12), V(s, 0, 0), V(0, 1, 0), 2.2);
@@ -761,18 +788,18 @@ export function buildSweeper() {
   truss(B, V(0, 0, -90), V(0, 0, 96), 7, 8, 0.3, CK.DARK);
   // drive block and bells
   B.push(tr(0, 0, -96));
-  B.lathe([[0.02, -8, CK.DARK], [10, -6, CK.HULL], [11, 0, CK.BRONZE], [11, 16, CK.HULL], [9, 22, CK.DARK], [0.02, 24, CK.HULL]], 24);
+  B.lathe([[0.02, -8, CK.DARK], [10, -6, DK.GRIME], [11, 0, CK.BRONZE], [11, 16, DK.GRIME], [9, 22, CK.DARK], [0.02, 24, DK.GRIME]], 24);
   B.pop();
   for (const [x, y] of [[-6, 0], [6, 0], [0, 6]]) bell(B, x, y, -103, 2.6, 7, glows);
   // hopper bins either side
   for (const s of [-1, 1]) for (let i = 0; i < 4; i++) {
     const z = -60 + i * 26;
-    B.box(s * 8.4, 0, z, 10, 10, 22, i % 2 ? CK.HULL : CK.BRONZE);
+    B.box(s * 8.4, 0, z, 10, 10, 22, i % 2 ? DK.LIVERY : CK.BRONZE);
     B.box(s * 13.6, 0, z, 0.4, 7, 18, CK.DARK);
     B.box(s * 8.4, 5.3, z, 9, 0.6, 20, CK.DECK);
   }
   // crew module and bridge
-  B.push(tr(0, 9, 30)); habModule(B, 5.5, 30, { glass: 2, seg: 18 }); B.pop();
+  B.push(tr(0, 9, 30)); habModule(B, 5.5, 30, { glass: 2, seg: 18, seed: 61 }); B.pop();
   B.box(0, 9, 62, 8, 5, 6, CK.GLASS);
   // ablation laser turret on the dorsal: a barrel looking forward and out
   B.push(tr(0, 16, 50).multiply(new THREE.Matrix4().makeRotationX(-0.25)));
