@@ -135,6 +135,12 @@ function cliffs(B, M, lamps, S, r) {
           M.box(sg * (X0 - depth - 7.8), (y0 + y1) / 2 - 18, zq, 0.3, 1.2, lw, CK.BRONZE);
         }
       }
+      // sky bridges across the next light well on every third deck (clear of the lift shaft)
+      if (j < TILE_L / segL - 1) for (let i = 1; i < levels; i += 3) {
+        const depth = d0 - i * step, xb = sg * (X0 - depth * 0.55);
+        B.box(xb, i * H + 60, z1 + gap / 2, 30, 8, gap + 6, CK.GLASS);
+        M.box(xb, i * H + 55.6, z1 + gap / 2, 32, 0.8, gap + 6, CK.BRONZE);
+      }
       // light-well lift shaft and its glass at the crest
       const zs = z1 + gap / 2;
       if (j < TILE_L / segL - 1) {
@@ -585,6 +591,25 @@ function buildCrawler(sg, G) {
   B.pop();
   return B.geometry();
 }
+function buildAircar() {
+  const B = new CB();
+  B.box(0, 0, 0, 4.2, 2.2, 11, CK.HULL);
+  B.box(0, 1.6, 0.8, 3.4, 1.2, 5.5, CK.GLASS);
+  B.box(0, 0.2, -5.6, 3.6, 0.8, 0.3, CK.LANTERN);
+  for (const x of [-3.4, 3.4]) for (const z of [-3.6, 3.6]) {
+    B.push(new THREE.Matrix4().makeTranslation(x, 0.2, z).multiply(toY));
+    lathe(B, [[1.2, -0.5, CK.BRONZE], [1.5, -0.4, CK.BRONZE], [1.5, 0.4, CK.BRONZE], [1.2, 0.5, CK.DARK]], 10, 0, { closedProfile: true });
+    B.pop();
+  }
+  return B.geometry();
+}
+/** Aircar lanes under the vault: over the boulevards and the spine, where no building stands. */
+export function aircarLanes(S) {
+  const out = [];
+  for (const bx of [-7000, 7000]) for (const [dx, dy, v] of [[-25, 180, 55], [25, 180, -55], [-25, 320, 70], [25, 320, -70]]) out.push({ x: bx + dx, y: S.deck(bx) + dy, v, gap: 900 + Math.abs(v) * 4 });
+  for (const [dx, v] of [[-30, 80], [30, -80]]) out.push({ x: dx, y: S.deck(0) + 220, v, gap: 1500 });
+  return out;
+}
 function buildPod() {
   const B = new CB();
   B.box(0, 0, 0, 22, 14, 16, CK.HULL);
@@ -746,6 +771,7 @@ export class HaloDistricts {
     this.ships = this.shipClasses.map((c) => inst(c.geo, SLOTS * 4));
     const G = rotorGeometry(S);
     this.rotorCrawlers = [-1, 1].map((sg) => inst(buildCrawler(sg, G), 64));
+    this.aircars = inst(buildAircar(), 1400);
     // services: [x (m), y above radius (m), speed (m/s), spacing (m), cars, car pitch (m), seed]
     const yT = S.deck(0) + 34 + 1.6 + 0.1;
     this.lines = [
@@ -755,6 +781,7 @@ export class HaloDistricts {
         { im: this.trams, x: bx - 8, y: S.deck(bx) + 1.2, v: 14, gap: 2600, cars: 1, pitch: 0, off: 700 * i },
         { im: this.trams, x: bx + 8, y: S.deck(bx) + 1.2, v: -14, gap: 2600, cars: 1, pitch: 0, off: 1900 + 500 * i },
       ]),
+      ...aircarLanes(S).map((l, i) => ({ im: this.aircars, x: l.x, y: l.y, v: l.v, gap: l.gap, cars: 1, pitch: 0, off: 317 * i })),
       ...[-1, 1].map((sg, i) => {
         const r = G.apo + G.hoop + 2 + G.crawlerLift;
         return { im: this.rotorCrawlers[i], x: sg * (S.tubeX + r * Math.cos(G.face)), y: S.tubeY + r * Math.sin(G.face), v: sg * 6, gap: 5200, cars: 1, pitch: 0, off: 900 * i };
@@ -838,7 +865,7 @@ export class HaloDistricts {
     const R = this.Rm, u0 = this.anchorAngle * R, C = TAU * R;
     const tileOk = (u) => { const k = Math.floor((((u % C) + C) % C) / TILE_L); return k < this.nTiles && this.tileVariant[k] >= 0; };
     // trains and trams: each service is a lattice of vehicles u = off + v t + i gap
-    for (const im of [this.trains, this.trams, ...this.rotorCrawlers]) im.count = 0;
+    for (const im of [this.trains, this.trams, this.aircars, ...this.rotorCrawlers]) im.count = 0;
     for (const L of this.lines) {
       const im = L.im, head = L.off + L.v * t;
       const i0 = Math.ceil((u0 - MOVER_RANGE - head) / L.gap), i1 = Math.floor((u0 + MOVER_RANGE - head) / L.gap);
@@ -850,7 +877,7 @@ export class HaloDistricts {
         }
       }
     }
-    for (const im of [this.trains, this.trams, ...this.rotorCrawlers]) im.instanceMatrix.needsUpdate = true;
+    for (const im of [this.trains, this.trams, this.aircars, ...this.rotorCrawlers]) im.instanceMatrix.needsUpdate = true;
     // gantries and their crawler pods
     let g = 0;
     this.pods.count = 0;

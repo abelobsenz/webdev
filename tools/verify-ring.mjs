@@ -14,7 +14,7 @@ import { Rings } from '../src/space/rings.js';
 import { Elevator } from '../src/space/elevator.js';
 import { HaloPorts, buildPortStation, PORT_LIFE, buildCourtCrane } from '../src/space/stations.js';
 import { HALO_PORTS } from '../src/space/earthData.js';
-import { TILE_L, WINDOW, MINOR_RANGE_KM, GANTRY, rotorGeometry, buildGantry } from '../src/space/haloDistricts.js';
+import { TILE_L, WINDOW, MINOR_RANGE_KM, GANTRY, rotorGeometry, buildGantry, aircarLanes } from '../src/space/haloDistricts.js';
 import { buildPassengerClimber, buildFreightClimber, buildTetherSegment, GUIDE_OFFSET, RIBBON, CABLE_R, MARKER_PROUD, BORE_R } from '../src/space/climbers.js';
 import { WHEELS, WHEEL, STEM, TUGS, CAPSULE, wheelOmega, segDist, counterKeepOuts } from '../src/space/counterLife.js';
 
@@ -47,7 +47,7 @@ assert.ok(out.districtMaxPieceMs < 150, 'No single build piece stalls a frame fo
 const maxMajor = Math.max(...D.variants.map((v) => tris(v.major))) + Math.max(...D.crests.map((c) => tris(c.major)));
 const maxMinor = Math.max(...D.variants.map((v) => tris(v.minor))) + Math.max(...D.crests.map((c) => tris(c.minor)));
 const minorSlots = 2 * Math.ceil(MINOR_RANGE_KM / (TILE_L / 1000)) + 1;
-const movers = D.trains.instanceMatrix.count * tris(D.trains.geometry) + D.trams.instanceMatrix.count * tris(D.trams.geometry) + D.ships.reduce((s, im) => s + im.instanceMatrix.count * tris(im.geometry), 0) + 2 * tris(D.gantryGeo);
+const movers = D.aircars.instanceMatrix.count * tris(D.aircars.geometry) + D.trains.instanceMatrix.count * tris(D.trains.geometry) + D.trams.instanceMatrix.count * tris(D.trams.geometry) + D.ships.reduce((s, im) => s + im.instanceMatrix.count * tris(im.geometry), 0) + 2 * tris(D.gantryGeo);
 out.tileMajorTris = maxMajor; out.tileMinorTris = maxMinor;
 out.districtWorstRenderedTris = (2 * WINDOW + 1) * maxMajor + minorSlots * maxMinor + movers;
 out.districtUniqueTris = D.variants.reduce((s, v) => s + tris(v.major) + tris(v.minor), 0) + D.crests.reduce((s, c) => s + tris(c.major) + tris(c.minor), 0) + tris(D.gantryGeo);
@@ -71,6 +71,12 @@ for (const v of D.variants) for (const g of [v.major, v.minor]) {
   });
 }
 out.vaultClearanceMetres = Math.round(vaultGap);
+// aircar lanes: an empty 14 m tube round every lane through every variant
+const lanes = aircarLanes(S);
+let laneHits = 0;
+for (const v of D.variants) for (const g of [v.major, v.minor]) eachVertex(g, (x, y) => { for (const l of lanes) if (Math.abs(x - l.x) < 14 && Math.abs(y - l.y) < 14) laneHits++; });
+for (const l of lanes) assert.ok(S.roofLow(l.x) - l.y > 1000, 'Aircar lanes run well under the glass');
+assert.equal(laneHits, 0, 'Aircar lanes are clear of every building');
 out.deckEmbedMetres = Math.round(-deckSink);
 assert.ok(vaultGap > 150, `Every district structure stays ${vaultGap} m under the lowest glass (chord sag included)`);
 assert.ok(-deckSink < 100 && -deckSink > 10, 'Footings reach 10+ m into the 400 m deck slab (covering its chord sag) and never through it');
@@ -148,9 +154,9 @@ space.scene.updateMatrixWorld(true);
 ut.sort((x, y) => x - y);
 out.districtUpdateMedianMs = +ut[120].toFixed(3);
 assert.ok(ut[120] < 0.3, `District update ${ut[120]} ms per frame`);
-assert.ok(D.anchor.visible && D.trains.count > 0 && D.trams.count > 0 && D.ships[0].count > 0 && D.pods.count > 0 && D.rotorCrawlers[0].count > 0, 'Traffic, docks, gantry and crawlers are live near the ring');
+assert.ok(D.anchor.visible && D.trains.count > 0 && D.trams.count > 0 && D.ships[0].count > 0 && D.pods.count > 0 && D.rotorCrawlers[0].count > 0 && D.aircars.count > 100, 'Traffic, docks, gantry and crawlers are live near the ring');
 let badInst = 0;
-for (const im of [D.trains, D.trams, D.pods, ...D.ships, ...D.rotorCrawlers]) for (let i = 0; i < im.count * 16; i++) if (!Number.isFinite(im.instanceMatrix.array[i])) badInst++;
+for (const im of [D.trains, D.trams, D.pods, D.aircars, ...D.ships, ...D.rotorCrawlers]) for (let i = 0; i < im.count * 16; i++) if (!Number.isFinite(im.instanceMatrix.array[i])) badInst++;
 assert.equal(badInst, 0, 'Instance matrices are finite');
 const visSlots = D.slots.filter((s) => s.g.visible).length;
 out.visibleTiles = visSlots;
