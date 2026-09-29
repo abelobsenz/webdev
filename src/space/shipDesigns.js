@@ -432,7 +432,41 @@ export function buildClipper(seed = 1) {
   return out;
 }
 
-export const DESIGNS = { hauler: buildHauler, tanker: buildTanker, tug: buildWorkTug, packet: buildPacket, barge: buildBarge, lighter: buildLighter, clipper: buildClipper };
+// ------------------------------------------------------------------ drone ----
+/**
+ * Work drone (the reclamation crews' hands): a 5 m instrument body with a glazed sensor eye,
+ * four thruster pods on outriggers, two manipulator arms folded under, a work light and a
+ * strobe-free amber beacon. Lives on its RCS: the pods are its drive.
+ */
+export function buildDrone(seed = 1) {
+  const r = rng(seed * 179424673 + 19);
+  const B = new CB();
+  const glows = [], lamps = [], rcs = [];
+  const L = r.range(4.2, 5.6);
+  hull(B, -L / 2, L / 2, (u) => [1.3 * (1 - 0.3 * u * u), 0.9 * (1 - 0.35 * u * u)], { K: 20, N: 8, n: 3, kind: (i, j) => (j === 4 ? CK.BRONZE : CK.HULL) });
+  B.at(0, 0.1, L / 2);
+  B.lathe([[0.7, 0, CK.BRONZE], [0.62, 0.3, CK.GLASS], [0.3, 0.55, CK.GLASS], [0.02, 0.6, CK.GLASS]], 16);
+  B.pop();
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+    const pod = V(sx * 2.2, 0, sz * 1.4);
+    B.tube([V(sx * 1.1, 0, sz * 1.0), pod], 0.12, 5, CK.DARK);
+    B.at(pod.x, pod.y, pod.z);
+    B.lathe([[0.02, -0.5, CK.DARK], [0.36, -0.45, CK.DARK], [0.4, 0, CK.HULL], [0.36, 0.45, CK.BRONZE], [0.02, 0.5, CK.BRONZE]], 12);
+    B.pop();
+    rcs.push(...rcsQuad(B, pod.clone().add(V(0, 0.38, 0)), V(0, 1, 0), V(0, 0, 1), 0.28));
+    if (sz < 0) bell(B, pod.x, pod.y, pod.z - 0.5, 0.26, 0.45, glows);
+  }
+  for (const sx of [-1, 1]) {
+    B.tube([V(sx * 0.6, -0.8, L * 0.3), V(sx * 0.8, -1.2, L * 0.55), V(sx * 0.5, -1.0, L * 0.75)], 0.08, 5, CK.BRONZE);
+  }
+  lamps.push(flood(B, V(0, -0.5, L / 2 + 0.1), V(0, -0.2, 1), 0.3, LAMP.WHITE, 2.2));
+  lamps.push(flood(B, V(0, -0.95, 0), V(0, -1, 0.3), 0.25, LAMP.WHITE, 1.8));          // belly light over the work
+  lamps.push({ p: V(0, 1.0, -L * 0.2), r: 0.22, color: LAMP.AMBER, i: 2.6, breathe: 0.6 });
+  navSet(lamps, { hw: 2.7, y: 0, z: 1.4, stern: V(0, 0.4, -L / 2 - 0.1), r: 0.18 });
+  return finish(B, glows, lamps, rcs, 'drone', L + 1);
+}
+
+export const DESIGNS = { drone: buildDrone, hauler: buildHauler, tanker: buildTanker, tug: buildWorkTug, packet: buildPacket, barge: buildBarge, lighter: buildLighter, clipper: buildClipper };
 
 /** A design by class and seed, built once and shared (the working lanes and the streak traffic's hulls). */
 const _built = new Map();

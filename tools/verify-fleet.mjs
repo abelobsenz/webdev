@@ -214,12 +214,17 @@ let minClear = Infinity, worst = null;
 if (structTris.length) {
   const T = tree(structTris);
   for (const ps of pathSamples) {
-    const d = dist(T, ps.p, 50) - ps.r;
+    const d = dist(T, ps.p, 50) - ps.r - (ps.st.name === "tenders" ? 0.1 : 0.4);   // margin beyond the required clearance (drones 100 m, ships 400 m)
     if (d < minClear) { minClear = d; worst = ps; }
   }
 }
-out.structureClearanceKm = +minClear.toFixed(3);
-assert.ok(minClear > 0.4, `working lanes clear every structure by ${minClear} km (${worst?.st.name} ${worst?.sh.design.kind} t=${worst?.t})`);
+out.structureMarginKm = +minClear.toFixed(3);
+if (!(minClear > 0)) {
+  const names = cand.map((c) => { let n = c.o.name || c.o.type, x = c.o; while (!c.o.name && x.parent) { x = x.parent; if (x.name) { n = x.name; break; } } return [n, c.s.center.distanceTo(worst.p).toFixed(2), c.s.radius.toFixed(2), c.o.geometry.index?.count / 3]; });
+  console.log('nearest candidates', JSON.stringify(names), 'local', worst.p.clone().applyMatrix4(worst.st.group.matrixWorld.clone().invert()).toArray().map((x) => +x.toFixed(3)));
+  if (worst.st.name === 'tenders') console.log('tenders at', fleet.tenders.map((t) => t.mesh.position.toArray().map((x) => +x.toFixed(3))));
+}
+assert.ok(minClear > 0, `working lanes clear every structure with ${minClear} km to spare (${worst?.st.name} ${worst?.sh.design.kind} t=${worst?.t})`);
 // the tether: a line up the Harbour's axis from the ground to the counterweight
 {
   const el = space.elevator, h = el.harbour;
@@ -232,9 +237,41 @@ assert.ok(minClear > 0.4, `working lanes clear every structure by ${minClear} km
 }
 {
   let mE = Infinity, mM = Infinity;
-  for (const ps of pathSamples) { mE = Math.min(mE, ps.p.length() - R_EARTH - ps.r); mM = Math.min(mM, ps.p.distanceTo(sim.moonPos) - R_MOON - ps.r); }
+  let mD = Infinity;
+  for (const ps of pathSamples) { if (ps.st.name === "tenders") { mD = Math.min(mD, ps.p.length() - R_EARTH); continue; } mE = Math.min(mE, ps.p.length() - R_EARTH - ps.r); mM = Math.min(mM, ps.p.distanceTo(sim.moonPos) - R_MOON - ps.r); }
   out.earthClearanceKm = Math.round(mE); out.moonClearanceKm = Math.round(mM);
   assert.ok(mE > 20000 && mM > 100, 'no ship grazes a world');
+  out.droneAltitudeKm = +mD.toFixed(2);
+  assert.ok(mD > 626, 'the drones work above the tenders, over the Halo');
+}
+
+// ---- 4b. the tenders yaw and wobble as they keep station: the drones clear each tender's hull,
+// cradle and relic (its local bounding box, arms at full reach) at every moment
+{
+  const { buildTender } = await import('../src/craft/craftGeometry.js');
+  const td = buildTender(620);
+  const box = td.geo.boundingBox.clone();
+  for (const a of td.arms) { a.geo.computeBoundingBox(); box.union(a.geo.boundingBox.clone().expandByScalar(40)); }
+  box.expandByPoint(V(0, 0, 440)).expandByScalar(20);             // the relic in the closed cradle, and a margin
+  const D = traffic.tenders, p = V(), f = V(), inv = new THREE.Matrix4();
+  let m = Infinity;
+  for (let t = 0; t < 900; t += 3) {
+    fleet.update(sim, t, 0.016, space);
+    D.group.updateMatrixWorld(true);
+    for (const tn of fleet.tenders) tn.mesh.updateMatrixWorld(true);
+    for (const sh of D.ships) {
+      shipPose(sh, t, p, f);
+      const w = p.clone().applyMatrix4(D.group.matrixWorld);
+      for (const tn of fleet.tenders) {
+        inv.copy(tn.mesh.matrixWorld).invert();
+        const dd = box.distanceToPoint(w.clone().applyMatrix4(inv)) - sh.design.radius;
+        if (dd < m) { m = dd; out.droneWorst = [t, fleet.tenders.indexOf(tn), p.toArray().map((x) => +x.toFixed(3)), tn.mesh.position.toArray().map((x) => +x.toFixed(3))]; }
+      }
+    }
+  }
+  out.droneTenderClearanceM = +m.toFixed(1);
+  assert.ok(m > 20, `drones keep clear of the working tenders (${m} m, ${JSON.stringify(out.droneWorst)})`);
+  frame(0);
 }
 
 // ---- 5. separation: every pair of working ships, and from the fleet's and the roads' movers
@@ -247,13 +284,14 @@ assert.ok(minClear > 0.4, `working lanes clear every structure by ${minClear} km
       const pos = S.map((sh) => { const p = V(); shipPose(sh, t, p, f); return sh.vis > 0.01 ? p : null; });
       for (let i = 0; i < S.length; i++) for (let j = i + 1; j < S.length; j++) {
         if (!pos[i] || !pos[j]) continue;
-        const d = pos[i].distanceTo(pos[j]) - (S[i].design.radius * S[i].scale + S[j].design.radius * S[j].scale) * KM;
+        // margin beyond the required gap: 100 m between ships, 30 m between the tenders' drones
+        const d = pos[i].distanceTo(pos[j]) - (S[i].design.radius * S[i].scale + S[j].design.radius * S[j].scale) * KM - (st.name === "tenders" ? 0.03 : 0.1);
         if (d < minPair) { minPair = d; pairAt = [st.name, i, j, t]; }
       }
     }
   }
-  out.shipSeparationKm = +minPair.toFixed(3);
-  assert.ok(minPair > 0.1, `working ships keep their distance (${minPair} km at ${pairAt})`);
+  out.shipSeparationMarginKm = +minPair.toFixed(3);
+  assert.ok(minPair > 0, `working ships keep their distance (${minPair} km at ${pairAt})`);
   // the Harbour's own movers (voyagers in world space; the roads' freighters in the Harbour frame)
   const H = traffic.harbour, hInv = V();
   let minMover = Infinity;

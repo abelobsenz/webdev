@@ -189,6 +189,29 @@ export function seleneConvoyRun() {
   return makeRoute(legs, { fadeIn: 0.0, fadeOut: 0.0 });
 }
 
+/**
+ * A work drone's circuit over the tenders (the tender group's frame, km; src/space/fleet.js lays
+ * the three tenders out round the capture at the origin). The drone hops from station to
+ * station 0.40 or 0.62 km above each tender's centre (above the discs their hulls sweep as they
+ * yaw), hovering at each to work; odd drones fly the circuit the other way.
+ */
+export const TENDER_STATIONS = [V(-1.464, -0.271, -1.382), V(-0.214, 0.002, -0.332), V(1.036, -0.498, -0.382)];
+export function tenderCircuit(group) {
+  // two crews: the low one works round the tenders one way, the high one (220 m above, a
+  // little aside) the other way; within a crew the drones fly one circuit, evenly spaced
+  const h = group ? 0.62 : 0.4, shift = group ? V(0.1, 0, 0.1) : V();
+  const order = group ? [0, 2, 1] : [0, 1, 2];
+  const P = order.map((k) => TENDER_STATIONS[k].clone().add(shift).add(V(0, h, 0)));
+  const legs = [];
+  for (let k = 0; k < 3; k++) {
+    const a = P[k], b = P[(k + 1) % 3];
+    const yFl = Math.max(...P.map((q) => q.y)) + 0.15;   // one flight level for the crew, over every tender's swept disc
+    legs.push({ k: 'bez', p: [a, a.clone().lerp(b, 0.3).setY(yFl), a.clone().lerp(b, 0.7).setY(yFl), b], dur: 55, ease: 'io', face: 'fwd', thr: 0.6 });
+    legs.push({ k: 'hold', at: b, dur: 20 });
+  }
+  return makeRoute(legs, { fadeIn: 0, fadeOut: 0 });
+}
+
 // ------------------------------------------------------------------ ships ----
 /** Formations (path frame: x across, y up, z along; km). */
 export const FORMATION = {
@@ -469,8 +492,8 @@ export class StationTraffic {
 /** Sister-ship families: a few seeded designs per class (shared by both stations). */
 export function buildFamilies() {
   const fam = {};
-  const seeds = { hauler: [3, 8, 21], tanker: [5, 12], tug: [2, 7, 11], packet: [4, 9], barge: [6, 14], lighter: [1, 10], clipper: [2, 5] };
-  const accents = { hauler: [1.0, 0.72, 0.45], tanker: [1.0, 0.62, 0.35], tug: [1.0, 0.8, 0.35], packet: [0.55, 0.88, 1.0], barge: [1.0, 0.66, 0.4], lighter: [0.5, 1.0, 0.8], clipper: [0.6, 0.9, 1.0] };
+  const seeds = { drone: [1, 2, 3], hauler: [3, 8, 21], tanker: [5, 12], tug: [2, 7, 11], packet: [4, 9], barge: [6, 14], lighter: [1, 10], clipper: [2, 5] };
+  const accents = { drone: [0.5, 1.0, 0.8], hauler: [1.0, 0.72, 0.45], tanker: [1.0, 0.62, 0.35], tug: [1.0, 0.8, 0.35], packet: [0.55, 0.88, 1.0], barge: [1.0, 0.66, 0.4], lighter: [0.5, 1.0, 0.8], clipper: [0.6, 0.9, 1.0] };
   for (const [k, list] of Object.entries(seeds)) fam[k] = list.map((sd) => ({ ...design(k, sd), accent: accents[k], seed: sd }));
   return fam;
 }
@@ -521,8 +544,15 @@ export class FleetTraffic {
       FORMATION.vee.forEach((sl, j) => S.push({ route: conv, phase: g * conv.T * 0.5, design: pick(j ? 'hauler' : 'tanker', j + g), scale: 1.3, slot: sl, seed: 110 + g * 5 + j, fidget: 0.3 }));
     }
     const sDesigns = [...new Set(S.map((r) => r.design))];
+    // ---- the reclamation crews' drones, working between the three tenders over the Halo
+    const T = [], crews = [tenderCircuit(0), tenderCircuit(1)];
+    for (let i = 0; i < 9; i++) {
+      const g = i % 2, R = crews[g], n = g ? 4 : 5;
+      T.push({ route: R, phase: (Math.floor(i / 2) / n) * R.T, design: pick('drone', i), scale: 1, slot: [0, 0, 0], seed: 130 + i, fidget: 1 });
+    }
+    this.tenders = new StationTraffic(space, 'tenders', fleet.tenderGroup, T, [...new Set(T.map((r) => r.design))], { engineColor: [0.55, 1.0, 0.85] });
     this.selene = new StationTraffic(space, 'selene', fleet.refinery, S, sDesigns, { engineColor: [1.0, 0.7, 0.42] });
-    this.stations = [this.harbour, this.selene];
+    this.stations = [this.harbour, this.selene, this.tenders];
   }
 
   update(sim, realTime, dt, space) {
