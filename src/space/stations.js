@@ -226,14 +226,32 @@ export function buildCraneMast(h = 300) {
 function buildTetherPod() {
   const B = new CB();
   B.push(new THREE.Matrix4().makeRotationX(-Math.PI / 2));
-  lathe(B, [[14, -30, CK.DARK], [34, -26, CK.HULL], [38, -12, CK.GLASS], [38, 10, CK.HULL], [30, 24, CK.BRONZE], [14, 30, CK.DARK]], 20, 0, { closedProfile: true });
+  const b = PORT_LIFE.podBore;
+  lathe(B, [[b, -30, CK.DARK], [34, -26, CK.HULL], [38, -12, CK.GLASS], [38, 10, CK.HULL], [30, 24, CK.BRONZE], [b, 30, CK.DARK]], 20, 0, { closedProfile: true });
   B.pop();
   return B.geometry();
 }
 
+/**
+ * The port tethers as structure under the station: each ribbon (20 m wide) hangs from its
+ * sheave, banded by beacon collars every 500 m that the tether pods' bores pass over.
+ */
+export function buildPortTethers(xs = PORT_LIFE.tetherX, top = PORT_LIFE.tetherTopY, len = PORT_LIFE.tetherShown) {
+  const B = new CB(), lamps = [];
+  for (const x of xs) {
+    B.box(x, top - len / 2, 0, 1, len, PORT_LIFE.ribbonW, CK.HULL);
+    for (const z of [-PORT_LIFE.ribbonW / 2, PORT_LIFE.ribbonW / 2]) B.box(x, top - len / 2, z, 2, len, 0.8, CK.BRONZE);
+    for (let y = top - 250; y > top - len; y -= 500) {
+      B.box(x, y, 0, 3, 4, PORT_LIFE.ribbonW + 3, CK.LANTERN);
+      if (Math.round((top - y - 250) / 500) % 4 === 0) lamps.push({ p: V(x, y, PORT_LIFE.ribbonW / 2 + 4), r: 6, color: LAMP.AMBER, i: 2.2, breathe: 0.3 }, { p: V(x, y, -PORT_LIFE.ribbonW / 2 - 4), r: 6, color: LAMP.AMBER, i: 2.2, breathe: 0.3 });
+    }
+  }
+  return { geo: B.geometry(), lamps };
+}
+
 export const PORT_LIFE = {
   shuttlePeriod: 900, approachKm: 12, gateY: -8000, craneY: 520, craneZ: 21150, podSpeed: 180, podSpan: 22000,
-  tetherX: [-9000, 0, 9000], tetherTopY: -1420,
+  tetherX: [-9000, 0, 9000], tetherTopY: -1420, tetherShown: 22500, ribbonW: 20, podBore: 14,
 };
 
 /**
@@ -243,7 +261,7 @@ export const PORT_LIFE = {
  */
 export class PortLife {
   constructor(mesh, st, { seed = 0, tethers = PORT_LIFE.tetherX } = {}) {
-    PortLife.shared ||= { crane: buildCourtCrane(), mast: buildCraneMast(PORT_LIFE.craneY), shuttle: buildShuttle(110).geo, pod: buildTetherPod() };
+    PortLife.shared ||= { crane: buildCourtCrane(), mast: buildCraneMast(PORT_LIFE.craneY), shuttle: buildShuttle(110).geo, pod: buildTetherPod(), tethers: buildPortTethers() };
     const K = PortLife.shared;
     this.seed = seed;
     this.tethers = tethers;
@@ -266,6 +284,11 @@ export class PortLife {
       return im;
     };
     this.shuttles = inst(K.shuttle, 2);
+    if (tethers === PORT_LIFE.tetherX) {
+      const tm = craftPart(mesh, K.tethers.geo);
+      addLamps(tm, K.tethers.lamps, { minPx: 1.2 });
+      this.group.add(tm);
+    }
     this.pods = inst(K.pod, Math.max(1, 2 * tethers.length));
     this.pods.count = 2 * tethers.length;
     mesh.add(this.group);

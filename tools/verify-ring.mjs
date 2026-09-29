@@ -12,7 +12,7 @@ import * as THREE from 'three';
 import { SpaceSim, R_EARTH, MERIDIAN_LON, COUNTERWEIGHT_ALT, bodyDir } from '../src/space/sim.js';
 import { Rings } from '../src/space/rings.js';
 import { Elevator } from '../src/space/elevator.js';
-import { HaloPorts, buildPortStation, PORT_LIFE, buildCourtCrane } from '../src/space/stations.js';
+import { HaloPorts, buildPortStation, PORT_LIFE, buildCourtCrane, buildPortTethers } from '../src/space/stations.js';
 import { HALO_PORTS } from '../src/space/earthData.js';
 import { TILE_L, WINDOW, MINOR_RANGE_KM, GANTRY, rotorGeometry, buildGantry, aircarLanes } from '../src/space/haloDistricts.js';
 import { buildPassengerClimber, buildFreightClimber, buildTetherSegment, GUIDE_OFFSET, RIBBON, CABLE_R, MARKER_PROUD, BORE_R } from '../src/space/climbers.js';
@@ -270,6 +270,13 @@ for (const seat of ports.craneSeats) {
 for (let t = 0; t < 900; t += 3) for (const side of [0, 1]) {
   const y = ports.shuttleY(t, side, 123);
   if (y !== null) { assert.ok(y + 57 < -7300 - 20 && y > -24000 + 60, 'Gate shuttles stay under the gate trusses and inside the port body'); }
+}
+{
+  // pods ride over the ribbons and their collars; the shown ribbon ends inside the port body
+  const w = PORT_LIFE.ribbonW, collarHalf = Math.hypot(1.5, (w + 3) / 2), edgeHalf = Math.hypot(1, w / 2 + 0.8);
+  assert.ok(PORT_LIFE.podBore > collarHalf + 1 && PORT_LIFE.podBore > edgeHalf + 1, 'Tether pods clear the ribbon collars');
+  const pt = buildPortTethers(); pt.geo.computeBoundingBox();
+  assert.ok(pt.geo.boundingBox.min.y > -24000 && Math.abs(pt.geo.boundingBox.max.y - PORT_LIFE.tetherTopY) < 1e-6, 'Port ribbons hang from the sheaves');
 }
 for (let t = 0; t < 400; t += 5) for (let k = 0; k < 6; k++) { const y = ports.podY(t, k, 7); assert.ok(y < -1700 && y > -24000, 'Tether pods ride below the sheaves, inside the port body'); }
 space.camera.position.copy(bodyDir(0, THREE.MathUtils.degToRad(HALO_PORTS[1].lon)).multiplyScalar(R_EARTH + 640)).applyQuaternion(sim.earthQuat);
