@@ -13,6 +13,8 @@ import { surfaceY } from '../src/space/lunarSite.js';
 import { TOWNS } from '../src/space/moonBake.js';
 import { R_MOON } from '../src/space/sim.js';
 import { LunarHops } from '../src/space/lunarHops.js';
+import { LunarRingTrains, RING_R, RAIL_Z, RAIL_TOP } from '../src/space/lunarRing.js';
+import { buildLunarPort } from '../src/space/lunarPort.js';
 import { stationFrame } from '../src/space/stations.js';
 
 let fails = 0;
@@ -326,6 +328,32 @@ report.landingTris = tris(L.geo); report.worksTris = tris(W.geo);
   report.hopsUpdateMs = +((performance.now() - t0) / 300).toFixed(4);
   ok(H.craft.instanceMatrix.array.every(Number.isFinite) && H.iLamp.array.every(Number.isFinite), 'hoppers finite');
   ok(report.hopsUpdateMs < 0.05, `hops update ${report.hopsUpdateMs} ms`);
+}
+
+// ------------------------------------------------------------------ ring expresses --
+{
+  const g = new THREE.Group(); g.updateMatrixWorld(true);
+  const RT = new LunarRingTrains(g);
+  const cam = new THREE.Vector3(RING_R / 1000 + 3, 0.5, 20);
+  t0 = performance.now();
+  let n = 0;
+  for (let i = 0; i < 200; i++) n = RT.update(i * 1.3, cam);
+  report.ringTrainMs = +((performance.now() - t0) / 200).toFixed(4);
+  report.ringCars = n;
+  ok(n > 0 && n <= RT.max, `ring expresses drawn near the ring (${n})`);
+  const m = new THREE.Matrix4(), p = new THREE.Vector3();
+  for (let i = 0; i < n; i++) { RT.cars.getMatrixAt(i, m); p.setFromMatrixPosition(m); ok(Math.abs(Math.hypot(p.x, p.z) - RING_R - RAIL_TOP) < 0.5 && Math.abs(Math.abs(p.y) - RAIL_Z) < 1e-6, 'express on its rail'); }
+  ok(RT.update(0, new THREE.Vector3(0, 3000, 0)) === 0, 'no expresses drawn far from the ring');
+  ok(report.ringTrainMs < 0.1, `ring expresses update ${report.ringTrainMs} ms`);
+  // the Exchange straddles the rails without closing over them (its triangles clear the cars' corridor)
+  const d = buildLunarPort(), P = d.geo.getAttribute('position'), ix = d.geo.index.array;
+  let hits = 0;
+  for (let t = 0; t < ix.length; t += 3) {
+    let y0 = 1e9, y1 = -1e9, z0 = 1e9, z1 = -1e9;
+    for (let k = 0; k < 3; k++) { const i = ix[t + k]; y0 = Math.min(y0, P.getY(i)); y1 = Math.max(y1, P.getY(i)); z0 = Math.min(z0, P.getZ(i)); z1 = Math.max(z1, P.getZ(i)); }
+    for (const sg of [1, -1]) if (y1 > RAIL_TOP - 2 && y0 < RAIL_TOP + 18 && z1 > sg * RAIL_Z - 8 && z0 < sg * RAIL_Z + 8) hits++;
+  }
+  ok(hits === 0, `the Exchange clears the expresses' corridor (${hits} triangles)`);
 }
 
 // ------------------------------------------------------------------ budgets --

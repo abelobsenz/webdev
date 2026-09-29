@@ -16,6 +16,7 @@ import { LunarTraffic } from './lunarTraffic.js';
 import { buildMediiWorks } from './lunarWorks.js';
 import { LunarOutposts } from './lunarOutposts.js';
 import { LunarHops } from './lunarHops.js';
+import { LunarRingTrains } from './lunarRing.js';
 
 // The terraformed Moon: seas in the old maria, green highlands softened craters,
 // polar ice, clouds, city lights, a thin blue atmosphere and an equatorial ring.
@@ -317,6 +318,7 @@ export class Moon {
     // settlements (lunarOutposts.js) one at a time as the camera nears each
     this.life = null;
     this.outposts = new LunarOutposts(this.group);
+    this.ringTrains = new LunarRingTrains(this.group);   // expresses on the ring's transit rails (lunarRing.js)
     this.hops = new LunarHops(this.group);           // hoppers between Medii and the outposts (lunarHops.js)
   }
 
@@ -401,6 +403,7 @@ export class Moon {
       }
       this.outposts.update(realTime, cam, this.space.camera, this.space.size.y);
       this.hops.update(realTime);
+      this.ringTrains.update(realTime, cam);
     }
     this.atmoU.uCenter.value.copy(sim.moonPos);
     // the air shell is seen from within below 229 km: draw its inner face then (the sky over the
