@@ -7,7 +7,7 @@ import { CB, CK } from '../craft/craftGeometry.js';
 import { R_EARTH, R_MOON, GEO_ALT, MOON_DIST } from './sim.js';
 import { COL, WINDOW_CENTRES, buildRotor, buildWindows, buildMirror, buildStator, buildAgriRing, buildPairFrame } from './lagrangeColony.js';
 import { createWindowMaterial, createMirrorMaterial, bindWindow, bindMirror } from './lagrangeShaders.js';
-import { GATE, buildGateway, buildGatewayWheel } from './lagrangeGateway.js';
+import { GATE, buildGateway, buildGatewayWheel, buildLiftCar, liftRange } from './lagrangeGateway.js';
 import { StationTraffic, makeRoute, buildFamilies } from './fleetTraffic.js';
 import { LagrangeLife } from './lagrangeLife.js';
 
@@ -168,6 +168,11 @@ export class LagrangeColonies {
       });
       const tugs = makeRoute([{ k: 'track', c: V(0, 0.75, 0), a: V(0, 0, 1), b: V(1, 0, 0), L: 1.4, r: 0.9, dur: 240 }], { fadeIn: 0, fadeOut: 0 });
       for (let i = 0; i < 3; i++) ro.push({ route: tugs, phase: (i / 3) * tugs.T, design: pick('tug', i), scale: 1, slot: [0, 0, 0], seed: 330 + i, fidget: 1 });
+      // inspection drones circling the station between the wheels and the radiators / solar wings
+      for (const z of [-0.42, 0.42]) {
+        const ring = makeRoute([{ k: 'track', c: V(0, 0, z), a: V(1, 0, 0), b: V(0, 1, 0), L: 0.001, r: 0.7, dur: 150 }], { fadeIn: 0, fadeOut: 0 });
+        for (let i = 0; i < 3; i++) ro.push({ route: ring, phase: (i / 3) * ring.T + (z > 0 ? 20 : 0), design: pick('drone', i), scale: 1.5, slot: [0, 0, 0], seed: 340 + i + (z > 0 ? 5 : 0), fidget: 1 });
+      }
       this.gateway.traffic = new StationTraffic(space, 'lagrange-L1', this.gateway.group, ro, [...new Set(ro.map((r) => r.design))], { engineColor: LAMP.AMBER });
     }
     this.traffic = [...this.pairs.map((p) => p.traffic), this.gateway.traffic];
@@ -267,6 +272,22 @@ export class LagrangeColonies {
     P.ramAlpha = a;
   }
 
+  /** Lift cars up and down a wheel's spokes: eased runs with dwells at hub and rim (wheel frame, metres). */
+  _lifts(w, t, wi) {
+    const A = w.lifts.instanceMatrix.array, r0 = w.range[0], r1 = w.range[1];
+    for (let k = 0; k < 4; k++) {
+      const ph = ((t / 90 + k * 0.29 + wi * 0.13) % 1 + 1) % 1;
+      // 0-0.15 dwell at the hub, run out, 0.5-0.65 dwell at the rim, run in
+      const u = ph < 0.15 ? 0 : ph < 0.5 ? smooth(0.15, 0.5, ph) : ph < 0.65 ? 1 : 1 - smooth(0.65, 1, ph);
+      const rc = r0 + (r1 - r0) * u, a = (k / 4) * TAU, c = Math.cos(a), s = Math.sin(a), o = k * 16;
+      A[o] = -s; A[o + 1] = c; A[o + 2] = 0; A[o + 3] = 0;
+      A[o + 4] = c; A[o + 5] = s; A[o + 6] = 0; A[o + 7] = 0;
+      A[o + 8] = 0; A[o + 9] = 0; A[o + 10] = 1; A[o + 11] = 0;
+      A[o + 12] = c * rc; A[o + 13] = s * rc; A[o + 14] = 0; A[o + 15] = 1;
+    }
+    w.lifts.instanceMatrix.needsUpdate = true;
+  }
+
   // --------------------------------------------------------------- gateway --
   _gateway() {
     const space = this.space, pt = this.parts;
@@ -279,6 +300,7 @@ export class LagrangeColonies {
     const hull = craftMesh(pt.gate.geo, { scale: 1 }, mat);
     m.add(hull);
     addLamps(hull, pt.gate.lamps, { minPx: 1.2 });
+    const liftGeo = buildLiftCar();
     const wheels = GATE.WHEELS.map((w, i) => {
       const g = new THREE.Group();
       g.position.z = w.z;
@@ -286,7 +308,10 @@ export class LagrangeColonies {
       g.add(mesh);
       addLamps(mesh, pt.wheels[i].lamps, { minPx: 1.2 });
       m.add(g);
-      return { g, spin: w.spin };
+      // lift cars on the four spokes, climbing between the hub and the rim
+      const lifts = instancedPart(mesh, liftGeo, 4);
+      g.add(lifts);
+      return { g, spin: w.spin, lifts, range: liftRange(w) };
     });
     const approach = this._approach('lagrange-L1', approachLamps([-1, 1].map((s) => ({ c: V(0, 0, s * 150), r: 3, n: 12, from: V(0, 0, s * 12), to: V(0, 0, s * 140) })), LAMP.AMBER), 155);
     space.scene.add(group);
@@ -404,7 +429,11 @@ export class LagrangeColonies {
     lagrangeFrame(sim, 'L1', G.group.quaternion);
     G.approach.position.copy(G.pos); G.approach.quaternion.copy(G.group.quaternion);
     G.m.visible = cp.distanceTo(G.pos) < NEAR_KM * 0.4;
-    for (const w of G.wheels) w.g.rotation.z = (w.spin * t) % TAU;
+    for (let i = 0; i < G.wheels.length; i++) {
+      const w = G.wheels[i];
+      w.g.rotation.z = (w.spin * t) % TAU;
+      if (G.m.visible) this._lifts(w, t, i);
+    }
     this.pairs[0].group.updateMatrixWorld(true); this.pairs[1].group.updateMatrixWorld(true); G.group.updateMatrixWorld(true);
     this.pairs[0].approach.updateMatrixWorld(true); this.pairs[1].approach.updateMatrixWorld(true); G.approach.updateMatrixWorld(true);
     // near detail: built on the first close approach, shown while close

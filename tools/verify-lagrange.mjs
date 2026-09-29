@@ -173,6 +173,21 @@ ok(rMax <= COL.ROTOR_MAX_R, `rotor's outer works within ${COL.ROTOR_MAX_R} m of 
   ok(bad === 0, 'mirror rams run from the longeron crests to the mirror edges at every opening');
 }
 
+{
+  // gateway lift cars ride their spokes between the hub's shell and the rim's inner wall
+  let bad = 0;
+  lag.gateway.m.visible = true;
+  for (let t = 0; t < 180; t += 3) lag.gateway.wheels.forEach((w, wi) => {
+    lag._lifts(w, t, wi);
+    const W = GATE.WHEELS[wi], A = w.lifts.instanceMatrix.array;
+    for (let k = 0; k < 4; k++) {
+      const rc = Math.hypot(A[k * 16 + 12], A[k * 16 + 13]);
+      if (rc - 9.2 < GATE.SPINE_R + 60 + 1 || rc + 9.2 > W.R - W.r - 1) bad++;
+    }
+  });
+  ok(bad === 0, 'gateway lift cars stay on their spokes, clear of hub and rim');
+}
+
 // ---- near detail (built on approach): force it, time it, check what it seats
 lag.life.build(lag.families);
 ok(lag.life.buildMs < 400, `near detail built in ${lag.life.buildMs.toFixed(0)} ms (on first approach)`);

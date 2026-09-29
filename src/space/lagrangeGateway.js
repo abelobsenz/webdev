@@ -93,6 +93,27 @@ export function buildGateway() {
   return { geo: B.geometry(), lamps, berths };
 }
 
+/**
+ * A lift car that climbs a wheel spoke (metres; the spoke runs along local +y through the car's
+ * open core): glazed walls round a 20 m shaft, bronze collars top and bottom, a lantern roof.
+ */
+export function buildLiftCar() {
+  const B = new CB();
+  for (const s of [-1, 1]) {
+    B.box(s * 11.5, 0, 0, 3, 16, 26, CK.GLASS);
+    B.box(0, 0, s * 11.5, 20, 16, 3, CK.GLASS);
+    B.box(s * 11.5, s * 8.6, 0, 3.6, 1.2, 27, CK.BRONZE);
+    B.box(0, s * 8.6, s * 11.5, 21, 1.2, 3.6, CK.BRONZE);
+  }
+  B.box(0, 9.6, 11.5, 8, 1, 2, CK.LANTERN);
+  return B.geometry();
+}
+
+/** Radial travel of a lift car on wheel w: [inner, outer] centre radii, clear of hub and rim. */
+export function liftRange(w) {
+  return [GATE.SPINE_R + 58 + 8 + 10, w.R - w.r + 4 - 8 - 10];
+}
+
 /** One habitat wheel (axis z, centred at the origin). Returns { geo, lamps }. */
 export function buildGatewayWheel(w) {
   const B = new CB();
