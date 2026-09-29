@@ -386,7 +386,8 @@ export function buildStator(seed = 3) {
     B.pop();
     for (const l of dc.lamps) lamps.push(l);
     berths.push({ p, dir: V(0, 0, -1), a });
-    for (let k = 1; k <= 5; k++) lamps.push({ p: V(c * BERTH_R, s * BERTH_R, zP - 24 - k * 160), r: 7, color: i % 3 ? LAMP.AMBER : LAMP.GREEN, i: 2.4, phase: k * 0.12, breathe: 0.8 });
+    // lead-in lights either side of the collar face (a string of lamps hanging in empty space read as a gizmo)
+    for (const x of [-24, 24]) lamps.push({ p: V(c * BERTH_R - s * x, s * BERTH_R + c * x, zP - 30), r: 6, color: i % 3 ? LAMP.AMBER : LAMP.GREEN, i: 2.6, phase: i / BERTHS, breathe: 0.8 });
   }
   // the harbour hall: a drum of hangar decks with a dark door ring
   B.at(0, 0, zP - 1500);

@@ -393,7 +393,9 @@ export class LagrangeColonies {
     const lamps = [];
     this.laneData = LANES.map(([from, to], li) => {
       const L = { from, to, buoy0: lamps.length, ship0: 0, A: new THREE.Vector3(), B: new THREE.Vector3(), C: new THREE.Vector3() };
-      for (let i = 0; i < LANE_BUOYS; i++) lamps.push({ p: new THREE.Vector3(), r: 0.4, color: i % 2 ? LAMP.AMBER : LAMP.BLUE, i: 8, phase: i / LANE_BUOYS, breathe: 0.6 });
+      // lane marker beacons: real-sized (60 m of glow), so from afar they vanish instead of stringing
+      // dotted arcs across the sky; a ship on the lane sees them flash as it passes
+      for (let i = 0; i < LANE_BUOYS; i++) lamps.push({ p: new THREE.Vector3(), r: 0.06, color: i % 2 ? LAMP.AMBER : LAMP.BLUE, i: 4, phase: i / LANE_BUOYS, breathe: 0.9 });
       L.ship0 = lamps.length;
       for (let i = 0; i < LANE_SHIPS; i++) {
         const out = i % 2 === 0;
