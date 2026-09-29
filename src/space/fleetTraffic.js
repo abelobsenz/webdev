@@ -311,7 +311,7 @@ export class StationTraffic {
       this.group.add(im);
       // spinning parts (a clipper's habitat rings): their own instanced meshes, same material
       const spins = (d.spin?.rings || []).map((ring) => {
-        const sm = new THREE.InstancedMesh(ring.geo, mat, im.count);
+        const sm = new THREE.InstancedMesh(ring.geo, mat, im.instanceMatrix.count);   // same capacity as the hulls (im.count is 0 here)
         sm.count = 0; sm.frustumCulled = false; sm.renderOrder = 3; sm.onBeforeRender = im.onBeforeRender;
         this.group.add(sm);
         return { im: sm, omega: ring.omega };
