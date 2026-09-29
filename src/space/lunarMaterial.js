@@ -192,12 +192,17 @@ void main() {
     // blue-grey slate render; a darker string course every fourth storey, a cornice line
     // under the roof of each block, soot under the sills
     float bh = hash12(floor(f.x / 48.0) + vec2(3.7, floor(f.y / 57.6)));
-    vec3 stoneC = bh < 0.35 ? vec3(0.62, 0.595, 0.535) : (bh < 0.6 ? vec3(0.66, 0.55, 0.38) : (bh < 0.8 ? vec3(0.6, 0.47, 0.43) : vec3(0.5, 0.54, 0.57)));
+    // (real building stone: limestone ~0.45, sandstone and granite darker; the old values near
+    // 0.65 burned the town out to white speckle under a high Sun)
+    vec3 stoneC = bh < 0.35 ? vec3(0.47, 0.45, 0.405) : (bh < 0.6 ? vec3(0.5, 0.415, 0.29) : (bh < 0.8 ? vec3(0.45, 0.35, 0.32) : vec3(0.37, 0.4, 0.43)));
     alb = stoneC * (0.94 + 0.08 * mix(0.5, hash12(floor(f / vec2(16.0, 14.4)) + 2.0), detP));
     float course = cLine(f.y - 0.3, 14.4, 0.28, fw.y) * (1.0 - plinth);
     alb *= 1.0 - 0.22 * course * detP;
     float soot = (1.0 - smoothstep(0.0, 0.1, lc.y)) * (1.0 - smoothstep(0.3, 0.34, abs(lc.x - 0.5))) * (1.0 - plinth);
     alb *= 1.0 - 0.18 * soot * det;
+    // weathering under the thin new air: rain streaks trailing from the sills and cornices
+    float streak = vnoise(vec2(f.x * 1.3, f.y * 0.08 + bh * 11.0));
+    alb *= 1.0 - 0.12 * smoothstep(0.55, 0.9, streak) * detP * (1.0 - plinth);
     alb = mix(alb, vec3(0.06, 0.07, 0.08), wv * 0.9);
     alb *= 1.0 - 0.12 * plinth;
     rough = mix(0.7, 0.1, wv); metal = 0.0;
@@ -236,10 +241,16 @@ void main() {
     alb = mix(alb, vec3(0.02, 0.05, 0.018), mix(0.25, tree, det));
     rough = 0.9;
   } else if (k < 25.5) {
-    // tiled roof: bronze-grey tiles in courses
+    // tiled roof, each roof its own (the builder offsets facade x by 1000 m a roof): terracotta,
+    // slate, bronze-grey shingle or verdigris copper, in courses, each tile a shade apart, the
+    // lower courses darkened by run-off and lichen toward the eaves
+    float rid = hash12(vec2(floor((f.x + 500.0) / 1000.0), 3.0));
+    vec3 tileC = rid < 0.4 ? vec3(0.34, 0.16, 0.1) : (rid < 0.65 ? vec3(0.14, 0.15, 0.17) : (rid < 0.85 ? vec3(0.3, 0.25, 0.2) : vec3(0.16, 0.29, 0.25)));
     float course = gridLine(f.y, 0.9, 0.05, fw.y) * det;
-    alb = vec3(0.33, 0.27, 0.22) * (0.9 + 0.12 * mix(0.5, hash12(floor(f / vec2(6.0, 0.9))), detP)) * (1.0 - 0.3 * course);
-    rough = 0.55; metal = 0.2;
+    float tileJ = hash12(floor(f / vec2(0.45, 0.9)) + 5.0);
+    alb = tileC * (0.9 + 0.12 * mix(0.5, hash12(floor(f / vec2(6.0, 0.9))), detP)) * (1.0 - 0.3 * course) * mix(1.0, 0.88 + 0.24 * tileJ, det);
+    alb *= 1.0 - 0.16 * (1.0 - smoothstep(0.0, 2.8, f.y));
+    rough = rid < 0.4 ? 0.7 : (rid < 0.65 ? 0.42 : 0.5); metal = rid > 0.85 ? 0.35 : 0.05;
   } else if (k < 26.5) {
     // reflecting pool: dark water mirroring the sky
     alb = vec3(0.01, 0.02, 0.025); rough = 0.05; metal = 0.0;
@@ -316,12 +327,25 @@ void main() {
   vec3 eDir = toE / max(dE, 1.0);
   vec3 earthL = uSunE * vec3(0.55, 0.7, 1.0) * 2.4e-3 * uEarthLit * smoothstep(-0.05, 0.1, dot(upV, eDir));
   vec3 skyL = uSunE * vec3(0.03, 0.05, 0.1) * smoothstep(-0.1, 0.3, mu) * (1.0 - smoothstep(20.0, 80.0, hh));
+  // moonshine: the lit Moon below fills the undersides and the shade (albedo ~0.13, the disc
+  // filling (R/r)^2 of the view straight down; from the ground this is the bounce off the
+  // sunlit land round a building). The lit share of the disc under an orbiter follows the Sun's
+  // height over the point beneath it, softened by how much of the globe it sees.
+  float Fm = ${R_MOON.toFixed(1)} * ${R_MOON.toFixed(1)} / max(rr * rr, 1.0);
+  float litDisc = clamp(mu + 0.3 * (1.0 - Fm), 0.0, 1.0);
+  float faceDown = clamp(0.5 - 0.5 * dot(N, upV), 0.0, 1.0);
+  vec3 moonL = uSunE * vec3(0.105, 0.13, 0.115) * Fm * litDisc * mix(faceDown, faceDown * faceDown, 1.0 - Fm) * 0.9;
+  // contact darkening: a wall darkens toward its foot (facade y is height above the footing
+  // for stone, dressed stone and sintered regolith), where the ground hides half the sky
+  float wallK = 1.0 - abs(dot(N, upV));
+  float footAO = (k > 19.5 && k < 20.5) || (k > 26.5 && k < 27.5) || (k > 28.5 && k < 29.5) ? 1.0 - 0.32 * exp(-max(f.y, 0.0) / 1.6) * wallK : 1.0;
+  alb *= footAO;
   float ndl = max(dot(N, uSunView), 0.0);
   vec3 H = normalize(V + uSunView);
   float sp = pow(max(dot(N, H), 0.0), mix(80.0, 8.0, rough)) * mix(0.6, 0.15, rough);
   vec3 F0 = mix(vec3(0.04), alb, metal);
   float fres = pow(1.0 - max(dot(N, V), 0.0), 5.0);
-  vec3 col = alb * (1.0 - metal * 0.8) / 3.14159 * (sunL * ndl + earthL * max(dot(N, eDir), 0.0) + skyL * (0.55 + 0.45 * max(dot(N, upV), 0.0)));
+  vec3 col = alb * (1.0 - metal * 0.8) / 3.14159 * (sunL * ndl + earthL * max(dot(N, eDir), 0.0) + skyL * (0.55 + 0.45 * max(dot(N, upV), 0.0)) + moonL * footAO);
   col += min((F0 + (1.0 - F0) * fres * 0.3) * sp * sunL * ndl, sunL * 0.5);
   // glossy surfaces mirror the sky: dark blue by day, black at night
   col += (F0 + (1.0 - F0) * fres) * (1.0 - rough) * skyL * 0.6;

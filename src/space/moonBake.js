@@ -368,13 +368,17 @@ const dir = ([lat, lon], v = new THREE.Vector3()) => {
 export class MoonBake {
   constructor(renderer, size) {
     this.renderer = renderer;
-    const mk = (s) => {
-      const rt = new THREE.WebGLCubeRenderTarget(s, { type: THREE.UnsignedByteType, format: THREE.RGBAFormat, generateMipmaps: true, minFilter: THREE.LinearMipmapLinearFilter, magFilter: THREE.LinearFilter, depthBuffer: false });
+    // Albedo+height and normals bake to half floats: in 8 bits the height code stepped every
+    // ~65 m at 2 km altitude and the normals every half a degree, which read as terraced
+    // plateaus and square shadow blocks under a low Sun. Clouds keep 8 bits.
+    const mk = (s, type = THREE.UnsignedByteType) => {
+      const rt = new THREE.WebGLCubeRenderTarget(s, { type, format: THREE.RGBAFormat, generateMipmaps: true, minFilter: THREE.LinearMipmapLinearFilter, magFilter: THREE.LinearFilter, depthBuffer: false });
       rt.texture.colorSpace = THREE.NoColorSpace;
       return rt;
     };
-    this.moonA = mk(size);
-    this.moonN = mk(size);
+    this.size = size;
+    this.moonA = mk(size, THREE.HalfFloatType);
+    this.moonN = mk(size, THREE.HalfFloatType);
     this.moonC = mk(Math.min(size, 512));
     const v4 = (a, w) => { const v = dir(a); return new THREE.Vector4(v.x, v.y, v.z, w); };
     this.mat = new THREE.ShaderMaterial({
