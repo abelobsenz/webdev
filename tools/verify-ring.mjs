@@ -16,6 +16,7 @@ import { HaloPorts, buildPortStation, PORT_LIFE, buildCourtCrane } from '../src/
 import { HALO_PORTS } from '../src/space/earthData.js';
 import { TILE_L, WINDOW, MINOR_RANGE_KM, GANTRY, rotorGeometry, buildGantry, aircarLanes } from '../src/space/haloDistricts.js';
 import { buildPassengerClimber, buildFreightClimber, buildTetherSegment, GUIDE_OFFSET, RIBBON, CABLE_R, MARKER_PROUD, BORE_R } from '../src/space/climbers.js';
+import { buildRelayCollar, buildRelayRing, RELAY, relayOmega, RELAY_ALTS } from '../src/space/tetherStations.js';
 import { WHEELS, WHEEL, STEM, TUGS, CAPSULE, wheelOmega, segDist, counterKeepOuts } from '../src/space/counterLife.js';
 
 const V = (x, y, z) => new THREE.Vector3(x, y, z);
@@ -182,6 +183,24 @@ const seg = buildTetherSegment();
 seg.geo.computeBoundingBox();
 assert.ok(Math.abs(seg.geo.boundingBox.max.x - GUIDE_OFFSET - CABLE_R) < 0.5, 'Guide cables at their offset');
 
+// relay waystations: climbers pass through the bore, the crew ring spins clear of the collar at 1 g
+{
+  const col = buildRelayCollar(), ring = buildRelayRing();
+  let laneGap = Infinity, ringIn = Infinity, collarOut = 0, ext = 0;
+  for (const g of [col.geo, ring.geo]) eachVertex(g, (x, y, z) => {
+    for (const lx of [-GUIDE_OFFSET, GUIDE_OFFSET]) laneGap = Math.min(laneGap, Math.hypot(x - lx, z) - RELAY.climberR);
+    ext = Math.max(ext, Math.hypot(x, y, z));
+  });
+  eachVertex(ring.geo, (x, y, z) => { ringIn = Math.min(ringIn, Math.hypot(x, z)); assert.ok(Math.abs(y) <= RELAY.ringTube + 1e-6); });
+  eachVertex(col.geo, (x, y, z) => { if (Math.abs(y) < RELAY.ringTube + 5) collarOut = Math.max(collarOut, Math.hypot(x, z) > 700 ? 0 : Math.hypot(x, z)); });
+  out.relayClimberClearanceMetres = Math.round(laneGap);
+  out.relayBearingGapMetres = +(ringIn - collarOut).toFixed(1);
+  assert.ok(laneGap > 5, 'Climbers pass through the relay collars');
+  assert.ok(ringIn - collarOut >= 5, 'Relay crew rings turn clear of the fixed collar');
+  assert.ok(Math.abs(relayOmega() ** 2 * (RELAY.ringR + RELAY.ringTube) - 9.81) < 1e-9, 'Relay rings at 1 g');
+  assert.ok(ext < 1600, 'Relays inside their 1.6 km bodies');
+  assert.ok(RELAY_ALTS.every((a) => Math.abs(a - 35786) > 3000), 'Relays keep away from the Harbour');
+}
 // ------------------------------------------------------------ counterweight ----
 t0 = performance.now();
 const el = new Elevator(space, { climbers: 60 });

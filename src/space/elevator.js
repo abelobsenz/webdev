@@ -9,6 +9,7 @@ const _jw = new THREE.Vector3();
 import { ClimberCars } from './climbers.js';
 import { buildCounterweightRock } from './counterweightRock.js';
 import { CounterLife } from './counterLife.js';
+import { TetherStations } from './tetherStations.js';
 
 // Meridian's space elevator: the tether (surface -> Halo -> Geostationary
 // Harbour -> counterweight), its climbers, and the stations along it.
@@ -133,6 +134,8 @@ export class Elevator {
     this.group.add(this.climbers);
     this.cars = new ClimberCars(space, up, aC);
     this.group.add(this.cars.group);
+    // relay waystations clamped round the tether (tetherStations.js)
+    this.relays = new TetherStations(space, up, this.group);
     // stations
     const qStation = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), up);
     this.hullMats = [];
@@ -190,6 +193,7 @@ export class Elevator {
     if (space) this.station.update(sim, realTime, space);
     if (space) this.cars.update(sim, realTime, dt, space);
     this.counterLife.update(realTime);
+    this.relays.update(realTime, space);
     if (space && space.camera && space.size) {
       const px = pixelRadius(space.camera, this.junction.getWorldPosition(_jw), 22, space.size.y);
       this.junctionLife.group.visible = px > 160;
