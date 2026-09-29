@@ -7,6 +7,7 @@ import { R_EARTH, MERIDIAN_LON, bodyDir } from './sim.js';
 import { Aurora } from './aurora.js';
 import { EARTH_DETAIL_GLSL, buildLaneTexture, buildArcTexture, arcologyUniforms, shipClock, trainClock } from './earthDetail.js';
 import { buildArcs } from './earthBake.js';
+import { EARTH_FINE_GLSL, EARTH_FINE_SHADOW_GLSL } from './earthFine.js';
 
 // The planet, rendered in one pass on a proxy sphere at the top of the
 // atmosphere. Each fragment ray-traces the ground and the cloud shell and
@@ -49,6 +50,7 @@ uniform float uLightGain;
 uniform float uPixAng;
 uniform float uReady;
 uniform float uAtmoGain;
+uniform float uLimbGain;
 varying vec3 vWorld;
 
 ${ATMO_CONSTANTS}
@@ -116,26 +118,8 @@ float landBias(vec3 b) {
   float lat = asin(clamp(b.y, -1.0, 1.0));
   return land * (-0.26 * arid + 0.06 * (1.0 - arid) * exp(-lat * lat / 0.04));
 }
-// fractal detail from ~60 km down to ~0.6 km: the mesoscale octaves gather the cumulus into
-// clusters and streets with clear sea between, the cumulus octaves (3-6 km) make the puffs:
-// x the resolved sum, y the RMS amplitude of the octaves still below a few pixels
-vec2 cloudDetail(vec3 q, float fp, float streets) {
-  float s = 0.0, u = 0.0, wl = 60.0;
-  // cumulus lines up in streets along the (zonal) wind: the coarse octaves drawn out east-west
-  vec3 x = q * (6371.0 / 60.0) * vec3(1.0, 1.0 + 1.4 * streets, 1.0);
-  for (int i = 0; i < 7; i++) {
-    float a = i == 0 ? 0.75 : i == 1 ? 0.8 : i == 2 ? 0.8 : i == 3 ? 0.8 : i == 4 ? 0.7 : i == 5 ? 0.55 : 0.4;
-    // (the street octaves are filtered by their short, north-south wavelength)
-    float wf = i <= 2 ? wl / (1.0 + 1.4 * streets) : wl;
-    float f = 1.0 - smoothstep(wf * 0.08, wf * 0.22, fp);
-    if (f > 0.0) s += a * f * snoise(x);
-    u += a * a * (1.0 - f) * (1.0 - f);
-    x = x * 2.13 + vec3(3.1, 7.7, 1.3);
-    if (i == 2) x.y /= 1.0 + 1.4 * streets;
-    wl /= 2.13;
-  }
-  return vec2(s, sqrt(u));
-}
+${EARTH_FINE_GLSL}
+
 // convection cells (~30 km): x = distance to the nearest centre, y = F2 - F1 (0 on the lanes)
 vec2 cellF(vec3 p) {
   vec3 base = floor(p - 0.5);
@@ -149,22 +133,21 @@ vec2 cellF(vec3 p) {
   return vec2(f1, f2 - f1);
 }
 const float CU_A = 0.11;     // detail amplitude of cumuliform cloud
-// Low and middle cloud at body direction b, footprint fp (km per pixel): x = cover, y = tau
-vec2 lowCloud(vec3 b, float fp, float bias, bool fine) {
+// Low and middle cloud at body direction b, footprint fp (km per pixel): x = cover, y = tau.
+// oct: the fractal octaves to evaluate (0 = the bake alone, its unresolved detail widening the
+// edge); the convection cells and towers only on the full evaluation of the deck itself.
+vec2 lowCloud(vec3 b, float fp, float bias, int oct) {
   vec4 w = weatherAt(b, fp);
   vec3 q = rotY(b, -uCloudRot);
   float P = w.r + bias;
   float S = w.g, O = w.b;
   float A = mix(CU_A, 0.035, S);
-  vec2 dt = vec2(0.0, 1.8);
-#if QUALITY > 0
-  if (fine) dt = cloudDetail(q, fp, 1.0 - S);
-#endif
+  vec3 dt = oct > 0 ? ef_cloudDetail(q, fp, 1.0 - S, oct) : vec3(0.0, EF_CD_RMS, 0.0);
+  bool fine = oct >= EF_CLOUD_OCT;
   float Pd = P + A * dt.x;
   float edge = 0.012 + 0.3 * A * dt.y;
   // cells: open (cloud in the lanes round clear hearts) and closed (bright hearts, dark lanes)
   float cellRes = 0.0, lane = 0.0, heart = 0.62;
-#if QUALITY > 0
   if (fine && (O > 0.02 || S > 0.3)) {
     cellRes = 1.0 - smoothstep(3.0, 8.0, fp);
     if (cellRes > 0.0) {
@@ -176,13 +159,14 @@ vec2 lowCloud(vec3 b, float fp, float bias, bool fine) {
       heart = smoothstep(0.02, 0.3, cf.y);
     }
   }
-#endif
   Pd += O * (mix(0.35, lane, cellRes) - 0.35) * 0.35;
   edge += O * 0.08 * (1.0 - cellRes);
   float cover = smoothstep(0.5 - edge, 0.5 + edge, Pd);
   float thick = clamp((Pd - 0.5) / 0.3, 0.0, 1.0);
   float tau = mix(mix(8.0, 5.0, S), 48.0, thick * (0.5 + 0.5 * thick)) * mix(1.0, mix(0.72, 1.12, mix(0.75, heart, cellRes)), S * (1.0 - O));
-#if QUALITY > 0
+  // the puffs' own relief where the cumulus octaves are resolved: domes thicker at their
+  // centres, thinner at their rims (their tops' height, and so their shading, from tau)
+  tau *= 1.0 + 0.9 * dt.z * clamp(dt.x * 2.2, -0.5, 0.5) * (1.0 - S);
   // deep convection resolved: the towers of a storm complex (~10 km domes, overshooting tops
   // punching through the anvil), their optical depth, and so their relief and shadows, heaped
   // at the centres of the updraughts
@@ -196,14 +180,14 @@ vec2 lowCloud(vec3 b, float fp, float bias, bool fine) {
       tau *= mix(1.0, 0.55 + 1.2 * dome * dome + 0.9 * over, convP * towerRes);
     }
   }
-#endif
   return vec2(cover, tau);
 }
+${EARTH_FINE_SHADOW_GLSL}
+
 // High ice cloud on its own shell: thin, fibrous, drawn out along the wind. x = cover, y = tau
 vec2 cirrusCloud(vec3 b, float fp, bool fine) {
   float c = weatherAt(b, fp).a;
   float e = 0.1;
-#if QUALITY > 0
   if (fine) {
     vec3 q = rotY(b, -uCloudRot);
     // fibres drawn out along the wind, each filtered by its short (north-south) wavelength:
@@ -213,7 +197,6 @@ vec2 cirrusCloud(vec3 b, float fp, bool fine) {
     c += fib * 0.22 * smoothstep(0.05, 0.35, c);
     e += 0.08 * (1.0 - f0) + 0.04 * (1.0 - f1);
   }
-#endif
   float cover = smoothstep(0.36 - e, 0.7 + e, c) * 0.9;
   return vec2(cover, mix(0.4, 2.6, smoothstep(0.4, 1.0, c)));
 }
@@ -476,11 +459,8 @@ void main() {
   vec4 B = texture(uSurfB, b);
   float H = A.a * 2.0 - 1.0;
   vec3 alb = A.rgb * A.rgb;
-  float Hd = H;
-#if QUALITY > 0
-  float coastW = exp(-abs(H) * 10.0) * smoothstep(14.0, 2.0, fp);
-  if (coastW > 0.01) Hd += (snoise(b * 1500.0) * 0.6 * (1.0 - smoothstep(1.0, 2.5, fp)) + snoise(b * 4100.0) * 0.4 * (1.0 - smoothstep(0.4, 1.0, fp))) * 0.05 * coastW;
-#endif
+  // the coast drawn below the bake's texels: headlands, coves, barrier islands
+  float Hd = H + ef_coast(b, H, fp);
   float ew = max(fwidth(Hd), 1e-4);
   float landF = smoothstep(-ew, ew, Hd);
   float bakedLand = step(0.0, H);
@@ -492,15 +472,11 @@ void main() {
 
   // relief normal (land only)
   vec3 dpdx = dFdx(pG), dpdy = dFdy(pG);
-  float hK = max(H, 0.0) * 6.0 * 3.5;        // km, exaggerated x3.5
-#if QUALITY > 0
-  // sub-texel ridges and valleys in the uplands (~18 km and ~6 km), each fading to flat
-  // while it still spans a few pixels; evaluated unconditionally so the derivatives stay defined
-  float mtn = smoothstep(0.02, 0.25, H);
-  float rA = 0.5 - abs(snoise(b * 350.0));
-  float rB = 0.5 - abs(snoise(b * 1100.0 + 7.0));
-  hK += mtn * (rA * 1.4 * (1.0 - smoothstep(3.0, 6.0, fp)) + rB * 0.45 * (1.0 - smoothstep(1.0, 2.0, fp)));
-#endif
+  // sub-texel ridges, drainage valleys, rock, snow, fields and dunes (earthFine.js), each
+  // fading to its mean while it still spans a few pixels; evaluated unconditionally so the
+  // derivatives of the relief stay defined
+  float valley;
+  float hK = (max(H, 0.0) * 6.0 + ef_land(b, fp, H, B.b, ice, landAlb, valley)) * 3.5;   // km, exaggerated x3.5
   float dhx = dFdx(hK), dhy = dFdy(hK);
   vec3 r1 = cross(dpdy, n), r2 = cross(n, dpdx);
   float det = dot(dpdx, r1);
@@ -517,22 +493,27 @@ void main() {
   float biasG = landBias(b);
   {
     vec2 ts = sphereHits(pG, sun, RC);
-    vec2 cs = lowCloud(uToBody * normalize(pG + sun * max(ts.y, 0.0)), max(fp, 0.4), biasG, fp < 8.0);
+    vec2 cs = lowCloud(uToBody * normalize(pG + sun * max(ts.y, 0.0)), max(fp, 0.4), biasG, fp < 6.0 ? EF_SHADOW_OCT : 0);
     vec2 ti = sphereHits(pG, sun, RCI);
     vec2 ci = cirrusCloud(uToBody * normalize(pG + sun * max(ti.y, 0.0)), max(fp, 0.4), false);
+    // (the deck's shadow edge softened by the Sun's disc over the ~8 km drop: ~70 m, so crisp)
     csh = (1.0 - 0.95 * cs.x * cloudR(cs.y)) * (1.0 - ci.x * cloudR(ci.y) * 1.5);
   }
   float shadow = rsh * csh;
-  vec3 skyAmb = uSunE * vec3(0.05, 0.085, 0.16) * smoothstep(-0.28, 0.35, mu) * (0.35 + 0.65 * clamp(mu + 0.3, 0.0, 1.0));
+  // skylight: blue by day, gold along the terminator, violet in twilight; the valleys see less sky
+  vec3 skyAmb = uSunE * ef_skyAmbient(mu);
+  float skyOcc = 1.0 - 0.35 * valley * landF;
   vec3 V = -rd;
   // land
   float ndl = max(dot(nb, sun), 0.0);
-  vec3 landCol = landAlb / S_PI * (uSunE * sunT * ndl * shadow + skyAmb * (0.6 + 0.4 * shadow));
+  vec3 landCol = landAlb / S_PI * (uSunE * sunT * ndl * shadow + skyAmb * (0.6 + 0.4 * shadow) * skyOcc);
   // ocean with sun glint
   // whitecaps: where the storms blow the sea is streaked with foam (Monahan's W = 3.8e-6 U^3.41:
   // a few per cent of the surface at gale force), lifting its albedo and roughening its glint
   float gale = smoothstep(0.55, 0.85, weatherAt(b, max(fp, 12.0)).r) * smoothstep(0.55, 0.85, abs(b.y));
   float U10 = 6.0 + 12.0 * gale;
+  // the water's own colour: blooms drawn into filaments by the eddies, sediment on the shelves
+  seaAlb = mix(ef_seaColour(b, fp, B.a, H, seaAlb), seaAlb, ice);
   float wcap = 3.84e-6 * pow(U10, 3.41);
   seaAlb += vec3(0.5 * wcap) * (1.0 - ice);
   vec3 seaCol;
@@ -546,10 +527,10 @@ void main() {
     // varied by weather systems, with calm slicks streaking it where they are resolved
     float wind = snoise(rotY(b, -uCloudRot) * 7.0) * 0.5 + 0.5;
     float al = mix(0.17, 0.25, wind);
-#if QUALITY > 0
     float slick = smoothstep(0.55, 0.8, snoise(b * vec3(90.0, 260.0, 90.0) + wind * 3.0) * 0.5 + 0.5) * (1.0 - smoothstep(2.0, 8.0, fp));
     al -= 0.05 * slick;
-#endif
+    // wind rows and cat's paws in the glint
+    al *= ef_windRows(b, fp);
     al *= 1.0 + 0.35 * gale;                         // Cox-Munk: rougher in a gale
     // the sea's texture in the glint, and the ships' wakes through it
     al *= od_seaTexture(b, fp, B.a);
@@ -572,7 +553,9 @@ void main() {
     float F = 0.02 + 0.98 * pow(1.0 - max(dot(V, Hh), 0.0), 5.0);
     float Fv = 0.02 + 0.98 * pow(clamp(1.0 - nv, 0.0, 1.0), 5.0);
     vec3 spec = vec3(D * G * F / (4.0 * nv + 1e-4)) * uSunE * sunT * shadow;
-    vec3 skyRefl = uSunE * vec3(0.03, 0.06, 0.13) * smoothstep(-0.2, 0.3, mu);
+    // the reflected sky whitens toward grazing (the horizon's haze), and warms at the terminator
+    float graze = clamp(1.0 - nv, 0.0, 1.0);
+    vec3 skyRefl = uSunE * (mix(vec3(0.03, 0.06, 0.13), vec3(0.075, 0.095, 0.14), graze * graze * graze) * smoothstep(-0.2, 0.3, mu) + ef_skyAmbient(mu) * 0.3);
     vec3 body = seaAlb / S_PI * (uSunE * sunT * nl * shadow + skyAmb);
     seaCol = body * (1.0 - Fv) + Fv * skyRefl + spec * (1.0 - ice);
     seaCol = mix(seaCol, seaAlb / S_PI * (uSunE * sunT * nl * shadow + skyAmb), ice);
@@ -654,7 +637,8 @@ void main() {
   vec3 bC = uToBody * nC;
   float fpC = max(max(tC.x, 0.0) * uPixAng, 1e-3);
   float muVC = max(abs(dot(rd, nC)), 0.04);
-  vec2 lcl = tC.x < tC.y ? lowCloud(bC, fpC, landBias(bC), true) : vec2(0.0);
+  float biasC = landBias(bC);
+  vec2 lcl = tC.x < tC.y ? lowCloud(bC, fpC, biasC, EF_CLOUD_OCT) : vec2(0.0);
   // what the deck hides of what lies below: the covered share times its direct-beam opacity
   float cA = lcl.x * (1.0 - exp(-lcl.y * 0.5 / muVC));
   // relief: the tops' height read from the optical depth, so towers catch the Sun on one side;
@@ -665,7 +649,7 @@ void main() {
   vec3 cr1 = cross(dcy, nC), cr2 = cross(nC, dcx);
   float cdet = dot(dcx, cr1);
   vec3 cgrad = abs(cdet) > 1e-9 ? (dax * cr1 + day * cr2) / cdet : vec3(0.0);
-  cgrad *= (1.0 - smoothstep(0.6, 3.0, fpC)) * 3.0;               // tops ~3 km proud
+  cgrad *= (1.0 - smoothstep(1.0, 5.0, fpC)) * EF_TOP_KM;         // tops ~3 km proud
   float cgl = length(cgrad);
   if (cgl > 2.0) cgrad *= 2.0 / cgl;
   vec3 nRel = normalize(nC - cgrad);
@@ -676,19 +660,28 @@ void main() {
     // self shadowing: the deck a little toward the Sun (nearer when close, so cells shade cells)
     vec3 st = normalize(sun - nC * muC + 1e-5);
     float off = clamp(fpC * 3.0, 1.5, 38.0);
-    vec2 cs = lowCloud(uToBody * normalize(nC + st * (off / 6371.0)), max(off * 0.5, fpC), 0.0, false);
+    vec2 cs = lowCloud(uToBody * normalize(nC + st * (off / 6371.0)), max(off * 0.5, fpC), 0.0, 0);
     float shade = exp(-2.4 * max(cs.x * cloudR(cs.y) - lcl.x * cloudR(lcl.y) * 0.4, 0.0));
-    float wrap = clamp((dot(nRel, sun) + 0.15) / 1.15, 0.0, 1.0) * smoothstep(-0.06, 0.02, muC);
+    // and at the scale of the puffs and towers: the height field marched toward the Sun
+    float h0 = EF_TOP_KM * hTop;
+    float selfRes = 1.0 - smoothstep(2.5, 5.0, fpC);
+    float selfSh = (lcl.x > 0.02 && selfRes > 0.0) ? mix(1.0, ef_cloudSelfShadow(nC, sun, muC, fpC, biasC, h0), selfRes) : 1.0;
+    // tall tops keep the Sun a little past the terminator (the horizon dips ~0.03 rad at 3 km)
+    float wrap = clamp((dot(nRel, sun) + 0.15) / 1.15, 0.0, 1.0) * smoothstep(-0.06, 0.02, muC + 0.01 * h0) * selfSh;
     float rs = ringShadow(pC, sun);
     // the cirrus overhead shades the deck
     vec2 ti = sphereHits(pC, sun, RCI);
     vec2 cio = cirrusCloud(uToBody * normalize(pC + sun * max(ti.y, 0.0)), 4.0, false);
     float cish = 1.0 - cio.x * cloudR(cio.y) * 1.5;
-    vec3 amb = uSunE * vec3(0.06, 0.09, 0.15) * smoothstep(-0.25, 0.3, muC);
+    // skylight on the tops, less of it down between them (the valleys of a cumulus field)
+    vec3 amb = uSunE * ef_skyAmbient(muC) * 1.15 * (0.62 + 0.38 * sqrt(clamp(lcl.y / 48.0, 0.0, 1.0)));
     // reflectance from the optical depth: thin cloud grey, thick cloud white
     float Rc = cloudR(lcl.y) / max(1.0 - exp(-lcl.y * 0.5 / muVC), 0.05);
     Rc = clamp(Rc, 0.0, 0.92);
     cloudCol = vec3(Rc) / S_PI * (uSunE * sunTc * wrap * (0.3 + 0.7 * shade) * rs * cish + amb * (0.7 + 0.3 * shade));
+    // silver edges: thin cloud toward the Sun passes the light on forward
+    float fwdC = pow(max(dot(rd, sun), 0.0), 10.0);
+    cloudCol += vec3(0.95, 0.96, 1.0) / S_PI * uSunE * sunTc * rs * cish * fwdC * exp(-lcl.y * 0.18) * 1.6 * smoothstep(-0.02, 0.05, muC);
     // city glow on cloud undersides, lightning in the deep convection
     float nightC = 1.0 - smoothstep(-0.10, 0.06, muC);
     // lights below glow through the deck and light it from beneath, softened by scattering
@@ -724,7 +717,7 @@ void main() {
     float nightI = 1.0 - smoothstep(-0.10, 0.06, muI);
     float Ri = clamp(cloudR(ic.y * 3.0) / max(1.0 - exp(-ic.y / muVI), 0.05), 0.0, 0.9);
     ciCol = vec3(0.93, 0.96, 1.0) * Ri / S_PI * (uSunE * sunTi * clamp((muI + 0.1) / 1.1, 0.0, 1.0) * (0.9 + 2.0 * fwd) * ringShadow(pI, sun)
-          + uSunE * vec3(0.07, 0.1, 0.16) * smoothstep(-0.25, 0.3, muI));
+          + uSunE * ef_skyAmbient(muI) * 1.3);
     ciCol += vec3(0.5, 0.6, 0.8) * 0.003 * max(dot(nI, uMoonDir), 0.0) * nightI;
   }
   emis *= (1.0 - cA * 0.85) * (1.0 - iA * 0.3);
@@ -738,6 +731,12 @@ void main() {
   vec3 L = integrateAtmo(ro, rd, t0, tEnd, hitG, sun, T);
   // artistic: thin the blue veil over the disc a little, keep the limb at full strength
   L *= mix(1.0, uAtmoGain, smoothstep(0.08, 0.6, dot(n, -rd)) * (hitG ? 1.0 : 0.0));
+  // the limb's glow: grazing rays through the lowest air, whiter haze beneath, blue above
+  {
+    float tMin = max(-dot(ro, rd), 0.0);
+    float hMin = length(ro + rd * tMin) - Rg;
+    L *= ef_limbGain(hMin, hitG, dot(n, -rd), uLimbGain);
+  }
   // noctilucent clouds at the summer mesopause
   vec3 nlc = od_nlc(ro, rd, sun, hitG ? tG.x : 1e9);
   // and nacreous clouds in the Antarctic winter stratosphere
@@ -795,6 +794,7 @@ export class Earth {
       uPixAng: { value: 0.001 },
       uReady: { value: 0 },
       uAtmoGain: { value: 0.36 },
+      uLimbGain: { value: 0.55 },
       uLaneTex: { value: LANES.tex },
       uIds: { value: bake.ids ? bake.ids.texture : null },
       uArcTex: { value: ARCS.tex },
