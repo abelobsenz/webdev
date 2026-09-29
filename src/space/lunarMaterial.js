@@ -199,7 +199,9 @@ void main() {
     float h = hash12(cell + 11.0);
     vec2 lc = fract(f / vec2(4.0, 3.6));
     float win = (1.0 - smoothstep(0.3, 0.3 + fw.x / 4.0, abs(lc.x - 0.5))) * (1.0 - smoothstep(0.28, 0.28 + fw.y / 3.6, abs(lc.y - 0.55)));
-    float plinth = 1.0 - step(3.6, f.y);
+    // (a plinth only at a footing: walls whose facade y runs negative, up in a station's frame,
+    // are storeys all the way down)
+    float plinth = step(-1.5, f.y) * (1.0 - step(3.6, f.y));
     win *= 1.0 - plinth;
     float meanWin = 0.36 * (1.0 - plinth);
     float wv = mix(meanWin, win, det);
@@ -368,7 +370,7 @@ void main() {
   // contact darkening: a wall darkens toward its foot (facade y is height above the footing
   // for stone, dressed stone and sintered regolith), where the ground hides half the sky
   float wallK = 1.0 - abs(dot(N, upV));
-  float footAO = (k > 19.5 && k < 20.5) || (k > 26.5 && k < 27.5) || (k > 28.5 && k < 29.5) ? 1.0 - 0.32 * exp(-max(f.y, 0.0) / 1.6) * wallK : 1.0;
+  float footAO = (k > 19.5 && k < 20.5) || (k > 26.5 && k < 27.5) || (k > 28.5 && k < 29.5) ? 1.0 - 0.32 * step(-1.5, f.y) * exp(-max(f.y, 0.0) / 1.6) * wallK : 1.0;
   alb *= footAO;
   float ndl = max(dot(N, uSunView), 0.0);
   vec3 H = normalize(V + uSunView);

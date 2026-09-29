@@ -31,8 +31,9 @@ export function buildLunarPort({receiving=true}={}) {
     B.tube([d.clone().multiplyScalar(1050).setY(1080),d.clone().multiplyScalar(3580).setY(1080)],115,12,CK.HULL);
     B.tube([d.clone().multiplyScalar(3600).setY(-100),d.clone().multiplyScalar(3600).setY(1080)],110,10,CK.BRONZE);
     B.at(d.x*3600,1080,d.z*3600,0,-a,0);
-    B.box(0,-250,0,850,220,650,CK.HULL);
-    B.box(0,-115,0,650,45,450,CK.GARDEN);
+    // (the commons' halls in lit stone storeys under a walled roof garden, not blank hull)
+    B.box(0,-250,0,850,220,650,LK.STONE);
+    B.box(0,-115,0,650,45,450,LK.ROOFG);
     B.pop();
     lamps.push({p:d.clone().multiplyScalar(3600).setY(1480),r:22,color:LAMP.AMBER,i:1.8});
   }
@@ -55,7 +56,7 @@ export function buildLunarPort({receiving=true}={}) {
     for(let x=1700;x<6800;x+=700)for(const zz of [-280,280])lamps.push({p:V(sd*x,-120,zz),r:12,color:LAMP.AMBER,i:1.5,breathe:.2,phase:x/7000});
     for(let j=0;j<3;j++) {
       const x=sd*(4400+j*900);
-      B.box(x,20,0,740,240,1150,CK.HULL);
+      B.box(x,20,0,740,240,1150,LK.STONE);
       B.at(x,120,0);B.push(toY);
       B.lathe([[500,0,CK.BRONZE],[500,90,CK.GLASS],[370,350,CK.ROOF],[0,450,CK.ROOF]],24);B.pop();B.pop();
     }
