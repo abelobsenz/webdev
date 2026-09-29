@@ -6,7 +6,7 @@ import { CRAFT_FRAME } from './craftMesh.js';
 import { createLamps, LAMP } from './lamps.js';
 import { HALO_PORTS } from './earthData.js';
 import { createHaloMaterial } from './haloMaterial.js';
-import { buildPerson, DISTRICT_STYLE, standBox, vault, ribArc, cliffs, townCell, parkCell, farmCell, civicCell, worksCell, stadiumCell, marketCell, buildVaultFrame, harbourTown, HARBOUR, buildHarbourBoat } from './haloArchitecture.js';
+import { buildPerson, buildDrone, DISTRICT_STYLE, standBox, vault, ribArc, cliffs, townCell, parkCell, farmCell, civicCell, worksCell, stadiumCell, marketCell, buildVaultFrame, harbourTown, HARBOUR, buildHarbourBoat } from './haloArchitecture.js';
 import { bodyDir } from './sim.js';
 
 // The Halo, lived in. Seen from orbit the deck shader already paints a continent of towns and
@@ -41,6 +41,8 @@ const SEAM_TILES = 8;                        // the last tiles before theta = 0 
 export const FAR_TILES = 45;                 // silhouette tiles either side beyond the near window (180 km)
 export const FAR_RANGE_KM = 420;             // silhouettes drawn within this distance of the band
 export const VARIANTS = ['residential', 'agrarian', 'civic', 'works', 'lakeland', 'markets'];
+/** Glass-survey drones over the vault near the camera: above the frame (15 m), below the pods (55 m). */
+export const DRONES = { perTile: 6, reach: 2, lift: 32, half: 2.2 };
 export const PEOPLE = { max: 1600, range: 900, spacing: 38, speed: 1.3 };   // walkers round the camera
 export const HARBOUR_V = VARIANTS.length;        // the harbour town under each hub arch (tile variant 6)
 const MOVER_RANGE = (WINDOW + 0.5) * TILE_L; // m either side of the anchor
@@ -666,6 +668,7 @@ export class HaloDistricts {
     // harbour boats: ferries and sailing boats on their rounds of the basin (a hub tile or two
     // is ever inside the window; capacity for four)
     this.people = inst(buildPerson(), PEOPLE.max);
+    this.drones = inst(buildDrone(), DRONES.perTile * (2 * DRONES.reach + 1));
     this.boats = [0, 1].map((fleet) => inst(buildHarbourBoat(fleet), 4 * HARBOUR.routes.reduce((n, rt) => n + (rt.fleet === fleet ? rt.n : 0), 0)));
     this.trains = inst(buildTrainCar(), 8 * 24);
     this.trams = inst(buildTram(), 320);
@@ -841,6 +844,28 @@ export class HaloDistricts {
     for (const im of this.ships) im.instanceMatrix.needsUpdate = true;
     this._harbourBoats(t);
     this._people(t);
+    this._drones(t);
+  }
+
+  /** Survey drones sweeping the outside of the glass over the tiles round the camera. */
+  _drones(t) {
+    const im = this.drones, S = this.S, A = S.hw - 1500;
+    im.count = 0;
+    for (let d = -DRONES.reach; d <= DRONES.reach; d++) {
+      const s = this.slots[WINDOW + d];
+      if (!s || !s.g.visible || !s.frame.visible) continue;
+      const uk = this.tileAngle(s.k) * this.Rm, st = this.tileStretch(s.k);
+      for (let i = 0; i < DRONES.perTile && im.count < im.instanceMatrix.count; i++) {
+        const h = hash2(s.k * 8 + i, 29), w = 0.004 + 0.003 * h, ph = h * 40 + i * 1.3;
+        const x = A * Math.sin(w * t + ph), vx = A * w * Math.cos(w * t + ph);
+        const z = (TILE_L * 0.4) * Math.sin(0.23 * w * t + ph * 1.7 + i), vz = TILE_L * 0.4 * 0.23 * w * Math.cos(0.23 * w * t + ph * 1.7 + i);
+        this._place(_m, uk + z * st, x, S.roofCurve(x) + DRONES.lift, 1);
+        _r.makeRotationY(Math.atan2(vx, vz));
+        _m.multiply(_r);
+        im.setMatrixAt(im.count++, _m);
+      }
+    }
+    im.instanceMatrix.needsUpdate = true;
   }
 
   /**

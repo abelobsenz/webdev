@@ -14,7 +14,7 @@ import * as THREE from 'three';
 import { SpaceSim, bodyDir } from '../src/space/sim.js';
 import { HALO_PORTS } from '../src/space/earthData.js';
 import { Rings } from '../src/space/rings.js';
-import { TILE_L, WINDOW, GANTRY, MAJOR_RANGE_KM, MINOR_RANGE_KM, FINE_RANGE_KM, FRAME_RANGE_KM } from '../src/space/haloDistricts.js';
+import { DRONES, TILE_L, WINDOW, GANTRY, MAJOR_RANGE_KM, MINOR_RANGE_KM, FINE_RANGE_KM, FRAME_RANGE_KM } from '../src/space/haloDistricts.js';
 import { VAULT_FRAME, HARBOUR } from '../src/space/haloArchitecture.js';
 import { HARBOUR_V } from '../src/space/haloDistricts.js';
 import { buildPortStation } from '../src/space/stations.js';
@@ -108,6 +108,12 @@ const C = 2 * Math.PI * D.Rm;
   assert.ok(lo > 0.5, 'Vault ribs and purlins ride outside the glass');
   assert.ok(pod - hi > 20, 'Vault frame stays well under the gantry pods and chords');
   out.frameTris = tris(g);
+  // survey drones fly between the frame's top and the gantry pods' undersides
+  const db = D.drones.geometry; db.computeBoundingBox();
+  const dLo = DRONES.lift + db.boundingBox.min.y, dHi = DRONES.lift + db.boundingBox.max.y;
+  out.droneFrameGapMetres = +(dLo - (VAULT_FRAME.lift + 2 * VAULT_FRAME.ribR * 1.6 + 1.5)).toFixed(1);
+  out.dronePodGapMetres = +(pod - dHi).toFixed(1);
+  assert.ok(out.droneFrameGapMetres > 5 && out.dronePodGapMetres > 5, 'Drones clear of the vault frame (lamps included) and the gantry pods');
   assert.ok(out.frameTris < 40000, 'Vault frame is light');
   assert.ok(D.vaultFrame.lampCount > 0);
 }
@@ -263,6 +269,8 @@ assert.ok(out.closestApproachTris < 12e6, 'District tiles within 12M rendered tr
   for (const s of D.slots) if (s.g.visible) { fine += s.fine.visible; minor += s.minor.visible; major += s.major.visible; mid += s.mid.visible; frame += s.frame.visible; }
   out.slotsNear = { fine, minor, major, mid, frame };
   out.people = D.people.count;
+  out.drones = D.drones.count;
+  assert.ok(D.drones.count > 0 && D.drones.count <= D.drones.instanceMatrix.count, 'Survey drones over the glass');
   assert.ok(D.people.count > 50 && D.people.count <= D.people.instanceMatrix.count, 'People walking round the camera, within their buffer');
   assert.ok(fine >= 3 && fine <= fineSlots, 'Fine detail only on the nearest tiles');
   assert.ok(minor <= minorSlots && major <= majorSlots && mid > 0, 'Minor and major in range, silhouettes beyond');

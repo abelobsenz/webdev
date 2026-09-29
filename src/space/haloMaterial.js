@@ -209,6 +209,8 @@ void haloKinds(float k, vec2 f, vec2 fw, float px, inout vec3 alb, inout float r
     vec3 c = haloTree(k - 60.0);
     float n = mix(0.5, vnoise(f * 0.5) * 0.6 + vnoise(f * 2.3) * 0.4, det);
     alb = c * (0.6 + 0.8 * n);
+    // leaves turning in the vault's air currents: gusts running across the canopy
+    alb *= 1.0 + 0.12 * det * sin(uTime * 1.7 + f.x * 0.9 + f.y * 0.6 + 6.0 * n);
     rough = 0.9; metal = 0.0;
     em = vec3(1.0, 0.8, 0.5) * 0.004;
     return;

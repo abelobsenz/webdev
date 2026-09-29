@@ -40,6 +40,18 @@ export const DISTRICT_STYLE = [
   { pal: 2, pitched: 0.3, trees: [0, 3, 1, 2], street: LAMPC.WARM, accent: LAMPC.TEAL },          // harbour towns under the arches
 ];
 
+/** A glass-survey drone (4 m across): a pod, four ducted rotors, a lit sensor bar underneath. */
+export function buildDrone() {
+  const B = new CB();
+  B.box(0, 0, 0, 1.6, 0.9, 2.4, CK.HULL);
+  B.box(0, -0.55, 0, 1.2, 0.2, 1.8, CK.LANTERN);
+  for (const x of [-1.5, 1.5]) for (const z of [-1.5, 1.5]) {
+    B.box(x * 0.55, 0.1, z * 0.55, 1.2, 0.12, 0.2, CK.DARK);
+    B.box(x, 0.2, z, 1.3, 0.3, 1.3, CK.BRONZE);
+  }
+  return B.geometry();
+}
+
 /** A person, 1.75 m: legs, coat (the canvas kind: every colour going), head. +z forward. */
 export function buildPerson() {
   const B = new CB();
