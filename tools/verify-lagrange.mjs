@@ -152,6 +152,27 @@ ok(rMax <= COL.ROTOR_MAX_R, `rotor's outer works within ${COL.ROTOR_MAX_R} m of 
   ok(gw > 0.03, `gateway traffic clears the station (${(gw * 1000).toFixed(0)} m)`);
 }
 
+{
+  // mirror rams: seated on the longeron crest (r = R + 140 at a strip edge) and reaching the mirror edge at every opening
+  const P0 = lag.pairs[0], m = new THREE.Matrix4(), a = new THREE.Vector3(), b = new THREE.Vector3();
+  let bad = 0;
+  for (const alpha of [COL.MIRROR_MIN, COL.MIRROR_MAX, (COL.MIRROR_MIN + COL.MIRROR_MAX) / 2]) {
+    P0.alpha = alpha; lag._rams(P0);
+    for (let k = 0; k < 6; k++) {
+      P0.cyls[0].rod.getMatrixAt(k, m);
+      a.set(0, 0, 0).applyMatrix4(m); b.set(0, 1, 0).applyMatrix4(m);
+      const r = Math.hypot(a.x, a.y), ang = Math.atan2(a.y, a.x), e = ((ang - Math.PI / 6) % (Math.PI / 3) + Math.PI / 3) % (Math.PI / 3);
+      if (Math.abs(r - (COL.R + 140)) > 1 || Math.min(e, Math.PI / 3 - e) > 1e-3) bad++;
+      // the far end on the mirror plane (hinge frame y = -5, 10 km along)
+      const w = WINDOW_CENTRES[Math.floor(k / 2)], c = Math.cos(w), s = Math.sin(w), rr = COL.R + COL.MIRROR_OFF;
+      const inv = new THREE.Matrix4().set(-s, c, 0, c * rr, c, s, 0, s * rr, 0, 0, 1, -COL.HL, 0, 0, 0, 1).multiply(new THREE.Matrix4().makeRotationX(-alpha)).invert();
+      const lb = b.clone().applyMatrix4(inv);
+      if (Math.abs(lb.y + 5) > 0.5 || Math.abs(lb.z - 10000) > 0.5) bad++;
+    }
+  }
+  ok(bad === 0, 'mirror rams run from the longeron crests to the mirror edges at every opening');
+}
+
 // ---- near detail (built on approach): force it, time it, check what it seats
 lag.life.build(lag.families);
 ok(lag.life.buildMs < 400, `near detail built in ${lag.life.buildMs.toFixed(0)} ms (on first approach)`);

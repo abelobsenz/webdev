@@ -2,7 +2,8 @@ import * as THREE from 'three';
 import { createCraftMaterial } from '../craft/craftMaterial.js';
 import { craftMesh, addLamps, KM } from './craftMesh.js';
 import { LAMP, createLamps } from './lamps.js';
-import { DynLamps, smooth, instancedPart } from './lifeKit.js';
+import { DynLamps, smooth, instancedPart, spanMatrix } from './lifeKit.js';
+import { CB, CK } from '../craft/craftGeometry.js';
 import { R_EARTH, R_MOON, GEO_ALT, MOON_DIST } from './sim.js';
 import { COL, WINDOW_CENTRES, buildRotor, buildWindows, buildMirror, buildStator, buildAgriRing, buildPairFrame } from './lagrangeColony.js';
 import { createWindowMaterial, createMirrorMaterial, bindWindow, bindMirror } from './lagrangeShaders.js';
@@ -29,7 +30,8 @@ import { LagrangeLife } from './lagrangeLife.js';
 const L1_FRAC = 1 - 58020 / MOON_DIST;
 const NEAR_KM = 25000;          // meshes drawn inside this
 const DETAIL_KM = 900;          // lamps, stations' fine parts
-const LIFE_KM = 400;            // trams, fittings, docked ships, cranes
+const LIFE_KM = 400;
+const RAMS = 6, RAM_X = 2070;   // two rams per mirror, on the longeron crests either side of it            // trams, fittings, docked ships, cranes
 const _n = new THREE.Vector3(), _a = new THREE.Vector3(), _b = new THREE.Vector3(), _c = new THREE.Vector3(), _d = new THREE.Vector3();
 const _x = new THREE.Vector3(), _y = new THREE.Vector3(), _z = new THREE.Vector3(), _m = new THREE.Matrix4();
 const TAU = Math.PI * 2;
@@ -123,6 +125,11 @@ export class LagrangeColonies {
       agri: buildAgriRing(), frame: buildPairFrame(), gate: buildGateway(), wheels: GATE.WHEELS.map((w) => buildGatewayWheel(w)),
     };
     this.mirMat = createMirrorMaterial();
+    // the mirrors' rams: a bronze sleeve on the longeron crest and a rod to the mirror's edge,
+    // both unit length along +y (stretched to the span each time the mirrors move)
+    const ram = (r, k) => { const B = new CB(); B.tube([V(0, 0, 0), V(0, 1, 0)], r, 10, k); return B.geometry(); };
+    this.ramGeo = { sleeve: ram(26, CK.BRONZE), rod: ram(13, CK.HULL) };
+    this.ramPiv = WINDOW_CENTRES.map((a) => { const c = Math.cos(a), sn = Math.sin(a), r = COL.R + COL.MIRROR_OFF; return new THREE.Matrix4().set(-sn, c, 0, c * r, c, sn, 0, sn * r, 0, 0, 1, -COL.HL, 0, 0, 0, 1); });
     this.pairs = [this._pair('L4', 0.13, 11), this._pair('L5', 0.61, 23)];
     this.gateway = this._gateway();
     // local traffic
@@ -223,15 +230,41 @@ export class LagrangeColonies {
         cyl.add(g);
         return { g, dir: (i % 2 ? -1 : 1) * s, phase: i * 0.7 };
       });
-      cyls.push({ s, cyl, rotor, hinges, agri, win });
+      // rams (one buffer per pair: both twins open their mirrors together)
+      const sleeve = instancedPart(hull, this.ramGeo.sleeve, RAMS), rod = instancedPart(hull, this.ramGeo.rod, RAMS);
+      if (cyls.length) { sleeve.instanceMatrix = cyls[0].sleeve.instanceMatrix; rod.instanceMatrix = cyls[0].rod.instanceMatrix; }
+      rotor.add(sleeve, rod);
+      cyls.push({ s, cyl, rotor, hinges, agri, win, sleeve, rod });
     }
     // the approach: a gate ring of beacons 200 km out on the anti-sun side of each twin, and a
     // string of buoys down the corridor to the port (km, pair frame)
     const approach = this._approach(group.name, approachLamps([-1, 1].map((s) => ({ c: V(s * COL.PAIR_X * KM, 0, -200), r: 10, n: 18, from: V(s * COL.PAIR_X * KM, 0, -28), to: V(s * COL.PAIR_X * KM, 0, -190) })), name === 'L4' ? LAMP.BLUE : LAMP.TEAL), 215);
     space.scene.add(group);
-    const P = { name, group, approach, m, mat, winMat, cyls, lampSets, dayOffset, day: 1, alpha: COL.MIRROR_MAX, pos: new THREE.Vector3() };
+    const P = { name, group, approach, m, mat, winMat, cyls, lampSets, dayOffset, day: 1, alpha: COL.MIRROR_MAX, ramAlpha: -1, pos: new THREE.Vector3() };
+    this._rams(P);
     P.body = space.addBody(group.name, [group], (o) => (o || _a).copy(P.pos), 50, { solid: true, minNear: 0.02 });
     return P;
+  }
+
+  /**
+   * Point the pair's mirror rams at the mirrors' current opening: from the longeron crest
+   * (pivot frame x = +-RAM_X, 535 m below the hinge line, 4 km along) to the mirror's edge
+   * 10 km along the sheet. Rotor frame, metres; no allocation.
+   */
+  _rams(P) {
+    const a = P.alpha, ca = Math.cos(a), sa = Math.sin(a);
+    const S = P.cyls[0].sleeve, Rd = P.cyls[0].rod;
+    let k = 0;
+    for (const piv of this.ramPiv) for (const sx of [-1, 1]) {
+      _a.set(sx * RAM_X, -535, 4000).applyMatrix4(piv);
+      _b.set(sx * RAM_X, -5 * ca + 10000 * sa, 5 * sa + 10000 * ca).applyMatrix4(piv);
+      spanMatrix(_m, _a, _b); Rd.setMatrixAt(k, _m);
+      _c.lerpVectors(_a, _b, 0.55);
+      spanMatrix(_m, _a, _c); S.setMatrixAt(k, _m);
+      k++;
+    }
+    S.instanceMatrix.needsUpdate = true; Rd.instanceMatrix.needsUpdate = true;
+    P.ramAlpha = a;
   }
 
   // --------------------------------------------------------------- gateway --
@@ -357,6 +390,7 @@ export class LagrangeColonies {
       if (!P.m.visible) continue;
       const det = d < DETAIL_KM * 8;
       for (const ls of P.lampSets) if (ls) ls.visible = det;
+      if (Math.abs(P.alpha - P.ramAlpha) > 1e-7) this._rams(P);
       for (const C of P.cyls) {
         C.rotor.rotation.z = C.s * ((COL.SPIN * t) % TAU);
         for (const h of C.hinges) h.rotation.x = -P.alpha;
