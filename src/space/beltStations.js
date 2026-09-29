@@ -310,12 +310,15 @@ function buildHabitat(c) {
         const a = (k / nSpokes) * TAU + (zo > 0 ? Math.PI / nSpokes : 0);
         const u = V(Math.cos(a), Math.sin(a), 0);
         const p0 = u.clone().multiplyScalar(hubR * 1.25).setZ(zo * 0.5), p1 = u.clone().multiplyScalar(R - rimH * 0.98).setZ(zo);
-        Bp.tube([p0, p1], 4.2, 10, DK.LIVERY);
+        // a twin-boom spoke, laced with ties (a single 8 m pipe read as a wire at the wheel's scale)
+        const ax = V(0, 0, 5.5);
+        for (const e of [-1, 1]) Bp.tube([p0.clone().addScaledVector(ax, e), p1.clone().addScaledVector(ax, e)], 3, 10, DK.LIVERY);
+        for (let t = 0.075; t < 0.99; t += 0.125) { const m = p0.clone().lerp(p1, t); Bp.tube([m.clone().sub(ax), m.clone().add(ax)], 1.1, 6, CK.BRONZE); }
         Bp.tube([p0.clone().addScaledVector(V(-u.y, u.x, 0), 7), p1.clone().addScaledVector(V(-u.y, u.x, 0), 7)], 1.2, 6, CK.GLASS);   // lift shaft
         // the lift car rides the shaft's outer rail, hub collar to rim
         const side = V(-u.y, u.x, 0).multiplyScalar(LIFT_SIDE);
         lifts.push({ a: u.clone().multiplyScalar(hubR * 1.45 + 8).setZ(zo * 0.5).add(side), b: u.clone().multiplyScalar(R - rimH - 8).setZ(zo).add(side), axis: u.clone() });
-        for (let t = 0.2; t < 0.95; t += 0.25) Bp.tube([p0.clone().lerp(p1, t).addScaledVector(V(-u.y, u.x, 0), -1.5), p0.clone().lerp(p1, t).addScaledVector(V(-u.y, u.x, 0), 8)], 0.8, 5, CK.BRONZE);
+        for (let t = 0.2; t < 0.95; t += 0.25) Bp.tube([p0.clone().lerp(p1, t).addScaledVector(V(-u.y, u.x, 0), -0.6), p0.clone().lerp(p1, t).addScaledVector(V(-u.y, u.x, 0), 8)], 0.8, 5, CK.BRONZE);
         lamps.push({ p: p1.clone().addScaledVector(u, -rimH * 0.2).setZ(zo + (twin ? rimW * 0.3 : rimW * 0.55)), r: 2.4, color: LAMP.AMBER, i: 3, breathe: 0.4 });
       }
     }
