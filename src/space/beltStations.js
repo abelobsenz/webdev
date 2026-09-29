@@ -532,6 +532,11 @@ function buildTransit(c) {
     const len = r.range(50, 90);
     can(c, u.clone().multiplyScalar(R + len / 2 + 2).setY(y), u, 5, len, { ends: false });
     berth(c, u.clone().multiplyScalar(R + len + 6).setY(y), u, 2.6, 4);
+    if (k >= 4) {
+      // the outer arms hold a packet alongside for the night (its berth taken off the traffic list)
+      const face = c.docks.pop().p, seed = k % 2 ? 4 : 9;
+      c.moored.push({ cls: 'packet', seed, pos: face.clone().addScaledVector(u, design('packet', seed).geo.boundingBox.max.z + 3), fwd: u.clone().negate(), up: Y.clone() });
+    }
     floodAt(c, u.clone().multiplyScalar(R + 4).setY(y + 8), u.clone().multiplyScalar(R + len + 20).setY(y), 1.1);
   }
   // control tower on the zenith cap: a stalk and a glazed cab with its beacon
