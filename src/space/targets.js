@@ -117,6 +117,13 @@ TARGET_INFO.waterStore = {
 };
 TARGET_ORDER.push('concordYard', 'waterStore');
 
+// the visitor's own ship (src/space/starship.js); not in the list, it appears once flown
+TARGET_INFO.lodestar = {
+  key:'',name:'Lodestar',district:'Concord starcourier · the helm is yours (V)',
+  lore:'A starcourier of the Concord fleet, lent to visitors: a pearl spindle with a glazed bridge crown and a panoramic band round her nose, a habitat ring turning a quarter-g promenade, three bronze drive bells, radiator wings that open when she idles, and legs to set down on the Moon. Her drive scales itself to whatever is near: a walking pace beside a berth, seconds from the Harbour to the Moon.',
+  facts:[['Length','48 m'],['Ring','24 m across, 4.3 rpm'],['Crew and guests','6 + 12']],
+};
+
 // The counterweight's release yard (src/space/releaseYard.js).
 TARGET_INFO.releaseYard = {
   key:'',name:'Counterweight Release Yard',district:'Tether · 100,000 km',

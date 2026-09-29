@@ -25,6 +25,7 @@ import { WorkingStations } from './workingStations.js';
 import { GeoRoads, geoRoadTargets } from './geoRoads.js';
 import { ReleaseYard, releaseYardTarget } from './releaseYard.js';
 import { computeSky } from '../core/sun.js';
+import { ShipPilot } from './shipPilot.js';
 
 const smooth = (a, b, x) => { const t = Math.min(Math.max((x - a) / (b - a), 0), 1); return t * t * (3 - 2 * t); };
 const easeInOut = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
@@ -252,6 +253,9 @@ export class SpaceMode {
     // the counterweight's release yard: cradles, a held liner, one let go, its lit lane
     this.releaseYard = new ReleaseYard(this);
     this.modules.push(this.releaseYard);
+    // the Lodestar, flown by the visitor (V): built on first boarding
+    this.ship = new ShipPilot(this);
+    this.modules.push(this.ship);
     for (const b of this.bodies) if (!b.local) b.remote = true;
     // post: crossfade helper
     this.fadeRT = new THREE.WebGLRenderTarget(1, 1, { type: THREE.UnsignedByteType, depthBuffer: false });
@@ -339,6 +343,7 @@ export class SpaceMode {
     this._cityReset = true;
     if (this.mode === 'off') return;
     const app = this.app;
+    if (this.ship && this.ship.active) this.ship.exit();
     this.rig.enabled = false;
     if (immediate) { this._finishExit(); return; }
     this.mode = 'descend';
@@ -396,6 +401,7 @@ export class SpaceMode {
     this.realTime += dt;
     this.updateSim(dt);
     if (this.fade && this.fade.phase === 'space') this._driveSpaceTransition(dt);
+    else if (this.ship && this.ship.active) this.ship.drive(dt, this.camera);
     else this.rig.update(dt, this.camera);
     this.renderToScreen(dt);
   }
@@ -872,6 +878,12 @@ export class SpaceMode {
   handleKey(e) {
     if (this.mode === 'off') return false;
     if (this.mode !== 'space') return true;          // swallow keys mid-transition
+    // the Lodestar: V takes or leaves the helm; its flight keys are its own while flying
+    if (e.code === 'KeyV' && this.ship) { this.ship.toggle(); return true; }
+    if (this.ship && this.ship.active) {
+      if (this.ship.owns(e.code)) return true;
+      if (e.code === 'KeyO' || e.code === 'Escape' || Object.values(this.targets).some((t) => t.key && t.key === e.key)) this.ship.exit();
+    }
     const k = e.key;
     for (const name of Object.keys(this.targets)) if (this.targets[name].key === k) { this.focus(name); return true; }
     switch (e.code) {

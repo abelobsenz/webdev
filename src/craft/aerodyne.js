@@ -417,6 +417,7 @@ export class Aerodyne {
     const rear = this._duct(0.62, 0, true);
     rear.position.set(0, tailC.y, tailC.z + 0.12);
     this.group.add(rear);
+    this.rear = rear;
     this._light(0xffffff, V3(0, tailC.y + 0.69, tailC.z + 0.12), 'nav', 0.06);
     // ---- details: pitot, chin sensor, spine antennas, beacons, landing lights, dorsal intake
     { const p = new THREE.CylinderGeometry(0.018, 0.028, 0.9, 10); p.rotateX(Math.PI / 2); p.translate(0.32, -0.05, Z0 + 0.95); M.chrome && dark.push(p); }

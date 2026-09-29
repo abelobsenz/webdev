@@ -231,8 +231,8 @@ body.touch-ui .lore { bottom: calc(var(--safe-bottom) + var(--timebar-h) + 180px
 }
 
 /* ---------- the piloted aerodyne ---------- */
-#pilot-hud { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); z-index: 8; display: grid; gap: 8px; justify-items: center; pointer-events: none; font-family: var(--mono); color: #ece6d8; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.55); }
-#pilot-hud[hidden] { display: none; }
+#pilot-hud, #ship-hud { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); z-index: 8; display: grid; gap: 8px; justify-items: center; pointer-events: none; font-family: var(--mono); color: #ece6d8; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.55); }
+#pilot-hud[hidden], #ship-hud[hidden] { display: none; }
 .ph-row { display: flex; gap: 22px; align-items: flex-end; padding: 10px 20px; border-radius: 12px; background: rgba(8, 12, 20, 0.42); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); border: 1px solid rgba(233, 198, 143, 0.2); }
 .ph-cell { display: grid; justify-items: center; gap: 3px; min-width: 62px; }
 .ph-val { font-size: 22px; font-weight: 300; font-variant-numeric: tabular-nums; line-height: 1; }
@@ -244,5 +244,7 @@ body.touch-ui .lore { bottom: calc(var(--safe-bottom) + var(--timebar-h) + 180px
 .ph-bar i.boost { background: linear-gradient(90deg, var(--gold), #ffb36b); }
 .ph-keys { font-size: 10.5px; color: rgba(214, 206, 190, 0.8); background: rgba(8, 12, 20, 0.32); padding: 5px 12px; border-radius: 8px; }
 .ph-keys kbd { font-size: 9.5px; }
-body.hide-ui #pilot-hud, body.capture #pilot-hud { display: none; }
+body.hide-ui #pilot-hud, body.capture #pilot-hud, body.hide-ui #ship-hud, body.capture #ship-hud { display: none; }
 @media (max-width: 720px) { .ph-row { gap: 12px; padding: 8px 12px; } .ph-val { font-size: 17px; } .ph-bar { width: 70px; } .ph-keys { display: none; } }
+.ph-att { width: 88px; height: 88px; margin: -4px 4px -4px -6px; }
+@media (max-width: 720px) { .ph-att { width: 64px; height: 64px; } }

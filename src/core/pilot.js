@@ -1,5 +1,8 @@
 import * as THREE from 'three';
 import { Aerodyne } from '../craft/aerodyne.js';
+import { Trail, Downwash, heatPlume } from '../craft/aerodyneFx.js';
+import { EngineVoice } from './engineAudio.js';
+import { U } from './uniforms.js';
 
 // Piloted flight in the Concord aerodyne (craft/aerodyne.js), seen from a chase camera.
 //
@@ -117,7 +120,19 @@ export class Pilot {
   enter() {
     const app = this.app;
     if (app.space && app.space.active) return false;
-    if (!this.craft) { this.craft = new Aerodyne(); app.scene.add(this.craft.group); }
+    if (!this.craft) {
+      this.craft = new Aerodyne();
+      app.scene.add(this.craft.group);
+      // air effects in world space, heat in each duct's own frame
+      this.trails = [new Trail(), new Trail()];
+      for (const t of this.trails) app.scene.add(t.mesh);
+      this.wash = new Downwash();
+      app.scene.add(this.wash.points);
+      this.heat = [];
+      for (const n of this.craft.movers.nacelles) { const h = heatPlume(1); n.add(h); this.heat.push(h); }
+      if (this.craft.rear) { const h = heatPlume(0.62); this.craft.rear.add(h); this.heat.push(h); }
+      this.voice = new EngineVoice(app.audio, 'fans');
+    }
     const cam = app.camera;
     const fwd = _v.set(0, 0, -1).applyQuaternion(cam.quaternion);
     fwd.y = 0;
@@ -201,6 +216,31 @@ export class Pilot {
       gear: this.gear, roll: i.roll, pitch: i.pitch, yaw: i.yaw,
     });
     if (this.active) { this._camera(dt); this._updateHud(); }
+    this._effects(dt);
+  }
+
+  _effects(dt) {
+    const app = this.app, night = U.uNight.value;
+    _f.set(0, 0, -1).applyQuaternion(this.quat); _r.set(1, 0, 0).applyQuaternion(this.quat);
+    const bank = Math.asin(clamp(-_r.y, -1, 1));
+    // wingtip vortices: fast and pulling hard (or a boosted dash)
+    const gl = 1 + (this.speed * Math.abs(this.rates.x)) / G + (1 - this.tilt) * Math.abs(Math.tan(clamp(bank, -1.3, 1.3))) * 0.6;
+    const vort = smooth(65, 150, this.speed) * smooth(1.5, 3.0, gl) + (this.boost ? 0.35 * smooth(180, 300, this.speed) : 0);
+    const light = lerp(1.7, 0.18, night);
+    this.craft.movers.nacelles.forEach((n, i) => {
+      const tip = n.getWorldPosition(_v).addScaledVector(_r, (i === 0 ? 1 : -1) * 1.1);
+      this.trails[i].update(dt, tip, vort, app.camera.position, light);
+    });
+    // downwash: the fans thrown against water or ground under a low hover
+    const floor = this._floor(this.pos), agl = this.pos.y - floor;
+    const water = app.world.surfaceHeight(this.pos.x, this.pos.z) < 0.35;
+    const rate = this.tilt * (0.35 + 0.65 * Math.min(1, this.throttle + Math.max(this.input.lift, 0) + 0.3)) * smooth(26, 5, agl) * (this.landed && this.throttle < 0.05 ? 0.15 : 1);
+    this.wash.update(dt, this.pos, floor, rate, water, lerp(1.2, 0.12, night));
+    // heat shimmer in the exhausts
+    const thrust = this.craft.state.thrust;
+    for (const h of this.heat) h.material.uniforms.uThrust.value = thrust * lerp(0.9, 2.6, night) * 0.6;
+    // engine voice
+    if (this.voice) this.voice.set(this.active, this.craft.state.rpm, thrust, this.boost ? 1 : 0, clamp(vort, 0, 1));
   }
 
   _step(h) {
@@ -344,6 +384,7 @@ export class Pilot {
     el.hidden = true;
     el.innerHTML = `
       <div class="ph-row">
+        <canvas class="ph-att" width="132" height="132" data-k="att"></canvas>
         <div class="ph-cell"><span class="ph-val" data-k="spd">0</span><span class="ph-unit">km/h</span></div>
         <div class="ph-cell"><span class="ph-val" data-k="alt">0</span><span class="ph-unit">m</span></div>
         <div class="ph-cell"><span class="ph-val" data-k="vs">0</span><span class="ph-unit">m/s</span></div>
@@ -366,5 +407,46 @@ export class Pilot {
     k.thr.classList.toggle('boost', this.boost);
     k.mode.textContent = this.landed ? 'LANDED' : this.tilt > 0.8 ? 'HOVER' : this.tilt > 0.15 ? 'TRANSITION' : this.boost ? 'BOOST' : 'CRUISE';
     k.gear.textContent = `gear ${this.gear > 0.5 ? 'down' : 'up'}${this.gearAuto ? '' : ' · manual'}`;
+    this._attitude(k.att);
+  }
+
+  /** Artificial horizon: sky over ground turned by the bank, the pitch ladder, heading. */
+  _attitude(cv) {
+    const x = cv.getContext('2d'), W = cv.width, H = cv.height, c = W / 2;
+    _f.set(0, 0, -1).applyQuaternion(this.quat); _r.set(1, 0, 0).applyQuaternion(this.quat);
+    const pitch = Math.asin(clamp(_f.y, -1, 1)), bank = Math.asin(clamp(-_r.y, -1, 1));
+    const ppd = 2.4;                                      // pixels per degree of pitch
+    const deg = pitch * 180 / Math.PI;
+    x.clearRect(0, 0, W, H);
+    x.save();
+    x.beginPath(); x.arc(c, c, c - 2, 0, Math.PI * 2); x.clip();
+    x.translate(c, c); x.rotate(-bank);
+    x.fillStyle = 'rgba(70, 120, 170, 0.55)'; x.fillRect(-W, -H * 2 + deg * ppd, W * 2, H * 2);
+    x.fillStyle = 'rgba(120, 92, 60, 0.55)'; x.fillRect(-W, deg * ppd, W * 2, H * 2);
+    x.strokeStyle = 'rgba(236, 230, 216, 0.9)'; x.lineWidth = 1.5;
+    x.beginPath(); x.moveTo(-W, deg * ppd); x.lineTo(W, deg * ppd); x.stroke();
+    x.font = '9px ui-monospace, monospace'; x.fillStyle = 'rgba(236, 230, 216, 0.85)'; x.textAlign = 'left'; x.textBaseline = 'middle';
+    for (let p = -60; p <= 60; p += 10) {
+      if (!p) continue;
+      const y = (deg - p) * ppd;
+      if (Math.abs(y) > c) continue;
+      const w = p % 20 === 0 ? 22 : 12;
+      x.beginPath(); x.moveTo(-w, y); x.lineTo(w, y); x.stroke();
+      if (p % 20 === 0) x.fillText(String(Math.abs(p)), w + 3, y);
+    }
+    x.restore();
+    // fixed aircraft symbol, bank pointer and heading
+    x.strokeStyle = '#e9c68f'; x.lineWidth = 2.2;
+    x.beginPath(); x.moveTo(c - 30, c); x.lineTo(c - 10, c); x.lineTo(c - 5, c + 6); x.moveTo(c + 30, c); x.lineTo(c + 10, c); x.lineTo(c + 5, c + 6); x.stroke();
+    x.beginPath(); x.arc(c, c, 2.2, 0, Math.PI * 2); x.fillStyle = '#e9c68f'; x.fill();
+    x.strokeStyle = 'rgba(236, 230, 216, 0.5)'; x.lineWidth = 1;
+    x.beginPath(); x.arc(c, c, c - 2, 0, Math.PI * 2); x.stroke();
+    x.save(); x.translate(c, c); x.rotate(-bank);
+    x.beginPath(); x.moveTo(0, -c + 4); x.lineTo(-5, -c + 13); x.lineTo(5, -c + 13); x.closePath(); x.fillStyle = '#e9c68f'; x.fill();
+    x.restore();
+    const hdg = ((Math.atan2(_f.x, -_f.z) * 180) / Math.PI + 360) % 360;
+    x.fillStyle = 'rgba(8, 12, 20, 0.6)'; x.fillRect(c - 17, H - 20, 34, 14);
+    x.fillStyle = '#ece6d8'; x.font = '10px ui-monospace, monospace'; x.textAlign = 'center';
+    x.fillText(String(Math.round(hdg)).padStart(3, '0'), c, H - 13);
   }
 }
