@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { CB } from '../craft/craftGeometry.js';
-import { LK, lunarMesh, lunarInstanced, createLunarMaterial } from './lunarMaterial.js';
+import { LK, lunarMesh, lunarInstanced, createLunarMaterial, setFloods } from './lunarMaterial.js';
 import { LAMP, createLamps } from './lamps.js';
 import { addLamps, pixelRadius } from './craftMesh.js';
 import { mulberry } from './lunarKit.js';
@@ -173,6 +173,12 @@ export function buildWheelRing(seed = 1) {
     B.lathe([[8.5, WHEEL.hubR + 12, LK.HULL], [8.5, Ri - 36, LK.HULL]], 16);
     B.pop();
     for (const o of [-11, 11]) B.box((Ri - 36 + 64) / 2, o, 0, Ri - 36 - 64, 1.6, 1.6, LK.CONDUIT);
+    // the lift shafts' lit galleries down both faces of the spoke: six spokes drawn in light
+    // across the wheel by night, the cars' stations as brighter bands
+    for (const zz of [-8.9, 8.9]) {
+      B.box((Ri - 36 + WHEEL.hubR + 12) / 2, 0, zz, Ri - 36 - WHEEL.hubR - 12, 3, 0.6, LK.LANTERN);
+      for (const r of [WHEEL.hubR + 30, Ri - 60]) B.box(r, 0, zz * 1.02, 12, 9, 0.4, LK.GLASS);
+    }
     B.box(WHEEL.hubR + 14, 0, 0, 8, 22, 22, LK.BRONZE);  // the spoke's root, riding clear of the hub's bearing
     B.pop();
     lamps.push({ p: V(Math.cos(a) * (Ro + 5), Math.sin(a) * (Ro + 5), 0), r: 3.2, color: LAMP.RED, i: 2.6, breathe: 0.8 });
@@ -372,6 +378,20 @@ export function buildDepot() {
   B.box(hx + 40.5, 0, 28, 0.8, 40, 4, LK.SIGN);
   B.box(hx, 32.3, 0, 70, 0.6, 20, LK.LANTERN);
   B.box(hx, -32.3, 0, 70, 0.6, 20, LK.ROOF);
+  // the hangar's frames: ribs round the hall every 10 m (so it reads as a built hall, not a
+  // white box), a hazard-banded door surround, a window band along its flanks
+  for (let x = hx - 35; x <= hx + 35; x += 10) {
+    B.box(x, 0, 32.9, 2.4, 66, 1.8, LK.DARK); B.box(x, 0, -32.9, 2.4, 66, 1.8, LK.DARK);
+    B.box(x, 32.9, 0, 2.4, 1.8, 66, LK.DARK); B.box(x, -32.9, 0, 2.4, 1.8, 66, LK.DARK);
+  }
+  for (const s of [-1, 1]) {
+    B.box(hx + 40.8, s * 27, 0, 1, 4, 58, LK.HAZARD);
+    B.box(hx + 40.8, 0, s * 27, 1, 58, 4, LK.HAZARD);
+    B.box(hx - 4, 18, s * 32.4, 60, 5, 0.6, LK.GLASS);
+  }
+  // the service module behind the hall on the spine: life support, a radiator pair of its own
+  B.box(hx - 56, 0, 0, 32, 30, 30, LK.PANEL);
+  for (const s of [-1, 1]) B.box(hx - 56, s * 42, 0, 26, 50, 0.6, LK.RADIATOR);
   for (const z of [-32, 32]) {
     B.at(hx - 10, 0, z + Math.sign(z) * 2, z > 0 ? 0 : Math.PI, 0, 0);
     B.lathe([[8, 0, LK.DARK], [9, 3, LK.BRONZE], [9, 7, LK.BRONZE], [6, 9, LK.HAZARD], [5, 9, LK.DARK]], 20);
@@ -386,6 +406,13 @@ export function buildDepot() {
     B.box(x, s * 14, 0, 4, 12, 4, LK.HULL);
     B.box(x, s * 80, 0, 200, 110, 0.7, LK.RADIATOR);
     B.box(x, s * 80, 0.5, 200, 3, 0.4, LK.CONDUIT);
+    // the panel's frame and its supply and return headers along both long edges
+    for (const e of [-1, 1]) {
+      B.box(x, s * 80 + e * 55.6, 0, 202, 1.4, 1.4, LK.DARK);
+      B.box(x + e * 100.6, s * 80, 0, 1.4, 112, 1.4, LK.DARK);
+      B.box(x, s * 80 + e * 54, 1.1, 196, 1.2, 1.2, LK.CONDUIT);
+    }
+    B.box(x, s * 20, 0, 3, 4, 3, LK.BRONZE);                                       // the hinge
   }
   // the robot arm's base on the spine beside the berth
   const armBase = V(-420, 0, 8);
@@ -417,52 +444,89 @@ function buildArmSegment(len) {
 
 // ---------------------------------------------------------------------- Hevelius Yard --
 
-export const YARD = { L: 900, W: 240, H: 240, gantryZ: [-260, 180], pods: 16, frameStep: 75 };
+export const YARD = { L: 900, W: 240, H: 240, gantryZ: [-260, 180], pods: 16, frameStep: 75, carriers: 6, shopZ: [470, 610] };
 
-/** The dock's portal frame (metres, in the plane z = 0): box-section members, knee gussets, a
- * walkway along the top beam, floodlight heads at the top corners. Instanced along the dock,
- * each in its paint (the instance colour). */
+/** A lattice column or beam between a and b (metres, in the plane z = 0): two box flanges
+ * front and back (z = +-d/2) laced by a zigzag of diagonals, so a portal member reads as open
+ * steelwork from a few kilometres, not as a solid black bar. `n` bays. */
+function latticeMember(B, ax, ay, bx, by, d, t, n, k) {
+  const L = Math.hypot(bx - ax, by - ay), ang = Math.atan2(by - ay, bx - ax);
+  B.at((ax + bx) / 2, (ay + by) / 2, 0, 0, 0, ang);
+  for (const s of [-1, 1]) {
+    B.box(0, 0, s * d / 2, L, t, t, k);
+    B.box(0, s * (t * 1.6), s * d / 2, L, t * 0.35, t * 0.35, k);           // the flange lip
+  }
+  const step = L / n;
+  for (let i = 0; i < n; i++) {
+    const x0 = -L / 2 + i * step, xm = x0 + step / 2;
+    // the batten at each panel point, and a diagonal across the bay, alternating
+    B.box(x0, 0, 0, t * 0.7, t * 0.7, d, k);
+    const len = Math.hypot(step, d), a = Math.atan2(d, step) * (i % 2 ? 1 : -1);
+    B.at(xm, 0, 0, 0, -a, 0); B.box(0, 0, 0, len, t * 0.55, t * 0.55, k); B.pop();
+  }
+  B.box(L / 2, 0, 0, t * 0.7, t * 0.7, d, k);
+  B.pop();
+}
+
+/** The dock's portal frame (metres, in the plane z = 0): lattice columns and beams laced in
+ * the yard's paint (the instance colour), plate knee gussets, a cabin on each column with its
+ * windows lit, cable trays, the walkway along the top beam, floodlight heads at the corners
+ * and along the beam, the hazard-banded feet. Instanced along the dock. */
 export function buildYardFrame() {
   const { W, H } = YARD;
   const B = new CB();
-  const hw = W / 2, hh = H / 2, m = 9;
-  // box-section members: the flanges in the paint, the webs a shade darker (service metal)
-  B.box(0, -hh, 0, W + m, m, m, LK.PAINT);
-  B.box(0, hh, 0, W + m, m, m, LK.PAINT);
+  const hw = W / 2, hh = H / 2, d = 12, t = 2.6;
+  // the four members as lattice (the bottom chord solid: it carries the floor)
+  latticeMember(B, -hw, hh, hw, hh, d, t, 10, LK.PAINT);
+  B.box(0, -hh, 0, W + 9, 9, 9, LK.PAINT);
+  B.box(0, -hh + 4.9, 0, W - 4, 0.8, 7, LK.DARK);
   for (const s of [-1, 1]) {
-    B.box(s * hw, 0, 0, m, H - m, m, LK.PAINT);
-    // lightening holes read as a darker web panel on the columns' inner faces
-    B.box(s * (hw - m / 2 - 0.3), 0, 0, 0.6, H - 40, m - 3, LK.DARK);
-    // the knee gussets at the four corners, 34 m braces at 45 degrees
-    for (const t of [-1, 1]) {
-      B.at(s * (hw - 17), t * (hh - 17), 0, 0, 0, s * t * Math.PI / 4);
-      B.box(0, 0, 0, 5, 48, 5, LK.PAINT);
+    latticeMember(B, s * hw, -hh + 4, s * hw, hh, d, t, 10, LK.PAINT);
+    // plate knee gussets at the top corners (solid triangles read as the frame's shoulders)
+    for (const zz of [-d / 2, d / 2]) {
+      B.at(s * (hw - 14), hh - 14, zz, 0, 0, s * Math.PI / 4);
+      B.box(0, 0, 0, 3, 34, 1, LK.PAINT);
+      B.box(0, -9, 0, 14, 1.2, 1.1, LK.PAINT);
       B.pop();
     }
-    // the column foot: a hazard-banded collar where it meets the bottom chord
-    B.box(s * hw, -hh + m, 0, m + 1.2, 4, m + 1.2, LK.HAZARD);
+    // the column foot: a hazard-banded collar where it meets the bottom chord, and a base plate
+    B.box(s * hw, -hh + 9, 0, d + 3, 5, d + 3, LK.HAZARD);
+    B.box(s * hw, -hh + 5, 0, d + 6, 1.4, d + 6, LK.DARK);
+    // the column cabin: a pressurised crew post two thirds up, facing into the dock, lit
+    const cy = hh * 0.3;
+    B.box(s * (hw - 10), cy, 0, 12, 10, 16, LK.HULL);
+    B.box(s * (hw - 16.2), cy + 1, 0, 0.4, 3.4, 13, LK.GLASS);
+    B.box(s * (hw - 10), cy + 5.4, 0, 13, 0.8, 17, LK.DARK);
+    B.box(s * (hw - 16.4), cy - 3.6, 0, 0.3, 0.6, 14, LK.SIGN);
+    // the cable tray and the pipe run down the column's outer face
+    B.box(s * (hw + d / 2 + 1.4), 0, -3, 1.2, H - 20, 3, LK.DARK);
+    B.box(s * (hw + d / 2 + 1.4), 0, 3, 1.6, H - 20, 1.6, LK.BRONZE);
     // a floodlight head at each top corner, lenses toward the ship
-    B.at(s * (hw - 6), hh + m / 2 + 4, 0, 0, 0, -s * 0.75);
+    B.at(s * (hw - 6), hh + t + 4, 0, 0, 0, -s * 0.75);
     B.box(0, 0, 0, 8, 5, 6, LK.DARK);
     B.box(0, -2.7, 0, 6.5, 0.5, 4.5, LK.LIGHT);
     B.pop();
   }
+  // lamp heads along the top beam, looking down into the dock
+  for (const x of [-60, 0, 60]) { B.box(x, hh - 6, 0, 5, 3, 4, LK.DARK); B.box(x, hh - 7.7, 0, 4, 0.4, 3, LK.LIGHT); }
   // the walkway along the top beam, with its handrails and a lit edge
-  B.box(0, hh + m / 2 + 0.5, 0, W - 20, 1, 5, LK.DECK);
-  for (const zz of [-2.6, 2.6]) B.box(0, hh + m / 2 + 1.6, zz, W - 20, 0.3, 0.3, LK.HULL);
-  B.box(0, hh - m / 2 - 0.4, 0, W - 30, 0.6, 3, LK.SIGN);
+  B.box(0, hh + t + 1.6, 0, W - 20, 1, 5, LK.DECK);
+  for (const zz of [-2.6, 2.6]) B.box(0, hh + t + 2.8, zz, W - 20, 0.3, 0.3, LK.HULL);
+  B.box(0, hh - t - 1.8, d / 2 + 0.3, W - 40, 1.6, 0.4, LK.SIGN);
   return B.geometry();
 }
 
 /**
- * The lunar-orbit shipyard (metres, the dock's length along local z): a drydock of portal
- * frames on four lattice chords over a strongback, clad along its lower sides, a liner on the
- * stocks inside it (plated aft with the plating front ragged where the gangs work, bare frames
- * forward with her decks showing through them, her drive section waiting at the stern), the
- * crew block and its radiators alongside: { geo, frameZ, lamps, hullR }.
+ * The lunar-orbit shipyard (metres, the dock's length along local z): a drydock of lattice
+ * portal frames on four chords over a strongback; shield cladding and lit service galleries
+ * along the lower sides; sun screens over the aft bays, where the plating gangs work; the
+ * plate shop at the bow end feeding a conveyor into the dock; racks of plates in the laydown;
+ * a liner on the stocks inside (plated aft with the front ragged where the gangs work, bare
+ * frames forward with her decks showing, her drive section waiting at the stern); the crew
+ * block and its radiators alongside: { geo, frameZ, lamps, floods, hullR }.
  */
 export function buildYard() {
-  const { L, W, H, frameStep } = YARD;
+  const { L, W, H, frameStep, shopZ } = YARD;
   const B = new CB();
   const lamps = [];
   const hw = W / 2, hh = H / 2;
@@ -473,27 +537,63 @@ export function buildYard() {
     frameZ.push(z);
     // floodlights: the frames' corner heads throw white light in over the ship
     for (const s of [-1, 1]) lamps.push({ p: V(s * (hw - 8), hh + 5, z), r: 5, color: LAMP.WHITE, i: 1.6, dir: V(-s, -1, 0).normalize() });
+    for (const x of [-60, 0, 60]) lamps.push({ p: V(x, hh - 9, z), r: 3, color: LAMP.WHITE, i: 1.2 });
+    // the column cabins' windows by night
+    for (const s of [-1, 1]) lamps.push({ p: V(s * (hw - 17), hh * 0.3 + 1, z), r: 2.2, color: LAMP.AMBER, i: 1.1 });
   }
-  // the strongback under the keel line: a box girder 44 m wide the length of the dock
+  // the strongback under the keel line: a box girder 44 m wide the length of the dock, its
+  // webs lightened, a rail for the keel-block carriages on top
   B.box(0, -hh + 10, 0, 44, 16, L, LK.HULL);
   B.box(0, -hh + 18.4, 0, 40, 0.8, L - 8, LK.DECK);
-  for (const s of [-1, 1]) B.box(s * 22.3, -hh + 10, 0, 0.6, 12, L - 8, LK.DARK);
+  for (const s of [-1, 1]) {
+    B.box(s * 22.3, -hh + 10, 0, 0.6, 12, L - 8, LK.DARK);
+    B.box(s * 8, -hh + 19.3, 0, 1.2, 1, L - 8, LK.BRONZE);
+    for (let z = -L / 2 + 20; z < L / 2 - 10; z += 40) B.box(s * 22.7, -hh + 10, z, 0.4, 6, 14, LK.HULL);
+  }
   // the dock floor: grating panels between the frames on the outer bays (open over the middle,
-  // so the pods below the hull and the Moon beneath still show through), and the laydown of
-  // hull plates waiting to be hung
+  // so the pods below the hull and the Moon beneath still show through), each bay a shade
+  // apart, with painted walk lanes; the laydown of hull plates waiting to be hung, in racks
   for (let z = -L / 2 + frameStep / 2; z < L / 2; z += frameStep) {
-    for (const s of [-1, 1]) B.box(s * (hw - 34), -hh + 1, z, 50, 1.6, frameStep - 12, LK.DECK);
+    for (const s of [-1, 1]) {
+      B.box(s * (hw - 34), -hh + 1, z, 50, 1.6, frameStep - 12, (Math.round(z / frameStep) + s) % 3 ? LK.DECK : LK.DARK);
+      B.box(s * (hw - 11), -hh + 1.9, z, 3, 0.2, frameStep - 12, LK.HAZARD);
+    }
   }
-  for (const s of [-1, 1]) for (let k = 0; k < 4; k++) {
-    const z = 230 + k * 36;
-    for (let j = 0; j < 3 + (k % 2); j++) B.box(s * (hw - 34), -hh + 3 + j * 1.5, z, 30, 1.2, 22 - j, j % 2 ? LK.DARK : LK.HULL);
+  for (const s of [-1, 1]) for (let k = 0; k < 5; k++) {
+    const z = 200 + k * 36;
+    // a plate rack: two A-frames and the plates leaning in them, primer grey and bare metal
+    for (const e of [-9, 9]) {
+      B.at(s * (hw - 34), -hh + 9, z + e, 0, 0, 0); B.box(0, 0, 0, 1, 14, 1, LK.PAINT); B.pop();
+      B.box(s * (hw - 34), -hh + 2.6, z + e, 22, 1.4, 2, LK.DARK);
+    }
+    for (let j = 0; j < 3 + (k % 2); j++) B.box(s * (hw - 34 + (j - 1.5) * 2.6), -hh + 9, z, 1, 13, 20 - j, j % 2 ? LK.DARK : LK.HULL);
   }
-  // cladding along the lower sides: shield panels 40 m high between the frames, seamed
+  // cladding along the lower sides: shield panels 40 m high between the frames, seamed, with a
+  // pressurised service gallery along each lower chord (lit windows, the crews' way from the
+  // crew block to the plating front)
   for (let z = -L / 2 + frameStep / 2; z < L / 2; z += frameStep) {
     for (const s of [-1, 1]) {
       B.box(s * (hw + 0.5), -hh + 26, z, 1.2, 40, frameStep - 10, LK.HULL);
       B.box(s * (hw + 1.3), -hh + 47, z, 0.6, 2, frameStep - 10, LK.HAZARD);
+      B.box(s * (hw + 1.3), -hh + 30, z, 0.4, 4, frameStep - 22, LK.SIGN);
     }
+  }
+  for (const s of [-1, 1]) {
+    const gx = s * (hw + 14), gy = -hh + 12;
+    B.box(gx, gy, 0, 12, 10, L - 10, LK.HULL);
+    B.box(gx + s * 6.1, gy + 1, 0, 0.3, 3, L - 30, LK.GLASS);
+    B.box(gx, gy + 5.4, 0, 12.6, 0.8, L - 10, LK.DARK);
+    for (let z = -L / 2 + 60; z < L / 2; z += 120) B.box(gx, gy, z, 13.4, 11, 3, LK.BRONZE);        // the pressure bulkhead collars
+  }
+  // sun screens over the aft bays, where the gangs plate the hull: louvred panels between the
+  // top chords, open between them so the floodlights still reach down
+  for (let z = -L / 2 + frameStep / 2; z < 0; z += frameStep) {
+    for (let j = -3; j <= 3; j++) {
+      B.at(j * 30, hh + 2, z, 0, 0, 0.35);
+      B.box(0, 0, 0, 24, 0.8, frameStep - 16, j % 2 ? LK.PANEL : LK.HULL);
+      B.pop();
+    }
+    B.box(0, hh + 2, z - frameStep / 2 + 8, W - 20, 1.4, 1.4, LK.DARK);
   }
   // the gantry rails along the top chords, on their own box girders
   for (const x of [-hw, hw]) { B.box(x, hh + 7, 0, 6, 3, L, LK.DARK); B.box(x, hh + 9, 0, 2, 1.2, L, LK.BRONZE); }
@@ -507,6 +607,12 @@ export function buildYard() {
   band(B, R + 0.3, -300, -280, 48, LK.SIGN, 1);                             // her name band, lit
   band(B, R + 0.3, -120, -60, 48, LK.GLASS, 1);                             // the saloon glazing, fitted
   band(B, R + 0.25, -250, -246, 48, LK.BRONZE, 1);                          // a rubbing strake
+  band(B, R + 0.3, -200, -186, 48, LK.GLASS, 1, 0.2, Math.PI - 0.2);         // a promenade deck, glazed on her upper side
+  // strakes still in primer and the odd unfaired plate: the plated half a patchwork, not one skin
+  for (let k = 0; k < 18; k++) {
+    const zc = -330 + ((k * 137) % 330), len = 14 + ((k * 31) % 22), a0 = ((k * 0.71) % 1) * TAU, a1 = a0 + 0.28 + ((k * 0.37) % 1) * 0.4;
+    band(B, R + 0.2, zc, zc + len, 6, k % 3 ? LK.DARK : LK.PANEL, 1, a0, a1);
+  }
   // the ragged plating front: the next plates hung on the upper strakes (some still in primer),
   // the lower ones open
   for (let k = 0; k < 12; k++) {
@@ -519,13 +625,15 @@ export function buildYard() {
     B.torus(r, 1.4, 40, 5, LK.BRONZE);
     B.pop();
   }
-  // the decks inside the bare section, one every 22 m of height, cut to the hull's section
+  // the decks inside the bare section, one every 22 m of height, cut to the hull's section;
+  // the lower decks already lit where the fitters work in them
   for (let z = 30; z < 380; z += 18) {
     const r = hullR(z + 9);
     for (const y of [-40, -18, 4, 26]) {
       if (Math.abs(y) > r - 6) continue;
       const hwD = Math.sqrt(r * r - y * y) - 3;
       B.box(0, y, z + 9, hwD * 2, 1.2, 17, (z / 18) % 5 < 1 ? LK.DARK : LK.DECK);
+      if (y < 0 && z < 200 && ((z / 18) % 3) < 1) B.box(0, y + 3.6, z + 9, hwD * 1.2, 0.5, 1.2, LK.LIGHT);
     }
     // a transverse bulkhead every 90 m
     if (((z - 30) / 18) % 5 === 4) B.box(0, -r * 0.2, z, r * 1.4, r * 1.2, 0.8, LK.HULL);
@@ -550,9 +658,18 @@ export function buildYard() {
     const a = 0.25 + (k / 8) * (Math.PI - 0.5);
     for (const z of [16, 44]) B.tube([V(Math.cos(a) * (R + 9), Math.sin(a) * (R + 9), z - 6), V(Math.cos(a) * (R + 9), Math.sin(a) * (R + 9), z + 6)], 0.5, 4, LK.HAZARD);
   }
-  // the drive section waiting at the stern, on its cradle; the stocks holding the hull
+  // the drive section waiting at the stern, on its cradle: nozzle bells, the reactor shield
+  // in foil, the coupling ring she will be joined by
   B.at(0, 0, -410);
   B.lathe([[40, 0, LK.HULL], [44, -6, LK.DARK], [44, -40, LK.DARK], [30, -52, LK.DARK], [18, -60, LK.BRONZE], [26, -84, LK.DARK], [0, -84, LK.DARK]], 28);
+  B.lathe([[44.4, -14, LK.FOIL], [44.4, -34, LK.FOIL]], 28);
+  B.lathe([[41, 1.5, LK.HAZARD], [41, 3, LK.HAZARD]], 28);
+  for (let k = 0; k < 4; k++) {
+    const a = k / 4 * TAU + TAU / 8;
+    B.at(Math.cos(a) * 17, Math.sin(a) * 17, -84);
+    B.lathe([[6, 0, LK.BRONZE], [8.5, -8, LK.DARK], [11, -18, LK.DARK], [10.4, -18, LK.DARK], [5.4, -1, LK.DARK]], 16);
+    B.pop();
+  }
   B.pop();
   const cradleTop = -Math.sqrt(44 * 44 - 30 * 30), floorTop = -hh + 19;
   for (const s of [-1, 1]) B.box(s * 30, (cradleTop + floorTop) / 2, -440, 8, cradleTop - floorTop, 30, LK.BRONZE);
@@ -567,6 +684,37 @@ export function buildYard() {
     B.box(0, -(r + (hh - r) / 2), z, 8, hh - r - 4, 8, LK.HULL);
     B.box(0, -r - 2, z, 22, 4, 12, LK.BRONZE);                                // the keel block
   }
+  // the plate shop beyond the bow end: a long hall on the dock's lower chords, its furnace end
+  // glowing, the rolling line's conveyor running out of it into the dock along the floor, the
+  // raw slab stock from the Moon stacked outside it
+  const [s0, s1] = shopZ, sl = s1 - s0, sm = (s0 + s1) / 2, sy = -hh + 30;
+  B.box(0, sy, sm, 150, 60, sl, LK.HULL);
+  B.box(0, sy + 30.6, sm, 140, 1.2, sl - 10, LK.PANEL);                       // the roof: panels
+  for (const s of [-1, 1]) {
+    B.box(s * 75.3, sy + 12, sm, 0.4, 5, sl - 20, LK.GLASS);                  // the gallery windows
+    B.box(s * 75.3, sy - 8, sm, 0.4, 3, sl - 30, LK.GLASS);
+    B.box(s * 75.6, sy + 22, sm, 0.5, 2.4, sl - 40, LK.SIGN);
+    for (let z = s0 + 10; z < s1; z += 26) B.box(s * 75.6, sy, z, 1.4, 60, 3, LK.DARK);    // the pilasters
+  }
+  // the furnace end: radiator fins glowing along the hall's far end
+  for (let k = -4; k <= 4; k++) B.box(k * 15, sy + 44, s1 - 8, 2, 28, 16, LK.RADIATOR);
+  B.box(0, sy, s1 + 0.6, 90, 40, 1, LK.RADIATOR);
+  // the open door facing the dock, lit inside
+  B.box(0, sy - 6, s0 - 0.4, 70, 40, 0.8, LK.LANTERN);
+  // the conveyor out along the dock floor to the laydown, on trestles, carrying plates
+  const cz0 = 150, cz1 = s0;
+  B.box(0, -hh + 24, (cz0 + cz1) / 2, 16, 2, cz1 - cz0, LK.DARK);
+  for (const s of [-1, 1]) B.box(s * 8.4, -hh + 25.4, (cz0 + cz1) / 2, 0.8, 1.2, cz1 - cz0, LK.HAZARD);
+  for (let z = cz0 + 20; z < cz1; z += 40) {
+    B.box(0, -hh + 21, z, 3, 6, 3, LK.HULL);
+    B.box(0, -hh + 26, z + 10, 13, 0.8, 14, z % 80 < 40 ? LK.HULL : LK.DARK);            // plates riding the line
+  }
+  // slab stock outside the hall, in stacks of four
+  for (const s of [-1, 1]) for (let k = 0; k < 4; k++) for (let j = 0; j < 4 - (k % 2); j++) {
+    B.box(s * (hw - 30), -hh + 2.4 + j * 2.4, s0 + 20 + k * 30, 30, 2, 18, j % 2 ? LK.DARK : LK.BRONZE);
+  }
+  lamps.push({ p: V(0, sy - 6, s0 - 3), r: 8, color: LAMP.AMBER, i: 2.2 });
+  for (const s of [-1, 1]) lamps.push({ p: V(s * 76, sy + 32, s0 + 4), r: 4, color: LAMP.RED, i: 2.4, breathe: 0.8 });
   // the crew block beside the dock: six lit decks, a glazed control gallery, radiators
   B.box(hw + 70, 0, -150, 90, 70, 160, LK.HULL);
   B.box(hw + 24.6, 0, -150, 0.8, 60, 140, LK.GLASS);
@@ -574,6 +722,9 @@ export function buildYard() {
   B.box(hw + 70, 36, -150, 70, 2, 120, LK.SIGN);
   for (const s of [-1, 1]) B.box(hw + 70, s * 75, -150, 80, 80, 1, LK.RADIATOR);
   B.box(hw + 12, 0, -150, 24, 8, 8, LK.HULL);                                // the gangway tube to the dock
+  B.box(hw + 70, 0, -150 - 81, 60, 50, 2, LK.HULL);                         // the end bulkheads, seamed
+  B.box(hw + 70, 0, -150 + 81, 60, 50, 2, LK.HULL);
+  B.box(hw + 70, 20, -150 - 82.2, 40, 6, 0.4, LK.GLASS);
   lamps.push({ p: V(hw + 118, 30, -80), r: 4, color: LAMP.GREEN, i: 2.4 }, { p: V(hw + 118, -30, -80), r: 4, color: LAMP.RED, i: 2.4 });
   // welding at the plating front: blue-white arcs, flickering, and the gangs' work lamps
   for (let k = 0; k < 14; k++) {
@@ -581,9 +732,27 @@ export function buildYard() {
     lamps.push({ p: V(Math.cos(a) * (hullR(z) + 1.5), Math.sin(a) * (hullR(z) + 1.5), z), r: 1.6, color: [0.75, 0.85, 1.0], i: 4, breathe: 1, phase: (k * 0.37) % 1 });
   }
   for (let k = 0; k < 6; k++) { const a = 0.4 + k * 0.45; lamps.push({ p: V(Math.cos(a) * (R + 10), Math.sin(a) * (R + 10), 30), r: 2.2, color: LAMP.AMBER, i: 1.8 }); }
+  // welders in the bare frames forward too: the fitters' arcs deep in the decks
+  for (let k = 0; k < 8; k++) {
+    const z = 70 + k * 36, a = -0.6 + (k % 4) * 0.9, r = hullR(z) - 3;
+    lamps.push({ p: V(Math.cos(a) * r, Math.sin(a) * r, z), r: 1.2, color: [0.72, 0.84, 1.0], i: 3, breathe: 1, phase: (k * 0.53) % 1 });
+  }
   // beacons on the dock's corners
   for (const z of [-L / 2, L / 2]) for (const [x, y] of [[-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh]]) lamps.push({ p: V(x, y, z), r: 6, color: LAMP.RED, i: 2.4, breathe: 0.8 });
-  return { geo: B.geometry(), frameGeo: buildYardFrame(), frameZ, lamps, hullR };
+  // the floodlights that actually light the work (the lunar material's flood pools): along the
+  // dock's crown over the hull, the plating front, the bow's bare frames, the plate shop door;
+  // the last two slots ride the gantry trolleys (moved in LunarOrbitals._moveYard)
+  const floods = [
+    { p: [0, hh - 12, -300], reach: 120, color: [1, 0.95, 0.86], i: 1.1 },
+    { p: [0, hh - 12, -120], reach: 120, color: [1, 0.95, 0.86], i: 1.1 },
+    { p: [0, R + 26, 30], reach: 70, color: [0.9, 0.95, 1.0], i: 1.4 },
+    { p: [0, hh - 12, 200], reach: 120, color: [1, 0.93, 0.82], i: 1.0 },
+    { p: [0, -hh + 40, 430], reach: 90, color: [1, 0.72, 0.42], i: 1.2 },
+    { p: [0, -R - 22, -40], reach: 90, color: [1, 0.9, 0.78], i: 0.8 },
+    { p: [30, hh - 10, YARD.gantryZ[0]], reach: 70, color: [1, 0.86, 0.6], i: 0.9 },
+    { p: [30, hh - 10, YARD.gantryZ[1]], reach: 70, color: [1, 0.86, 0.6], i: 0.9 },
+  ];
+  return { geo: B.geometry(), frameGeo: buildYardFrame(), frameZ, lamps, floods, hullR };
 }
 
 /** A gantry crane bridge spanning the dock's top (metres, centred; its trolley and hoist hang at x). */
@@ -594,6 +763,9 @@ export function buildGantry() {
   for (const s of [-1, 1]) {
     B.box(s * hw, hh + 12, 0, 12, 8, 26, LK.PAINT);                           // the end carriages on the rails
     B.box(s * hw, hh + 9, 0, 14, 1.2, 20, LK.HAZARD);
+    for (const zz of [-10, 10]) B.box(s * hw, hh + 7.4, zz, 13, 3, 4, LK.DARK);                // the wheel housings
+    B.box(s * (hw - 8), hh + 22, 0, 6, 8, 8, LK.HULL);                        // the drive house
+    B.box(s * (hw - 8), hh + 22, 4.2, 4, 2, 0.3, LK.GLASS);
   }
   // the bridge: a lattice girder 16 m square (the old pair of plain beams read as two sticks)
   B.push(new THREE.Matrix4().makeRotationY(Math.PI / 2));
@@ -602,12 +774,17 @@ export function buildGantry() {
   B.box(0, hh + 26.6, 0, W, 1.2, 14, LK.DECK);
   B.box(0, hh + 27.6, 7, W, 1, 0.3, LK.HULL);
   B.box(0, hh + 27.6, -7, W, 1, 0.3, LK.HULL);
+  B.box(0, hh + 10.2, 8.1, W - 30, 1, 0.3, LK.SIGN);
   B.box(30, hh + 14, 0, 16, 8, 16, LK.HULL);                                 // the trolley and its cab
   B.box(30, hh + 14, 8.2, 12, 4, 0.4, LK.LIGHT);
-  B.tube([V(30, hh + 10, 0), V(30, hh - 50, 0)], 0.3, 4, LK.BRONZE);
+  B.box(30, hh + 9.6, 0, 10, 0.6, 10, LK.DARK);
+  for (const zz of [-5, 5]) B.tube([V(30, hh + 10, zz), V(30, hh - 50, zz * 0.6)], 0.3, 4, LK.BRONZE);
   B.box(30, hh - 52, 0, 12, 4, 12, LK.HAZARD);                               // the hook block with a hull plate
+  B.box(30, hh - 55, 0, 3, 3, 3, LK.DARK);
   B.box(30, hh - 58, 0, 18, 1, 26, LK.HULL);
-  const lamps = [{ p: V(30, hh + 20, 0), r: 3, color: LAMP.AMBER, i: 2.4, breathe: 1 }, { p: V(-hw, hh + 17, 0), r: 2.4, color: LAMP.AMBER, i: 1.6 }, { p: V(hw, hh + 17, 0), r: 2.4, color: LAMP.AMBER, i: 1.6 }];
+  B.box(30, hh - 58.6, 0, 16, 0.3, 24, LK.DARK);
+  const lamps = [{ p: V(30, hh + 20, 0), r: 3, color: LAMP.AMBER, i: 2.4, breathe: 1 }, { p: V(-hw, hh + 17, 0), r: 2.4, color: LAMP.AMBER, i: 1.6 }, { p: V(hw, hh + 17, 0), r: 2.4, color: LAMP.AMBER, i: 1.6 },
+    { p: V(30, hh + 9, 0), r: 2.6, color: LAMP.WHITE, i: 1.6 }];
   return { geo: B.geometry(), lamps };
 }
 
@@ -618,6 +795,22 @@ export function buildPod() {
   B.box(0, 0.4, 2.0, 2.4, 1.2, 0.6, LK.GLASS);
   for (const s of [-1, 1]) { B.box(s * 1.5, -0.6, 2.6, 0.3, 0.3, 2.2, LK.HULL); B.box(s * 2.3, 0, -0.4, 0.6, 0.6, 0.6, LK.DARK); }
   B.box(0, 2.3, 0, 0.5, 0.4, 0.5, LK.LIGHT);
+  return B.geometry();
+}
+
+/** A plate carrier: a small tug in yard paint with a hull plate 18 x 24 m clamped under it,
+ * shuttling plates from the shop to the plating front outside the frames (metres, nose +z). */
+export function buildCarrier() {
+  const B = new CB();
+  B.box(0, 0, 0, 7, 4, 12, LK.PAINT);
+  B.box(0, 1.2, 6.2, 5, 1.6, 0.4, LK.GLASS);
+  B.box(0, 0, 6.3, 5.6, 0.5, 0.3, LK.LIGHT);
+  for (const s of [-1, 1]) {
+    B.box(s * 4.2, -0.8, -3, 1.4, 1.4, 3, LK.DARK);                         // thruster pods
+    B.box(s * 3.2, -3, 0, 0.6, 3, 0.6, LK.HULL);                            // the clamp legs
+  }
+  B.box(0, -4.8, 0, 18, 0.8, 24, LK.HULL);                                  // the plate
+  B.box(0, -5.3, 0, 17, 0.2, 23, LK.DARK);
   return B.geometry();
 }
 
@@ -661,7 +854,7 @@ export class LunarOrbitals {
   constructor(parent) {
     const t0 = performance.now();
     this.parent = parent;
-    this.mat = createLunarMaterial({ lit: 0.62, accent: [0.55, 0.85, 1.0] });
+    this.mat = createLunarMaterial({ lit: 0.62, accent: [0.55, 0.85, 1.0], fill: 1 });
     this.stations = [];
     // --- the Wheel ---
     {
@@ -673,6 +866,8 @@ export class LunarOrbitals {
       const hubMesh = lunarMesh(hub.geo, {}, this.mat);
       hubMesh.name = 'Endymion Wheel hub, docking arms and masts';
       addLamps(hubMesh, hub.lamps, { minPx: 1.1 });
+      // floods on the docking arms and the hub's berths
+      setFloods(hubMesh, [{ p: [0, 0, 120], reach: 90, color: [1, 0.94, 0.84], i: 0.9 }, { p: [0, 0, -120], reach: 90, color: [1, 0.94, 0.84], i: 0.9 }, { p: [80, 0, 0], reach: 70, color: [0.85, 0.92, 1.0], i: 0.7 }, { p: [-80, 0, 0], reach: 70, color: [0.85, 0.92, 1.0], i: 0.7 }]);
       g.add(hubMesh);
       const ringData = buildWheelRing(1);
       const rings = [];
@@ -682,6 +877,12 @@ export class LunarOrbitals {
         const rm = lunarMesh(ringData.geo, {}, this.mat);
         rm.name = `Endymion Wheel ${s > 0 ? 'north' : 'south'} ring`;
         addLamps(rm, ringData.lamps, { minPx: 1.0 });
+        // the light the town throws on its own roof and the spokes' feet by night: a warm pool
+        // under each spoke's head, turning with the ring
+        setFloods(rm, Array.from({ length: WHEEL.spokes }, (_, k) => {
+          const a = (k + 0.5) / WHEEL.spokes * TAU, r = WHEEL.Ri - 70;
+          return { p: [Math.cos(a) * r, Math.sin(a) * r, 0], reach: 110, color: [1, 0.84, 0.6], i: 0.7 };
+        }));
         rg.add(rm);
         g.add(rg);
         rings.push({ group: rg, sign: s });
@@ -749,11 +950,20 @@ export class LunarOrbitals {
       const mesh = lunarMesh(d.geo, {}, this.mat);
       mesh.name = 'Aitken Depot truss, tanks, hangar and radiators';
       addLamps(mesh, d.lamps, { minPx: 1.1 });
+      // work floods: a pool on each tank cluster from the spine's lamp masts, the hangar mouth,
+      // the arm's reach over the tanker (they carry the depot through the lunar night)
+      setFloods(mesh, [
+        ...DEPOT.clusters.map((x) => ({ p: [x, DEPOT.tankOff + 40, 0], reach: 85, color: [1, 0.94, 0.84], i: 1.0 })),
+        ...DEPOT.clusters.map((x) => ({ p: [x, -DEPOT.tankOff - 40, 0], reach: 85, color: [0.9, 0.95, 1.0], i: 0.7 })),
+        { p: [DEPOT.spine[1] - 20, 0, 60], reach: 90, color: [1, 0.86, 0.62], i: 1.1 },
+        { p: [DEPOT.spine[0] + 60, 0, 70], reach: 110, color: [1, 0.94, 0.84], i: 0.8 },
+      ]);
       g.add(mesh);
       const tk = lunarInstanced(buildTanker(), 1, {}, this.mat, { tint: true });
       tk.setMatrixAt(0, d.tanker);
       tk.instanceColor.setXYZ(0, 0.2, 0.42, 0.36);
       tk.name = 'Aitken Depot tanker alongside';
+      tk.userData.floods = mesh.userData.floods;
       g.add(tk);
       // sun-tracking solar wings at the lower end, turning about the spine
       const sol = buildWings(-200, 200, LK.PANEL);
@@ -787,6 +997,7 @@ export class LunarOrbitals {
       const mesh = lunarMesh(y.geo, {}, this.mat);
       mesh.name = 'Hevelius Yard dock, liner on the stocks and crew block';
       addLamps(mesh, y.lamps, { minPx: 1.0 });
+      setFloods(mesh, y.floods);
       g.add(mesh);
       // the dock's portal frames, instanced in their paint: yard yellow, every third grey
       const frames = lunarInstanced(y.frameGeo, y.frameZ.length, {}, this.mat, { tint: true });
@@ -795,12 +1006,15 @@ export class LunarOrbitals {
         frames.instanceColor.setXYZ(i, ...(i % 3 === 1 ? [0.5, 0.52, 0.55] : [0.82, 0.56, 0.12]));
       });
       frames.name = 'Hevelius Yard portal frames';
+      frames.userData.floods = mesh.userData.floods;          // (the same pools light the frames)
       g.add(frames);
       const gd = buildGantry();
       const gantries = YARD.gantryZ.map((z0, i) => {
         const gm = lunarMesh(gd.geo, {}, this.mat);
         gm.name = `Hevelius Yard gantry ${i + 1}`;
         addLamps(gm, gd.lamps, { minPx: 1.0 });
+        // its own work lights: the trolley's lamp on the plate below, the crown light on the bridge
+        setFloods(gm, [{ p: [30, YARD.H / 2 - 30, 0], reach: 40, color: [1, 0.9, 0.7], i: 1.2 }, { p: [0, YARD.H / 2 + 60, 30], reach: 110, color: [1, 0.95, 0.86], i: 0.8 }]);
         g.add(gm);
         return { mesh: gm, z0 };
       });
@@ -809,13 +1023,21 @@ export class LunarOrbitals {
       pods.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
       for (let i = 0; i < YARD.pods; i++) pods.instanceColor.setXYZ(i, ...(i % 3 ? [0.9, 0.62, 0.14] : [0.86, 0.84, 0.8]));
       pods.name = 'Hevelius Yard worker pods';
+      pods.userData.floods = mesh.userData.floods;
       g.add(pods);
+      // plate carriers shuttling from the plate shop to the plating front, outside the frames
+      const carriers = lunarInstanced(buildCarrier(), YARD.carriers, {}, this.mat, { tint: true });
+      carriers.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      for (let i = 0; i < YARD.carriers; i++) carriers.instanceColor.setXYZ(i, ...(i % 2 ? [0.86, 0.58, 0.12] : [0.74, 0.76, 0.78]));
+      carriers.name = 'Hevelius Yard plate carriers';
+      carriers.userData.floods = mesh.userData.floods;
+      g.add(carriers);
       // (between the stocks, which stand every 100 m from z = -350; under the hull, clear of the
       // gantries' hooks overhead)
       this.podPaths = Array.from({ length: YARD.pods }, (_, i) => ({ z: -100 + (i % 5) * 100, a0: -Math.PI / 2 + ((i * 0.37) % 1 - 0.5) * 1.6, w: 0.03 + 0.01 * (i % 4), dr: 14 + (i % 4) * 5 }));
       g.visible = false;
       parent.add(g);
-      this.yard = { group: g, orbit: o, gantries, pods, frames, hullR: y.hullR, near: [mesh, frames, pods, ...gantries.map((q) => q.mesh)], hubR: 0.9 };
+      this.yard = { group: g, orbit: o, gantries, pods, frames, carriers, dock: mesh, hullR: y.hullR, near: [mesh, frames, pods, carriers, ...gantries.map((q) => q.mesh)], hubR: 0.9 };
       this.stations.push(this.yard);
     }
     // --- relays, instanced in the Moon frame (metres about the Moon's centre) ---
@@ -1016,7 +1238,30 @@ export class LunarOrbitals {
   _moveYard(t) {
     const Y = this.yard;
     // the gantries: each works its own reach of the dock, three minutes a traverse
-    for (let i = 0; i < Y.gantries.length; i++) { const gq = Y.gantries[i], u = 0.5 - 0.5 * Math.cos(t * TAU / 360 + i * 2); gq.mesh.position.z = (gq.z0 + u * 220) * 1e-3; }
+    // (the dock's last two flood pools ride the trolleys)
+    const FD = Y.dock.userData.floods.data;
+    for (let i = 0; i < Y.gantries.length; i++) {
+      const gq = Y.gantries[i], u = 0.5 - 0.5 * Math.cos(t * TAU / 360 + i * 2);
+      gq.mesh.position.z = (gq.z0 + u * 220) * 1e-3;
+      FD[(6 + i) * 7 + 2] = gq.z0 + u * 220;
+    }
+    // the carriers: out from the shop door along the outside of the frames, down to the plating
+    // front, a pause while the plate is handed over, and back (each its own lane and phase)
+    const hw = YARD.W / 2, z0 = YARD.shopZ[0] - 20, z1 = 60;
+    for (let i = 0; i < YARD.carriers; i++) {
+      const side = i % 2 ? 1 : -1, lane = Math.floor(i / 2);
+      const ph = ((t + i * 47) % 240) / 240;
+      // 0..0.4 outbound, 0.4..0.5 at the front, 0.5..0.9 back, 0.9..1 at the shop
+      const u = ph < 0.4 ? ph / 0.4 : ph < 0.5 ? 1 : ph < 0.9 ? 1 - (ph - 0.5) / 0.4 : 0;
+      const e = u * u * (3 - 2 * u);
+      const x = side * (hw + 36 + lane * 16), y = -20 + lane * 40 + 12 * Math.sin(e * Math.PI);
+      const z = z0 + (z1 - z0) * e;
+      const back = ph >= 0.5 && ph < 0.9;
+      _x.set(back ? 1 : -1, 0, 0); _y.set(0, 1, 0); _z.set(0, 0, back ? 1 : -1);
+      _m.makeBasis(_x, _y, _z).setPosition(x, y, z);
+      Y.carriers.setMatrixAt(i, _m);
+    }
+    Y.carriers.instanceMatrix.needsUpdate = true;
     for (let i = 0; i < YARD.pods; i++) {
       const P = this.podPaths[i], a = Math.max(-2.7, Math.min(-0.44, P.a0 + 0.6 * Math.sin(t * P.w + i))), r = Y.hullR(P.z) + P.dr;
       _p.set(Math.cos(a) * r, Math.sin(a) * r, P.z + 6 * Math.sin(t * 0.05 + i));

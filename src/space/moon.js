@@ -17,6 +17,7 @@ import { buildMediiWorks } from './lunarWorks.js';
 import { LunarOutposts, lampDayGain } from './lunarOutposts.js';
 import { LunarHops } from './lunarHops.js';
 import { LunarRingTrains, LunarRingHalls } from './lunarRing.js';
+import { LunarRingDeck } from './lunarRingDeck.js';
 import { LunarOrbitals } from './lunarOrbitals.js';
 
 // The terraformed Moon: seas in the old maria, green highlands softened craters,
@@ -125,6 +126,16 @@ float stripe(float x, float P, float w, float px) {
   return mix(c, 2.0 * w / P, smoothstep(0.25, 0.6, px / P));
 }
 
+// An exact integer hash of a terrace plot (PCG): the plots' pocket squares, courts, heights
+// and roofs are drawn in three dimensions near the camera (lunarRingDeck.js plotHash), and a
+// float hash of indices up to 55,000 does not come out the same in JavaScript
+float plotHash(vec2 blk, uint salt) {
+  uint v = uint(int(blk.x) + 1048576) * 2u + (blk.y > 0.0 ? 1u : 0u) + salt * 2654435761u;
+  uint st = v * 747796405u + 2891336453u;
+  uint w = ((st >> ((st >> 28u) + 4u)) ^ st) * 277803737u;
+  return float((w >> 22u) ^ w) / 4294967295.0;
+}
+
 // The deck's plan (km): u along the ring, a across it (|a| < 5.5). Returns the building
 // height (km, 0 on open ground) of the terrace blocks lining the local streets, and the
 // block's id in blk.
@@ -135,13 +146,13 @@ float blockH(float u, float a, out vec2 blk) {
   float bi = floor(u / P);
   float bf = fract(u / P) * P;
   blk = vec2(bi, sign(a));
-  float h = hash12(blk + 3.7);
+  float h = plotHash(blk, 1u);
   // lanes between the blocks, a courtyard light well inside the deeper ones, one plot in
   // eight a pocket square
   float inB = step(0.014, bf) * step(bf, P - 0.014);
   float court = step(0.07, bf) * step(bf, P - 0.07) * step(2.34, s) * step(s, 2.64) * step(0.5, h);
   float sq = step(h, 0.12);
-  return row * inB * (1.0 - court) * (1.0 - sq) * (0.018 + 0.05 * hash12(blk + 9.1));
+  return row * inB * (1.0 - court) * (1.0 - sq) * (0.018 + 0.05 * plotHash(blk, 2u));
 }
 
 // garden tree crowns ~22 m apart in clumps; x: cover (0..1), y: crown shading (lit - shade)
@@ -229,7 +240,7 @@ void main() {
   alb = mix(alb, ball, bed);
   alb = mix(alb, vec3(0.45, 0.44, 0.4), band1(s, 1.35, 0.004, fa) + band1(s, 2.05, 0.004, fa));
   // terrace blocks: roofs of terracotta, slate, green roofs and photovoltaics, a parapet line
-  float rh = hash12(blk + 1.3);
+  float rh = plotHash(blk, 3u);
   vec3 roof = rh < 0.3 ? vec3(0.3, 0.15, 0.1) : (rh < 0.55 ? vec3(0.14, 0.145, 0.16) : (rh < 0.78 ? vec3(0.07, 0.11, 0.045) : vec3(0.03, 0.045, 0.1)));
   roof *= mix(1.0, 0.9 + 0.2 * hash12(floor(vec2(u, across) / 0.03) + 2.0), 1.0 - smoothstep(0.01, 0.03, px));
   alb = mix(alb, mix(pave * 0.9, roof, clamp(bK / max(rowZone, 1e-3), 0.0, 1.0)), rowZone);
@@ -251,6 +262,30 @@ void main() {
   vec3 g = mix(lawn, vec3(0.34, 0.31, 0.26), walks);
   g = mix(g, trees, tr.x * (1.0 - walks));
   g = mix(g, vec3(0.012, 0.025, 0.03), pond);
+  // each district's terraces their own kind of garden (so 17 km of deck is not one stripe
+  // repeated): parkland, allotments on the inner and outer terraces, an orchard, water meadow
+  float dI = floor(u / 17.32 + 0.5);
+  float dk = hash12(vec2(dI, 11.0));
+  float alK = step(0.25, dk) * step(dk, 0.55) * clamp(band1(s, 3.1, 0.25, px) + band1(s, 4.6, 0.3, px), 0.0, 1.0);
+  vec2 ap = vec2(u / 0.06, s / 0.03);
+  vec2 aid = floor(ap);
+  float ah = hash12(aid + dI * 3.0);
+  vec3 alC = ah < 0.3 ? vec3(0.07, 0.1, 0.035) : ah < 0.5 ? vec3(0.11, 0.1, 0.05) : ah < 0.7 ? vec3(0.09, 0.07, 0.045) : ah < 0.85 ? vec3(0.05, 0.08, 0.03) : vec3(0.13, 0.11, 0.06);
+  vec2 ae = min(fract(ap), 1.0 - fract(ap)) * vec2(0.06, 0.03);            // km to the plot's edge
+  float alH = 1.0 - smoothstep(0.0015, 0.0015 + px, min(ae.x, ae.y));
+  float alRes = 1.0 - smoothstep(0.01, 0.03, px);
+  vec3 allot = mix(vec3(0.085, 0.088, 0.045), mix(alC, vec3(0.03, 0.05, 0.02), alH * 0.8), alRes);
+  g = mix(g, allot, alK * (1.0 - walks));
+  float orK = step(0.55, dk) * step(dk, 0.8) * band1(s, 3.9, 0.45, px);
+  vec2 oc = fract(vec2(u, s) / 0.012) - 0.5;
+  float orT = 1.0 - smoothstep(0.33, 0.33 + px / 0.012, length(oc));
+  float orch = mix(0.34, orT, 1.0 - smoothstep(0.004, 0.01, px));
+  g = mix(g, mix(lawn * 0.9, vec3(0.03, 0.055, 0.025), orch), orK * (1.0 - walks));
+  // water meadow: the outer terrace wetter and bluer-green, with its channels
+  float wmK = step(0.8, dk) * band1(s, 4.4, 0.4, px);
+  float chan = stripe(u + 0.2 * sin(s * 9.0), 0.18, 0.004, px);
+  g = mix(g, mix(vec3(0.05, 0.085, 0.05), vec3(0.015, 0.03, 0.035), chan), wmK * (1.0 - walks));
+  gloss = max(gloss, chan * wmK * garden * 0.5);
   gloss = max(gloss, pond * garden);
   float ringsP = stripe(length(vec2(dU, s - 3.5)), 0.06, 0.006, px);
   vec3 plazaC = mix(vec3(0.42, 0.4, 0.36), vec3(0.3, 0.28, 0.25), ringsP);
@@ -273,6 +308,10 @@ void main() {
     float h2 = blockH(u + off.x, across + off.y, blk2);
     shadow = step(hs * 0.6, h2) * (1.0 - step(0.001, hb)) * (1.0 - smoothstep(0.3, 0.6, px / 0.24));
   }
+  // contact darkening: the streets and lanes darken toward the terrace blocks' feet
+  float dEdge = min(abs(s - 2.2), abs(s - 2.78));
+  float feet = (1.0 - smoothstep(0.0, 0.03 + px, dEdge)) * (1.0 - step(0.001, hb)) * (1.0 - smoothstep(0.03, 0.1, px));
+  alb *= 1.0 - 0.3 * feet;
   alb = mix(vec3(0.28, 0.29, 0.3) * (0.9 + 0.1 * stripe(u, 0.05, 0.002, fu)), alb, top);
   // ---- light ----
   // relief: the block roofs and the tree crowns tilt the normal a little toward the Sun's side
@@ -283,7 +322,9 @@ void main() {
   float mu = dot(radial, uSunDir);
   float Fm = ${(R_MOON * R_MOON).toFixed(1)} / max(rp * rp, 1.0);
   vec3 moonL = uSunE * vec3(0.105, 0.13, 0.115) * Fm * clamp(mu + 0.3 * (1.0 - Fm), 0.0, 1.0) * clamp(0.5 - 0.5 * dot(N, radial), 0.0, 1.0);
-  vec3 col = alb / PI * (sunL * ndl * (1.0 - 0.75 * shadow) * treeLit + moonL);
+  // earthlight and the deck's own bounce: shade is dim, not black
+  vec3 fillL = uSunE * (vec3(0.55, 0.7, 1.0) * 0.0012 + vec3(1.0) * 0.004 * sh * (0.5 + 0.5 * max(mu, 0.0)));
+  vec3 col = alb / PI * (sunL * ndl * (1.0 - 0.75 * shadow) * treeLit + moonL + fillL);
   vec3 V = normalize(cameraPosition - vWorld);
   vec3 H = normalize(V + uSunDir);
   float spec = pow(max(dot(N, H), 0.0), mix(55.0, 400.0, gloss)) * mix(0.045, 1.2, gloss);
@@ -347,7 +388,15 @@ void main() {
   vec3 p = vWorld - uCenter;
   float b = dot(p, uSunDir);
   float sh = b > 0.0 ? 1.0 : smoothstep(${(R_MOON - 20).toFixed(1)}, ${(R_MOON + 20).toFixed(1)}, length(p - uSunDir * b));
-  vec3 col = vec3(0.42) * 0.3 * uSunE * sh * 0.5 + vec3(0.8, 0.88, 1.0) * (0.04 + 0.12 * (1.0 - sh));
+  // the deck as a structure, not an overlay line: its mean albedo (paving, gardens, roofs), lit
+  // by how squarely the Sun stands over it (the deck faces out from the Moon; its edges and
+  // underside take the grazing light), dark on the Moon's night side except for the warm
+  // lights of its streets (the old flat blue-white glow read as a drawn ellipse)
+  vec3 rad = normalize(p);
+  float mu = dot(rad, uSunDir);
+  vec3 alb = vec3(0.19, 0.2, 0.17);
+  vec3 col = alb * uSunE * sh * (0.06 + 0.26 * max(mu, 0.0) + 0.05 * max(-mu, 0.0));
+  col += vec3(1.0, 0.72, 0.45) * 0.045 * (1.0 - sh * smoothstep(-0.1, 0.2, mu));
   float fade = 1.0 - smoothstep(1.6, 3.2, vPx);
   gl_FragColor = vec4(col * vCoverage * fade, 0.0);
 }
@@ -493,6 +542,7 @@ export class Moon {
     this.outposts = new LunarOutposts(this.group);
     this.ringTrains = new LunarRingTrains(this.group);
     this.ringHalls = new LunarRingHalls(this.group, this.districtData, districtMat);   // the halls: far forms all round, full halls near (lunarRing.js)   // expresses on the ring's transit rails (lunarRing.js)
+    this.ringDeck = new LunarRingDeck(this.group);    // the deck's plan stood up round the camera: terraces, vaults, portals, avenues, trams (lunarRingDeck.js)
     this.hops = new LunarHops(this.group);           // hoppers between Medii and the outposts (lunarHops.js)
     this.orbitals = new LunarOrbitals(this.group);    // Endymion Wheel, Aitken Depot, relays and ferries in lunar orbit (lunarOrbitals.js)
   }
@@ -592,6 +642,7 @@ export class Moon {
       this.hops.update(realTime);
       this.ringTrains.update(realTime, cam);
       this.ringHalls.update(cam);
+      this.ringDeck.update(realTime, cam);
       this.orbitals.update(realTime, _sunM, cam, this.space.camera, this.space.size.y);
     }
     this.atmoU.uCenter.value.copy(sim.moonPos);

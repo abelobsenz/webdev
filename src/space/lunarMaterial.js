@@ -25,6 +25,9 @@ export const LK = { GLASS: 0, HULL: 1, LANTERN: 2, GARDEN: 3, CONDUIT: 4, PANEL:
 // (aprons and haul roads), 35 lamp lenses and lit cab windows (always glowing), 36 gold
 // multi-layer insulation over cryogenic tanks (crinkled facets, taped seams, beta-cloth patches).
 
+/** Floodlights a lunar mesh may carry (see setFloods). */
+export const FLOODS = 8;
+
 const VERT = /* glsl */ `
 attribute vec3 aFacade;
 varying vec3 vFac;
@@ -61,6 +64,13 @@ uniform float uTime;
 uniform vec3 uAccent;
 uniform float uLit;
 uniform float uScale;        // view units per facade metre (1e-3: the meshes are metres in a km scene)
+// the station's own floodlights (up to FLOODS, view space km; w = reach in km) and their
+// colour times strength; a mesh without any sets uFloodN = 0. They are what shows a
+// yard or a depot working in the lunar night, when the Sun is behind the Moon.
+uniform vec4 uFloodP[${FLOODS}];
+uniform vec3 uFloodC[${FLOODS}];
+uniform int uFloodN;
+uniform float uFill;         // light reflected about the structure itself (0 on the ground)
 varying vec3 vFac;
 varying vec3 vView;
 varying vec3 vN;
@@ -172,9 +182,20 @@ void main() {
     alb += vec3(0.1, 0.09, 0.08) * max(gridLine(f.x, 3.0, 0.05, fw.x), gridLine(f.y, 2.0, 0.05, fw.y)) * det;
     rough = 0.5 - 0.15 * plate; metal = 0.5;
   } else if (k < 11.5) {
-    alb = vec3(0.1, 0.09, 0.085); rough = 0.7;
-    float ch = mix(0.17, gridLine(f.y, 24.0, 2.0, fw.y), 1.0 - smoothstep(4.0, 9.0, fw.y));
-    em = vec3(1.0, 0.36, 0.12) * (0.1 + 0.4 * ch);
+    // radiator: white high-emissivity coating over fluid channels every 1.6 m (ribs a shade
+    // darker), panels 12 m square with dark hinge and manifold gaps, each panel's coating
+    // weathered its own shade; the working panels glow a dull red by night where the loop
+    // runs hot (brighter along the manifolds), unresolved detail settling to its mean
+    float resR = 1.0 - smoothstep(0.25, 0.9, px);
+    float rib = mix(0.2, gridLine(f.y, 1.6, 0.18, fw.y), 1.0 - smoothstep(0.15, 0.5, fw.y));
+    float gap = mix(0.1, max(gridLine(f.x, 12.0, 0.35, fw.x), gridLine(f.y, 12.0, 0.35, fw.y)), resR);
+    float ph = hash12(floor(f / 12.0) + 61.0);
+    alb = vec3(0.56, 0.57, 0.58) * (0.86 + 0.18 * mix(0.5, ph, resR)) * (1.0 - 0.22 * rib);
+    alb = mix(alb, vec3(0.07, 0.07, 0.075), gap * 0.85);
+    rough = mix(0.55, 0.35, rib); metal = mix(0.0, 0.6, gap);
+    float hot = step(0.3, ph) * mix(0.7, 1.0, resR);
+    float man = mix(0.17, gridLine(f.y, 24.0, 2.0, fw.y), 1.0 - smoothstep(4.0, 9.0, fw.y));
+    em = vec3(1.0, 0.34, 0.1) * (0.015 + 0.09 * man + 0.05 * hot * (1.0 - gap)) * (0.25 + 0.75 * night);
   } else if (k < 12.5) {
     // glazed roof over parkland and lit lanes
     float g = vnoise(f * 0.011) * 0.55 + vnoise(f * 0.09) * 0.45;
@@ -377,7 +398,26 @@ void main() {
   float sp = pow(max(dot(N, H), 0.0), mix(80.0, 8.0, rough)) * mix(0.6, 0.15, rough);
   vec3 F0 = mix(vec3(0.04), alb, metal);
   float fres = pow(1.0 - max(dot(N, V), 0.0), 5.0);
-  vec3 col = alb * (1.0 - metal * 0.8) / 3.14159 * (sunL * ndl + earthL * max(dot(N, eDir), 0.0) + skyL * (0.55 + 0.45 * max(dot(N, upV), 0.0)) + moonL * footAO);
+  // floodlights: a soft inverse-square pool from each lamp head, windowed at four reaches,
+  // with a specular glint of its own on glossy plating
+  vec3 floodL = vec3(0.0), floodS = vec3(0.0);
+  for (int i = 0; i < ${FLOODS}; i++) {
+    if (i >= uFloodN) break;
+    vec3 Lv = uFloodP[i].xyz - vView;
+    float dl = length(Lv);
+    vec3 Ld = Lv / max(dl, 1e-6);
+    float q = dl / max(uFloodP[i].w, 1e-6);
+    float fall = (1.0 - smoothstep(2.0, 4.0, q)) / (1.0 + q * q);
+    vec3 Ei = uSunE * uFloodC[i] * fall;
+    float nd = max(dot(N, Ld), 0.0);
+    floodL += Ei * nd;
+    vec3 Hf = normalize(V + Ld);
+    floodS += Ei * nd * pow(max(dot(N, Hf), 0.0), mix(60.0, 6.0, rough)) * mix(0.5, 0.1, rough);
+  }
+  // the structure's own reflected light: the lit faces round a member fill its shade a little
+  vec3 fillL = uSunE * uFill * vec3(0.9, 0.93, 1.0) * (sunVis * 0.012 + 0.0025) * (0.6 + 0.4 * abs(dot(N, V)));
+  vec3 col = alb * (1.0 - metal * 0.8) / 3.14159 * (sunL * ndl + earthL * max(dot(N, eDir), 0.0) + skyL * (0.55 + 0.45 * max(dot(N, upV), 0.0)) + moonL * footAO + floodL + fillL);
+  col += (F0 + (1.0 - F0) * fres * 0.3) * floodS;
   col += min((F0 + (1.0 - F0) * fres * 0.3) * sp * sunL * ndl, sunL * 0.5);
   // glossy surfaces mirror the sky: dark blue by day, black at night
   col += (F0 + (1.0 - F0) * fres) * (1.0 - rough) * skyL * 0.6;
@@ -388,7 +428,7 @@ void main() {
 
 const _m = new THREE.Matrix4();
 
-export function createLunarMaterial({ accent = [0.6, 0.85, 1.0], lit = 0.55, side = THREE.FrontSide } = {}) {
+export function createLunarMaterial({ accent = [0.6, 0.85, 1.0], lit = 0.55, side = THREE.FrontSide, fill = 0 } = {}) {
   return new THREE.ShaderMaterial({
     vertexShader: VERT, fragmentShader: FRAG,
     uniforms: {
@@ -399,6 +439,10 @@ export function createLunarMaterial({ accent = [0.6, 0.85, 1.0], lit = 0.55, sid
       uEarthLit: LUNAR_FRAME.earthLit,
       uTime: { value: 0 }, uAccent: { value: new THREE.Color(...accent) }, uLit: { value: lit },
       uScale: { value: 1e-3 },
+      uFloodP: { value: Array.from({ length: FLOODS }, () => new THREE.Vector4()) },
+      uFloodC: { value: Array.from({ length: FLOODS }, () => new THREE.Vector3()) },
+      uFloodN: { value: 0 },
+      uFill: { value: fill },
     },
     side,
   });
@@ -439,7 +483,40 @@ function bindLunar(mesh, m) {
     u.uMoonView.value.copy(LUNAR_FRAME.moonPos).applyMatrix4(_m);
     u.uEarthView.value.set(0, 0, 0).applyMatrix4(_m);
     u.uTime.value = LUNAR_FRAME.time;
+    // this mesh's floodlights (a shared material: every mesh writes its own, none = 0)
+    const F = mesh.userData.floods;
+    const n = F ? Math.min(F.n, FLOODS) : 0;
+    u.uFloodN.value = n;
+    if (n) {
+      _fm.multiplyMatrices(_m, mesh.matrixWorld);
+      const sc = _fs.setFromMatrixScale(_fm).x;
+      for (let i = 0; i < n; i++) {
+        const P = u.uFloodP.value[i], j = i * 7;
+        _fv.set(F.data[j], F.data[j + 1], F.data[j + 2]).applyMatrix4(_fm);
+        P.set(_fv.x, _fv.y, _fv.z, F.data[j + 3] * sc);
+        u.uFloodC.value[i].set(F.data[j + 4], F.data[j + 5], F.data[j + 6]);
+      }
+    }
     m.uniformsNeedUpdate = true;
   };
+  return mesh;
+}
+
+const _fm = new THREE.Matrix4(), _fv = new THREE.Vector3(), _fs = new THREE.Vector3();
+
+/**
+ * Give a lunar mesh its own floodlights: [{ p: [x, y, z] (the mesh's local units, metres for
+ * lunarMesh), reach (metres: the distance at which the pool has halved), color: [r, g, b],
+ * i: strength (1 lights a pale surface at its reach about a quarter as bright as the Sun) }].
+ * At most FLOODS; packed once, so the per-frame upload allocates nothing.
+ */
+export function setFloods(mesh, floods) {
+  const n = Math.min(floods.length, FLOODS);
+  const data = new Float32Array(n * 7);
+  for (let i = 0; i < n; i++) {
+    const f = floods[i], c = f.color || [1, 0.92, 0.8], k = (f.i ?? 1) * 0.5;
+    data.set([f.p[0], f.p[1], f.p[2], f.reach, c[0] * k, c[1] * k, c[2] * k], i * 7);
+  }
+  mesh.userData.floods = { n, data };
   return mesh;
 }

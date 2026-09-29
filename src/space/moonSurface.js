@@ -241,29 +241,132 @@ float cloudAt(vec3 d, float lod, float fp) {
   return dens;
 }
 
-// crater octave relief (slope vector in the tangent plane) for close views
-vec3 craterDetail(vec3 p, float sc, float fpCells, float quiet, float seed) {
-  vec3 q = p * sc + seed;
+// ---- close-range crater fields and ridges ----
+// A crater population, not a lattice of identical dimples: each octave scatters craters with a
+// steep power-law of sizes (most small, a few large), and each crater has an age. A fresh one
+// is a deep bowl with a sharp raised rim, a bright ejecta blanket and rays; an old one is worn
+// shallow, its rim rounded, its floor filled with fines and (on this Moon) grassed over. The
+// larger ones in the coarse octaves are complex: a flat floor, slumped terraces down the
+// walls and a central peak. The density itself varies over the globe (saturated highland
+// fields beside smoother plains), so the ground never reads as a uniform bumpy noise.
+// Heights are in units of each crater's radius (they are self-similar), so the slopes are
+// dimensionless and add straight into the relief gradient (+grad h, downhill is -grad).
+struct Craters {
+  vec3 grad;      // height gradient (tangent plane)
+  float alb;      // albedo factor: fresh ejecta and rays brighter, old floors darker
+  float rock;     // exposed rock: fresh walls, rims and blocky ejecta
+  float veg;      // filled old floors: meadow and water-loving scrub
+};
+
+void craterOctave(inout Craters C, vec3 p, float cellKm, float fp, float quiet, float seed, float dens, float cplx) {
+  float fc = fp / cellKm;
+  float res = 1.0 - smoothstep(0.1, 0.3, fc);
+  if (res <= 0.0) return;
+  // rays and rim albedo sharpen only once the crater spans a good many pixels
+  float resA = 1.0 - smoothstep(0.04, 0.16, fc);
+  vec3 q = p * (RM / cellKm) + seed;
   vec3 base = floor(q - 0.5);
-  vec3 slope = vec3(0.0);
+  vec3 e1 = normalize(cross(p, abs(p.y) < 0.9 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0)));
+  vec3 e2 = cross(p, e1);
   for (int i = 0; i < 2; i++) for (int j = 0; j < 2; j++) for (int k = 0; k < 2; k++) {
     vec3 cell = base + vec3(float(i), float(j), float(k));
-    vec3 h = hash33(cell);
-    if (h.x > 0.55) continue;
-    vec3 c = cell + 0.3 + 0.4 * hash33(cell + 7.1);
-    float rr = 0.08 + 0.2 * h.y * h.y;
+    vec3 h = hash33(cell + seed * 0.173);
+    if (h.x > dens) continue;
+    vec3 h2 = hash33(cell + 7.1);
+    vec3 c = cell + 0.25 + 0.5 * h2;
+    // sizes: a steep power law (radius 0.05 .. 0.42 cell), the largest rare
+    float s3 = h.y * h.y * h.y;
+    float rr = 0.05 + 0.37 * s3 * h.y;
     vec3 dv = q - c;
     dv -= p * dot(dv, p);
     float dl = length(dv);
     float x = dl / rr;
-    if (x > 2.2) continue;
-    // bowl (depth 0.2 D) with a raised rim and a thinning ejecta skirt
-    float gx = (x - 1.0) * 4.5;
-    float g = exp(-gx * gx);
-    float dh = (x < 1.0 ? 0.8 * x : 0.0) - 9.0 * (x - 1.0) * g * 0.16 - (x > 1.0 ? 0.3 * pow(x, -4.0) : 0.0);
-    slope += dh * dv / max(dl, 1e-5) * (1.0 - 0.7 * h.z);
+    if (x > 3.2) continue;
+    vec3 dir = dv / max(dl, 1e-5);
+    // age 0 fresh .. 1 degraded; fresh craters are the rarer
+    float age = sqrt(h.z);
+    float fresh = 1.0 - smoothstep(0.0, 0.45, age);
+    float keep = 1.0 - 0.72 * age;                          // relief left after degradation
+    float depth = 0.42 * keep;
+    // complex: flat floor, terraced walls and a central peak for the big ones of coarse octaves
+    float big = cplx * smoothstep(0.18, 0.34, rr);
+    float fl = mix(0.0, 0.55, big);
+    // the bowl, h = -depth (1.0 - smoothstep(fl, 1.0, x)): its slope on the walls
+    float t = clamp((x - fl) / (1.0 - fl), 0.0, 1.0);
+    float dhdx = x < 1.0 ? depth * 6.0 * t * (1.0 - t) / (1.0 - fl) : 0.0;
+    // slumped terraces: the wall slope broken into steps (steep scarps, level benches)
+    dhdx *= 1.0 + big * 0.9 * sin(t * 18.85) * step(0.05, t) * resA;
+    // the rim: a raised lip, sharp when fresh, rounded when old
+    float w = 0.14 + 0.22 * age;
+    float rimH = 0.09 * keep;
+    float gr = (x - 1.0) / w;
+    float rim = exp(-gr * gr);
+    dhdx += rimH * rim * (-2.0 * gr / w);
+    // the ejecta blanket falling away outside the rim (hummocky close to it)
+    if (x > 1.0) {
+      float xi = 1.0 / x;
+      dhdx -= 3.0 * 0.05 * keep * xi * xi * xi * xi;
+    }
+    // the central peak
+    float pk = x / 0.16;
+    dhdx += big * 0.3 * keep * exp(-pk * pk) * (-2.0 * pk / 0.16);
+    C.grad += dhdx * dir * quiet * res;
+    // albedo: fresh ejecta bright out to ~2.2 radii with rays past it; old floors darker and
+    // grassed; the walls and rim of the fresh ones bare rock
+    float blanket = (1.0 - smoothstep(1.0, 2.2, x)) * step(1.0, x);
+    float ang = atan(dot(dir, e2), dot(dir, e1));
+    float nr = 7.0 + floor(h2.z * 6.0);
+    float ray = max(0.0, sin(ang * nr + h2.x * 30.0)) * max(0.0, sin(ang * (nr * 2.0 + 3.0) + h2.y * 20.0));
+    ray *= smoothstep(1.0, 1.3, x) * (1.0 - smoothstep(1.6, 3.2, x));
+    float bright = fresh * (0.55 * blanket + mix(0.12, 0.9 * ray, resA) * (1.0 - blanket) + 0.25 * (1.0 - step(1.0, x)));
+    float floorF = (1.0 - smoothstep(fl * 0.9 + 0.35, 0.92, x)) * smoothstep(0.35, 0.8, age);
+    C.alb *= 1.0 + (0.62 * bright - 0.2 * floorF) * res * quiet;
+    float wall = smoothstep(0.45, 0.8, x) * (1.0 - smoothstep(1.0, 1.25, x));
+    C.rock = max(C.rock, (fresh * (wall + 0.5 * blanket) + (1.0 - fresh) * rim * 0.45) * res * quiet);
+    C.veg = max(C.veg, floorF * res * quiet);
   }
-  return slope * quiet * (1.0 - smoothstep(0.12, 0.3, fpCells));
+}
+
+// wrinkle ridges and scarps: sinuous ridged crests tens of kilometres long (the crest where
+// a warped simplex field crosses zero), steep on one flank, strongest on the old plains
+vec3 ridgeField(vec3 up, float fp, float amt) {
+  vec3 g = vec3(0.0);
+  float lam = 26.0;
+  float a = 1.0;
+  for (int i = 0; i < 2; i++) {
+    float res = 1.0 - smoothstep(0.12 * lam, 0.4 * lam, fp);
+    if (res > 0.0) {
+      vec3 pp = up * (RM / lam) + float(i) * 13.1;
+      vec4 wv = sdnoise(pp * 0.37 + 5.0);
+      vec4 n = sdnoise(pp + wv.yzw * 0.3);
+      // ridge: 1 - |n| sharpened; its gradient -sign(n) grad n, steeper on the side of n > 0
+      float cr = 1.0 - smoothstep(0.0, 0.35, abs(n.x));
+      float flank = n.x > 0.0 ? 1.0 : 0.45;
+      g -= sign(n.x) * n.yzw * cr * flank * a * res * 0.05;
+    }
+    lam /= 3.2;
+    a *= 0.6;
+  }
+  g -= up * dot(g, up);
+  return g * amt;
+}
+
+Craters craterField(vec3 up, float fp, float quiet, float worked, float hl) {
+  Craters C;
+  C.grad = vec3(0.0); C.alb = 1.0; C.rock = 0.0; C.veg = 0.0;
+  // the regional crater density: saturated fields on the old highlands, sparse on the young
+  // plains, patchy in between (two scales, so fields have edges, not a uniform scatter)
+  float reg = snoise(up * 5.3) * 0.6 + snoise(up * 19.0) * 0.4;
+  float high = smoothstep(0.1, 1.2, hl);
+  float d0 = clamp(0.22 + 0.38 * reg + 0.25 * high, 0.05, 0.8);
+  float q = quiet;
+  craterOctave(C, up, 24.0, fp, q, 3.0, d0 * 0.8, 1.0);
+  craterOctave(C, up, 6.5, fp, q, 11.0, d0, 1.0);
+  craterOctave(C, up, 1.7, fp, q, 37.0, d0 * 1.1, 0.5);
+  float qw = max(q, worked * 0.7);
+  if (fp < 0.1) craterOctave(C, up, 0.34, fp, qw, 71.0, clamp(d0 * 1.2 + 0.15, 0.0, 0.85), 0.0);
+  if (fp < 0.025) craterOctave(C, up, 0.075, fp, qw, 97.0, 0.7, 0.0);
+  return C;
 }
 
 // settlement lights at one lattice scale: clusters that fall to their mean while unresolved
@@ -571,7 +674,26 @@ void main() {
       wk = (1.0 - smoothstep(0.0, 0.35, wbox)) * nearSite;
       if (wk > 0.0) {
         float gn = snoise(vec3(wuv * 1.7, 11.0)) * 0.5 + 0.5;
-        vec3 reg = mix(vec3(0.19, 0.18, 0.165), vec3(0.3, 0.285, 0.26), gn);
+        vec3 reg = mix(vec3(0.15, 0.143, 0.13), vec3(0.24, 0.228, 0.205), gn);
+        // haul tracks and spoil: darker ruts in bands along the planning axes, where resolved
+        float trk = (1.0 - smoothstep(0.012, 0.03, fp)) * smoothstep(0.55, 0.9, snoise(vec3(wuv.x * 0.6, wuv.y * 9.0, 4.0)) * 0.5 + 0.5);
+        reg *= 1.0 - 0.18 * trk;
+        // the array (lunarWorks.js ARRAY, 1.5 x 1.75 km) stands in meadow, not bare regolith:
+        // grass between the tracker rows, the rows' shade in strips 16 m apart where they
+        // resolve, the service roads every 18 rows and 36 columns pale gravel
+        vec2 arr = vec2(max(0.8 - wuv.x, wuv.x - 2.3), max(-4.9 - wuv.y, wuv.y + 3.15));
+        float inArr = 1.0 - smoothstep(0.0, 0.03, max(arr.x, arr.y));
+        if (inArr > 0.0) {
+          vec3 meadow = mix(vec3(0.05, 0.075, 0.03), vec3(0.075, 0.09, 0.04), snoise(vec3(wuv * 7.0, 2.0)) * 0.5 + 0.5);
+          float rowsR = 1.0 - smoothstep(0.004, 0.012, fp);
+          float rowSh = mix(0.35, 1.0 - smoothstep(0.0, 0.3, abs(fract((wuv.y + 4.9) / 0.016) - 0.5)), rowsR);
+          meadow *= 1.0 - 0.35 * rowSh;
+          float rdv = abs(fract((wuv.y + 4.9) / (0.016 * 18.0) - 0.5) - 0.5) * 0.288;
+          float rdu = abs(fract((wuv.x - 0.8) / (0.014 * 36.0) - 0.5) - 0.5) * 0.504;
+          float road = max(1.0 - smoothstep(0.005, 0.005 + fp, rdv), 1.0 - smoothstep(0.005, 0.005 + fp, rdu)) * min(1.0, 0.01 / max(fp, 0.01));
+          meadow = mix(meadow, vec3(0.2, 0.19, 0.17), road);
+          reg = mix(reg, meadow, inArr);
+        }
         alb = mix(alb, reg, wk);
       }
     }
@@ -676,28 +798,43 @@ void main() {
     vec3 V = -rd;
     vec3 landCol = vec3(0.0), seaCol = vec3(0.0);
     if (waterF < 0.999) {
-      // relief: baked normals (exaggerated a little) plus finer craters when close
+      // relief, as the height gradient (+grad h: the normal leans away from it). The bake's
+      // normal carries -grad h in its tangent part. (Until wave 4 the baked relief and the
+      // crater octaves were added with the opposite sign to the procedural field, so hills and
+      // bowls were lit inside out under the true shadows: the "bumpy" ground from orbit.)
       float nu = max(dot(nB, up), 0.2);
-      vec3 grad = (nB - up * dot(nB, up)) / nu;
+      vec3 grad = -(nB - up * dot(nB, up)) / nu;
       float quiet = smoothstep(9.0, 26.0, acos(clamp(dot(up, SITE_UP), -1.0, 1.0)) * RM);
-      if (fp < 2.0) grad -= craterDetail(up, RM / 5.0, fp / 5.0, quiet, 0.0) * 0.55;
-      if (fp < 0.6) grad -= craterDetail(up, RM / 1.4, fp / 1.4, quiet, 37.0) * 0.5;
-      // a third octave of small fresh craters (tens of metres) for the ground a lander sees,
-      // on the worked ground of the Works too
-      if (fp < 0.08) grad -= craterDetail(up, RM / 0.25, fp / 0.25, max(quiet, wk * 0.7), 71.0) * 0.42;
+      // crater populations from 24 km cells down to 75 m ones, with rims, ejecta, rays, terraces
+      // and central peaks; wrinkle ridges across the plains
+      Craters cf = craterField(up, fp, quiet, wk, hl);
+      grad += cf.grad * 0.6;
+      if (fp < 9.0) grad += ridgeField(up, fp, quiet * (1.0 - 0.6 * smoothstep(0.3, 1.5, hl)));
       if (fp < 0.25) {
         vec3 e = up * RM / 0.35;
         vec3 gn = vec3(snoise(e), snoise(e + 5.2), snoise(e + 9.7)) * 0.08 * (1.0 - smoothstep(0.03, 0.1, fp / 0.35));
         grad += gn - up * dot(gn, up);
       }
-      // the procedural relief: rough on rock and scree, gentle under turf, none in the Landing
-      // (bare rock ridged into crags and gullies, turf rolling; the woods' crowns on top)
-      grad += mix(gf.grad, gf.rgrad, rockF * rockF) * roughK * gf.dw * quiet;
+      // the finest relief a lander or a low pass sees: rubble and hummocks ridged on bare rock
+      // (slope-aware: the rock of crater walls and rims is rougher than the grassed floors)
+      float rockAll = clamp(max(rockF, cf.rock), 0.0, 1.0);
+      grad += mix(gf.grad, gf.rgrad, rockAll * rockAll) * max(roughK, 0.3 * cf.rock) * gf.dw * quiet;
       grad += crowns.xyz * 0.55 * vegF * quiet;
       grad *= 1.0 - nearSite * (1.0 - smoothstep(3.0, 9.0, siteD));
+      // the craters' own ground: fresh ejecta and rays pale, walls and rims bare grey rock,
+      // old filled floors a deeper, damper green (and grey where the country is bare)
+      vec3 albC = alb * cf.alb;
+      float bareRock = cf.rock * (1.0 - nearSite);
+      albC = mix(albC, vec3(0.2, 0.194, 0.182) * (0.9 + 0.25 * gf.fine * gf.dw) * cf.alb, bareRock * 0.55);
+      float gex0 = (alb.g - 0.5 * (alb.r + alb.b)) / max(dot(alb, vec3(0.3, 0.5, 0.2)), 1e-3);
+      vec3 floorC = mix(alb * vec3(0.78, 0.8, 0.8), alb * vec3(0.72, 0.98, 0.66), smoothstep(0.1, 0.4, gex0));
+      albC = mix(albC, floorC, cf.veg * 0.7 * (1.0 - nearSite));
+      // the lie of the land: hollows collect the darker fines, crests and rims are scoured
+      float conc = dot(cf.grad, cf.grad);
+      albC *= 1.0 - 0.06 * smoothstep(0.02, 0.2, conc) * (1.0 - cf.rock);
       vec3 n = normalize(up - grad * 1.5);
       float ndl = max(dot(n, sun), 0.0);
-      landCol = alb / PI * (E * ndl + sky * (0.6 + 0.4 * dot(n, up)) + earth * max(dot(n, uEarthM), 0.0));
+      landCol = albC / PI * (E * ndl + sky * (0.6 + 0.4 * dot(n, up)) + earth * max(dot(n, uEarthM), 0.0));
       // settlement lights at night: coasts and lowlands, most of all facing home; towns and
       // villages where they are resolved, their mean where they are not
       float night = 1.0 - smoothstep(-0.06, 0.03, mu);

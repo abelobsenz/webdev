@@ -65,8 +65,9 @@ export function buildLunarPort({receiving=true}={}) {
     B.tube([V(-1700,-1050,sd*7800),V(1700,-1050,sd*7800)],90,8,CK.HULL);
     for(const x of [-1700,1700]) {
       B.box(x,-1050,sd*7800,1500,220,2400,CK.HULL);
+      pierSlab(B,x,-1050,sd*7800,1500,220,2400,lamps);
       if(!receiving||sd<0)for(let j=0;j<4;j++) B.box(x,-740,sd*(7050+j*500),1050,400,350,j%2?CK.BRONZE:CK.HULL);
-      B.box(x,-1650,sd*8100,2000,28,2800,CK.PANEL);
+      pierArray(B,x,-1650,sd*8100,2000,2800);
       B.tube([V(x,-1050,sd*7800),V(x,-1650,sd*7800)],75,8,CK.DARK);
     }
     B.at(0,-1050,sd*9500);B.push(toY);
@@ -77,6 +78,61 @@ export function buildLunarPort({receiving=true}={}) {
   const geo=court?placeMerge([{geo:baseGeo,m:new THREE.Matrix4()},...court.parts.map(p=>({geo:p.geo,m:new THREE.Matrix4()}))]):baseGeo;
   if(court)lamps.push(...court.lamps);
   return {geo,baseGeo,lamps,receiving:court,radius:11.2};
+}
+
+/**
+ * The architecture of a cargo pier's slab (centre cx, cy, cz; size sx, sy, sz metres): from a
+ * few kilometres the bare box read as a blank white tile. Deep ribs every 100 m down the sides
+ * over a darker plinth course; edge girders under the rim with a hazard lip; two bands of lit
+ * gallery windows (the pier crews' quarters and control rooms) along the long faces; the
+ * service keel, pipe racks and cable trunks along the underside; red rim lamps at the corners.
+ * Everything stands proud of the slab's sides or hangs under it: the top face (the courts'
+ * floor) is untouched.
+ */
+function pierSlab(B,cx,cy,cz,sx,sy,sz,lamps) {
+  const hx=sx/2,hy=sy/2,hz=sz/2,top=cy+hy,bot=cy-hy;
+  // edge girders just under the rim, a hazard lip on their faces
+  for(const s of [-1,1]) {
+    B.box(cx+s*(hx+2.8),top-10,cz,6,16,sz+11,CK.DARK);
+    B.box(cx+s*(hx+5.9),top-4,cz,0.4,3,sz-3,LK.HAZARD);
+    B.box(cx,top-10.5,cz+s*(hz+2.9),sx+11.5,15,6,CK.DARK);
+    B.box(cx,top-4.5,cz+s*(hz+6.0),sx-3,3,0.4,LK.HAZARD);
+  }
+  // the long faces (along z): ribs every 100 m, two lit gallery bands between them, a plinth
+  for(const s of [-1,1]) {
+    const fx=cx+s*hx;
+    for(let z=-hz+50;z<hz;z+=100) B.box(fx+s*2.0,cy-8,cz+z,5,sy-40,8,CK.DARK);
+    for(const [y,h] of [[top-44,7],[top-72,5]]) B.box(fx+s*0.4,y,cz,1.2,h,sz-40,CK.GLASS);
+    B.box(fx+s*0.6,top-58,cz,1.4,2,sz-44,LK.SIGN);
+    B.box(fx+s*1.3,bot+21,cz,3,38,sz-2,CK.PANEL);
+    // the short faces (along x): the same rhythm, 1500 m of it
+    const fz=cz+s*hz;
+    for(let x=-hx+50;x<hx;x+=100) B.box(cx+x,cy-8,fz+s*2.0,8,sy-40,5,CK.DARK);
+    B.box(cx,top-44,fz+s*0.4,sx-40,7,1.2,CK.GLASS);
+    B.box(cx,bot+21,fz+s*1.3,sx-2,38,3,CK.PANEL);
+  }
+  // the underside: a service keel down the middle, pipe racks and cable trunks either side
+  B.box(cx,bot-13.8,cz,120,28,sz-120,CK.HULL);
+  B.box(cx,bot-28.3,cz,100,1.2,sz-160,LK.SIGN);
+  for(const dx of [-380,-300,300,380]) B.tube([V(cx+dx,bot-10,cz-hz+80),V(cx+dx,bot-10,cz+hz-80)],7,8,dx<0?CK.BRONZE:CK.CONDUIT);
+  for(let z=-hz+120;z<hz;z+=240) B.box(cx,bot-4.8,cz+z,sx-200,10,6,CK.DARK);
+  for(const [a,b] of [[-1,-1],[1,-1],[1,1],[-1,1]]) lamps.push({p:V(cx+a*(hx+6),top-2,cz+b*(hz+6)),r:10,color:LAMP.RED,i:2,breathe:.7,phase:(a+b+2)/5});
+  for(let z=-hz+200;z<hz;z+=400) for(const s of [-1,1]) lamps.push({p:V(cx+s*(hx+4),top-44,cz+z),r:8,color:LAMP.AMBER,i:1.4});
+}
+
+/** The pier's array under its slab: 5 x 7 photovoltaic modules on a truss spine, gapped by
+ * their frames (the old single blue sheet read as a flat tile). */
+function pierArray(B,cx,cy,cz,sx,sz) {
+  const nx=5,nz=7,gx=sx/nx,gz=sz/nz;
+  for(let i=0;i<nx;i++)for(let j=0;j<nz;j++) {
+    const x=cx-sx/2+(i+0.5)*gx,z=cz-sz/2+(j+0.5)*gz;
+    B.box(x,cy,z,gx-24,10,gz-24,LK.SOLAR);
+  }
+  // a rail under each column of modules, all of them on the cross spine
+  for(let i=0;i<nx;i++) B.box(cx-sx/2+(i+0.5)*gx,cy-6,cz,8,4,sz-30,CK.DARK);
+  B.box(cx,cy+2,cz,40,24,sz+40,CK.DARK);
+  B.box(cx,cy+2,cz,sx+40,24,40,CK.DARK);
+  for(const s of [-1,1]) B.box(cx+s*(sx/2+14),cy,cz,8,14,sz+20,CK.BRONZE);
 }
 
 // Positive-z receiving court. The entire dock is stationary; its ferry can lift
