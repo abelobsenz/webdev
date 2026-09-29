@@ -340,7 +340,7 @@ export function buildRingHall(far=false) {
   // podium: 80 m of lit storeys, its roof a garden terrace inside a parapet
   B.box(0,30,0,1500,80,1550,LK.STONE);
   B.box(0,70.6,0,1496,1.2,1546,LK.ROOFG);
-  for(const s of [-1,1]) {B.box(s*748,73,0,4,6,1550,LK.WALL);B.box(0,73,s*773,1500,6,4,LK.WALL);}
+  for(const s of [-1,1]) {B.box(s*748,73,0,4,6,1558,LK.WALL);B.box(0,73,s*773,1492,6,4,LK.WALL);}
   // the arcade: a colonnade 30 m out from the podium's front and flanks under a tiled roof
   for(let x=-725;x<=725;x+=50)B.box(x,19,-790,10,58,10,LK.WALL);
   B.box(0,50.5,-790,1500,3,34,LK.TILE);
@@ -429,4 +429,10 @@ export function buildLunarRingDistricts(radiusKm=2117) {
     for(const zz of [-1700,1700])lamps.push({p:V(Math.cos(b)*(R+76),zz,Math.sin(b)*(R+76)),r:7,color:LAMP.TEAL,i:1.4});
   }
   return {geo:B.geometry(),districts,lamps,hallMats,hallAngle,hallNear:buildRingHall(false),hallFar:buildRingHall(true),sectors:N};
+}
+
+/** The full halls of districts idx placed in the Moon frame (metres), merged: for probes and audits. */
+export function placedHalls(data, idx) {
+  const m=new THREE.Matrix4();
+  return placeMerge(idx.map(i=>({geo:data.hallNear,m:m.clone().fromArray(data.hallMats,i*16)})));
 }
