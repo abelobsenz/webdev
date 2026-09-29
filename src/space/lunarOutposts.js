@@ -147,9 +147,10 @@ export function buildOutpost(seed, weight = 0.5, lat = 0) {
     const first = pads.length === 0;
     const nCraft = first ? 1 + Math.floor(rnd() * 1.99) : 1 + Math.floor(rnd() * 2.2);
     if (first) cycler = [x, z, rnd() * TAU];
+    const a = rnd() * TAU;
     for (let c = 0; c < nCraft; c++) {
-      const a = rnd() * TAU, d = first ? 55 : nCraft === 1 ? 0 : 45;
-      const lx = x + Math.cos(a + c * Math.PI) * d, lz = z + Math.sin(a + c * Math.PI) * d;
+      const d = first ? 55 : nCraft === 1 ? 0 : 45;
+      const lx = x + Math.cos(a + c * TAU / nCraft) * d, lz = z + Math.sin(a + c * TAU / nCraft) * d;
       const part = rnd() < 0.5 ? 'lander' : 'cargoLander';
       put(part, seat(_m, lx, lz, rnd() * TAU, 0.9), LIVERY[Math.floor(rnd() * LIVERY.length)]);
       parked.push([lx, lz]);
