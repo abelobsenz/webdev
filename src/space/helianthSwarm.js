@@ -376,7 +376,10 @@ void main() {
   float shimmer = 0.85 + 0.15 * sin(along * 0.9 + uTime * 5.0 + vSeed * 30.0);
   float ends = smoothstep(0.0, 0.04, vUv.x) * (1.0 - smoothstep(0.96, 1.0, vUv.x));
   float fade = mix(1.0, (1.0 - vUv.x) * (1.0 - vUv.x), vF);
-  vec3 c = uColor * core * (0.3 + 1.1 * pulse) * shimmer * ends * fade * vI * uGain;
+  // the beam itself is nearly invisible in vacuum: what shows is the thin trace of the dust it
+  // crosses and the packets of the pulse train, brightest near the emitter
+  float emit = 1.0 + 1.5 * exp(-vUv.x * 30.0);
+  vec3 c = uColor * core * (0.12 + 1.2 * pulse) * shimmer * ends * fade * emit * vI * uGain;
   if (c.r + c.g + c.b < 1e-5) discard;
   gl_FragColor = vec4(c, 0.0);
 }
@@ -565,10 +568,12 @@ export class HelianthSwarm {
       const src = V(420, 600, 0).applyMatrix4(it.m).multiplyScalar(KM);
       const dst = src.clone().normalize().multiplyScalar(SWARM.beamEnd);
       dst.y = 2.2 + Math.sign(src.y) * 3;
-      beams.push({ a: src, b: dst, w: 0.9, seed: (it.c.i * 0.13 + it.c.j * 0.31) % 1 });
+      // a phased-array power beam is a few tens of metres across, not a kilometre: drawn at its
+      // true width it thins to a faint thread with distance instead of a wall of cyan streaks
+      beams.push({ a: src, b: dst, w: 0.05, seed: (it.c.i * 0.13 + it.c.j * 0.31) % 1 });
     }
-    this.relayBeams = createBeams(beams, { color: [0.35, 0.75, 1.0], gain: 0.9, wave: 60 });
-    this.mainBeam = createBeams([{ a: V(0, 16, 0), b: V(0, 60000, 0), w: 3.5, seed: 0.2, fade: 1 }], { color: [1.0, 0.72, 0.36], gain: 1.4, wave: 900, segs: 48 });
+    this.relayBeams = createBeams(beams, { color: [0.35, 0.75, 1.0], gain: 1.2, wave: 60 });
+    this.mainBeam = createBeams([{ a: V(0, 16, 0), b: V(0, 60000, 0), w: 0.4, seed: 0.2, fade: 1 }], { color: [1.0, 0.72, 0.36], gain: 1.6, wave: 900, segs: 48 });
     this.beamGroup.add(this.relayBeams, this.mainBeam);
     this.beamCount = beams.length;
     // service tugs on the streets
