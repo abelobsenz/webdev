@@ -144,3 +144,31 @@ TARGET_INFO.lunarFields = {
   facts:[['Pads','3 x 496 m'],['Propellant farm','9 spheres'],['Turnaround','about 3 minutes']],
 };
 TARGET_ORDER.push('mediiWorks', 'lunarFields');
+
+// The low and middle shell (src/space/lowOrbit.js, stations in src/space/leoStations.js).
+TARGET_INFO.aurelia = {
+  key:'',name:'Aurelia Wheel',district:'Low orbit · 820 km · 51.6°',
+  lore:'The oldest hotel above the Halo. The wheel is 500 m across and turns twice a minute, which gives full gravity in its suites; every one has a bay window looking out past the rim. Guests come up the spokes to the hub, drift through the docking drum, and dance under the glass of the ballroom sphere, where there is no weight at all and the Earth fills the floor. Its orbit carries it over most of the inhabited world every day.',
+  facts:[['Wheel','500 m, 1 g at 1.9 rpm'],['Suites','1,700'],['Lap','101 minutes']],
+};
+TARGET_INFO.demeter = {
+  key:'',name:'Demeter Reach',district:'Low orbit · 1,050 km · 28°',
+  lore:'A farm in orbit. Two drums 640 m long turn in opposite directions, so the pair holds its axes on the Sun without thrusters. Hinged louvre-mirrors throw sunlight through the glazed strips onto orchards, rice terraces and pasture. Astern, the granary grows seedlings and algae in zero gravity under magenta light. Most of the fresh fruit eaten on the Halo comes from here.',
+  facts:[['Drums','2 × 320 m, counter-rotating'],['Farmland','1.3 km²'],['Lap','105 minutes']],
+};
+TARGET_INFO.boreal = {
+  key:'',name:'Boreal Watch',district:'Polar orbit · 900 km · 90°',
+  lore:'The weather and ice observatory of the Concord. It flies over both poles every lap and keeps its instrument deck pointed at the ground, like a plumb line: dishes, a lidar and two telescopes look straight down. Its crew of sixty sleeps in the small centrifuge. Its wings turn to follow the Sun as the station crosses from day to night.',
+  facts:[['Spine','490 m, Earth-pointing'],['Centrifuge','142 m, 1 g'],['Coverage','the whole Earth every 12 h']],
+};
+TARGET_INFO.dawnline = {
+  key:'',name:'Dawnline',district:'Sun-synchronous orbit · 1,200 km · 100.4°',
+  lore:'A power station that almost never sees night. Its orbit follows the line between day and night, and the bulge of the Earth turns that orbit once a year, so it keeps the same angle to the Sun. Almost two kilometres of photovoltaic blanket face the Sun. The phased-array emitter on its gimbal mast turns to hold on the rectenna fields far below.',
+  facts:[['Array','1.9 km × 360 m'],['Beamed','2.4 GW'],['Eclipse','a few minutes a lap, at most']],
+};
+TARGET_INFO.anansi = {
+  key:'',name:'Anansi Skyhook',district:'Rotovator · hub 1,250 km · 12°',
+  lore:'A 900 km tether that turns end over end as it orbits. At the bottom of each swing its tip moves 3.2 km/s slower than the hub, slow enough for a hopper launched from the Halo deck to meet it. The grapple takes the hopper, carries it over the top, and lets go at more than 10 km/s, fast enough for the Moon. Each tip catches one hopper every quarter hour.',
+  facts:[['Tether','900 km'],['Tip speed','3.2 km/s relative'],['Tip gravity','2.3 g']],
+};
+TARGET_ORDER.push('aurelia', 'demeter', 'anansi', 'boreal', 'dawnline');
