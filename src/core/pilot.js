@@ -28,6 +28,7 @@ const OWN = ['KeyW', 'KeyS', 'KeyA', 'KeyD', 'KeyQ', 'KeyE', 'ArrowUp', 'ArrowDo
 
 const _f = V(), _u = V(), _r = V(), _v = V(), _w = V(), _q = new THREE.Quaternion(), _m = new THREE.Matrix4(), _e = new THREE.Euler();
 const UP = new THREE.Vector3(0, 1, 0);
+const _eye = V(), _tgt = V(), _up = V();
 
 export class Pilot {
   constructor(app) {
@@ -234,7 +235,7 @@ export class Pilot {
     // downwash: the fans thrown against water or ground under a low hover
     const floor = this._floor(this.pos), agl = this.pos.y - floor;
     const water = app.world.surfaceHeight(this.pos.x, this.pos.z) < 0.35;
-    const rate = this.tilt * (0.35 + 0.65 * Math.min(1, this.throttle + Math.max(this.input.lift, 0) + 0.3)) * smooth(26, 5, agl) * (this.landed && this.throttle < 0.05 ? 0.15 : 1);
+    const rate = this.tilt * (0.35 + 0.65 * Math.min(1, this.throttle + Math.max(this.input.lift, 0) + 0.3)) * smooth(26, 5, agl) * (this.landed && this.throttle < 0.05 ? (this.active ? 0.12 : 0) : 1);
     this.wash.update(dt, this.pos, floor, rate, water, lerp(1.2, 0.12, night));
     // heat shimmer in the exhausts
     const thrust = this.craft.state.thrust;
@@ -288,6 +289,11 @@ export class Pilot {
     // ---- vertical: the fans lift when tilted, the wings carry the craft at speed
     const liftCap = lerp(3.5, 17, hov);
     this.climb += (i.lift * liftCap - this.climb) * (1 - Math.exp(-h * 2.4));
+    // ground effect: within about a duct span of the surface the fans' wash is trapped under the
+    // hull and cushions a descent (a soft flare onto the gear rather than a thump)
+    const aglNow = this.pos.y - (this._lastFloor ?? -1e9) - 2.28;
+    const ge = hov * smooth(9, 1.5, aglNow);
+    if (this.climb < 0) this.climb *= 1 - 0.65 * ge;
     const support = Math.max(hov, smooth(30, 62, this.speed));
     const sink = (1 - support) * 16;
     _v.copy(_f).multiplyScalar(this.speed);
@@ -299,6 +305,7 @@ export class Pilot {
     this.pos.addScaledVector(this.vel, h);
     const gearH = lerp(0.98, 2.28, this.craft ? this.craft.state.gear : this.gear);
     const floor = this._floor(this.pos);
+    this._lastFloor = floor;
     if (this.pos.y < floor + gearH) {
       const impact = -this.vel.y;
       this.pos.y = floor + gearH;
@@ -332,7 +339,7 @@ export class Pilot {
     const app = this.app, cam = app.camera, c = this.cam, q = this.quat;
     _f.set(0, 0, -1).applyQuaternion(q); _u.set(0, 1, 0).applyQuaternion(q);
     if (!c.held) { c.idle += dt; if (c.idle > 1.6) { const k = 1 - Math.exp(-dt * 1.8); c.yaw -= c.yaw * k; c.pitch -= c.pitch * k; } }
-    const eye = V(), target = V(), up = V();
+    const eye = _eye, target = _tgt, up = _up;
     if (c.hood) {
       // just behind the canopy, looking over the nose
       eye.set(0, 2.35, 1.2).applyQuaternion(q).add(this.pos);

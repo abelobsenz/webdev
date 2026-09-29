@@ -21,6 +21,7 @@ const TAU = Math.PI * 2;
 const V3 = (x, y, z) => new THREE.Vector3(x, y, z);
 const smooth = (a, b, x) => { const t = Math.min(Math.max((x - a) / (b - a), 0), 1); return t * t * (3 - 2 * t); };
 const lerp = (a, b, t) => a + (b - a) * t;
+const _qd = new THREE.Quaternion(), _X = new THREE.Vector3(1, 0, 0);
 
 // ------------------------------------------------------------------ geometry --
 /** Surface through rings of points (each ring closed); consecutive rings joined, optional caps. */
@@ -190,14 +191,17 @@ export const HULL = { L, Z0, hull, tOf, hullBottom };
 
 // ------------------------------------------------------------------ materials --
 function bodyMaterial() {
-  return patchedMaterial({ physical: true, color: 0xebe7df, roughness: 0.3, metalness: 0.0, clearcoat: 1.0, clearcoatRoughness: 0.07, envMapIntensity: 1.15 }, {
+  // bone-white pearl: a hard clear-coat over a faintly iridescent mica base
+  return patchedMaterial({ physical: true, color: 0xebe7df, roughness: 0.3, metalness: 0.0, clearcoat: 1.0, clearcoatRoughness: 0.06, envMapIntensity: 1.15,
+    iridescence: 0.22, iridescenceIOR: 1.45, iridescenceThicknessRange: [260, 420], sheen: 0.25, sheenRoughness: 0.5, sheenColor: new THREE.Color(0xf3e6d2) }, {
     key: 'aerodyne-body',
     fragment: {
       pars: /* glsl */ `
 float adLine(float x, float P, float w) {
   float fw = max(fwidth(x), 1e-4);
   float d = abs(fract(x / P + 0.5) - 0.5) * P;
-  return 1.0 - smoothstep(w, w + fw * 1.5, d);
+  // energy-conserving: a seam thinner than a pixel fades to its average instead of widening
+  return (1.0 - smoothstep(w, w + fw * 1.5, d)) * min(1.0, w / fw);
 }
 float adBand(float x, float a, float b) { float fw = max(fwidth(x), 1e-4); return smoothstep(a - fw, a + fw, x) * (1.0 - smoothstep(b - fw, b + fw, x)); }`,
       color: /* glsl */ `
@@ -215,14 +219,16 @@ float adBand(float x, float a, float b) { float fw = max(fwidth(x), 1e-4); retur
   float pl = max(adLine(o.z + 0.31, 1.15, 0.006), adLine(o.x + 0.45 * sign(o.x), 0.9, 0.005) * step(0.2, abs(o.x)));
   pl = max(pl, adLine(o.y - 0.28, 1.2, 0.005));
   float rivet = adLine(o.z + 0.31 - 0.035, 1.15, 0.004) * adLine(o.y * 1.3 + o.x, 0.09, 0.012);
-  diffuseColor.rgb *= 1.0 - 0.34 * pl - 0.2 * rivet;
+  // fine seams read as shadowed lines only up close (fwidth-faded), never as toy-like bands
+  float seamFade = 1.0 - smoothstep(0.004, 0.02, fwidth(o.z));
+  diffuseColor.rgb *= 1.0 - (0.13 * pl + 0.08 * rivet) * seamFade;
   vAdStripe = stripe; vAdPanel = pl; vAdGlare = glare;
 }`,
       surface: /* glsl */ `
 metalnessFactor = mix(metalnessFactor, 1.0, vAdStripe);
 roughnessFactor = mix(roughnessFactor, 0.34, vAdStripe);
 roughnessFactor = mix(roughnessFactor, 0.8, vAdGlare);
-roughnessFactor = clamp(roughnessFactor + 0.25 * vAdPanel, 0.0, 1.0);
+roughnessFactor = clamp(roughnessFactor + 0.12 * vAdPanel, 0.0, 1.0);
 diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.62, 0.42, 0.24), vAdStripe);`,
     },
     onShader: (sh) => {
@@ -681,11 +687,11 @@ export class Aerodyne {
     // flaperons (roll, with droop in hover), ruddervators (pitch + yaw mixed)
     for (const f of mv.flaperons) {
       const a = (-f.side * st.roll * 0.35) + st.tilt * 0.18;
-      f.g.quaternion.copy(f.g.userData.q0).multiply(new THREE.Quaternion().setFromAxisAngle(V3(1, 0, 0), a));
+      f.g.quaternion.copy(f.g.userData.q0).multiply(_qd.setFromAxisAngle(_X, a));
     }
     for (const r of mv.ruddervators) {
       const a = -st.pitch * 0.3 + r.side * st.yaw * 0.25;
-      r.g.quaternion.copy(r.g.userData.q0).multiply(new THREE.Quaternion().setFromAxisAngle(V3(1, 0, 0), a));
+      r.g.quaternion.copy(r.g.userData.q0).multiply(_qd.setFromAxisAngle(_X, a));
     }
     // gear folds: the nose leg forward, the mains inboard
     for (const g of mv.gear) {

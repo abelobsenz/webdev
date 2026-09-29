@@ -322,6 +322,24 @@ void main() {
       seaCol = body * (1.0 - Fv) + Fv * skyR + spec;
     }
     col = mix(landCol, seaCol, waterF);
+    // aerial perspective from within the air (from space the air shell's own glow veils the
+    // disc): the column between the eye and the ground, density falling as exp(-h / 40 km),
+    // dims and reddens what lies far off and adds the blue of the lit air along the way, so
+    // a horizon from the Landing's terraces or a low pass over the highlands recedes into haze
+    float rcam = length(uCamM);
+    float inAir = 1.0 - smoothstep(RM + 224.0, RM + 229.0, rcam);
+    if (inAir > 0.0) {
+      float dcam = exp(-max(rcam - RM, 0.0) / 40.0);
+      float muv = dot(uCamM / max(rcam, 1e-3), rd);
+      float path = min(40.0 * (1.0 - dcam) / max(-muv, 1e-4), tG) * inAir;
+      vec3 ext = exp(-path * vec3(0.22, 0.46, 1.0) / 520.0);
+      float pk = 1.0 - exp(-path / 520.0);
+      float litA = smoothstep(-0.3, 0.15, mu);
+      float cosT = dot(rd, sun);
+      vec3 rayC = vec3(0.22, 0.46, 1.0) * (0.75 + 0.25 * cosT * cosT);
+      vec3 dusk = vec3(1.0, 0.52, 0.28) * smoothstep(0.3, -0.05, mu) * litA;
+      col = col * ext + (rayC * litA + dusk * 0.8) * pk * uSunE * 0.011;
+    }
     gl_FragColor = vec4(col, 1.0);
     vec4 clip = projectionMatrix * vec4(rdV * tG, 1.0);
     gl_FragDepth = clamp(clip.z / clip.w * 0.5 + 0.5, 0.0, 1.0);

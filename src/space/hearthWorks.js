@@ -5,6 +5,8 @@ import { KIND, merge } from './hull.js';
 import { createLamps, LAMP } from './lamps.js';
 import { addEngines, placeLamps } from './craftMesh.js';
 import { createRibbonMaterial, buildRibbonGeometry } from './lines.js';
+import { SPACE_UTIL_GLSL } from './glsl.js';
+import { M_KM, VIS_OMEGA } from './hearthLens.js';
 
 // THE HEARTH REFUGE AT WORK (km, in the refuge's and the Hearth's own frames).
 //
@@ -164,63 +166,117 @@ export function buildGalleryStubs(loop) {
 }
 
 // ------------------------------------------------------------------ feeder ----
-export const FEEDER = { r: 530, phi: 1.22, y: 18, scale: 9, streamEnd: 250, sweep: 1.55 };
+// The feeder holds station inside the collector line and pays matter out slower than the
+// circular speed, so it falls on a Kepler ellipse (apoapsis at the injector, periapsis well
+// inside the disc) slightly inclined to the disc plane. The ribbon follows that orbit until it
+// strikes the disc's rim, where the lens shader draws the hot spot and its sheared tail.
+export const FEEDER = { r: 680, phi: 1.22, y: 18, scale: 9, rPeri: 250, rImpact: 420 };
 
-/** The feeder ship and its matter stream (Hearth frame, km). */
-export function buildFeeder() {
-  const fr = buildFreighter(1100);
+/** The feeder's frame (Hearth frame, km): position, directions, injector root, throat, nozzle. */
+export function feederFrame() {
   const { r, phi, y } = FEEDER;
   const pos = V(Math.cos(phi) * r, y, Math.sin(phi) * r);
   const prograde = V(Math.sin(phi), 0, -Math.cos(phi));        // the disc turns this way (decreasing phi)
   const inward = V(-Math.cos(phi), 0, -Math.sin(phi));
+  const root = pos.clone().addScaledVector(inward, 0.2);
+  const throat = pos.clone().addScaledVector(inward, 2.6).addScaledVector(prograde, 0.4);
+  const nozzle = throat.clone().add(throat.clone().sub(root).normalize().multiplyScalar(0.4));
+  return { pos, prograde, inward, root, throat, nozzle };
+}
+
+/**
+ * The stream's orbit from the nozzle to the rim: points, arc length (km) and the fraction of
+ * the fall time elapsed at each point (clumps released at equal intervals bunch up where the
+ * gas is slow and string out as it speeds toward periapsis).
+ */
+export function feederStream(nozzle = feederFrame().nozzle, n = 180) {
+  const ra = nozzle.length(), p0 = Math.atan2(nozzle.z, nozzle.x);
+  const e = (ra - FEEDER.rPeri) / (ra + FEEDER.rPeri), pp = ra * (1 - e);
+  const nuI = Math.acos((pp / FEEDER.rImpact - 1) / e);                 // true anomaly at the rim (< pi)
+  const sinI = nozzle.y / (ra * Math.sin(Math.PI - nuI));               // inclination: the node lies at the rim
+  const Mof = (nu) => { const E = 2 * Math.atan(Math.sqrt((1 - e) / (1 + e)) * Math.tan(nu / 2)); return E - e * Math.sin(E); };
+  const Mi = Mof(nuI);
+  const pts = [], along = [], time = [];
+  let L = 0;
+  for (let k = 0; k <= n; k++) {
+    const nu = k === n ? nuI : Math.PI - (Math.PI - nuI) * (k / n);
+    const rr = pp / (1 + e * Math.cos(nu));
+    const ph = p0 - (Math.PI - nu);
+    const sLat = sinI * Math.sin(nu - nuI), cLat = Math.sqrt(1 - sLat * sLat);
+    const q = V(Math.cos(ph) * rr * cLat, rr * sLat, Math.sin(ph) * rr * cLat);
+    if (k) L += q.distanceTo(pts[k - 1]);
+    pts.push(q); along.push(L);
+    time.push(k === 0 ? 0 : (Math.PI - Mof(nu)) / (Math.PI - Mi));
+  }
+  return { pts, along, time, length: L, e, nuImpact: nuI, sinI };
+}
+
+/** Film time for the fall (s), at the same film speed as the disc's rotation (hearthLens VIS_OMEGA). */
+export function feederFallSeconds(st) {
+  const a = (FEEDER.rImpact / (1 - st.e * st.e) * (1 + st.e * Math.cos(st.nuImpact))) / M_KM;   // semi-major axis (M)
+  const E = 2 * Math.atan(Math.sqrt((1 - st.e) / (1 + st.e)) * Math.tan(st.nuImpact / 2)), Mi = E - st.e * Math.sin(E);
+  return (Math.PI - Mi) * Math.pow(a, 1.5) / VIS_OMEGA;
+}
+
+/** Where the stream meets the disc: radius (km) and Boyer-Lindquist azimuth (BL x, y = Hearth z, x). */
+export const FEEDER_IMPACT = (() => {
+  const s = feederStream(), end = s.pts[s.pts.length - 1];
+  return { r: Math.hypot(end.x, end.z), phiBL: Math.atan2(end.x, end.z), point: end };
+})();
+
+/** The feeder ship and its matter stream (Hearth frame, km). */
+export function buildFeeder() {
+  const fr = buildFreighter(1100);
+  const { pos, prograde, root, throat, nozzle } = feederFrame();
   const mm = basis(prograde, V(0, 1, 0)).setPosition(pos.clone().multiplyScalar(1000)).multiply(new THREE.Matrix4().makeScale(FEEDER.scale, FEEDER.scale, FEEDER.scale));
   const hull = toHullKinds(fr.geo, mm);
   // the injector: a boom from the ship's inboard flank, ending in a glowing throat that
   // faces along the stream
   const B = new CB();
-  const root = pos.clone().addScaledVector(inward, 0.2);
-  const throat = pos.clone().addScaledVector(inward, 2.6).addScaledVector(prograde, 0.4);
   B.tube([root, throat], 0.14, 12, CK.HULL);
   const tq = basis(throat.clone().sub(root), V(0, 1, 0)).setPosition(throat);
   B.push(tq);
   lathe(B, [[0.14, -0.24, CK.HULL], [0.32, 0, CK.BRONZE], [0.4, 0.36, CK.DARK], [0.32, 0.4, CK.LANTERN], [0.16, 0.2, CK.LANTERN]], 24);
   B.pop();
   const injector = toHullKinds(B.geometry(), null, 1);
-  const nozzle = throat.clone().add(throat.clone().sub(root).normalize().multiplyScalar(0.4));
-  // the stream: from the throat, falling prograde and inward to the disc's outer edge
-  const pts = [], along = [];
-  const r0 = Math.hypot(nozzle.x, nozzle.z), p0 = Math.atan2(nozzle.z, nozzle.x);
-  let L = 0;
-  for (let k = 0; k <= 160; k++) {
-    const t = k / 160, e = Math.pow(t, 1.25);
-    const rr = r0 + (FEEDER.streamEnd - r0) * e;
-    const ph = p0 - FEEDER.sweep * t;
-    const p = V(Math.cos(ph) * rr, nozzle.y * (1 - smooth(0, 1, t)), Math.sin(ph) * rr);
-    if (k) L += p.distanceTo(pts[k - 1]);
-    pts.push(p); along.push(L);
-  }
+  const stream = feederStream(nozzle);
   const lamps = placeLamps(fr.lamps, mm, 6).map((l) => ({ ...l, p: l.p.clone().multiplyScalar(0.001), r: l.r * 0.001 }));
   lamps.push({ p: nozzle.clone(), r: 0.12, color: [1.0, 0.7, 0.4], i: 3.0, breathe: 0.4 });
-  return { hull, injector, stream: { pts, along, length: L }, pos, nozzle, matrix: mm, glows: fr.glows, lamps };
+  return { hull, injector, stream, pos, nozzle, matrix: mm, glows: fr.glows, lamps };
+}
+
+/** The stream as a ribbon: x of aData the km along it, y the fraction of the fall time. */
+function streamRibbon(st) {
+  const g = buildRibbonGeometry([{ pts: st.pts, along: st.along, id: 0 }]);
+  const d = g.getAttribute('aData');
+  for (let i = 0; i < st.pts.length; i++) for (let s = 0; s < 2; s++) d.setY(i * 2 + s, st.time[i]);
+  return g;
 }
 
 const STREAM_FRAG = /* glsl */ `
 uniform float uLen;
+uniform float uFall;           // seconds for a clump to fall from the nozzle to the rim
 uniform float uBehindMask;
 uniform sampler2D uHearthTex;
 uniform vec2 uHearthRes;
 uniform float uHearthDepth;
+${SPACE_UTIL_GLSL}
 void main() {
   float x = clamp(vAcross, -1.0, 1.0);
-  float core = exp(-x * x * 3.0);
-  float s = vData.x;
-  float fa = max(fwidth(s), 1e-3);
-  // clumps of matter falling inward (their mean once they are under a few pixels)
-  float pp = fract(s / 26.0 - uTime * 0.18) - 0.5;
-  float pulse = mix(0.4, exp(-pp * pp * 50.0), 1.0 - smoothstep(4.0, 14.0, fa));
-  float heat = smoothstep(0.0, 1.0, s / uLen);
-  vec3 col = mix(vec3(1.0, 0.5, 0.22), vec3(1.0, 0.86, 0.68), heat) * (0.45 + 1.3 * pulse) * core * (1.2 + 1.6 * heat);
-  col *= smoothstep(0.0, 3.0, s) * (1.0 - 0.65 * smoothstep(uLen * 0.8, uLen, s));
+  float s = vData.x, ft = clamp(vData.y, 0.0, 1.0);
+  // a narrow jet from the injector that swells a little as it falls and heats
+  float w = mix(0.22, 0.62, ft);
+  float core = exp(-x * x / (2.0 * w * w));
+  float halo = exp(-x * x * 2.2) * 0.12 * (1.0 - x * x);
+  // clumps released at equal intervals: evenly spaced in fall time, so they string out as the
+  // gas speeds toward periapsis (their mean once they are under a few pixels)
+  float q = ft * 16.0 - uTime / uFall * 16.0;
+  float fa = max(fwidth(ft * 16.0), 1e-4);
+  float pp = fract(q) - 0.5;
+  float pulse = mix(0.55, 0.25 + 1.5 * exp(-pp * pp * 18.0), 1.0 - smoothstep(0.12, 0.45, fa));
+  // gas heated as it falls: an incandescent orange at the nozzle, white-gold at the rim
+  vec3 col = blackbody(mix(2100.0, 6200.0, ft * ft)) * (0.35 + 2.6 * ft * ft) * (core * pulse + halo);
+  col *= smoothstep(0.0, 1.5, s) * (1.0 - smoothstep(uLen - 1.5, uLen, s) * 0.5);
   float m = 1.0;
   if (uBehindMask > 0.5 && length(vWorld - cameraPosition) > uHearthDepth) m = 1.0 - texture(uHearthTex, gl_FragCoord.xy / uHearthRes).a;
   gl_FragColor = vec4(col * vCoverage * m, 0.0);
@@ -263,10 +319,10 @@ export class HearthWorks {
     this.frame.rotation.z = -hearth.stations.rotation.z;
     hearth.stations.add(this.frame);
     this.frame.add(this.feeder);
-    this.streamMat = createRibbonMaterial({ widthKm: 1.4, minPx: 2.0, frag: STREAM_FRAG, uniforms: {
-      uLen: { value: fd.stream.length }, uBehindMask: mask.uBehindMask, uHearthTex: mask.uHearthTex, uHearthRes: mask.uHearthRes, uHearthDepth: mask.uHearthDepth,
+    this.streamMat = createRibbonMaterial({ widthKm: 3.2, minPx: 2.0, frag: STREAM_FRAG, uniforms: {
+      uLen: { value: fd.stream.length }, uFall: { value: feederFallSeconds(fd.stream) }, uBehindMask: mask.uBehindMask, uHearthTex: mask.uHearthTex, uHearthRes: mask.uHearthRes, uHearthDepth: mask.uHearthDepth,
     } });
-    this.stream = new THREE.Mesh(buildRibbonGeometry([{ pts: fd.stream.pts, along: fd.stream.along, id: 0 }]), this.streamMat);
+    this.stream = new THREE.Mesh(streamRibbon(fd.stream), this.streamMat);
     this.stream.renderOrder = 12;
     this.frame.add(this.stream);
     // lamps: the sleeves and carriers, the feeder

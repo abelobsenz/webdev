@@ -364,7 +364,7 @@ const verts = (g, m = new THREE.Matrix4(), step = 1) => { const p = g.attributes
   const fr = Math.hypot(fd.pos.x, fd.pos.z);
   assert.ok(fr > 15 * RS + 50 && fr < 30 * RS - 100, `feeder at ${fr.toFixed(0)} km: clear of the disc and the collector ring`);
   const end = fd.stream.pts[fd.stream.pts.length - 1], rEnd = Math.hypot(end.x, end.z);
-  assert.ok(rEnd < 15 * RS * 0.6 && Math.abs(end.y) < 1e-6 && rEnd > 2 * RS, `the stream ends in the disc plane at ${rEnd.toFixed(0)} km`);
+  assert.ok(rEnd < 15 * RS && Math.abs(end.y) < 1e-6 && rEnd > 2 * RS, `the stream ends in the disc plane, inside its rim, at ${rEnd.toFixed(0)} km`);
   assert.ok(fd.stream.pts.every((p, i, a) => !i || Math.hypot(p.x, p.z) <= Math.hypot(a[i - 1].x, a[i - 1].z) + 1e-6), 'the stream only ever falls inward');
   results.refugeLoopClearanceKm = +loopClear.toFixed(2); results.feederRadiusKm = +fr.toFixed(0); results.streamEndKm = +rEnd.toFixed(0);
 }

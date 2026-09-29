@@ -61,6 +61,7 @@ uniform float uTime;
 uniform vec3 uEarthPos;
 uniform vec3 uPointPos;        // extra light (e.g. the Hearth's disc)
 uniform vec3 uPointColor;
+uniform float uPointRef;       // > 0: the point light falls off as (uPointRef / d)^2 beyond it
 uniform float uPattern;        // km per window cell
 uniform vec3 uAccent;
 uniform float uBehindMask;     // 1: fade where the Hearth's image says the disc is in front
@@ -107,7 +108,7 @@ void main() {
   vec3 toP = uPointPos - vWorld;
   float dP = length(toP);
   vec3 pDir = toP / max(dP, 1e-3);
-  vec3 pointL = uPointColor * max(dot(N, pDir), 0.0);
+  vec3 pointL = uPointColor * max(dot(N, pDir), 0.0) * (uPointRef > 0.0 ? min(uPointRef * uPointRef / max(dP * dP, 1e-6), 4.0) : 1.0);
   vec3 cellP = vLocal / uPattern;
   float fw = max(max(fwidth(cellP.x), fwidth(cellP.y)), fwidth(cellP.z));
   // fine cell patterns fade to their average well before they reach a pixel, so lit
@@ -223,13 +224,15 @@ void main() {
   // (no random blinking hull cells: they read as flashing white quads once bloomed;
   //  the stations carry explicit beacon lamps instead)
   float a = 1.0;
+  vec3 front = vec3(0.0);
   if (uBehindMask > 0.5) {
+    // beyond the Hearth's centre: its disc (light and opacity) lies in front of this hull
     vec4 hb = texture(uHearthTex, gl_FragCoord.xy / uHearthRes);
     float viewD = length(vWorld - cameraPosition);
-    if (viewD > uHearthDepth) a = 1.0 - hb.a;
+    if (viewD > uHearthDepth) { a = 1.0 - hb.a; front = hb.rgb; }
   }
   if (a < 0.02) discard;
-  gl_FragColor = vec4(col * a, 1.0);
+  gl_FragColor = vec4(col * a + front, 1.0);
 }
 `;
 
@@ -239,7 +242,7 @@ export function createHullMaterial({ pattern = 0.06, accent = [0.5, 0.85, 1.0], 
     uniforms: {
       uTransmittanceLUT: U.uTransmittanceLUT, uSunDir: { value: new THREE.Vector3(1, 0, 0) }, uSunE: U.uSunIlluminance,
       uTime: { value: 0 }, uEarthPos: { value: new THREE.Vector3() },
-      uPointPos: { value: new THREE.Vector3(1e9, 0, 0) }, uPointColor: { value: new THREE.Color(0, 0, 0) },
+      uPointPos: { value: new THREE.Vector3(1e9, 0, 0) }, uPointColor: { value: new THREE.Color(0, 0, 0) }, uPointRef: { value: 0 },
       uPattern: { value: pattern }, uAccent: { value: new THREE.Color(...accent) },
       uBehindMask: { value: behindMask ? 1 : 0 }, uHearthTex: { value: null }, uHearthRes: { value: new THREE.Vector2(1, 1) }, uHearthDepth: { value: 1e12 },
       uResY: { value: 1080 },
