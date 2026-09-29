@@ -175,7 +175,7 @@ City cityAt(vec3 up, float fp, float shore, float t, float siteD) {
     // boulevards out of the centre, and ring roads round it
     float nav = 6.0 + floor(w * 8.0);
     float sect = 6.2831853 / nav;
-    float th = atan(q.y, q.x);
+    float th = atan(q.y, q.x + 1e-5);                  // (defined at the very centre too)
     float dA = abs(fract(th / sect + 0.5) - 0.5) * sect * r;
     float av = litLine(dA, 0.03, fp) * smoothstep(0.3, 1.2, r) * metro;
     float rp = Rc * 0.42;
