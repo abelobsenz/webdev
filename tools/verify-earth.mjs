@@ -238,6 +238,10 @@ function lint(name, mat) {
       ok(false, `${name}/${stage}: call to undefined ${f}()`);
       break;
     }
+    // words GLSL ES 3.00 reserves (a compile error if used as a name)
+    const RES = /\b(half|patch|sample|input|output|filter|fixed|active|common|partition|resource|class|union|enum|long|short|double|unsigned|cast|namespace|using|template|this|goto|inline|noinline|public|static|extern|external|interface|superp|sizeof|coherent|volatile|restrict|readonly|writeonly|subroutine|noperspective|asm|typedef|hvec[234]|dvec[234]|fvec[234])\b/;
+    const rm = src.match(RES);
+    ok(!rm, `${name}/${stage}: reserved word '${rm && rm[1]}'`);
     // braces and parentheses balance
     const bal = (a, b) => src.split(a).length - src.split(b).length;
     ok(bal('{', '}') === 0 && bal('(', ')') === 0, `${name}/${stage}: unbalanced brackets`);

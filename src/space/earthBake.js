@@ -600,8 +600,8 @@ void main() {
     vec3 wf = wq - wc - 0.5;
     if (wh.x > 0.965) {
       // a solar field: a rectangle of panels in a sub-rectangle of the cell
-      vec2 half = vec2(0.12 + 0.2 * wh.y, 0.08 + 0.12 * wh.z);
-      vec2 qq = abs(vec2(wf.x + wf.z, wf.y)) - half;
+      vec2 hsz = vec2(0.12 + 0.2 * wh.y, 0.08 + 0.12 * wh.z);
+      vec2 qq = abs(vec2(wf.x + wf.z, wf.y)) - hsz;
       float fld = 1.0 - smoothstep(-0.02, 0.02, max(qq.x, qq.y));
       c = mix(c, vec3(0.055, 0.065, 0.085), fld * dune);
     } else if (wh.x > 0.93) {
