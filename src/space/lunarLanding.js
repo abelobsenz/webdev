@@ -554,8 +554,9 @@ export function buildMediiLanding() {
       const m = new THREE.Matrix4().lookAt(c, P(s + 10), UP).setPosition(c);
       B.push(m);
       const i0 = B.pos.length / 3;
-      B.box(0, 6.2, 0, 20, 2, 2.2, LK.COIL); B.box(0, -5, 0, 20, 2, 2.2, LK.COIL);
-      B.box(-9, 0.6, 0, 2, 13.2, 2.2, LK.COIL); B.box(9, 0.6, 0, 2, 13.2, 2.2, LK.COIL);
+      // tall enough for a loaded sled to run through: opening 20 m wide, 18.8 m over the beam
+      B.box(0, 24, 0, 24, 2, 2.2, LK.COIL); B.box(0, -5, 0, 24, 2, 2.2, LK.COIL);
+      B.box(-11, 9.5, 0, 2, 31, 2.2, LK.COIL); B.box(11, 9.5, 0, 2, 31, 2.2, LK.COIL);
       for (let i = i0; i < B.pos.length / 3; i++) { B.fac[i * 3] = s; B.fac[i * 3 + 1] = s; }
       B.pop();
     }
@@ -569,7 +570,7 @@ export function buildMediiLanding() {
       const top = c.clone().addScaledVector(UP, -3.4);
       const w0 = 10 + hgt * 0.04, w1 = 9;
       column(B, foot, top, w0, w1, LK.WALL);
-      if (s % 4000 === 600) lamps.push({ p: c.clone().addScaledVector(UP, 7), r: 3, color: LAMP.RED, i: 2.2, breathe: 0.3 });
+      if (s % 4000 === 600) lamps.push({ p: c.clone().addScaledVector(UP, 27), r: 3, color: LAMP.RED, i: 2.2, breathe: 0.3 });
     }
     // launch gate: a ring round the beam's end on its own frame
     {
@@ -611,5 +612,8 @@ export function buildMediiLanding() {
   const life = buildLandingLife(S);
 
   const geo = B.geometry();
-  return { geo, lamps, liftTop, radius: 38, gateKm: 36, plan, trees: life.trees };
+  // the mass driver's line, for the sleds that run on it (lunarTraffic.js)
+  const [dx0, dz0] = UV(2300, -800);
+  const driver = { P0: new THREE.Vector3(dx0, gy(dx0, dz0) + 16, dz0), dir: new THREE.Vector3(1, 0.0105, 0.25).normalize(), L: 36000, coilFrom: 1500 };
+  return { geo, lamps, liftTop, radius: 38, gateKm: 36, plan, trees: life.trees, driver, S };
 }

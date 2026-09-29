@@ -24,6 +24,8 @@ space.hearth = new Hearth(space, { bhSteps: 110, bhScale: 0.6 });
 space.scene.add(space.hearth.group);
 space.moon = new Moon(space);
 space.scene.add(space.moon.group);
+space.moon.ensureLife();            // Medii Works and the Landing's traffic (built on approach in the app)
+space.moon.outposts.buildAll();     // the other lunar settlements (likewise)
 const mods = [];
 for (const [k, C] of [['fleet', Fleet], ['works', WorkingStations], ['geoRoads', GeoRoads], ['lanes', Lanes], ['releaseYard', ReleaseYard]]) { space[k] = new C(space); mods.push(space[k]); }
 let tri = 0;

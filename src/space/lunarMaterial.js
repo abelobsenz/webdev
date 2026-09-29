@@ -17,17 +17,34 @@ import { R_MOON } from './sim.js';
 // courtyard, 25 tiled roof, 26 reflecting pool, 27 dressed stone wall, 28 mass-driver coil
 // (facade x = metres along the guideway).
 
-export const LK = { GLASS: 0, HULL: 1, LANTERN: 2, GARDEN: 3, CONDUIT: 4, PANEL: 7, BRONZE: 8, DECK: 9, DARK: 10, RADIATOR: 11, ROOF: 12, CONSERVATORY: 13, STONE: 20, ROOFG: 21, PAVE: 22, PAD: 23, COURT: 24, TILE: 25, POOL: 26, WALL: 27, COIL: 28 };
+export const LK = { GLASS: 0, HULL: 1, LANTERN: 2, GARDEN: 3, CONDUIT: 4, PANEL: 7, BRONZE: 8, DECK: 9, DARK: 10, RADIATOR: 11, ROOF: 12, CONSERVATORY: 13, STONE: 20, ROOFG: 21, PAVE: 22, PAD: 23, COURT: 24, TILE: 25, POOL: 26, WALL: 27, COIL: 28,
+  REGOLITH: 29, SOLAR: 30, HAZARD: 31, SIGN: 32, PAINT: 33, GROUND: 34, LIGHT: 35 };
+// 29 sintered regolith (berms, bagged shielding, spoil, boulders), 30 photovoltaic cells,
+// 31 hazard chevrons, 32 lit signage and concourse bands, 33 livery paint (the instance
+// colour: suits, clothes, rover and tram liveries), 34 packed regolith with tyre tracks
+// (aprons and haul roads), 35 lamp lenses and lit cab windows (always glowing).
 
 const VERT = /* glsl */ `
 attribute vec3 aFacade;
 varying vec3 vFac;
 varying vec3 vView;
 varying vec3 vN;
+varying vec3 vTint;
 void main() {
   vFac = aFacade;
-  vec4 mv = modelViewMatrix * vec4(position, 1.0);
-  vN = normalize(normalMatrix * normal);
+  vec4 lp = vec4(position, 1.0);
+  vec3 ln = normal;
+#ifdef USE_INSTANCING
+  lp = instanceMatrix * lp;
+  ln = mat3(instanceMatrix) * ln;
+#endif
+#ifdef USE_INSTANCING_COLOR
+  vTint = instanceColor;
+#else
+  vTint = vec3(1.0);
+#endif
+  vec4 mv = modelViewMatrix * lp;
+  vN = normalize(normalMatrix * ln);
   vView = mv.xyz;
   gl_Position = projectionMatrix * mv;
 }
@@ -46,6 +63,7 @@ uniform float uScale;        // view units per facade metre (1e-3: the meshes ar
 varying vec3 vFac;
 varying vec3 vView;
 varying vec3 vN;
+varying vec3 vTint;
 ${NOISE_GLSL}
 float gridLine(float x, float p, float w, float fw) { float d = abs(fract(x / p + 0.5) - 0.5) * p; return 1.0 - smoothstep(w, w + fw, d); }
 float cLine(float x, float p, float w, float fw) { float d = abs(fract(x / p + 0.5) - 0.5) * p; return clamp(1.0 - d / max(w, fw), 0.0, 1.0) * min(1.0, w / fw); }
@@ -199,7 +217,7 @@ void main() {
     alb = vec3(0.5, 0.48, 0.43) * (0.93 + 0.1 * mix(0.5, hash12(floor(f / vec2(1.4, 0.6))), det)) * (1.0 - 0.2 * max(crs, jnt));
     alb *= mix(1.0, 0.95 + 0.08 * vnoise(f * 0.03), 1.0 - smoothstep(6.0, 20.0, px));
     rough = 0.8;
-  } else {
+  } else if (k < 28.5) {
     // mass-driver coil: bronze windings glowing in a slow wave that runs out along the
     // guideway (2.4 km long, every 5 s), and a brighter launch pulse that follows it out
     // every 40 s; both smooth in time, no coil ever switches on or off
@@ -209,6 +227,52 @@ void main() {
     float launch = exp(-pow((s - front) / 700.0, 2.0));
     alb = vec3(0.5, 0.36, 0.22); rough = 0.35; metal = 0.9;
     em = uAccent * (0.3 + 1.5 * wave * wave + 5.0 * launch);
+  } else if (k < 29.5) {
+    // sintered regolith: bagged courses 0.5 m high, blocks 1.1 m, a grey-brown mottle that
+    // carries on as broad patches when the courses no longer resolve
+    float crs = gridLine(f.y, 0.5, 0.03, fw.y) * det;
+    float jnt = gridLine(f.x + 0.55 * step(0.5, fract(f.y)), 1.1, 0.04, fw.x) * det;
+    float m = vnoise(f * 0.07) * 0.6 + vnoise(f * 0.9) * 0.4 * detP;
+    alb = mix(vec3(0.3, 0.285, 0.26), vec3(0.42, 0.4, 0.36), m) * (1.0 - 0.22 * max(crs, jnt)) * vTint;
+    rough = 0.95;
+  } else if (k < 30.5) {
+    // photovoltaic cells: 0.16 m cells in 1 x 2 m modules on a silver frame, deep blue glass
+    float cell = max(gridLine(f.x, 0.16, 0.006, fw.x), gridLine(f.y, 0.16, 0.006, fw.y)) * (1.0 - smoothstep(0.004, 0.012, px));
+    float mod1 = max(gridLine(f.x, 1.0, 0.025, fw.x), gridLine(f.y, 2.0, 0.025, fw.y)) * (1.0 - smoothstep(0.02, 0.06, px));
+    alb = mix(vec3(0.02, 0.035, 0.09), vec3(0.08, 0.1, 0.16), cell * 0.7);
+    alb = mix(alb, vec3(0.7, 0.72, 0.74), mod1 * 0.85 + smoothstep(0.02, 0.2, px) * 0.12);
+    rough = mix(0.08, 0.4, mod1); metal = mix(0.35, 0.8, mod1);
+  } else if (k < 31.5) {
+    // hazard chevrons: yellow and near-black bands at 45 degrees, 0.6 m apart
+    float t = fract((f.x + f.y) / 1.2);
+    float band = smoothstep(0.5 - fw.x, 0.5 + fw.x, t) * (1.0 - smoothstep(1.0 - fw.x, 1.0, t));
+    band = mix(0.5, band, 1.0 - smoothstep(0.15, 0.4, px));
+    alb = mix(vec3(0.85, 0.62, 0.08), vec3(0.05, 0.05, 0.05), band); rough = 0.5;
+  } else if (k < 32.5) {
+    // lit signage and concourse bands: blocks of glyphs 0.6 x 0.8 m on a dark panel,
+    // steady, brighter by night; the colour alternates between the accent and warm white
+    vec2 gc = floor(f / vec2(0.6, 0.8));
+    float g = step(0.42, hash12(gc + 5.0)) * (1.0 - step(0.9, fract(f.y / 0.8)));
+    float word = step(0.25, hash12(floor(f / vec2(4.2, 0.8)) + 1.0));
+    float glyph = mix(0.45, g * word, 1.0 - smoothstep(0.2, 0.5, px));
+    vec3 tone = mix(uAccent, vec3(1.0, 0.82, 0.55), step(0.5, hash12(floor(f / vec2(12.0, 2.4)))));
+    alb = vec3(0.05); rough = 0.3;
+    em = tone * glyph * (0.35 + 0.65 * night) * 1.3;
+  } else if (k < 33.5) {
+    // livery paint: the instance colour, panel seams every 1.5 m, a lighter trim band
+    float seam = max(gridLine(f.x, 1.5, 0.02, fw.x), gridLine(f.y, 1.5, 0.02, fw.y)) * (1.0 - smoothstep(0.02, 0.08, px));
+    alb = vTint * (1.0 - 0.25 * seam);
+    rough = 0.42; metal = 0.1;
+  } else if (k < 34.5) {
+    // packed regolith: tyre tracks 3.2 m apart along the facade x axis, ruts and grit
+    float ruts = cLine(f.y, 3.2, 0.35, fw.y) * (1.0 - smoothstep(0.3, 1.2, px));
+    float grit = vnoise(f * 0.35) * 0.5 + vnoise(f * 3.0) * 0.5 * detP;
+    alb = mix(vec3(0.24, 0.23, 0.21), vec3(0.34, 0.325, 0.3), grit) * (1.0 - 0.3 * ruts);
+    rough = 0.97;
+  } else {
+    // lamp lenses and lit cab glazing: a steady warm glow, stronger by night
+    alb = vec3(0.3); rough = 0.2;
+    em = vTint * vec3(1.0, 0.86, 0.66) * (0.5 + 1.1 * night);
   }
   // light: the Sun (to the Moon's horizon), the Earth, the lunar sky
   vec3 toE = uEarthView - vView;
@@ -254,7 +318,25 @@ export const LUNAR_FRAME = { sunDir: new THREE.Vector3(1, 0, 0), moonPos: new TH
 /** A lunar-material mesh in metres, scaled into km. */
 export function lunarMesh(geo, opts = {}, mat = null) {
   const m = mat || createLunarMaterial(opts);
-  const mesh = new THREE.Mesh(geo, m);
+  return bindLunar(new THREE.Mesh(geo, m), m);
+}
+
+/**
+ * An instanced lunar-material mesh (instance matrices in metres, in the parent's frame; the
+ * mesh itself scaled into km). `tint` gives it an instance colour attribute (livery paint,
+ * regolith tone, lamp colour), white until set.
+ */
+export function lunarInstanced(geo, count, opts = {}, mat = null, { tint = false } = {}) {
+  const m = mat || createLunarMaterial(opts);
+  const mesh = new THREE.InstancedMesh(geo, m, Math.max(1, count));
+  mesh.count = count;
+  if (tint) {
+    mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(Math.max(1, count) * 3).fill(1), 3);
+  }
+  return bindLunar(mesh, m);
+}
+
+function bindLunar(mesh, m) {
   mesh.scale.setScalar(0.001);
   mesh.frustumCulled = false;
   mesh.renderOrder = 3;
