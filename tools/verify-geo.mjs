@@ -10,6 +10,8 @@ import { buildConcordYard, buildWaterStore, YARD, STORE, sectionPoint } from '..
 import { YardWorks, WORKS, craneBay, cranePlate, droneSites, dronePos, crewPodPos, podStops } from '../src/space/yardWorks.js';
 import { StoreWorks, PLUMB, storeDronePos } from '../src/space/storeWorks.js';
 import { craftMesh, placeMerge } from '../src/space/craftMesh.js';
+import { buildReleaseYard, YARD as RY } from '../src/space/releaseYard.js';
+import { ReleaseWorks, RW, crawlerS, gantryZ } from '../src/space/releaseWorks.js';
 
 const V = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z);
 const now = () => performance.now();
@@ -227,9 +229,44 @@ assert.ok(PLUMB.mainR - PLUMB.mainTube > 193 + 20, 'nothing of the plumbing ente
 const collar = new Collider([{ geo: sd.geo }], 40);
 for (const s of [-1, 1]) assert.ok(collar.dist(V(s * PLUMB.riserX, PLUMB.riserTop, 0), 20) < 6, 'riser top meets its berth collar');
 
+// ===================================================================== release yard
+const rd = buildReleaseYard();
+const rm = craftMesh(rd.geo);
+t0 = now();
+const rw = new ReleaseWorks(rm, rd);
+results.releaseWorksBuildMs = +(now() - t0).toFixed(1);
+t0 = now(); for (let i = 0; i < 600; i++) rw.update(10 + i * 0.37, 1e4);
+results.releaseWorksUpdateMs = +((now() - t0) / 600).toFixed(4);
+results.releaseWorksTriangles = rw.triangles();
+rw.update(3, 10); assert.ok(!rw.root.visible);
+const rc = new Collider([{ geo: rd.geo }, ...rd.rods.map((g) => ({ geo: g }))], 150);
+const { E, U } = rd.axes;
+let crawlGap = Infinity, gantryGap = Infinity;
+for (let t = 0; t < 1800; t += 3.7) {
+  for (let k = 0; k < RW.crawler.n; k++) {
+    const s = crawlerS(k, t);
+    assert.ok(s >= RW.crawler.s0 - 1e-6 && s <= RW.crawler.s1 + 1e-6 && s > RY.sparFrom + 300 + 40 && s < RY.sparTo - 400 - 40, 'crawlers stay on the lantern walk');
+    for (const dz of [-30, 0, 30]) { P.copy(E).multiplyScalar(s + dz).addScaledVector(U, RW.crawler.lift + 8); crawlGap = Math.min(crawlGap, rc.dist(P, 150) - 12); }
+  }
+  for (const [ci, c] of rd.cradles.entries()) for (let b = 0; b < RW.gantry.bays.length; b++) {
+    const z = gantryZ(ci, b, t);
+    for (const hz of RY.hoops) assert.ok(Math.abs(z + 12 - hz) > 15 + 30 + 20, 'gantries keep off the hoops, their arms and winch houses');
+    const r = RW.gantry.apothem / Math.cos(Math.PI / 8);
+    for (let k = 0; k < 8; k++) {
+      const a = Math.PI / 8 + k * Math.PI / 4;
+      P.set(Math.cos(a) * r, Math.sin(a) * r, z + 12).applyMatrix4(c.frame);
+      gantryGap = Math.min(gantryGap, rc.dist(P, 150) - 12);
+    }
+  }
+}
+Object.assign(results, { releaseCrawlerClearM: +crawlGap.toFixed(1), releaseGantryClearM: +gantryGap.toFixed(1) });
+assert.ok(crawlGap > 1, `spar crawlers clear the yard by ${crawlGap} m`);
+assert.ok(gantryGap > 5, `inspection gantries clear the cradles by ${gantryGap} m`);
+assert.ok(RW.gantry.apothem - 10 > RY.apothem + 22 + 30, 'the gantry rings stay outside the hoops (the liners pass inside)');
+
 // ===================================================================== totals
-results.totalLifeTriangles = results.harbourLifeTriangles + results.yardWorksTriangles + results.storeWorksTriangles;
-results.totalUpdateMs = +(results.harbourLifeUpdateMs + results.yardWorksUpdateMs + results.storeWorksUpdateMs).toFixed(4);
+results.totalLifeTriangles = results.harbourLifeTriangles + results.yardWorksTriangles + results.storeWorksTriangles + results.releaseWorksTriangles;
+results.totalUpdateMs = +(results.harbourLifeUpdateMs + results.yardWorksUpdateMs + results.storeWorksUpdateMs + results.releaseWorksUpdateMs).toFixed(4);
 assert.ok(results.totalLifeTriangles < 10e6, 'the domain stays inside its rendered-triangle budget');
 assert.ok(results.totalLifeTriangles > 300e3, 'the domain draws substantive detail');
 assert.ok(results.totalUpdateMs < 0.3, `per-frame cost ${results.totalUpdateMs} ms`);
