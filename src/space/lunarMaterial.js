@@ -378,8 +378,8 @@ void main() {
     float hollow = smoothstep(0.25, 0.6, cl);
     vec3 tilt = vec3(vnoise(lf * 1.9 + 11.0), vnoise(lf * 1.9 + 23.0), vnoise(lf * 1.9 + 37.0)) - 0.5;
     N = normalize(N + tilt * 0.9 * detP);
-    float cast = vnoise(f * 0.02 + spc * 13.0);
-    alb = base * mix(0.45, 1.25, hollow) * mix(vec3(0.85, 0.95, 1.1), vec3(1.2, 1.05, 0.8), cast);
+    float tcast = vnoise(f * 0.02 + spc * 13.0);
+    alb = base * mix(0.45, 1.25, hollow) * mix(vec3(0.85, 0.95, 1.1), vec3(1.2, 1.05, 0.8), tcast);
     alb *= mix(0.55, 1.0, smoothstep(-0.7, 0.5, dot(normalize(vN), upV)));
     if (spc > 2.5) { float bloom = step(0.62, vnoise(f * 2.1 + 5.0)) * detP; alb = mix(alb, vec3(0.62, 0.32, 0.4), bloom * 0.7); }
     rough = 0.85; metal = 0.0;
