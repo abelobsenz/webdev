@@ -31,6 +31,7 @@ uniform vec4 uPorts[7];
 uniform vec4 uWild[10];
 uniform vec4 uSc[5];
 uniform float uTexelKm;
+uniform float uCloudTexelKm;
 uniform vec4 uFish[5];
 uniform vec4 uIsles[${VORTEX_ISLES.length}];
 uniform vec4 uRivers[${RIVERS.length}];
@@ -138,6 +139,30 @@ float vortexStreets(vec3 d) {
     }
   }
   return dp;
+}
+
+// Mesoscale cloud potential (zero mean): three octaves ~110, ~50 and ~25 km, each dropped as it
+// nears the cloud cube's texel (no aliasing into stair steps at the low tiers); stretched along
+// the zonal wind where the wind is steady, and sheared by a slow warp so the streaks curve.
+float mesoWeather(vec3 p, float seed, float storm, float trades, float polar) {
+  float str = 1.0 + 2.2 * storm + 0.9 * trades;
+  vec3 wq = p * 22.0 + seed * 4.0;
+  vec3 wv = vec3(snoise(wq + 1.3), snoise(wq + 8.1), snoise(wq + 4.7));
+  vec3 x = p * vec3(60.0, 60.0 * str, 60.0) + wv * 0.9 + seed * 5.0;
+  float s = 0.0, wl = 106.0, a = 1.0, nrm = 0.0;
+  for (int i = 0; i < 3; i++) {
+    float w = smoothstep(2.2 * uCloudTexelKm, 3.2 * uCloudTexelKm, wl);
+    float n = snoise(x);
+    // the finer octaves gather into cells and lines (cloud along the convergence) in the
+    // cumulus regimes: absolute-value turbulence, re-centred on zero
+    if (i > 0) n = mix(n, (0.3 - abs(n)) * 1.6, 0.35 * clamp(1.0 - storm, 0.0, 1.0));
+    s += a * w * n;
+    nrm += a;
+    x = x * 2.1 + vec3(2.3, 5.9, 3.7);
+    wl /= 2.1;
+    a *= 0.78;
+  }
+  return 0.12 * (1.0 - 0.6 * polar) * s / nrm * 1.7;
 }
 
 void cloudPotential(vec3 d, float seed, out float P, out float S, out float O, out float CI) {
@@ -263,6 +288,12 @@ void cloudPotential(vec3 d, float seed, out float P, out float S, out float O, o
   S = max(S, tcS);                                                          // the overcast and its bands are sheets
   // (open cells in a belt along the sheet's frayed edge, not over the whole fringe)
   O = clamp(max(coldAir, (1.0 - core) * smoothstep(0.12, 0.24, deck) * (1.0 - smoothstep(0.3, 0.55, deck)) * 0.45) * (1.0 - frontS), 0.0, 1.0);
+  // mesoscale weather: the ~110, ~50 and ~25 km scales between the synoptic field (~200 km and
+  // up) and the Earth shader's own detail (60 km and down), which the cube can hold. Without
+  // them a deck is a smooth blob with one flat white inside: with them, clusters and gaps, and
+  // thick and thin cloud inside every mass. Drawn out along the wind in the storm tracks and
+  // the trades (streaks, not blotches); weaker in the sheets, none in a cyclone's eye.
+  P += mesoWeather(p, seed, storm, trades, polar) * (1.0 - 0.55 * S) * (1.0 - 0.7 * smoothstep(0.0, 0.12, trop)) * (1.0 - eye);
   // --- cirrus: streaks along the jets, anvils over the convection, frontal shields, canopies ---
   float ci = sfbm(vec3(p.x * 5.0, p.y * 42.0, p.z * 5.0) + vec3(sfbm(p * 6.0, 3) * 2.0), 5) * 0.5 + 0.5;
   float jet = exp(-pow((alat - 0.62) / 0.2, 2.0)) + 0.15 * exp(-pow((lat - 0.1) / 0.17, 2.0));
@@ -916,6 +947,7 @@ export class EarthBake {
         // stratocumulus decks: lat, lon (rad), extent (rad), strength: California, Peru, Namibia, Canaries, Western Australia
         uSc: { value: [[27, -128, 11, 1], [-17, -85, 13, 1], [-17, 5, 11, 0.9], [22, -24, 8, 0.7], [-27, 103, 9, 0.7]].map(([la, lo, e, w]) => new THREE.Vector4(la * D2R, lo * D2R, e * D2R, w)) },
         uTexelKm: { value: (Math.PI / 2 / size) * 6371 },
+        uCloudTexelKm: { value: (Math.PI / 2 / cloudSize) * 6371 },
         uRivers: { value: RIVERS.map(([la, lo, w]) => { const v = bodyDir(la * D2R, lo * D2R, new THREE.Vector3()); return new THREE.Vector4(v.x, v.y, v.z, w); }) },
         uIsles: { value: VORTEX_ISLES.map(([la, lo, r]) => { const v = bodyDir(la * D2R, lo * D2R, new THREE.Vector3()); return new THREE.Vector4(v.x, v.y, v.z, r); }) },
         uFish: { value: FISHING.map((b) => new THREE.Vector4(b[0], b[1], b[2], b[3])) },

@@ -599,10 +599,8 @@ void main() {
   float night = od_switchOn(b, mu, fp);
   vec4 LT = texture(uLights, b);
   float lw = LT.r, lc = LT.g, ln = LT.b;
-  float micro = 1.0;
-#if QUALITY > 0
-  micro = cityLattice(b, fp);
-#endif
+  // (at every tier, but only where there are lights to structure)
+  float micro = (lw + lc) * night > 1e-3 ? cityLattice(b, fp) : 1.0;
   // brighter from afar, where a city is a pixel's mean, calmer close up so districts keep their
   // structure (a smooth function of range: nothing pops)
   float rangeK = mix(0.7, 1.35, smoothstep(3.0, 30.0, fp));

@@ -377,6 +377,106 @@ lint('meteors', metMat);
   ok(earth.uniforms.uShipT.value >= 0 && earth.uniforms.uShipT.value < D.SHIP_PERIOD, 'earth ship clock wrapped');
 }
 
+// ---- the Earth up close (earthFine.js) ----------------------------------------------------------
+{
+  const F = await import('../src/space/earthFine.js');
+  // every tier builds and lints: the octave counts are picked by the QUALITY define
+  for (let q = 0; q <= 3; q++) {
+    const e = new Earth(fakeBake, { earthQ: q, atmoSteps: 5 + q * 2 });
+    ok(e.material.defines.QUALITY === q, `earth tier ${q} define`);
+    lint(`earth-q${q}`, e.material);
+    // the proxy sphere: finite, indexed within range
+    const g = e.mesh.geometry, pos = g.attributes.position;
+    let maxI = 0; for (let i = 0; i < g.index.count; i++) maxI = Math.max(maxI, g.index.getX(i));
+    ok(maxI < pos.count, `earth tier ${q}: index max ${maxI} < vertex count ${pos.count}`);
+    ok(pos.array.every(Number.isFinite), `earth tier ${q}: proxy positions finite`);
+    ok(g.index.count / 3 < 60000, `earth proxy triangles ${g.index.count / 3}`);
+  }
+  ok(F.CLOUD_OCT_BY_Q.every((n, q) => n >= 5 && n <= F.CLOUD_OCTAVES.length && F.SHADOW_OCT_BY_Q[q] < n), 'cloud octave counts per tier (the lowest tier still resolves the cumulus)');
+  // nothing sparkles: every octave is gone before its wavelength spans fewer than ~4.5 pixels, and
+  // at full weight while it spans more than ~12
+  ok(F.OCTAVE_FADE.lo < F.OCTAVE_FADE.hi && F.OCTAVE_FADE.hi <= 0.225 && F.OCTAVE_FADE.lo >= 0.06, 'octave fade window');
+  const wls = [...F.CLOUD_OCTAVES.map((o) => o.wl), ...F.RIDGE_OCTAVES.map((o) => o.wl)];
+  // (and every literal wavelength the module fades by)
+  const src = stripComments(F.EARTH_FINE_GLSL);
+  for (const m of src.matchAll(/ef_fade\(\s*([\d.]+)\s*,\s*fp\s*\)/g)) wls.push(+m[1]);
+  ok(wls.length > 20, `faded wavelengths found ${wls.length}`);
+  for (const wl of wls) {
+    ok(F.octaveWeight(wl, wl / 4.5) === 0, `octave ${wl} km gone at 4.5 px`);
+    ok(F.octaveWeight(wl, wl / 12.6) === 1, `octave ${wl} km whole at 12.6 px`);
+    for (let k = 1; k < 40; k++) { const fp = wl * k / 100; ok(F.octaveWeight(wl, fp) >= F.octaveWeight(wl, fp + wl / 100) - 1e-12, 'octave weight falls with range'); }
+  }
+  // octaves in order, lacunarity ~2, amplitudes bounded; the GLSL RMS matches the table
+  for (let i = 1; i < F.CLOUD_OCTAVES.length; i++) ok(Math.abs(F.CLOUD_OCTAVES[i - 1].wl / F.CLOUD_OCTAVES[i].wl - 2.13) < 1e-9, 'cloud lacunarity');
+  const rms = Math.sqrt(F.CLOUD_OCTAVES.reduce((s, o) => s + o.amp * o.amp, 0));
+  const mR = src.match(/EF_CD_RMS = ([\d.]+)/);
+  ok(mR && Math.abs(+mR[1] - rms) < 1e-5, 'cloud RMS constant');
+  ok(F.CLOUD_OCTAVES[F.CLOUD_OCTAVES.length - 1].wl < 0.7 && F.CLOUD_OCTAVES[0].wl === 60, 'cloud detail spans 60 km to below 0.7 km');
+  for (let i = 1; i < F.RIDGE_OCTAVES.length; i++) ok(F.RIDGE_OCTAVES[i].wl < F.RIDGE_OCTAVES[i - 1].wl && F.RIDGE_OCTAVES[i].amp < F.RIDGE_OCTAVES[i - 1].amp && F.RIDGE_OCTAVES[i].q >= F.RIDGE_OCTAVES[i - 1].q, 'ridge octaves ordered');
+  ok(F.RIDGE_OCTAVES.reduce((s, o) => s + o.amp, 0) < 2.5, 'ridge relief bounded (km)');
+  // the snowline: ~5 km in the tropics, falling to the sea toward the poles
+  let prev = Infinity;
+  for (let d = 0; d <= 90; d += 5) { const h = F.snowlineKm(d * Math.PI / 180); ok(Number.isFinite(h) && h <= prev + 1e-12, `snowline falls with latitude (${d})`); prev = h; }
+  ok(F.snowlineKm(0) > 4.5 && F.snowlineKm(0) < 5.6 && F.snowlineKm(Math.PI / 4) > 2.5 && F.snowlineKm(Math.PI / 4) < 4.2 && F.snowlineKm(Math.PI / 2) <= 0, 'snowline heights');
+  // the skylight: unchanged by day, gold along the terminator, violet in twilight, dark at night
+  const day = F.skyAmbient(1);
+  ok(Math.abs(day[0] - 0.05) < 2e-3 && Math.abs(day[1] - 0.085) < 2e-3 && Math.abs(day[2] - 0.16) < 2e-3, `skylight by day ${day.map((v) => v.toFixed(3))}`);
+  const term = F.skyAmbient(0.02), tw = F.skyAmbient(-0.09), night = F.skyAmbient(-0.4);
+  ok(term[0] / term[2] > 0.75 && term[0] > term[1], `skylight warm at the terminator ${term.map((v) => v.toFixed(3))}`);
+  ok(tw[2] > tw[1] && tw[0] > tw[1] * 0.9, `skylight violet in twilight ${tw.map((v) => v.toFixed(4))}`);
+  ok(night.every((v) => v >= 0 && v < 1e-3), 'skylight dark at night');
+  for (let m = -1; m <= 1; m += 0.01) { const a = F.skyAmbient(m), b = F.skyAmbient(m + 0.01); ok(a.every((v, i) => v >= 0 && Number.isFinite(v) && Math.abs(v - b[i]) < 0.01), 'skylight continuous'); }
+  // the GLSL skylight is the JS one (the same constants)
+  ok(/vec3\(0\.05, 0\.085, 0\.16\) \* day \+ vec3\(0\.034, 0\.018, 0\.012\)/.test(src), 'GLSL skylight constants mirror the JS');
+  // the self-shadow march reaches from a couple of pixels to within the coarse shade's 38 km
+  const SM = F.SHADOW_MARCH;
+  const reach = SM.d0 * Math.pow(SM.grow, SM.steps - 1);
+  ok(reach < 38 && reach > 4 && SM.steps <= 4, `self-shadow reach ${reach.toFixed(1)} km`);
+  ok(F.cloudTopKm(1, 48) === SM.topKm && F.cloudTopKm(0, 48) === 0 && F.cloudTopKm(1, 12) < F.cloudTopKm(1, 30), 'cloud top heights');
+  // a 3 km top shades its neighbour a few km off at a low Sun, not at noon
+  const occludes = (muSun, dKm) => SM.topKm - (0.3 + dKm * muSun / Math.sqrt(1 - muSun * muSun)) > 0;
+  ok(occludes(0.1, 3) && !occludes(0.95, 3), 'self-shadows long at a low Sun, short at noon');
+  // shader safety for code called inside non-uniform branches: explicit-LOD reads only, no
+  // derivatives, constant loop bounds, non-negative pow bases
+  const full = stripComments(F.EARTH_FINE_GLSL + F.EARTH_FINE_SHADOW_GLSL);
+  ok(!/\b(dFdx|dFdy|fwidth)\s*\(/.test(full), 'fine module takes no derivatives');
+  ok(!/\btexture\s*\(/.test(full), 'fine module reads textures with explicit LOD only');
+  for (const m of full.matchAll(/for\s*\(\s*int\s+\w+\s*=\s*0\s*;\s*\w+\s*<\s*([^;]+);/g)) ok(/^(\d+|EF_CD_N)$/.test(m[1].trim()), `fine loop bound ${m[1]}`);
+  for (const m of full.matchAll(/smoothstep\(\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)\s*,/g)) ok(+m[1] < +m[2], `fine: smoothstep edges (${m[1]}, ${m[2]})`);
+  for (const m of full.matchAll(/\bpow\(\s*([^,]+),/g)) ok(/^(xl|max\(|abs\(|clamp\()/.test(m[1].trim()), `fine: pow base ${m[1]} provably non-negative`);
+  ok(/xl = min\(abs\(lat\)/.test(full), 'snowline pow base is an absolute value');
+  // the Earth shader calls the fine module with the tier's octave counts, and nowhere else evaluates
+  // cloud detail with a boolean (the old signature)
+  const efs = stripComments(earth.material.fragmentShader);
+  ok(/lowCloud\(bC, fpC, biasC, EF_CLOUD_OCT\)/.test(efs) && /EF_SHADOW_OCT : 0\)/.test(efs), 'deck and ground shadows at the tier octave counts');
+  ok(!/lowCloud\([^;]*,\s*(true|false)\)/.test(efs), 'lowCloud takes an octave count');
+  ok(/ef_cloudSelfShadow\(/.test(efs) && /ef_land\(/.test(efs) && /ef_seaColour\(/.test(efs) && /ef_limbGain\(/.test(efs) && /ef_skyAmbient\(/.test(efs), 'fine terms wired into the Earth shader');
+  // (dFdx of the relief stays in uniform control flow: ef_land is called at the top level of main)
+  const iLand = efs.indexOf('ef_land(b, fp'), iMain = efs.indexOf('void main()');
+  const pre = efs.slice(iMain, iLand);
+  ok(iLand > iMain && pre.split('{').length - pre.split('}').length === 1, 'ef_land called outside any branch');
+  ok(earth.uniforms.uLimbGain.value > 0 && earth.uniforms.uLimbGain.value < 1.5, 'limb gain');
+}
+{
+  // the bake's mesoscale weather never aliases into stair steps: its finest drawn octave spans
+  // more than two cloud texels at every tier
+  const { SPACE_QUALITY } = await import('../src/space/quality.js');
+  const { EarthBake } = await import('../src/space/earthBake.js');
+  for (const [k, q] of Object.entries(SPACE_QUALITY)) {
+    const texel = Math.PI / 2 / q.cloudCube * 6371;
+    let wl = 106;
+    for (let i = 0; i < 3; i++) {
+      const t = Math.min(Math.max((wl - 2.2 * texel) / (texel), 0), 1);
+      const w = t * t * (3 - 2 * t);
+      ok(w === 0 || wl > 2.2 * texel, `meso octave ${wl.toFixed(0)} km at ${k}`);
+      wl /= 2.1;
+    }
+    const b = new EarthBake(null, 64, q.cloudCube);
+    ok(Math.abs(b.mat.uniforms.uCloudTexelKm.value - texel) < 1e-9, `bake cloud texel uniform at ${k}`);
+    ok(/mesoWeather\(p, seed, storm, trades, polar\)/.test(b.mat.fragmentShader), 'bake adds the mesoscale weather');
+  }
+}
+
 const total = performance.now() - t0;
 console.log(JSON.stringify({ auroraTris: aurora.triangles, auroraBuildMs: +auroraBuild.toFixed(1), earthBuildMs: +earthBuild.toFixed(1), stars: skyStars.points.geometry.attributes.position.count, totalMs: +total.toFixed(0) }));
 if (fails) { console.log(`VERIFY_EARTH_FAILED (${fails})`); process.exit(1); }
