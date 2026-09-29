@@ -3,6 +3,7 @@ import { SNOISE_GLSL } from './glsl.js';
 import { NOISE_GLSL } from '../shaders/noise.glsl.js';
 import { SKY_UNIFORMS } from './sky.js';
 import { U } from '../core/uniforms.js';
+import { createSunLoops } from './sunLoops.js';
 
 // The Sun (a real sphere once you are close enough to see its surface) and the Dyson swarm.
 //
@@ -468,7 +469,9 @@ export class SunSwarm {
     }));
     this.corona.renderOrder = 20;
     this.sunGroup = new THREE.Group();
-    this.sunGroup.add(this.sphere, this.corona);
+    // coronal loop arcades over the active regions (src/space/sunLoops.js)
+    this.loops = createSunLoops(spot, spotE, this.uniforms);
+    this.sunGroup.add(this.sphere, this.corona, this.loops);
     this.group.add(this.sunGroup);
     // swarm mirrors: one instanced quad each
     // (rings and polar statites as before, then the statite shell and the collector planes)

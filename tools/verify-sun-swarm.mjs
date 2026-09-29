@@ -393,3 +393,28 @@ const D = V(0, 0.025 * 1.496e8, 0.004 * 1.496e8).length();
 }
 console.log(JSON.stringify(out));
 console.log('SUN_SWARM_VERIFIED');
+// ================================================================== coronal loops
+{
+  const { LOOPS, R_SUN } = await import('../src/space/sunLoops.js');
+  const s = new SunSwarm({}, { swarm: 4000 });
+  const mesh = s.loops, g = mesh.geometry, P = g.attributes.position;
+  assert.ok(s.sunGroup.children.includes(mesh), 'loops ride with the Sun');
+  buffers('sunLoops', s.sunGroup);
+  const lines = mesh.userData.lines;
+  assert.equal(lines.length, 8 * LOOPS.perGroup, 'an arcade per spot group');
+  let lo = Infinity, hi = 0, footMax = 0;
+  for (const ln of lines) {
+    for (const p of ln.pts) { const r = p.length() / R_SUN; lo = Math.min(lo, r); hi = Math.max(hi, r); }
+    footMax = Math.max(footMax, Math.abs(ln.pts[0].length() / R_SUN - 1), Math.abs(ln.pts[ln.pts.length - 1].length() / R_SUN - 1));
+  }
+  assert.ok(lo >= 1 - 1e-9 && footMax < 1e-9, 'loops stand on the photosphere, feet on it');
+  assert.ok(hi < 1.25, `loops within the low corona (${hi.toFixed(3)} R)`);
+  const mat = mesh.material, vs = mat.vertexShader, fs = mat.fragmentShader;
+  for (const u of [...vs.matchAll(/uniform\s+\w+\s+(\w+)/g), ...fs.matchAll(/uniform\s+\w+\s+(\w+)/g)].map((x) => x[1])) assert.ok(u in mat.uniforms, `loop uniform ${u}`);
+  const vv = new Set([...vs.matchAll(/varying\s+(\w+)\s+(\w+)/g)].map((x) => x[1] + ' ' + x[2]));
+  for (const x of fs.matchAll(/varying\s+(\w+)\s+(\w+)/g)) assert.ok(vv.has(x[1] + ' ' + x[2]), `loop varying ${x[2]} matched`);
+  assert.ok(!/pow\(|fwidth|dFd/.test(fs + vs) && mat.premultipliedAlpha && /vec4\(c, 0\.0\)/.test(fs), 'loops: additive, alpha 0, no pow or derivatives');
+  assert.ok(P.array.every(Number.isFinite), 'finite loops');
+  console.log(JSON.stringify({ loopTris: tri(g), loopApexR: +hi.toFixed(3) }));
+}
+console.log('SUN_LOOPS_VERIFIED');
