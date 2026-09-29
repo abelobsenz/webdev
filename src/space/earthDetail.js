@@ -252,9 +252,22 @@ float od_lightning(vec3 bC, float fpC, float conv, float t) {
   return L * conv;
 }
 
-// Arcologies: day = (albedo rgb, cover); night emission out.
-vec4 od_arcology(vec3 b, float fp, out vec3 night) {
+// Sunglint off glass: a microfacet (GGX) lobe of roughness a, Schlick's Fresnel for glass.
+float od_glint(vec3 n, vec3 V, vec3 L, float a) {
+  vec3 H = normalize(V + L);
+  float nh = max(dot(n, H), 0.0), nv = max(dot(n, V), 1e-3), nl = max(dot(n, L), 0.0);
+  float a2 = a * a;
+  float dd = nh * nh * (a2 - 1.0) + 1.0;
+  float D = a2 / (S_PI * dd * dd);
+  float F = 0.04 + 0.96 * pow(1.0 - max(dot(V, H), 0.0), 5.0);
+  return D * F * step(0.0, nl) / (4.0 * nv);
+}
+
+// Arcologies: day = (albedo rgb, cover); night emission out; glass: the share of glazed roof
+// (the lenses are all glass; the rings and stars glazed between their spokes).
+vec4 od_arcology(vec3 b, float fp, out vec3 night, out float glass) {
   night = vec3(0.0);
+  glass = 0.0;
   vec4 day = vec4(0.0);
   vec3 gold = vec3(1.0, 0.8, 0.5), white = vec3(0.95, 0.97, 1.0);
   for (int i = 0; i < ${ARCOLOGIES.length}; i++) {
@@ -290,6 +303,7 @@ vec4 od_arcology(vec3 b, float fp, out vec3 night) {
     alb = mix(alb, vec3(0.5, 0.52, 0.5), core);
     float cov = plat * (1.0 - smoothstep(R * 2.5, R * 6.0, fp));
     day = mix(day, vec4(alb, 1.0), cov);
+    glass = max(glass, plat * (1.0 - lines) * (kind > 1.5 ? 0.85 : 0.3) * cov);
   }
   return day;
 }

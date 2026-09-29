@@ -586,8 +586,11 @@ void main() {
 
   // the arcologies: pale platforms by day, the brightest lights of their regions at night
   vec3 arcoNight;
-  vec4 arco = od_arcology(b, fp, arcoNight);
+  float arcoGlass;
+  vec4 arco = od_arcology(b, fp, arcoNight, arcoGlass);
   if (arco.a > 0.0) col = mix(col, arco.rgb / S_PI * (uSunE * sunT * max(mu, 0.0) * shadow + skyAmb), arco.a);
+  // their glazed roofs flash the Sun back where the geometry is right
+  if (arcoGlass > 0.0) col += vec3(od_glint(n, V, sun, 0.09)) * arcoGlass * uSunE * sunT * shadow;
 
   // Kilauea's vog by day
   vec3 volcNight;
