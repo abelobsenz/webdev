@@ -18,11 +18,12 @@ import { R_MOON } from './sim.js';
 // (facade x = metres along the guideway).
 
 export const LK = { GLASS: 0, HULL: 1, LANTERN: 2, GARDEN: 3, CONDUIT: 4, PANEL: 7, BRONZE: 8, DECK: 9, DARK: 10, RADIATOR: 11, ROOF: 12, CONSERVATORY: 13, STONE: 20, ROOFG: 21, PAVE: 22, PAD: 23, COURT: 24, TILE: 25, POOL: 26, WALL: 27, COIL: 28,
-  REGOLITH: 29, SOLAR: 30, HAZARD: 31, SIGN: 32, PAINT: 33, GROUND: 34, LIGHT: 35 };
+  REGOLITH: 29, SOLAR: 30, HAZARD: 31, SIGN: 32, PAINT: 33, GROUND: 34, LIGHT: 35, FOIL: 36 };
 // 29 sintered regolith (berms, bagged shielding, spoil, boulders), 30 photovoltaic cells,
 // 31 hazard chevrons, 32 lit signage and concourse bands, 33 livery paint (the instance
 // colour: suits, clothes, rover and tram liveries), 34 packed regolith with tyre tracks
-// (aprons and haul roads), 35 lamp lenses and lit cab windows (always glowing).
+// (aprons and haul roads), 35 lamp lenses and lit cab windows (always glowing), 36 gold
+// multi-layer insulation over cryogenic tanks (crinkled facets, taped seams, beta-cloth patches).
 
 const VERT = /* glsl */ `
 attribute vec3 aFacade;
@@ -106,6 +107,8 @@ void main() {
     vec3 lamp = mix(vec3(1.0, 0.74, 0.48), vec3(0.9, 0.92, 1.0), step(0.85, fract(h * 7.3)));
     em = lamp * mix(uLit * 0.8, lit, det) * (1.0 - frame) * 0.55 * (0.35 + 0.65 * night);
   } else if (k < 1.5) {
+    // (a pearl-grey hull, not paper white: 0.72 read as blank white boxes against the deck)
+    alb = vec3(0.6, 0.595, 0.575);
     vec2 pc = floor(f / vec2(12.0, 7.0));
     float h = hash12(pc + 3.0);
     alb *= mix(1.0, 0.93 + 0.1 * h, detP);
@@ -147,8 +150,20 @@ void main() {
     float br = vnoise(vec2(f.x * 0.2, f.y * 30.0));
     alb = vec3(0.72, 0.52, 0.3) * (0.9 + 0.2 * br * det); rough = 0.28; metal = 1.0;
   } else if (k < 9.5) {
+    // deck plating: 2.4 m plates each a shade apart, tie-down points on a 3.6 m grid, painted
+    // walkway margins every 24 m, and the traffic's scuffing worn darker down the middle of
+    // each lane, all settling to their mean as they shrink below a pixel
     float pl = max(gridLine(f.x, 2.4, 0.03, fw.x), gridLine(f.y, 2.4, 0.03, fw.y)) * det;
-    alb = vec3(0.6, 0.59, 0.56) * (1.0 - 0.3 * pl); rough = 0.6;
+    float ph = hash12(floor(f / 2.4) + 41.0);
+    alb = vec3(0.5, 0.495, 0.47) * (1.0 - 0.3 * pl) * mix(1.0, 0.92 + 0.14 * ph, detP);
+    vec2 td = (fract(f / 3.6) - 0.5) * 3.6;
+    float tie = (1.0 - smoothstep(0.12, 0.12 + px, length(td))) * det;
+    alb *= 1.0 - 0.45 * tie;
+    float lane = cLine(f.x, 24.0, 0.18, fw.x);
+    alb = mix(alb, vec3(0.78, 0.6, 0.12), lane * 0.75);
+    float scuff = 1.0 - smoothstep(2.0, 7.0, abs(fract(f.x / 24.0) - 0.5) * 24.0);
+    alb *= 1.0 - 0.12 * scuff * mix(0.6, vnoise(f * vec2(0.8, 0.12)), detP);
+    rough = 0.62;
   } else if (k < 10.5) {
     // dark service metal: a 0.3 m grating or ribbing, access plates, worn bright at the edges
     float grate = max(gridLine(f.x, 0.3, 0.03, fw.x), gridLine(f.y, 0.3, 0.03, fw.y)) * (1.0 - smoothstep(0.02, 0.08, px));
@@ -184,7 +199,9 @@ void main() {
     float h = hash12(cell + 11.0);
     vec2 lc = fract(f / vec2(4.0, 3.6));
     float win = (1.0 - smoothstep(0.3, 0.3 + fw.x / 4.0, abs(lc.x - 0.5))) * (1.0 - smoothstep(0.28, 0.28 + fw.y / 3.6, abs(lc.y - 0.55)));
-    float plinth = 1.0 - step(3.6, f.y);
+    // (a plinth only at a footing: walls whose facade y runs negative, up in a station's frame,
+    // are storeys all the way down)
+    float plinth = step(-1.5, f.y) * (1.0 - step(3.6, f.y));
     win *= 1.0 - plinth;
     float meanWin = 0.36 * (1.0 - plinth);
     float wv = mix(meanWin, win, det);
@@ -192,12 +209,17 @@ void main() {
     // blue-grey slate render; a darker string course every fourth storey, a cornice line
     // under the roof of each block, soot under the sills
     float bh = hash12(floor(f.x / 48.0) + vec2(3.7, floor(f.y / 57.6)));
-    vec3 stoneC = bh < 0.35 ? vec3(0.62, 0.595, 0.535) : (bh < 0.6 ? vec3(0.66, 0.55, 0.38) : (bh < 0.8 ? vec3(0.6, 0.47, 0.43) : vec3(0.5, 0.54, 0.57)));
+    // (real building stone: limestone ~0.45, sandstone and granite darker; the old values near
+    // 0.65 burned the town out to white speckle under a high Sun)
+    vec3 stoneC = bh < 0.35 ? vec3(0.47, 0.45, 0.405) : (bh < 0.6 ? vec3(0.5, 0.415, 0.29) : (bh < 0.8 ? vec3(0.45, 0.35, 0.32) : vec3(0.37, 0.4, 0.43)));
     alb = stoneC * (0.94 + 0.08 * mix(0.5, hash12(floor(f / vec2(16.0, 14.4)) + 2.0), detP));
     float course = cLine(f.y - 0.3, 14.4, 0.28, fw.y) * (1.0 - plinth);
     alb *= 1.0 - 0.22 * course * detP;
     float soot = (1.0 - smoothstep(0.0, 0.1, lc.y)) * (1.0 - smoothstep(0.3, 0.34, abs(lc.x - 0.5))) * (1.0 - plinth);
     alb *= 1.0 - 0.18 * soot * det;
+    // weathering under the thin new air: rain streaks trailing from the sills and cornices
+    float streak = vnoise(vec2(f.x * 1.3, f.y * 0.08 + bh * 11.0));
+    alb *= 1.0 - 0.12 * smoothstep(0.55, 0.9, streak) * detP * (1.0 - plinth);
     alb = mix(alb, vec3(0.06, 0.07, 0.08), wv * 0.9);
     alb *= 1.0 - 0.12 * plinth;
     rough = mix(0.7, 0.1, wv); metal = 0.0;
@@ -236,10 +258,16 @@ void main() {
     alb = mix(alb, vec3(0.02, 0.05, 0.018), mix(0.25, tree, det));
     rough = 0.9;
   } else if (k < 25.5) {
-    // tiled roof: bronze-grey tiles in courses
+    // tiled roof, each roof its own (the builder offsets facade x by 1000 m a roof): terracotta,
+    // slate, bronze-grey shingle or verdigris copper, in courses, each tile a shade apart, the
+    // lower courses darkened by run-off and lichen toward the eaves
+    float rid = hash12(vec2(floor((f.x + 500.0) / 1000.0), 3.0));
+    vec3 tileC = rid < 0.4 ? vec3(0.34, 0.16, 0.1) : (rid < 0.65 ? vec3(0.14, 0.15, 0.17) : (rid < 0.85 ? vec3(0.3, 0.25, 0.2) : vec3(0.16, 0.29, 0.25)));
     float course = gridLine(f.y, 0.9, 0.05, fw.y) * det;
-    alb = vec3(0.33, 0.27, 0.22) * (0.9 + 0.12 * mix(0.5, hash12(floor(f / vec2(6.0, 0.9))), detP)) * (1.0 - 0.3 * course);
-    rough = 0.55; metal = 0.2;
+    float tileJ = hash12(floor(f / vec2(0.45, 0.9)) + 5.0);
+    alb = tileC * (0.9 + 0.12 * mix(0.5, hash12(floor(f / vec2(6.0, 0.9))), detP)) * (1.0 - 0.3 * course) * mix(1.0, 0.88 + 0.24 * tileJ, det);
+    alb *= 1.0 - 0.16 * (1.0 - smoothstep(0.0, 2.8, f.y));
+    rough = rid < 0.4 ? 0.7 : (rid < 0.65 ? 0.42 : 0.5); metal = rid > 0.85 ? 0.35 : 0.05;
   } else if (k < 26.5) {
     // reflecting pool: dark water mirroring the sky
     alb = vec3(0.01, 0.02, 0.025); rough = 0.05; metal = 0.0;
@@ -305,6 +333,21 @@ void main() {
     float grit = vnoise(f * 0.35) * 0.5 + vnoise(f * 3.0) * 0.5 * detP;
     alb = mix(vec3(0.24, 0.23, 0.21), vec3(0.34, 0.325, 0.3), grit) * (1.0 - 0.3 * ruts);
     rough = 0.97;
+  } else if (k > 35.5) {
+    // multi-layer insulation: gold-coated film in blankets ~2 x 3 m, crinkled into facets that
+    // each catch the Sun at their own angle (the normal tilted by a smooth noise of the
+    // blanket, settling to a rougher, flatter gold where the facets no longer resolve), dark
+    // taped seams, and the odd white beta-cloth patch over a fitting
+    vec2 bl = floor(f / vec2(2.0, 3.0));
+    float hb = hash12(bl + 31.0);
+    float cr = detP;
+    vec3 tilt = vec3(vnoise(f * 1.7 + hb * 9.0), vnoise(f * 1.7 + 17.0), vnoise(f * 4.3 + 5.0)) - 0.5;
+    N = normalize(N + tilt * 0.7 * cr);
+    float seam = max(gridLine(f.x, 2.0, 0.04, fw.x), gridLine(f.y, 3.0, 0.04, fw.y)) * det;
+    alb = mix(vec3(0.78, 0.56, 0.2), vec3(0.62, 0.44, 0.16), hb) * (1.0 - 0.45 * seam);
+    float patchW = step(0.93, hb);
+    alb = mix(alb, vec3(0.8, 0.79, 0.75), patchW);
+    rough = mix(mix(0.36, 0.18, cr), 0.8, patchW); metal = mix(1.0, 0.0, patchW);
   } else {
     // lamp lenses and lit cab glazing: a steady warm glow, stronger by night
     alb = vec3(0.3); rough = 0.2;
@@ -316,12 +359,25 @@ void main() {
   vec3 eDir = toE / max(dE, 1.0);
   vec3 earthL = uSunE * vec3(0.55, 0.7, 1.0) * 2.4e-3 * uEarthLit * smoothstep(-0.05, 0.1, dot(upV, eDir));
   vec3 skyL = uSunE * vec3(0.03, 0.05, 0.1) * smoothstep(-0.1, 0.3, mu) * (1.0 - smoothstep(20.0, 80.0, hh));
+  // moonshine: the lit Moon below fills the undersides and the shade (albedo ~0.13, the disc
+  // filling (R/r)^2 of the view straight down; from the ground this is the bounce off the
+  // sunlit land round a building). The lit share of the disc under an orbiter follows the Sun's
+  // height over the point beneath it, softened by how much of the globe it sees.
+  float Fm = ${R_MOON.toFixed(1)} * ${R_MOON.toFixed(1)} / max(rr * rr, 1.0);
+  float litDisc = clamp(mu + 0.3 * (1.0 - Fm), 0.0, 1.0);
+  float faceDown = clamp(0.5 - 0.5 * dot(N, upV), 0.0, 1.0);
+  vec3 moonL = uSunE * vec3(0.105, 0.13, 0.115) * Fm * litDisc * mix(faceDown, faceDown * faceDown, 1.0 - Fm) * 0.9;
+  // contact darkening: a wall darkens toward its foot (facade y is height above the footing
+  // for stone, dressed stone and sintered regolith), where the ground hides half the sky
+  float wallK = 1.0 - abs(dot(N, upV));
+  float footAO = (k > 19.5 && k < 20.5) || (k > 26.5 && k < 27.5) || (k > 28.5 && k < 29.5) ? 1.0 - 0.32 * step(-1.5, f.y) * exp(-max(f.y, 0.0) / 1.6) * wallK : 1.0;
+  alb *= footAO;
   float ndl = max(dot(N, uSunView), 0.0);
   vec3 H = normalize(V + uSunView);
   float sp = pow(max(dot(N, H), 0.0), mix(80.0, 8.0, rough)) * mix(0.6, 0.15, rough);
   vec3 F0 = mix(vec3(0.04), alb, metal);
   float fres = pow(1.0 - max(dot(N, V), 0.0), 5.0);
-  vec3 col = alb * (1.0 - metal * 0.8) / 3.14159 * (sunL * ndl + earthL * max(dot(N, eDir), 0.0) + skyL * (0.55 + 0.45 * max(dot(N, upV), 0.0)));
+  vec3 col = alb * (1.0 - metal * 0.8) / 3.14159 * (sunL * ndl + earthL * max(dot(N, eDir), 0.0) + skyL * (0.55 + 0.45 * max(dot(N, upV), 0.0)) + moonL * footAO);
   col += min((F0 + (1.0 - F0) * fres * 0.3) * sp * sunL * ndl, sunL * 0.5);
   // glossy surfaces mirror the sky: dark blue by day, black at night
   col += (F0 + (1.0 - F0) * fres) * (1.0 - rough) * skyL * 0.6;

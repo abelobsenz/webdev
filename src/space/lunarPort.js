@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { CB, CK } from '../craft/craftGeometry.js';
 import { LAMP } from './lamps.js';
 import { placeMerge } from './craftMesh.js';
+import { LK } from './lunarMaterial.js';
 
 const V=(x,y,z)=>new THREE.Vector3(x,y,z), TAU=Math.PI*2;
 
@@ -30,8 +31,9 @@ export function buildLunarPort({receiving=true}={}) {
     B.tube([d.clone().multiplyScalar(1050).setY(1080),d.clone().multiplyScalar(3580).setY(1080)],115,12,CK.HULL);
     B.tube([d.clone().multiplyScalar(3600).setY(-100),d.clone().multiplyScalar(3600).setY(1080)],110,10,CK.BRONZE);
     B.at(d.x*3600,1080,d.z*3600,0,-a,0);
-    B.box(0,-250,0,850,220,650,CK.HULL);
-    B.box(0,-115,0,650,45,450,CK.GARDEN);
+    // (the commons' halls in lit stone storeys under a walled roof garden, not blank hull)
+    B.box(0,-250,0,850,220,650,LK.STONE);
+    B.box(0,-115,0,650,45,450,LK.ROOFG);
     B.pop();
     lamps.push({p:d.clone().multiplyScalar(3600).setY(1480),r:22,color:LAMP.AMBER,i:1.8});
   }
@@ -54,7 +56,7 @@ export function buildLunarPort({receiving=true}={}) {
     for(let x=1700;x<6800;x+=700)for(const zz of [-280,280])lamps.push({p:V(sd*x,-120,zz),r:12,color:LAMP.AMBER,i:1.5,breathe:.2,phase:x/7000});
     for(let j=0;j<3;j++) {
       const x=sd*(4400+j*900);
-      B.box(x,20,0,740,240,1150,CK.HULL);
+      B.box(x,20,0,740,240,1150,LK.STONE);
       B.at(x,120,0);B.push(toY);
       B.lathe([[500,0,CK.BRONZE],[500,90,CK.GLASS],[370,350,CK.ROOF],[0,450,CK.ROOF]],24);B.pop();B.pop();
     }
@@ -318,6 +320,71 @@ function buildReceivingCourt() {
   return {parts,lamps,seats,crewRoutes,releaseDistance:10000};
 }
 
+/**
+ * A neighbourhood hall on the ring deck (metres; x along the ring, y up from the deck, z across
+ * it, the entrance toward -z). near: a stepped podium of lit storeys with a roof-garden
+ * terrace, an arcade along its front and flanks, glasshouses on the terrace, four corner
+ * towers under tiled caps, a ribbed conservatory dome with a lantern cupola and a spire, and a
+ * glazed portico toward the walk. far: the same masses inset a few metres (hidden inside the
+ * near hall where both draw), so the whole ring keeps its halls for a sixth of the triangles.
+ */
+export function buildRingHall(far=false) {
+  const B=new CB(), toY=new THREE.Matrix4().makeRotationX(-Math.PI/2);
+  const ins=far?4:0;
+  const dome=(r0,y0,seg)=>{B.at(0,y0,0);B.push(toY);B.lathe([[r0-ins,0,CK.BRONZE],[r0+30-ins,110,CK.HULL],[r0+30-ins,150,CK.LANTERN],[r0-ins,220,CK.GLASS],[r0-70-ins,460,CK.GLASS],[r0-170-ins,550,CK.BRONZE],[0,760-ins,CK.ROOF]],seg);B.pop();B.pop();};
+  if(far) {
+    B.box(0,30,0,1500-2*ins,80-ins,1550-2*ins,LK.STONE);
+    B.box(0,100,0,1200-2*ins,60,1250-2*ins,LK.STONE);
+    dome(560,130,12);
+    return B.geometry();
+  }
+  // podium: 80 m of lit storeys, its roof a garden terrace inside a parapet
+  B.box(0,30,0,1500,80,1550,LK.STONE);
+  B.box(0,70.6,0,1496,1.2,1546,LK.ROOFG);
+  for(const s of [-1,1]) {B.box(s*748,73,0,4,6,1558,LK.WALL);B.box(0,73,s*773,1492,6,4,LK.WALL);}
+  // the arcade: a colonnade 30 m out from the podium's front and flanks under a tiled roof
+  for(let x=-725;x<=725;x+=50)B.box(x,19,-790,10,58,10,LK.WALL);
+  B.box(0,50.5,-790,1500,3,34,LK.TILE);
+  for(const s of [-1,1]) {
+    for(let z=-725;z<=725;z+=50)B.box(s*765,19,z,10,58,10,LK.WALL);
+    B.box(s*765,50.5,0,34,3,1550,LK.TILE);
+  }
+  // upper storeys set back, their roof garden round the dome's drum
+  B.box(0,100,0,1200,60,1250,LK.STONE);
+  B.box(0,130.6,0,1196,1.2,1246,LK.ROOFG);
+  // glasshouses along the terrace's flanks
+  for(const s of [-1,1]) {
+    B.box(s*672,96,0,112,50,1080,LK.CONSERVATORY);
+    B.box(s*672,122,0,116,3,1084,LK.BRONZE);
+  }
+  // corner towers: slender, lit, under tiled pyramid caps with a lamp gallery
+  for(const sx of [-1,1])for(const sz of [-1,1]) {
+    const x=sx*660,z=sz*690;
+    B.box(x,170,z,110,360,110,LK.STONE);
+    B.box(x,352,z,122,6,122,LK.BRONZE);
+    B.box(x,360,z,100,10,100,LK.LIGHT);
+    B.at(x,365,z,0,Math.PI/4,0);B.push(toY);B.lathe([[80,0,LK.TILE],[0,110,LK.TILE]],4);B.pop();B.pop();
+  }
+  // the conservatory dome: glazed on a lit drum, sixteen bronze ribs, a lantern cupola, a spire
+  dome(560,130,32);
+  const prof=[[590,110],[590,150],[560,220],[490,460],[390,550],[170,690]];
+  for(let k=0;k<16;k++) {
+    const a=k/16*TAU,c=Math.cos(a),sn=Math.sin(a);
+    B.tube(prof.map(([r,y])=>V(c*(r+6),130+y,sn*(r+6))),7,5,CK.BRONZE);
+  }
+  B.at(0,880,0);B.push(toY);
+  B.lathe([[95,0,CK.BRONZE],[95,20,CK.GLASS],[88,95,CK.GLASS],[100,105,CK.BRONZE],[60,140,CK.ROOF],[0,170,CK.BRONZE]],16);
+  B.pop();B.pop();
+  B.tube([V(0,1040,0),V(0,1130,0)],5,6,CK.BRONZE);
+  // the portico toward the walk: a glazed hall with a lit frieze
+  B.box(0,55,-845,440,130,120,LK.STONE);
+  B.box(0,121,-845,452,4,132,LK.BRONZE);
+  B.box(0,55,-906,300,100,2,CK.GLASS);
+  B.box(0,112,-907,330,14,3,CK.LANTERN);
+  B.at(0,123,-845);B.push(toY);B.lathe([[150,0,LK.TILE],[0,60,LK.TILE]],4,Math.PI/4);B.pop();B.pop();
+  return B.geometry();
+}
+
 /** Continuous edge shields, two transit rails, and regular lunar-ring neighbourhood halls. */
 export function buildLunarRingDistricts(radiusKm=2117) {
   const B=new CB(), R=radiusKm*1000, districts=[], lamps=[], N=768;
@@ -330,30 +397,29 @@ export function buildLunarRingDistricts(radiusKm=2117) {
     B.push(new THREE.Matrix4().makeTranslation(0,z,0).multiply(new THREE.Matrix4().makeRotationX(Math.PI/2)));
     B.torus(R+25,45,1800,6,CK.BRONZE);B.pop();
   }
-  // The Tranquillity exchange occupies sector zero; the next commons is 17 km away.
-  // Repeated small halls make the global road inhabited without adding whole city meshes.
+  // The Tranquillity exchange occupies sector zero; the next commons is 17 km away. One hall
+  // each side of the rails in every other sector, instanced (a far form for the whole ring, the
+  // full hall near the camera: LunarRingHalls in lunarRing.js); their matrices in the Moon
+  // frame, metres, two per sector (sector j: 2(j - 1) and 2(j - 1) + 1).
+  const hallMats=new Float32Array((N-1)*2*16), hallAngle=new Float32Array((N-1)*2);
+  const flip=new THREE.Matrix4().makeRotationY(Math.PI), mh=new THREE.Matrix4();
   for(let j=1;j<N;j++) {
     const a=j/N*TAU,up=V(Math.cos(a),0,Math.sin(a)),west=V(-Math.sin(a),0,Math.cos(a)),north=V(0,1,0);
     const m=new THREE.Matrix4().makeBasis(west,up,north).setPosition(up.clone().multiplyScalar(R));
-    B.push(m);
     for(const sd of [-1,1]) {
-      const z=sd*4100;
-      B.box(0,85,z,1500,190,1550,CK.HULL);
-      B.at(0,170,z);B.push(new THREE.Matrix4().makeRotationX(-Math.PI/2));
-      B.lathe([[560,0,CK.BRONZE],[590,110,CK.HULL],[590,150,CK.LANTERN],[560,220,CK.GLASS],[490,460,CK.GLASS],[390,550,CK.BRONZE],[0,760,CK.ROOF]],16);B.pop();B.pop();
-      B.box(-560,230,z,250,130,1500,CK.PANEL);
-      B.box(560,230,z,250,130,1500,CK.PANEL);
-      // Protected vestibules open toward a parallel local access walk, away from fast rails.
-      B.box(0,225,z-sd*730,480,270,350,CK.HULL);
-      B.box(0,250,z-sd*916,350,140,36,CK.LANTERN);
+      const z=sd*4100,i=2*(j-1)+(sd>0?1:0);
+      // (the hall's entrance toward the rails: local -z faces the centreline)
+      mh.copy(m).multiply(new THREE.Matrix4().makeTranslation(0,0,z));
+      if(sd<0)mh.multiply(flip);
+      mh.toArray(hallMats,i*16);
+      hallAngle[i]=a;
       districts.push({center:V(0,85,z).applyMatrix4(m),base:V(0,-10,z).applyMatrix4(m),sector:j});
-      // the hall's lit door toward the walk, and a lamp on its lantern
+      // the portico's lit door toward the walk, the lantern on the cupola, the towers' lamps
       // (small true radii: from the deck these are door lights and a lantern, not orbs; from
       // afar the sprite floor keeps them as points)
-      lamps.push({p:V(0,250,z-sd*940).applyMatrix4(m),r:14,color:LAMP.AMBER,i:2.4,breathe:.2,phase:(j*.37)%1});
-      lamps.push({p:V(0,944,z).applyMatrix4(m),r:12,color:LAMP.WHITE,i:1.5});
+      lamps.push({p:V(0,70,z-sd*912).applyMatrix4(m),r:14,color:LAMP.AMBER,i:2.4,breathe:.2,phase:(j*.37)%1});
+      lamps.push({p:V(0,1138,z).applyMatrix4(m),r:10,color:LAMP.WHITE,i:1.5});   // (on the spire, clear of the cupola)
     }
-    B.pop();
   }
   // parapet lamps on both edge shields and signal lamps along both transit rails, one set per
   // half sector (8.7 km), the rails' teal a half step out of phase with the walls' warm white
@@ -363,5 +429,11 @@ export function buildLunarRingDistricts(radiusKm=2117) {
     const b=(j+1)/(N*2)*TAU;
     for(const zz of [-1700,1700])lamps.push({p:V(Math.cos(b)*(R+76),zz,Math.sin(b)*(R+76)),r:7,color:LAMP.TEAL,i:1.4});
   }
-  return {geo:B.geometry(),districts,lamps};
+  return {geo:B.geometry(),districts,lamps,hallMats,hallAngle,hallNear:buildRingHall(false),hallFar:buildRingHall(true),sectors:N};
+}
+
+/** The full halls of districts idx placed in the Moon frame (metres), merged: for probes and audits. */
+export function placedHalls(data, idx) {
+  const m=new THREE.Matrix4();
+  return placeMerge(idx.map(i=>({geo:data.hallNear,m:m.clone().fromArray(data.hallMats,i*16)})));
 }

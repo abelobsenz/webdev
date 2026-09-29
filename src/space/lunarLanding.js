@@ -105,11 +105,13 @@ function prism(B, poly, top, bot, kTop, kSide) {
 }
 
 /** Gabled roof prism on a w x d footprint (local x along the ridge), ridge h above y0. */
+// (each roof takes the next 1000 m of facade x: the material gives every roof its own tiles)
+let roofN = 0;
 function gable(B, y0, w, d, h, k) {
-  const hx = w / 2, hz = d / 2;
+  const hx = w / 2, hz = d / 2, off = 1000 * (roofN++ % 97);
   const p = [[-hx, y0, -hz], [hx, y0, -hz], [hx, y0, hz], [-hx, y0, hz], [-hx, y0 + h, 0], [hx, y0 + h, 0]];
   const slope = Math.hypot(hz, h);
-  const id = (i, fu, fv) => B.v(p[i][0], p[i][1], p[i][2], fu, fv, k);
+  const id = (i, fu, fv) => B.v(p[i][0], p[i][1], p[i][2], fu + off, fv, k);
   // slopes (facade: along the ridge, up the slope)
   { const a = id(0, -hx, 0), b = id(1, hx, 0), c = id(5, hx, slope), e = id(4, -hx, slope); const n = new THREE.Vector3(0, hz, -h); B.tri(a, b, c, n); B.tri(a, c, e, n); }
   { const a = id(3, -hx, 0), b = id(2, hx, 0), c = id(5, hx, slope), e = id(4, -hx, slope); const n = new THREE.Vector3(0, hz, h); B.tri(a, b, c, n); B.tri(a, c, e, n); }
@@ -171,6 +173,7 @@ function column(B, a, b, w0, w1, k) {
 // ------------------------------------------------------------------ the town --
 
 export function buildMediiLanding() {
+  roofN = 0;
   const B = new CB();
   const lamps = [];
   const plan = [];                  // footprints (u, v rectangles, metres) for the overlap checks

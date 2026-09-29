@@ -75,3 +75,53 @@ export class LunarRingTrains {
     return n;
   }
 }
+
+// The ring's neighbourhood halls (lunarPort.js buildLunarRingDistricts): the far form of every
+// hall instanced round the whole ring, and the full hall - arcade, towers, ribbed dome - for the
+// sectors within HALL_WIN sectors of the camera. The near list is rewritten only when the
+// camera crosses into another sector (no per-frame work while it stays within one).
+const HALL_WIN = 10;                                     // sectors either side (~170 km)
+const _hm = new THREE.Matrix4();
+
+export class LunarRingHalls {
+  constructor(parent, data, mat) {
+    this.parent = parent;
+    this.N = data.sectors;
+    this.mats = data.hallMats;
+    const n = data.hallMats.length / 16;
+    this.far = lunarInstanced(data.hallFar, n, {}, mat);
+    for (let i = 0; i < n; i++) this.far.setMatrixAt(i, _hm.fromArray(this.mats, i * 16));
+    this.far.name = 'Ring halls (far form)';
+    this.nearMax = (2 * HALL_WIN + 1) * 2;
+    this.near = lunarInstanced(data.hallNear, this.nearMax, {}, mat);
+    this.near.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.near.count = 0;
+    this.near.visible = false;
+    this.near.name = 'Ring halls';
+    this.key = null;
+    parent.add(this.far, this.near);
+  }
+
+  /** Refill the near halls round the camera's sector (world position); returns how many. */
+  update(camWorld) {
+    _inv.copy(this.parent.matrixWorld).invert();
+    _c.copy(camWorld).applyMatrix4(_inv).multiplyScalar(1000);
+    const rc = Math.hypot(_c.x, _c.z);
+    const inRange = Math.abs(rc - RING_R) < WINDOW && Math.abs(_c.y) < WINDOW;
+    const j0 = inRange ? Math.round(Math.atan2(_c.z, _c.x) / (Math.PI * 2) * this.N) : null;
+    if (j0 === this.key) return this.near.count;
+    this.key = j0;
+    let n = 0;
+    if (j0 !== null) {
+      for (let dj = -HALL_WIN; dj <= HALL_WIN; dj++) {
+        const j = (((j0 + dj) % this.N) + this.N) % this.N;
+        if (j === 0) continue;                                 // sector zero is the Exchange
+        for (let s = 0; s < 2 && n < this.nearMax; s++) this.near.setMatrixAt(n++, _hm.fromArray(this.mats, (2 * (j - 1) + s) * 16));
+      }
+    }
+    this.near.count = n;
+    this.near.visible = n > 0;
+    if (n) this.near.instanceMatrix.needsUpdate = true;
+    return n;
+  }
+}

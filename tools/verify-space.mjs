@@ -10,7 +10,7 @@ import { buildCollector,Hearth } from '../src/space/hearth.js';
 import { beam,KIND,GARDEN_SURFACE } from '../src/space/hull.js';
 import { buildBand,Moon } from '../src/space/moon.js';
 import { Rings } from '../src/space/rings.js';
-import { buildLunarPort,buildLunarRingDistricts } from '../src/space/lunarPort.js';
+import { buildLunarPort,buildLunarRingDistricts,placedHalls } from '../src/space/lunarPort.js';
 import { buildFoundry,buildSolarCollector,WorkingStations } from '../src/space/workingStations.js';
 import { Fleet,voyage,shuttleRun } from '../src/space/fleet.js';
 import { Elevator } from '../src/space/elevator.js';
@@ -66,7 +66,7 @@ closed('reclamation-works',foundry.geo);closed('solar-collector',solar.geo);clos
 const terrace=buildEmbarkationTerrace(),court=buildLunarServiceCourt();
 closed('harbour-embarkation-terrace',terrace.geo);closed('lunar-service-court',court.geo);
 closed('lunar-ring',buildBand(2117,11,1800));
-const lunarDistricts=buildLunarRingDistricts();closed('lunar-ring-districts',lunarDistricts.geo);
+const lunarDistricts=buildLunarRingDistricts();closed('lunar-ring-districts',lunarDistricts.geo);closed('lunar-ring-hall',lunarDistricts.hallNear);closed('lunar-ring-hall-far',lunarDistricts.hallFar);
 for(const d of lunarDistricts.districts) {
   assert.ok(Math.abs(Math.hypot(d.base.x,d.base.z)-2116990)<.01,'Lunar hall foundation rests ten metres inside the ring slab');
   assert.ok(Math.abs(d.base.y)>3300,'District halls keep the transit corridor clear');
@@ -136,7 +136,7 @@ for(const [i,rotor] of hearth.refugeData.rotors.entries()) {
 assert.ok(refugeBearingGap>.045,'Refuge moving and fixed bearing surfaces retain their measured magnetic gap');
 ray.far=Infinity;
 // Sample real lunar hall hulls against the faceted ring, rather than trusting their labels.
-const lunarDistrictProbe=probe(lunarDistricts.geo),lunarBandProbe=probe(buildBand(2117,11,1800));
+const lunarDistrictProbe=probe(placedHalls(lunarDistricts,[0,376,766,1234])),lunarBandProbe=probe(buildBand(2117,11,1800));
 let lunarFoundationEmbed=Infinity;
 for(const i of [0,376,766,1234]) {
   const d=lunarDistricts.districts[i],up=d.center.clone().setY(0).normalize();
