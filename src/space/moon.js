@@ -139,10 +139,23 @@ void main() {
   col += sunL * pow(max(dot(N,normalize(V+uSunDir)),0.0),55.0)*.045;
   // Bounded public lighting reveals longitudinal order in lunar night without giant
   // random square emitters. Narrow lights settle to their coverage when unresolved.
-  float railLamp = exp(-pow((abs(across)-1.7)/max(.028,px*.7),2.0))*min(1.0,.028/max(px,.028));
-  float walkLamp = exp(-pow((abs(across)-3.0)/max(.018,px*.7),2.0))*min(1.0,.018/max(px,.018));
+  float rl = (abs(across)-1.7)/max(.028,px*.7), wl = (abs(across)-3.0)/max(.018,px*.7);   // (squared, never pow() of a signed base)
+  float railLamp = exp(-rl*rl)*min(1.0,.028/max(px,.028));
+  float walkLamp = exp(-wl*wl)*min(1.0,.018/max(px,.018));
   float buildingGlow = garden*plaza*.022;
   col += top*(alb*.034+vec3(.45,.8,1.0)*railLamp*.34+vec3(1.0,.72,.4)*(walkLamp*.24+buildingGlow)+vec3(.45,.64,.6)*verge*.025);
+  // the underside, as the Moon sees it: the keel galleries' window bands 1.1 km either side of
+  // the centreline (lit bays every 12 m where they resolve), and red obstruction lamps every
+  // 2 km along the centre, flashing in a wave that runs round the ring once a minute
+  float under = 1.0 - top;
+  float kd = (abs(across) - 1.1) / max(.04, px * .7);
+  float keel = exp(-kd * kd) * min(1.0, .04 / max(px, .04));
+  float bays = mix(.55, step(.45, fract(u / .012)), 1.0 - smoothstep(.004, .012, px));
+  float dl = (fract(u / 2.0 + .5) - .5) * 2.0;
+  float ls = max(.03, px * .7);
+  float obst = exp(-(dl * dl + across * across) / (ls * ls)) * (.03 / ls) * (.03 / ls);
+  float wave = step(.6, .5 + .5 * sin(uTime * 6.2832 / 60.0 * 40.0 - u * .0189));
+  col += under * (vec3(1.0, .8, .55) * keel * bays * .12 + vec3(1.0, .16, .06) * obst * wave * 1.4);
   gl_FragColor = vec4(col, 1.0);
 }
 `;

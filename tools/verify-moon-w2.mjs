@@ -90,6 +90,12 @@ const moon = new Moon(space);
 report.moonBuildMs = Math.round(performance.now() - t0);
 space.scene.add(moon.group);
 const O = moon.orbitals;
+{
+  // the ring's shader: no pow() of a signed base; its uniforms all supplied
+  const rf = moon.ring.material.fragmentShader;
+  ok(!/pow\(\((abs|across)/.test(rf), 'ring shader: pow() of a signed base');
+  for (const m of rf.matchAll(/^\s*uniform\s+\w+\s+(\w+)/gm)) ok(m[1] in moon.ring.material.uniforms, `ring uniform ${m[1]} supplied`);
+}
 report.orbitalsBuildMs = +O.buildMs.toFixed(1);
 ok(O.buildMs < 250, `orbitals build ${O.buildMs.toFixed(0)} ms`);
 report.orbitalTris = O.triangles();
