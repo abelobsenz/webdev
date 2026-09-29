@@ -18,7 +18,8 @@ import { R_MOON } from './sim.js';
 // (facade x = metres along the guideway).
 
 export const LK = { GLASS: 0, HULL: 1, LANTERN: 2, GARDEN: 3, CONDUIT: 4, PANEL: 7, BRONZE: 8, DECK: 9, DARK: 10, RADIATOR: 11, ROOF: 12, CONSERVATORY: 13, STONE: 20, ROOFG: 21, PAVE: 22, PAD: 23, COURT: 24, TILE: 25, POOL: 26, WALL: 27, COIL: 28,
-  REGOLITH: 29, SOLAR: 30, HAZARD: 31, SIGN: 32, PAINT: 33, GROUND: 34, LIGHT: 35, FOIL: 36 };
+  REGOLITH: 29, SOLAR: 30, HAZARD: 31, SIGN: 32, PAINT: 33, GROUND: 34, LIGHT: 35, FOIL: 36, CANOPY: 37 };
+// 37-40 tree canopies by species (broadleaf, cypress, stone pine, flowering): LK.CANOPY + species
 // 29 sintered regolith (berms, bagged shielding, spoil, boulders), 30 photovoltaic cells,
 // 31 hazard chevrons, 32 lit signage and concourse bands, 33 livery paint (the instance
 // colour: suits, clothes, rover and tram liveries), 34 packed regolith with tyre tracks
@@ -290,8 +291,19 @@ void main() {
     alb *= 1.0 - 0.16 * (1.0 - smoothstep(0.0, 2.8, f.y));
     rough = rid < 0.4 ? 0.7 : (rid < 0.65 ? 0.42 : 0.5); metal = rid > 0.85 ? 0.35 : 0.05;
   } else if (k < 26.5) {
-    // reflecting pool: dark water mirroring the sky
-    alb = vec3(0.01, 0.02, 0.025); rough = 0.05; metal = 0.0;
+    // pools and basins: dark clear water with ripples running across its level face, the sky
+    // mirrored along the reflected ray (pale at the horizon, deep overhead) and the Sun's glint
+    alb = vec3(0.012, 0.022, 0.026); rough = 0.04; metal = 0.0;
+    float level = smoothstep(0.85, 0.97, dot(normalize(vN), upV));
+    vec2 rp = f * 0.8 + vec2(uTime * 0.22, uTime * 0.15);
+    vec3 rip = vec3(vnoise(rp) + 0.5 * vnoise(rp * 2.7 + 5.0), vnoise(rp + 7.0) + 0.5 * vnoise(rp * 2.7 + 9.0), vnoise(rp + 13.0)) - 0.75;
+    N = normalize(N + rip * 0.16 * level * detP);
+    vec3 Rw = reflect(-V, N);
+    float relW = clamp(dot(Rw, upV), 0.0, 1.0);
+    vec3 skyW = uSunE * mix(vec3(0.05, 0.07, 0.1), vec3(0.012, 0.03, 0.085), smoothstep(0.0, 0.55, relW)) * smoothstep(-0.1, 0.3, mu);
+    float fxW = 1.0 - clamp(dot(N, V), 0.0, 1.0), fx2W = fxW * fxW;
+    float frW = 0.02 + 0.98 * fx2W * fx2W * fxW;
+    em += skyW * frW * level;
   } else if (k < 27.5) {
     // dressed stone: ashlar courses of 0.6 m, blocks 1.4 m, weathered a shade apart
     float crs = gridLine(f.y, 0.6, 0.03, fw.y) * det;
@@ -354,6 +366,24 @@ void main() {
     float grit = vnoise(f * 0.35) * 0.5 + vnoise(f * 3.0) * 0.5 * detP;
     alb = mix(vec3(0.24, 0.23, 0.21), vec3(0.34, 0.325, 0.3), grit) * (1.0 - 0.3 * ruts);
     rough = 0.97;
+  } else if (k > 36.5) {
+    // tree canopy: leaf clumps (a noise of the crown's surface tilting the normal and shading the
+    // hollows between clumps), darker undersides where the crown shades itself, a species colour
+    // with each tree's own cast, blossom on the flowering kind; light through the leaves is added
+    // below as a back-lit term
+    float spc = k - 37.0;
+    vec3 base = spc < 0.5 ? vec3(0.09, 0.17, 0.05) : (spc < 1.5 ? vec3(0.05, 0.1, 0.05) : (spc < 2.5 ? vec3(0.08, 0.13, 0.07) : vec3(0.1, 0.16, 0.06)));
+    vec2 lf = f * 0.55;
+    float cl = vnoise(lf) * 0.55 + vnoise(lf * 2.3 + 7.1) * 0.3 + vnoise(lf * 5.7 + 3.3) * 0.15 * det;
+    float hollow = smoothstep(0.25, 0.6, cl);
+    vec3 tilt = vec3(vnoise(lf * 1.9 + 11.0), vnoise(lf * 1.9 + 23.0), vnoise(lf * 1.9 + 37.0)) - 0.5;
+    N = normalize(N + tilt * 0.9 * detP);
+    float cast = vnoise(f * 0.02 + spc * 13.0);
+    alb = base * mix(0.45, 1.25, hollow) * mix(vec3(0.85, 0.95, 1.1), vec3(1.2, 1.05, 0.8), cast);
+    alb *= mix(0.55, 1.0, smoothstep(-0.7, 0.5, dot(normalize(vN), upV)));
+    if (spc > 2.5) { float bloom = step(0.62, vnoise(f * 2.1 + 5.0)) * detP; alb = mix(alb, vec3(0.62, 0.32, 0.4), bloom * 0.7); }
+    rough = 0.85; metal = 0.0;
+    em += alb * sunL * max(dot(-normalize(vN), uSunView), 0.0) * 0.08;
   } else if (k > 35.5) {
     // multi-layer insulation: gold-coated film in blankets ~2 x 3 m, crinkled into facets that
     // each catch the Sun at their own angle (the normal tilted by a smooth noise of the

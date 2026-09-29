@@ -862,13 +862,30 @@ void main() {
     }
     if (waterF > 0.001) {
       // shallow seas: the sea bed seen through clear water, the sky and the Sun mirrored
-      vec3 nw = up;
-      if (fp < 0.3) {
-        vec3 w = (up * RM + vec3(uTime * 0.004, 0.0, uTime * 0.003)) / 0.06;
-        vec3 gw = vec3(snoise(w), snoise(w + 3.3), snoise(w + 7.1)) * 0.035 * (1.0 - smoothstep(0.05, 0.3, fp));
-        nw = normalize(up + gw - up * dot(gw, up));
-      }
+      // wind waves: four octaves from a 150 m swell to 4 m chop, each travelling at its deep-water
+      // speed under the Moon's gravity (c = sqrt(g L / 2 pi), 6 m/s for the swell) and fading out
+      // once its wavelength is under a few pixels; the chop runs across the swell
       float wind = snoise(up * 40.0 + vec3(0.0, uCloudPh, 0.0)) * 0.5 + 0.5;
+      vec3 nw = up;
+      float crest = 0.0;
+      {
+        vec3 P = up * RM;
+        vec3 gsum = vec3(0.0);
+        float wl = 0.15, amp = 0.055 * (0.6 + 0.8 * wind);
+        for (int o = 0; o < 4; o++) {
+          float fade = 1.0 - smoothstep(wl * 0.12, wl * 0.5, fp);
+          if (fade > 0.0) {
+            float c = sqrt(1.62e-3 * wl / 6.2831853);
+            vec3 dir = o % 2 == 0 ? vec3(0.8, 0.0, 0.6) : vec3(-0.45, 0.0, 0.89);
+            vec3 w = (P - dir * c * uTime) / wl;
+            vec3 gw = vec3(snoise(w), snoise(w + 3.3), snoise(w + 7.1));
+            gsum += gw * amp * fade;
+            if (o == 1) crest = snoise(w * 1.7 + 11.0) * fade;
+          }
+          wl *= 0.33; amp *= 0.72;
+        }
+        nw = normalize(up + gsum - up * dot(gsum, up));
+      }
       float al = mix(0.08, 0.14, wind);
       vec3 Hh = normalize(V + sun);
       float nh = max(dot(nw, Hh), 0.0), nv = max(dot(nw, V), 1e-3), nl = max(dot(nw, sun), 0.0);
@@ -889,7 +906,13 @@ void main() {
       float surfD = (coastM - 0.5 - surfW * 0.6) / surfW;
       float surf = exp(-surfD * surfD) * (0.55 + 0.45 * sin(uTime * 0.7 + gf.fine * 3.0 + gf.broad * 5.0)) * gf.dw * (1.0 - nearSite);
       body += vec3(0.6, 0.62, 0.62) / PI * (E * max(mu, 0.0) + sky) * surf * 0.35;
-      vec3 skyR = uSunE * vec3(0.02, 0.04, 0.09) * smoothstep(-0.1, 0.3, mu);
+      // the sky mirrored: pale toward the horizon, deepening to the zenith, as seen along the
+      // reflected ray; whitecaps where the chop breaks on a windy sea
+      vec3 Rr = reflect(-V, nw);
+      float rel = clamp(dot(Rr, up), 0.0, 1.0);
+      vec3 skyR = uSunE * mix(vec3(0.055, 0.075, 0.105), vec3(0.012, 0.03, 0.085), smoothstep(0.0, 0.55, rel)) * smoothstep(-0.1, 0.3, mu);
+      float cap = smoothstep(0.62, 0.9, crest) * smoothstep(0.55, 0.95, wind);
+      body += vec3(0.7, 0.72, 0.72) / PI * (E * max(mu, 0.0) + sky) * cap * 0.25;
       seaCol = body * (1.0 - Fv) + Fv * skyR + spec;
       // at night: ships riding in the roads off the towns, the harbour lights mirrored near the
       // quays, and the rail causeways' lamps across the shallows

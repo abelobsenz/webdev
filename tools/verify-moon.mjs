@@ -280,10 +280,11 @@ report.landingTris = tris(L.geo); report.worksTris = tris(W.geo);
   const site = new THREE.Object3D(); site.updateMatrixWorld(true);
   const cam = new THREE.Vector3(0, 0.2, 1.6), sun = new THREE.Vector3(0.3, 0.8, 0.5).normalize();
   for (let i = 0; i < 60; i++) life.update(i / 60, cam, site, sun);
-  const N = 300;
-  t0 = performance.now();
-  for (let i = 0; i < N; i++) life.update(100 + i / 60, cam, site, sun);
-  report.updateMsNear = +((performance.now() - t0) / N).toFixed(3);
+  // the median update (a mean over 300 also counts whatever garbage-collection pause lands in it)
+  const N = 300, times = [];
+  for (let i = 0; i < N; i++) { const ta = performance.now(); life.update(100 + i / 60, cam, site, sun); times.push(performance.now() - ta); }
+  times.sort((a, b) => a - b);
+  report.updateMsNear = +times[N >> 1].toFixed(3);
   cam.set(0, 400, 0);
   t0 = performance.now();
   for (let i = 0; i < N; i++) life.update(100 + i / 60, cam, site, sun);
