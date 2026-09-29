@@ -455,8 +455,8 @@ export class LagrangeColonies {
       if (!P.m.visible) continue;
       const det = d < DETAIL_KM * 8;
       // the hull's lamps are for the near view: from tens of km they would dot the whole hull, so
-      // they fade to a fifth (the windows and the cap towns carry the colony's light there)
-      const lg = 1 - 0.8 * smooth(14, 60, d);
+      // they fade to a fifteenth (the windows and the cap terraces carry the colony's light there)
+      const lg = 1 - 0.93 * smooth(10, 45, d);
       for (const ls of P.lampSets) if (ls) { ls.visible = det; ls.material.uniforms.uGain.value = lg; }
       if (Math.abs(P.alpha - P.ramAlpha) > 1e-7) this._rams(P);
       for (const C of P.cyls) {

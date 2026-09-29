@@ -396,7 +396,7 @@ export function buildMirror() {
   B.tube([V(0, 40, -W / 2 - 60), V(0, 40, W / 2 + 60)], 50, 12, CK.BRONZE);
   B.pop();
   for (const x of [-W / 2 + 40, 0, W / 2 - 40]) B.tube([V(x, 30, 0), V(x, 24, L * 0.5), V(x, 14, L)], (t) => 34 - 18 * t, 6, CK.DARK);
-  for (let z = 1600; z < L; z += 1600) B.box(0, 14, z, W, 22, 24, CK.HULL);
+  for (let z = 1600; z < L; z += 1600) B.box(0, 14, z, W, 22, 24, DK.HAZARD);
   B.box(0, 12, L - 10, W + 40, 26, 30, CK.BRONZE);
   return { sheet, back: B.geometry() };
 }
@@ -416,9 +416,9 @@ export function buildStator(seed = 3) {
   for (let z = zA0 - 400; z > COL.TRUSS_Z[0] + 200; z -= 600) spA.push([rA, z + 60, CK.HULL], [rA + 40, z + 30, CK.BRONZE], [rA + 40, z - 30, CK.BRONZE], [rA, z - 60, CK.HULL]);
   spA.push([rA, COL.TRUSS_Z[0] - 150, CK.DARK]);
   B.lathe(spA.slice().reverse(), 32);
-  B.at(0, 0, zP); ring(B, [[rA + 10, -260, CK.HULL], [rA + 140, -200, CK.GLASS], [rA + 140, 200, CK.GLASS], [rA + 10, 260, CK.HULL]], 40); B.pop();
+  B.at(0, 0, zP); ring(B, [[rA + 10, -260, DK.GRIME], [rA + 140, -200, CK.GLASS], [rA + 140, 200, CK.GLASS], [rA + 10, 260, DK.GRIME]], 40); B.pop();
   // the docking wheel: rim, spokes, berth arms with collars; approach lights in strings
-  B.at(0, 0, zP); B.torus(rP, 90, 96, 12, CK.HULL); B.pop();
+  B.at(0, 0, zP); B.torus(rP, 90, 96, 12, DK.PORTS); B.pop();
   for (const s of [-1, 1]) { B.at(0, 0, zP + s * 96); B.torus(rP, 10, 96, 5, CK.BRONZE); B.pop(); }
   for (let i = 0; i < 6; i++) {
     const a = (i / 6) * TAU + 0.26;
@@ -431,7 +431,7 @@ export function buildStator(seed = 3) {
     radial(B, a, rP + 60, zP);
     B.box(0, (BERTH_R - rP - 60) / 2, 0, 46, BERTH_R - rP - 60, 40, CK.DECK);
     B.box(0, (BERTH_R - rP - 60) / 2, 22, 30, BERTH_R - rP - 90, 6, CK.GLASS);        // the gallery along the arm
-    B.box(0, 60, 0, 90, 60, 90, CK.HULL);                                             // arm root airlock house
+    B.box(0, 60, 0, 90, 60, 90, DK.LIVERY);                                             // arm root airlock house
     B.pop();
     // the berth faces -z (ships arrive from the anti-sun side)
     const p = V(c * BERTH_R, s * BERTH_R, zP - 24);
@@ -445,7 +445,7 @@ export function buildStator(seed = 3) {
   }
   // the harbour hall: a drum of hangar decks with a dark door ring
   B.at(0, 0, zP - 1500);
-  B.lathe([[rA + 10, 450, CK.HULL], [700, 380, CK.HULL], [720, 300, CK.BRONZE], [720, 150, CK.GLASS], [720, -150, CK.GLASS], [720, -300, CK.BRONZE], [700, -380, CK.DARK], [rA + 10, -450, CK.DARK]], 48);
+  B.lathe([[rA + 10, 450, DK.GRIME], [700, 380, DK.LIVERY], [720, 300, CK.BRONZE], [720, 150, CK.GLASS], [720, -150, CK.GLASS], [720, -300, CK.BRONZE], [700, -380, CK.DARK], [rA + 10, -450, CK.DARK]], 48);
   for (let i = 0; i < 16; i++) { const a = (i / 16) * TAU; lamps.push({ p: V(Math.cos(a) * 740, Math.sin(a) * 740, -390), r: 12, color: LAMP.WHITE, i: 2.4 }); }
   B.pop();
   // industry: factory blocks, smelter spheres on trusses, radiators edge-on to the Sun
@@ -454,7 +454,7 @@ export function buildStator(seed = 3) {
     const a = r() * TAU, rr = rA + 120 + r() * 700, z = zI + (r() - 0.5) * 1400;
     radial(B, a, rr, z);
     const w = 120 + r() * 220, h = 80 + r() * 160, l = 150 + r() * 300;
-    const k = r() < 0.4 ? CK.GLASS : r() < 0.6 ? CK.PANEL : CK.HULL;
+    const k = r() < 0.4 ? CK.GLASS : r() < 0.6 ? CK.PANEL : r() < 0.5 ? DK.GRIME : DK.PORTS;
     B.box(0, 0, 0, w, h, l, k);
     B.box(0, h / 2 + 6, 0, w * 0.6, 12, l * 0.8, CK.DARK);
     B.box(0, -rr / 2 + rA / 2, 0, 24, rr - rA + h * 0.1, 24, CK.DARK);                 // strut to the spindle
@@ -462,7 +462,7 @@ export function buildStator(seed = 3) {
   }
   for (let i = 0; i < 3; i++) {
     const a = (i / 3) * TAU + 0.5;
-    B.at(Math.cos(a) * 900, Math.sin(a) * 900, zI - 300); sphere(B, 150, CK.HULL, 20, 10); B.pop();
+    B.at(Math.cos(a) * 900, Math.sin(a) * 900, zI - 300); sphere(B, 150, DK.FOIL, 20, 10); B.pop();
     truss(B, V(Math.cos(a) * (rA + 10), Math.sin(a) * (rA + 10), zI - 300), V(Math.cos(a) * 760, Math.sin(a) * 760, zI - 300), 40, 80, 3, CK.DARK);
   }
   for (let i = 0; i < 4; i++) {
@@ -496,16 +496,16 @@ export function buildAgriRing() {
     const cz = Math.sin(b), cr = Math.cos(b);
     if (cz > 0.3) return CK.CONSERVATORY;          // the sunward glazing over the fields
     if (cr > 0.55) return CK.GLASS;                // the outer rim: the farm towns
-    return CK.HULL;
+    return DK.GRIME;
   });
   for (const s of [-1, 1]) torusK(B, R, 7, 160, 5, () => CK.BRONZE, s * (t + 14));
   B.torus(R + t + 6, 8, 160, 5, CK.BRONZE);
   // hub (clear of the spindle) and spokes
-  ring(B, [[SPINDLE_S + 12, -70, CK.BRONZE], [SPINDLE_S + 70, -50, CK.HULL], [SPINDLE_S + 70, 50, CK.HULL], [SPINDLE_S + 12, 70, CK.BRONZE]], 32);
+  ring(B, [[SPINDLE_S + 12, -70, CK.BRONZE], [SPINDLE_S + 70, -50, DK.LIVERY], [SPINDLE_S + 70, 50, DK.LIVERY], [SPINDLE_S + 12, 70, CK.BRONZE]], 32);
   for (let i = 0; i < 6; i++) {
     const a = (i / 6) * TAU;
     const c = Math.cos(a), s = Math.sin(a);
-    B.tube([V(c * (SPINDLE_S + 60), s * (SPINDLE_S + 60), 0), V(c * (R - t + 10), s * (R - t + 10), 0)], 20, 8, CK.HULL);
+    B.tube([V(c * (SPINDLE_S + 60), s * (SPINDLE_S + 60), 0), V(c * (R - t + 10), s * (R - t + 10), 0)], 20, 8, DK.LIVERY);
     B.tube([V(c * (SPINDLE_S + 60), s * (SPINDLE_S + 60), 26), V(c * (R - t + 10), s * (R - t + 10), 26)], 6, 5, CK.CONDUIT);
   }
   for (let i = 0; i < 32; i++) { const a = (i / 32) * TAU; lamps.push({ p: V(Math.cos(a) * (R + t + 18), Math.sin(a) * (R + t + 18), 0), r: 10, color: i % 8 ? LAMP.WHITE : LAMP.GREEN, i: 2.6, phase: i / 32, breathe: 0.4 }); }

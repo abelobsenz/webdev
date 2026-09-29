@@ -374,18 +374,27 @@ export class LowOrbit {
     s.tetherMat = createRibbonMaterial({
       widthKm: 0.006, minPx: 1.3, frag: /* glsl */ `
 void main() {
+  // A 6 m Hoytether of dark aramid-carbon strands: from the hub's close view it crossed the
+  // whole frame as a white beam. Now it is a dark cable with a narrow sunlit sheen along one
+  // side (a round braid lit from the Sun's side), the strand helix while it is a few px wide,
+  // small marker collars every 25 km that only glint, and the crawlers' faint pulses.
   vec3 sunL = spaceSunlight(uTransmittanceLUT, vWorld, uSunDir) * uSunE;
   float y = abs(vData.x);
   float x = clamp(vAcross, -1.0, 1.0);
   float cyl = sqrt(max(1.0 - x * x, 0.0));
-  vec3 col = vec3(0.62, 0.6, 0.55) * sunL * (0.03 + 0.05 * cyl) + vec3(0.05, 0.04, 0.03) * cyl;
-  // amber marker collars every 25 km (their mean once they are subpixel: no fwidth needed,
-  // the collar is 0.8 km long so it always spans a pixel at the ranges it is seen from)
+  float wide = smoothstep(2.0, 6.0, vPx);                    // resolved across: shading and braid
+  float sheen = exp(-((x - 0.45) * 4.0) * ((x - 0.45) * 4.0));
+  float helix = 0.5 + 0.5 * sin((vData.x * 1000.0 / 1.6 + x * 3.0) * 6.2831853);
+  float braid = mix(1.0, 0.7 + 0.3 * helix, wide);
+  vec3 col = vec3(0.3, 0.29, 0.27) * sunL * (0.008 + 0.014 * mix(0.7, cyl, wide) + 0.012 * sheen * wide) * braid;
+  col += vec3(0.012, 0.011, 0.01) * cyl;
+  // marker collars (0.8 km bronze sleeves): a warm glint, their mean kept once under a pixel
   float d = abs(fract(y / 25.0 + 0.5) - 0.5) * 25.0;
-  col += vec3(1.0, 0.62, 0.3) * (1.0 - smoothstep(0.2, 0.4, d)) * 1.2;
-  // a pulse runs out along each arm every few seconds (the tether's inspection crawlers)
+  float collar = 1.0 - smoothstep(0.2, 0.4, d);
+  col += vec3(1.0, 0.66, 0.34) * collar * (0.05 * sunL.r / max(uSunE, 1e-3) + 0.12);
+  // inspection crawlers: a soft pulse out along each arm every few seconds
   float pp = fract(y / 450.0 - uTime * 0.08) - 0.5;
-  col += vec3(0.95, 0.85, 0.55) * exp(-pp * pp * 900.0) * 0.5 * cyl;
+  col += vec3(0.95, 0.85, 0.55) * exp(-pp * pp * 900.0) * 0.14 * cyl;
   gl_FragColor = vec4(col * vCoverage, 0.0);
 }
 `,
