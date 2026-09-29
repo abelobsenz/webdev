@@ -417,7 +417,7 @@ export function buildLunarRingDistricts(radiusKm=2117) {
       // (small true radii: from the deck these are door lights and a lantern, not orbs; from
       // afar the sprite floor keeps them as points)
       lamps.push({p:V(0,70,z-sd*912).applyMatrix4(m),r:14,color:LAMP.AMBER,i:2.4,breathe:.2,phase:(j*.37)%1});
-      lamps.push({p:V(0,1000,z).applyMatrix4(m),r:12,color:LAMP.WHITE,i:1.5});
+      lamps.push({p:V(0,1138,z).applyMatrix4(m),r:10,color:LAMP.WHITE,i:1.5});   // (on the spire, clear of the cupola)
     }
   }
   // parapet lamps on both edge shields and signal lamps along both transit rails, one set per
