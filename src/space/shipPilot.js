@@ -9,7 +9,7 @@ import { EngineVoice } from '../core/engineAudio.js';
 // Flying the Lodestar in the orbital view (km, seconds). Newtonian: the drive and thrusters push
 // with realistic accelerations, gravity pulls, and nothing slows the ship but its own thrust.
 //
-//   W            main drive (12 g; with Shift, 300 g)    S           retro thrusters (3 g)
+//   W            main drive (12 g; with Shift, 300 g)    S           reverse engines (20 g; with Shift, 300 g)
 //   A / D        roll       Up / Down  pitch    Q / E  yaw (RCS: rates build and stop gradually)
 //   Space / C    thrusters up / down (0.1 g)             B           brake to rest (flight computer)
 //   Z            flight assist on / off                  G           landing legs
@@ -30,7 +30,8 @@ import { EngineVoice } from '../core/engineAudio.js';
 const G0 = 0.00981;                    // km/s^2
 const GM_EARTH = 398600.4, GM_MOON = 4902.8;
 const DRIVE = 10, BOOST = 100;           // a torch drive: ten times a chemical ship's push, a hundred on boost
-const A_MAIN = 1.2 * G0 * DRIVE, A_BOOST = 3.0 * G0 * BOOST, A_RETRO = 0.3 * G0 * DRIVE, A_RCS = 0.1 * G0 * DRIVE, A_ASSIST = 1.6 * G0 * DRIVE;
+const A_MAIN = 1.2 * G0 * DRIVE, A_BOOST = 3.0 * G0 * BOOST, A_RETRO = 20 * G0, A_RETRO_BOOST = 300 * G0,   // (the bow's reverse engines: S, and Shift+S)
+      A_RCS = 0.1 * G0 * DRIVE, A_ASSIST = 1.6 * G0 * DRIVE;
 const RATE = { pitch: 0.4, yaw: 0.32, roll: 0.7 }, ANG_ACC = 0.45;
 const C_LIGHT = 299792.458;
 const V = () => new THREE.Vector3();
@@ -265,13 +266,17 @@ export class ShipPilot {
     q.multiply(_q).normalize();
     // the angular acceleration the RCS delivered this step (ship frame, units of its capacity)
     const dw = V().copy(this.rates).sub(prev).divideScalar(h * ANG_ACC);
-    this.cmdAng.lerp(V().set(dw.x, -dw.y, -dw.z), 1 - Math.exp(-h * 30));
+    // the stabilisers fire only while the ship is actually being turned (or its turn stopped): no
+    // demand below a small deadband, so a ship holding its attitude shows no puffs
+    const dwv = V().set(dw.x, -dw.y, -dw.z);
+    if (dwv.length() < 0.03) dwv.set(0, 0, 0);
+    this.cmdAng.lerp(dwv, 1 - Math.exp(-h * 30));
     // ---- forces
     const f = V().set(0, 0, -1).applyQuaternion(q), up = V().set(0, 1, 0).applyQuaternion(q);
     const burnWant = i.fwd > 0 ? (this.boost ? A_BOOST : A_MAIN) : 0;
     this.burn += (burnWant - this.burn) * (1 - Math.exp(-h * 3));        // the drive spools up and down
     const a = V().copy(f).multiplyScalar(this.burn);
-    if (i.fwd < 0) a.addScaledVector(f, -A_RETRO);
+    if (i.fwd < 0) a.addScaledVector(f, -(this.boost ? A_RETRO_BOOST : A_RETRO));
     a.addScaledVector(up, i.lift * A_RCS);
     const g = this._gravity(this.pos, this.vel, V());
     let assistA = 0;
@@ -291,12 +296,10 @@ export class ShipPilot {
       if (this.brake && this.vel.length() < 0.0004) { this.brake = false; this.vel.set(0, 0, 0); this._flash('at rest'); }
     }
     this.assistA = assistA;
-    // the thrusters' share of the linear push (retro, translation, assist), ship frame, units of A_RCS
-    {
-      const rcsA = V().copy(a).addScaledVector(f, -this.burn);      // everything but the main drive
-      const inv = this.quat.clone().invert();
-      this.cmdLin.lerp(rcsA.applyQuaternion(inv).divideScalar(A_RCS), 1 - Math.exp(-h * 30));
-    }
+    // the thrusters' visible linear work is only what the pilot asks of them (lift); flight assist's
+    // hold against gravity is trimmed by the drives, and braking fires the reverse engines
+    this.cmdLin.lerp(V().set(0, i.lift, 0), 1 - Math.exp(-h * 30));
+    this.reverseOn = i.fwd < 0 ? (this.boost ? 1.5 : 1) : 0;
     this.accel = a.length();                  // what the crew feels
     this.vel.addScaledVector(a.add(g), h);
     this.pos.addScaledVector(this.vel, h);
@@ -470,13 +473,13 @@ export class ShipPilot {
     if (this.body) this.body.visible = !(this.warp && this.warp.active);
     const burn = this.burn / A_MAIN;
     if (!this.voice && this.space.app.audio) this.voice = new EngineVoice(this.space.app.audio, 'drive');
-    const rcs = this.active ? Math.min(1, Math.abs(i.roll) + Math.abs(i.pitch) + Math.abs(i.yaw) + Math.abs(i.lift) + (i.fwd < 0 ? 1 : 0) + (this.assistA || 0) / A_ASSIST) : 0;
+    const rcs = this.active ? Math.min(1, Math.abs(i.roll) + Math.abs(i.pitch) + Math.abs(i.yaw) + Math.abs(i.lift)) : 0;
     if (this.voice) this.voice.set(this.active && this.space.mode === 'space', 0.5 + 0.5 * Math.min(burn, 1), Math.min(burn, 1.5) + (j ? j.bubble * 0.6 : 0), this.boost && burn > 1.1 ? 1 : 0, rcs);
     // the Earth's shadow (a cylinder behind the planet): cold-gas puffs only show in sunlight
     const Pw = this.worldPos(V()), sd = sim.sunDir, along = Pw.dot(sd);
     const sunlit = along > 0 ? 1 : smooth(R_EARTH * 0.98, R_EARTH * 1.02, V().copy(Pw).addScaledVector(sd, -along).length());
     if (!this.active) { this.cmdAng.multiplyScalar(Math.exp(-dt * 8)); this.cmdLin.multiplyScalar(Math.exp(-dt * 8)); }
-    this.ship.update(dt, { throttle: this.active ? Math.min(burn, 1) : 0, aux: this.active ? Math.min(1, burn) * 0.7 : 0, boost: burn > 1.1 ? 1 : 0, legs: this.legs, rcs,
+    this.ship.update(dt, { throttle: this.active ? Math.min(burn, 1) : 0, aux: this.active ? Math.min(1, burn) * 0.7 : 0, boost: burn > 1.1 ? 1 : 0, legs: this.legs, rcs, reverse: this.active ? (this.reverseOn || 0) : 0,
       ang: this.cmdAng, lin: this.cmdLin, sunlit, time: realTime });
   }
 
@@ -564,7 +567,7 @@ export class ShipPilot {
         <div class="ph-cell ph-thr"><span class="ph-unit" data-k="thrL">drive</span><span class="ph-bar"><i data-k="thr"></i></span></div>
         <div class="ph-cell"><span class="ph-mode" data-k="mode">HOLD</span><span class="ph-unit" data-k="sub">assist on</span></div>
       </div>
-      <div class="ph-keys"><kbd>W</kbd> drive · <kbd>S</kbd> retro · <kbd>A</kbd><kbd>D</kbd> roll · <kbd>↑</kbd><kbd>↓</kbd> pitch · <kbd>Q</kbd><kbd>E</kbd> yaw · <kbd>Space</kbd><kbd>C</kbd> thrusters · <kbd>B</kbd> brake · <kbd>Z</kbd> assist · <kbd>J</kbd> jump to selection · <kbd>G</kbd> legs · <kbd>X</kbd> view · <kbd>V</kbd> leave</div>`;
+      <div class="ph-keys"><kbd>W</kbd> drive · <kbd>S</kbd> reverse (Shift: 300 g) · <kbd>A</kbd><kbd>D</kbd> roll · <kbd>↑</kbd><kbd>↓</kbd> pitch · <kbd>Q</kbd><kbd>E</kbd> yaw · <kbd>Space</kbd><kbd>C</kbd> thrusters · <kbd>B</kbd> brake · <kbd>Z</kbd> assist · <kbd>J</kbd> jump to selection · <kbd>G</kbd> legs · <kbd>X</kbd> view · <kbd>V</kbd> leave</div>`;
     document.body.appendChild(el);
     this.hud = el;
     this._hk = {};

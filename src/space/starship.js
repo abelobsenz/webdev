@@ -191,7 +191,7 @@ export class Starship {
     this.root = new THREE.Group();            // km units: position and orientation of the ship
     this.root.name = 'Lodestar';
     this.movers = {};
-    this.state = { throttle: 0, aux: 0, boost: 0, legs: 0, rcs: 0 };
+    this.state = { throttle: 0, aux: 0, boost: 0, legs: 0, rcs: 0, reverse: 0 };
     this._build();
   }
 
@@ -274,6 +274,17 @@ export class Starship {
       S.push(revolve([[R + 0.25, 0, CK.DARK], [R + 0.25, 0.55, CK.DARK], [R + 0.25, 0.55, CK.BRONZE], [R + 0.3, 0.75, CK.BRONZE], [R, 1.25, CK.BRONZE], [R, 1.25, CK.DARK], [e.rt + 0.1, 1.5, CK.DARK], [0, 1.5, CK.DARK]], 32, { cx: e.p.x, cy: e.p.y }).translate(0, 0, zs));
     }
 
+    // ---- reverse thrusters: a pod on each flank in the forward third, its nozzle facing forward and
+    // canted outboard so the plume clears the bow; they fire to brake (S), not the RCS
+    this.reverseMounts = [];
+    for (const side of [1, -1]) {
+      const c = hullPt(0.36, side > 0 ? -0.18 : Math.PI + 0.18, 0.55), z0 = c.z - 1.1;
+      S.push(revolve([[0, 0, CK.DARK], [0.3, 0.06, CK.DARK], [0.46, 0.3, CK.BRONZE], [0.5, 0.55, CK.HULL], [0.5, 1.9, CK.HULL], [0.44, 2.3, CK.BRONZE], [0.2, 2.5, CK.DARK], [0, 2.5, CK.DARK]], 28, { cx: c.x, cy: c.y }).translate(0, 0, z0));
+      // the pylon onto the hull
+      S.push(stock(new THREE.BoxGeometry(0.5, 0.18, 1.6), CK.DARK).translate(c.x - side * 0.35, c.y, z0 + 1.2));
+      this.reverseMounts.push({ p: V3(c.x, c.y, z0), side });
+    }
+
     // ---- RCS quads (fore on the chines, aft on the wing roots)
     this.rcs = [];
     for (const [t, a] of [[0.2, 0], [0.2, Math.PI], [0.88, 0.25], [0.88, Math.PI - 0.25]]) {
@@ -331,6 +342,14 @@ export class Starship {
       hull.add(eng);
       this.engines.push({ g: eng, main: !!e.main });
     }
+    // reverse engines: their axis +Z turned to face forward, canted 0.3 rad outboard
+    this.reverse = this.reverseMounts.map((m) => {
+      const eng = createEngine({ rt: 0.2, re: 0.5, len: 1.1, plumeLen: 0.5 * 15 });
+      eng.position.copy(m.p);
+      eng.rotation.y = Math.PI - m.side * 0.3;
+      hull.add(eng);
+      return eng;
+    });
     // RCS: a cold-gas jet at every nozzle, with the force and torque it gives the ship (for thruster
     // selection: each manoeuvre fires the nozzles that push the right way)
     this.jets = this.rcs.map((n) => {
@@ -365,6 +384,8 @@ export class Starship {
     st.rcs += (s.rcs - st.rcs) * k(12);
     for (const l of this.movers.legs) l.g.rotation.x = lerp(-1.52, l.out, st.legs);
     for (const e of this.engines) e.g.setThrust(e.main ? Math.min(1.5, st.throttle * (1 + 0.8 * st.boost)) : st.aux, dt);
+    st.reverse += ((s.reverse || 0) - st.reverse) * k(8);
+    if (this.reverse) for (const e of this.reverse) e.setThrust(st.reverse, dt);
     const ang = s.ang, lin = s.lin, sun = s.sunlit ?? 1, time = s.time ?? 0;
     for (const j of this.jets) {
       let d = 0;
