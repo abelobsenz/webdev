@@ -7,7 +7,8 @@ import { KM } from './craftMesh.js';
 import { craftInstances, MovingLamps } from './helianthDistrict.js';
 import { truss, dish, mast, radiatorWing } from './shipKit.js';
 import { droneGeo } from './lifeKit.js';
-import { SwarmYard } from './swarmYard.js';
+import { SwarmYard, SHUTTLES, shuttlePath, shuttlePose } from './swarmYard.js';
+import { buildShuttle } from '../craft/craftClasses.js';
 
 // The Helianth's own reach of the Dyson swarm, in 3D: the collector shells it sits in.
 //
@@ -592,6 +593,15 @@ export class HelianthSwarm {
     this.hosts = new Int32Array(SWARM.droneHosts); this.nHosts = 0; this._hd = new Float32Array(SWARM.nearCap);
     // the yard where collectors are built, in the sunward shell's window (src/space/swarmYard.js)
     this.yard = new SwarmYard(this.group, D, this.sunDir);
+    // and the crew shuttles between it and the Helianth
+    this.shuttlePath = shuttlePath(D);
+    const sh = buildShuttle(110);
+    this.shuttleGeo = sh.geo;
+    this.shuttles = craftInstances(sh.geo, Array.from({ length: SHUTTLES.count }, () => new THREE.Matrix4()), opt, mat);
+    this.shuttles.instanceMatrix.setUsage(THREE.DynamicDrawUsage); this.shuttles.userData.sunDir = this.sunDir;
+    this.shuttleLamps = new MovingLamps(SHUTTLES.count, { r: 0.02, color: LAMP.TEAL, i: 3, minPx: 1.3, breathe: 0.3 });
+    this.group.add(this.shuttles, this.shuttleLamps.mesh);
+    this.shuttles.frustumCulled = false; this.shuttleLamps.mesh.frustumCulled = false;
     this.group.traverse((o) => { o.frustumCulled = false; });
     this.beamGroup.traverse((o) => { o.frustumCulled = false; });
     this.built = true;
@@ -678,6 +688,16 @@ export class HelianthSwarm {
     }
     if (this.nHosts) { this.dronesIM.instanceMatrix.needsUpdate = true; this.droneLamps.commit(); }
     this.yard.animate(t);
+    for (let k = 0; k < SHUTTLES.count; k++) {
+      shuttlePose(k, t, this.shuttlePath, p, f);
+      const side = this._z.crossVectors(this._up, f);
+      if (side.lengthSq() < 1e-6) side.set(1, 0, 0); else side.normalize();
+      const u2 = this._x.crossVectors(f, side);
+      m.makeBasis(side, u2, f).setPosition(p.x * 1000, p.y * 1000, p.z * 1000);
+      this.shuttles.setMatrixAt(k, m);
+      this.shuttleLamps.set(k, p.addScaledVector(u2, 0.012));
+    }
+    this.shuttles.instanceMatrix.needsUpdate = true; this.shuttleLamps.commit();
     // the Helianth's beam: toward the Earth (at the world origin), in the station's frame
     if (sim) {
       p.copy(this._w).negate().normalize().applyQuaternion(this._iq);
@@ -691,6 +711,6 @@ export class HelianthSwarm {
     const tri = (g) => (g.index ? g.index.count : g.attributes.position.count) / 3;
     let n = 0;
     for (const im of [this.colNear, this.colMid, this.relNear, this.relMid, this.rings, this.tugs, this.dronesIM]) n += tri(im.geometry) * im.count;
-    return n + this.yard.triangles();
+    return n + this.yard.triangles() + tri(this.shuttleGeo) * SHUTTLES.count;
   }
 }

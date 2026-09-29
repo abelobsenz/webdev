@@ -487,3 +487,21 @@ console.log('SWARM_YARD_VERIFIED');
   assert.equal(s.uniforms.uProm.value.length, 9, 'nine prominences for nine filaments');
 }
 console.log('SUN_SHADERS_UNIFORMS_VERIFIED');
+// the yard's crew shuttles: under the flotilla, over the shell, down onto the yard's line, never meeting
+{
+  const { SHUTTLES, shuttlePath, shuttlePose } = await import('../src/space/swarmYard.js');
+  const path = shuttlePath(D), p = V(), f = V(), q = V(), g = V();
+  let flo = Infinity, shell = Infinity, meet = Infinity;
+  for (let t = 0; t < SHUTTLES.T * 2; t += 1.5) for (let k = 0; k < SHUTTLES.count; k++) {
+    shuttlePose(k, t, path, p, f);
+    assert.ok(Number.isFinite(p.x + p.y + p.z + f.x + f.y + f.z), 'finite shuttle');
+    if (Math.hypot(p.x, p.z) > 55) flo = Math.min(flo, Math.abs(p.y) - 26);
+    shell = Math.min(shell, p.y - shellY(D, SWARM.layers[0].y, p.x, p.z));
+    for (let j = k + 1; j < SHUTTLES.count; j++) { shuttlePose(j, t, path, q, g); meet = Math.min(meet, p.distanceTo(q)); }
+  }
+  assert.ok(flo > 20, `shuttles clear of the flotilla (${flo.toFixed(1)} km)`);
+  assert.ok(shell > 1.4, `shuttles never sink into the shell (${shell.toFixed(2)} km over it at the dock)`);
+  assert.ok(meet > 0.25, `shuttles never meet (${(meet * 1000).toFixed(0)} m)`);
+  console.log(JSON.stringify({ shuttleFlotillaClearKm: +flo.toFixed(1), shuttleMinSeparationM: Math.round(meet * 1000) }));
+}
+console.log('SHUTTLES_VERIFIED');

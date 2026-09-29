@@ -203,3 +203,43 @@ export class SwarmYard {
     return tri(this.mesh.geometry) + this.stages.reduce((a, s) => a + tri(s.geometry), 0) + tri(this.wheel.geometry) + tri(this.craneGeo) * 2 + tri(this.loads.geometry) * 2 + tri(this.tug.geometry);
   }
 }
+
+// ------------------------------------------------------------ crew shuttles ----
+// Crews and parts shuttle between the Helianth and the yard: down from the Helianth's side 40 km
+// out (inside its statite flotilla's inner edge), across 60 km below the Helianth's plane
+// (under the flotilla, over the shell), and down to the yard's line; they dwell at each end.
+export const SHUTTLES = { count: 4, y: -60, r0: 40, T: 900, dwell: 0.12, lane: 0.8 };
+
+/** The shuttle run (km, station frame): [P0 .. P3], the Helianth end first. */
+export function shuttlePath(D) {
+  const b = V(YARD.x, 0, YARD.z).normalize();
+  const c = V().setFromMatrixPosition(yardMatrix(D));
+  const up = V(c.x, c.y + D, c.z).normalize();
+  const dock = c.clone().addScaledVector(up, (YARD.spine.y + YARD.spine.w / 2 + 600) / 1000);   // over the spine's top
+  return [
+    b.clone().multiplyScalar(SHUTTLES.r0).setY(-6),
+    b.clone().multiplyScalar(SHUTTLES.r0).setY(SHUTTLES.y),
+    dock.clone().addScaledVector(b, -30).setY(SHUTTLES.y),
+    dock,
+  ];
+}
+
+/** Shuttle k at time t: position (km) and heading along the run, out and back with dwells. */
+export function shuttlePose(k, t, path, outP, outF) {
+  const u = (((t / SHUTTLES.T) + k / SHUTTLES.count) % 1 + 1) % 1, d = SHUTTLES.dwell;
+  // [dwell at the Helianth][out][dwell at the yard][back]
+  let s, dir;
+  if (u < d) { s = 0; dir = 1; } else if (u < 0.5) { s = (u - d) / (0.5 - d); dir = 1; } else if (u < 0.5 + d) { s = 1; dir = -1; } else { s = 1 - (u - 0.5 - d) / (0.5 - d); dir = -1; }
+  s = s * s * (3 - 2 * s);
+  let L = 0;
+  for (let i = 1; i < path.length; i++) L += path[i].distanceTo(path[i - 1]);
+  let x = s * L, i = 1;
+  for (; i < path.length - 1; i++) { const seg = path[i].distanceTo(path[i - 1]); if (x <= seg) break; x -= seg; }
+  const a = path[i - 1], b = path[i], seg = a.distanceTo(b) || 1;
+  outP.copy(a).lerp(b, Math.min(x / seg, 1));
+  // out- and inbound shuttles keep lanes apart (the lanes meet only at the dwell points, where each waits its turn)
+  const e = Math.abs(2 * s - 1), lane = 1 - e * e * e * e * e * e * e * e;
+  outP.y += (dir > 0 ? 1 : -1) * SHUTTLES.lane * lane;
+  outF.subVectors(b, a).normalize().multiplyScalar(dir);
+  return outP;
+}
