@@ -43,6 +43,8 @@ class Ctx {
     this.lamps = [];
     this.docks = [];
     this.parts = [];
+    this.walks = [];      // crews walk these: { a, b, up } (deck surface)
+    this.welds = [];      // welding arcs
     this.livery = livery;
   }
   /** A moving part in its own builder: build(Bp, lamps) in the pivot frame. */
@@ -228,6 +230,7 @@ function buildComms(c) {
   }
   // antenna farm on the zenith deck, beacons at the tips
   B.box(0, H / 2 + 2.6, 0, rad * 1.4, 1.2, rad * 1.4, CK.DECK);
+  c.walks.push({ a: V(-rad * 0.6, H / 2 + 3.2, -rad * 0.62), b: V(rad * 0.6, H / 2 + 3.2, -rad * 0.62), up: Y });
   railing(B, -rad * 0.7, rad * 0.7, -rad * 0.7, rad * 0.7, H / 2 + 3.2);
   const nm = r.int(4, 8);
   for (let i = 0; i < nm; i++) {
@@ -303,6 +306,7 @@ function buildDepot(c) {
   const w = 8;
   truss(B, V(-L / 2, 0, 0), V(L / 2, 0, 0), w, 12, 0.35);
   catwalk(B, V(-L / 2 + 10, w / 2 + 0.2, 0), V(L / 2 - 10, w / 2 + 0.2, 0), Y, 1.6, 1.1);
+  c.walks.push({ a: V(-L / 2 + 12, w / 2 + 0.32, 0), b: V(L / 2 - 12, w / 2 + 0.32, 0), up: Y });
   // tank clusters in bays along the spine
   const bays = Math.floor(L / 70);
   for (let i = 0; i < bays; i++) {
@@ -319,12 +323,15 @@ function buildDepot(c) {
         tank(B, 7, 44, k % 2 ? DK.LIVERY : DK.FOIL, CK.BRONZE, 16);
         B.pop();
       }
-      B.lathe([[20, -18, CK.BRONZE], [20.5, -17, CK.BRONZE], [20.5, -15, CK.BRONZE], [20, -14, CK.BRONZE]], 20, 0, { closedProfile: false });
+      for (const xx of [-18, 18]) { atAim(B, V(xx, 0, 0), X); B.lathe([[23.4, -1, CK.BRONZE], [23.4, 1, CK.BRONZE], [22.6, 1, CK.DARK], [22.6, -1, CK.DARK]], 24, 0, { closedProfile: true }); B.pop(); }
     } else {
-      atAim(B, V(0, 0, 0), X);
-      B.lathe([[0.02, -26, CK.HULL], [12, -24, CK.HULL], [18, -18, DK.LIVERY], [18, 18, DK.LIVERY], [12, 24, CK.HULL], [0.02, 26, CK.HULL]], 22);
-      for (const z of [-12, 0, 12]) B.lathe([[18.4, z - 1, CK.BRONZE], [18.4, z + 1, CK.BRONZE]], 22, 0, { closedProfile: false });
+      for (const sz of [-1, 1]) {
+      B.tube([V(0, 0, sz * w / 2), V(0, 0, sz * 10)], 1.4, 6, CK.BRONZE);
+      atAim(B, V(0, 0, sz * 23), X);
+      B.lathe([[0.02, -26, CK.HULL], [8, -24, CK.HULL], [12.5, -18, DK.LIVERY], [12.5, 18, DK.LIVERY], [8, 24, CK.HULL], [0.02, 26, CK.HULL]], 22);
+      for (const z of [-12, 0, 12]) B.lathe([[12.9, z - 1, CK.BRONZE], [12.9, z + 1, CK.BRONZE]], 22, 0, { closedProfile: false });
       B.pop();
+      }
     }
     // a pump house on the spine with its lit window strip
     block(c, 0, -w / 2 - 4, 0, 14, 7, 10, [DK.GRIME, CK.GLASS]);
@@ -343,7 +350,7 @@ function buildDepot(c) {
   for (const s of [-1, 1]) {
     can(c, V(s * (L / 2 + 22), 0, 0), X, 10, 30);
     berth(c, V(s * (L / 2 + 22 + 15 + 5), 0, 0), V(s, 0, 0), 2.6, 5);
-    radiatorWing(B, V(s * L * 0.3, w / 2, 0), Y, X, r.range(60, 90), 24, c.lamps, LAMP.AMBER);
+    radiatorWing(B, V(s * (L / 2 + 1), 0, w / 2), Z, X, r.range(60, 90), 24, c.lamps, LAMP.AMBER);
     c.beacon(V(s * (L / 2), w, 0), LAMP.RED, 3, 5, s > 0 ? 0.5 : 0);
   }
   pvWing(c, V(0, -w / 2, 0), V(0, -1, 0), X, r.range(70, 120), 28);
@@ -385,6 +392,7 @@ function buildShipyard(c) {
     const [x, y] = sectionEllipse(hw, hh, 8, 2.4, 0)[s];
     B.tube([V(x, y, zP - 2), V(x * 0.4, y * 0.4, hl / 2)], 0.6, 5, CK.DARK);
     if (s % 2 === 0) c.lamps.push({ p: V(x * 0.8, y * 0.8, zP + 20 + 30 * (s / 8)), r: 1.4, color: s % 4 ? LAMP.TEAL : LAMP.WHITE, i: 4, breathe: 0.9, phase: r() });   // welders
+    c.welds.push(V(x * 0.97, y * 0.97, zP + 12 + 14 * (s % 4)), V(x * 0.9, y * 0.9, zP + 40 + 14 * (s % 3)));
     void t;
   }
   // engine bells already on her, clamps from the frames
@@ -410,11 +418,12 @@ function buildShipyard(c) {
   berth(c, V(Wd / 2 + 30, 17, -L / 4 + 12), Y, 2.4, 5);
   B.box(0, -Hd / 2 - 16, 0, Wd * 0.8, 2, L * 0.7, CK.DECK);
   railing(B, -Wd * 0.4, Wd * 0.4, -L * 0.35, L * 0.35, -Hd / 2 - 15);
+  for (const s of [-1, 1]) c.walks.push({ a: V(s * Wd * 0.39, -Hd / 2 - 15, -L * 0.33), b: V(s * Wd * 0.39, -Hd / 2 - 15, L * 0.33), up: Y });
   truss(B, V(0, -Hd / 2 - 2, 0), V(0, -Hd / 2 - 15, 0), 4, 6, 0.3);
   for (let i = 0; i < 18; i++) {
     const x = r.range(-Wd * 0.35, Wd * 0.35), z = r.range(-L * 0.32, L * 0.32);
     if (r() < 0.6) container(B, x, -Hd / 2 - 17.6, z, 2.6, 2.6, 12, r.pick([CK.HULL, CK.BRONZE, DK.LIVERY, DK.GRIME]));
-    else B.box(x, -Hd / 2 - 16.6, z, 10, 0.6, 7, r.pick([CK.HULL, CK.RADIATOR]));
+    else B.box(THREE.MathUtils.clamp(x, -Wd * 0.35 + 5, Wd * 0.35 - 5), -Hd / 2 - 16.6, z, 10, 0.6, 7, r.pick([CK.HULL, CK.RADIATOR]));
   }
   for (const s of [-1, 1]) radiatorWing(B, V(s * Wd / 2, -Hd / 2, L / 2), V(s, 0, 0), Y, r.range(80, 120), 30, c.lamps, LAMP.AMBER);
   for (const [sx, sz] of [[1, 1], [-1, 1], [1, -1], [-1, -1]]) c.beacon(V(sx * Wd / 2, Hd / 2 + 4, sz * L / 2), LAMP.RED, 3.2, 5, (sx + sz + 2) * 0.13);
@@ -618,5 +627,5 @@ export function buildBeltStation(kind, seed, livery = 0) {
     radius = Math.max(radius, p.pivot.length() + p.geo.boundingSphere.center.length() + p.geo.boundingSphere.radius + (p.travel || 0));
     tris += p.geo.index.count / 3;
   }
-  return { kind, seed, geo, parts: c.parts, lamps: c.lamps, docks: c.docks, radius, tris, spinR: c.spinR || 0, buildMs: performance.now() - t0 };
+  return { kind, seed, geo, parts: c.parts, lamps: c.lamps, docks: c.docks, walks: c.walks, welds: c.welds, radius, tris, spinR: c.spinR || 0, buildMs: performance.now() - t0 };
 }

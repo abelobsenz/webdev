@@ -132,6 +132,46 @@ for (const st of belt.stations) {
     check(g.attributes.aFacade && g.attributes.aFacade.count === g.attributes.position.count, `${st.desc.name}: facade attribute size`);
   }
 }
+// the stations' life: pilots' corridors beside the berths, crews on their decks, patrols outside
+{
+  let pilotBlocked = [], walkBad = [], walkClearBad = [], patrolBad = 0, walks = 0, pilots = 0, suits = 0, drones = 0;
+  for (const st of belt.stations) {
+    const d = st.built.data, life = st.built.life;
+    const test = [new THREE.Mesh(d.geo, mat)];
+    test[0].updateMatrixWorld(true);
+    for (const p of d.parts) { const m = new THREE.Mesh(p.geo, mat); m.position.copy(p.pivot); m.quaternion.copy(p.q); m.updateMatrixWorld(true); test.push(m); }
+    for (const pd of life.pilots) {
+      pilots++;
+      const a = pd.dock.p.clone().add(pd.dock.side).addScaledVector(pd.dock.d, 8), b = pd.dock.p.clone().add(pd.dock.side).addScaledVector(pd.dock.d, pd.dock.reach);
+      _ray.set(a, b.clone().sub(a).normalize()); _ray.far = a.distanceTo(b);
+      if (_ray.intersectObjects(test, false).length) pilotBlocked.push(`${st.desc.name}(${st.desc.kind})`);
+    }
+    for (const pa of life.patrols) if (pa.rad - pa.bob < d.radius + 5) patrolBad++;
+    for (const w of d.walks || []) {
+      walks++;
+      for (const u of [0, 0.25, 0.5, 0.75, 1]) {
+        const p = w.a.clone().lerp(w.b, u);
+        _ray.set(p.clone().addScaledVector(w.up, 0.5), w.up.clone().negate()); _ray.far = 1.5;
+        const h = _ray.intersectObjects(test, false)[0];
+        if (!h || Math.abs(h.distance - 0.5) > 0.25) walkBad.push(`${st.desc.name} u=${u} ${h ? (h.distance - 0.5).toFixed(2) : 'none'}`);
+      }
+      for (const hgt of [0.4, 1.0, 1.7]) {
+        const a = w.a.clone().addScaledVector(w.up, hgt), b = w.b.clone().addScaledVector(w.up, hgt);
+        _ray.set(a, b.clone().sub(a).normalize()); _ray.far = a.distanceTo(b);
+        const hit = _ray.intersectObjects(test, false)[0];
+        if (hit) walkClearBad.push(`${st.desc.name}(${st.desc.kind}) h=${hgt} at ${hit.distance.toFixed(1)}/${_ray.far.toFixed(0)}`);
+      }
+    }
+    const c = life.counts();
+    suits += c.suits; drones += c.drones;
+    check(c.suits === life.walkers.length && c.drones === life.pilots.length + life.patrols.length, 'life instance counts');
+  }
+  out.life = { pilots, walks, suits, drones };
+  check(pilotBlocked.length === 0, `pilot corridors blocked: ${pilotBlocked.slice(0, 5).join(', ')}`);
+  check(patrolBad === 0, 'patrol circuit inside a station');
+  check(walkBad.length === 0, `crews not on their decks: ${walkBad.slice(0, 4).join('; ')}`);
+  check(walkClearBad.length === 0, `crew walks obstructed: ${walkClearBad.slice(0, 4).join('; ')}`);
+}
 out.docks = docks;
 out.minDockApproachMarginM = +minRayMargin.toFixed(1);
 check(blocked.length === 0, `blocked berths: ${blocked.slice(0, 6).join('; ')}`);

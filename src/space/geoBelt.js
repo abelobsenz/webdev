@@ -5,6 +5,7 @@ import { DynLamps, rng, smooth, TAU } from './lifeKit.js';
 import { R_EARTH, GEO_ALT, MERIDIAN_LON, bodyDir } from './sim.js';
 import { stationFrame } from './stations.js';
 import { buildBeltStation } from './beltStations.js';
+import { BeltLife } from './beltLife.js';
 import { StationTraffic, makeRoute } from './fleetTraffic.js';
 import { design } from './shipDesigns.js';
 
@@ -221,7 +222,9 @@ export class GeoBelt {
     addLamps(mesh, data.lamps, { minPx: 1.2 });
     st.group.add(mesh);
     st.body.radius = data.radius * KM + 0.05;
-    st.built = { data, mesh, parts };
+    // its working life: approach chains, pilot and patrol drones, crews, welders (beltLife.js)
+    const life = new BeltLife(mesh, data, d.id + 1);
+    st.built = { data, mesh, parts, life };
     // the berthing traffic, created once (its hulls are instanced; kept when the hull is let go)
     if (!st.traffic && data.docks.length) {
       const D = this._designs();
@@ -249,7 +252,7 @@ export class GeoBelt {
     const b = st.built;
     if (!b) return;
     st.group.remove(b.mesh);
-    b.mesh.traverse((o) => { if (o.geometry) o.geometry.dispose(); });
+    b.mesh.traverse((o) => { if (o.geometry && !o.geometry.userData.shared) o.geometry.dispose(); });
     b.mesh.material.dispose();
     st.built = null;
     st.body.visible = false;
@@ -282,6 +285,7 @@ export class GeoBelt {
       // beacon: gives way to the station's own lamps as it resolves
       this.lights.gain(st.desc.id, 1 - smooth(4, 14, st.px));
       if (bb && st.px > 1.5) this._animate(st, bb, t);
+      if (bb && st.px > 4) bb.life.update(t);
       if (st.traffic) {
         const near = dist < TRAFFIC_RANGE;
         st.traffic.body.visible = near;
