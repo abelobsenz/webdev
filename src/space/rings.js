@@ -9,6 +9,7 @@ import { HALO_PORTS } from './earthData.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { createHullMaterial, KIND } from './hull.js';
 import { createLamps, LAMP } from './lamps.js';
+import { HaloDistricts } from './haloDistricts.js';
 
 // The four orbital rings at planetary scale, with the same radii, widths and
 // orientations as RINGS in src/sky/celestial.js (defined there in Meridian's
@@ -680,6 +681,9 @@ export class Rings {
     this.tethers.frustumCulled = false;
     this.tethers.renderOrder = 12;
     this.group.add(this.tethers);
+    // the Halo's districts, docks, gantries and traffic within reach (src/space/haloDistricts.js):
+    // their own anchor and depth slice under the Earth-fixed frame, built on first approach
+    if (space && space.earthFixed && space.addBody) this.districts = new HaloDistricts(space, this);
   }
 
   setSize(w, h) {
@@ -711,6 +715,7 @@ export class Rings {
         if (n !== this.arches.count || n) { this.arches.count = n; this.arches.instanceMatrix.needsUpdate = true; }
       }
     }
+    if (this.districts) this.districts.update(sim, realTime, dt, space);
     for (const f of this.far) {
       const fu = f.material.uniforms;
       fu.uSunDir.value.copy(sim.sunDir); fu.uTime.value = realTime;
