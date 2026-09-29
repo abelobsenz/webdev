@@ -480,9 +480,10 @@ function underDeck(B, M, lamps, S) {
     for (let j = 0; j <= 4; j++) rings.push({ z: -TILE_L / 2 + (TILE_L * j) / 4, pts });
     B.loft(rings, (i) => (i === 4 || i === 5 || i === 6 ? CK.LANTERN : i === 3 || i === 7 ? CK.GLASS : CK.HULL), { capStart: false, capEnd: false });
     for (let z = -TILE_L / 2 + 125; z < TILE_L / 2; z += 250) {
-      M.push(new THREE.Matrix4().makeTranslation(x, y0 - 8, z).multiply(new THREE.Matrix4().makeRotationZ(Math.PI)));
-      M.torus(UNDER.half + 2, 1.6, 12, 4, CK.BRONZE, Math.PI);
-      M.pop();
+      // a hoop hugging the trunk's elliptical keel (1.6 m tube, touching the skin)
+      const hoop = [];
+      for (let i = 0; i <= 12; i++) { const a = Math.PI + (i / 12) * Math.PI; hoop.push(V3(x + Math.cos(a) * (UNDER.half + 1.6), y0 - 8 + Math.sin(a) * (UNDER.depth + 1.6), z)); }
+      M.tube(hoop, 1.6, 4, CK.BRONZE);
     }
     for (let z = -TILE_L / 2 + 250; z < TILE_L / 2; z += 500) lamps.push({ p: V3(x, y0 - 8 - UNDER.depth - 4, z), r: 5, color: z % 1000 ? LAMP.WHITE : LAMP.AMBER, i: 2.0, breathe: 0.25, phase: (x / 23000 + 0.5) % 1 });
     if (FAR) FAR.box(x, y0 - 8 - UNDER.depth / 2, 0, UNDER.half * 2, UNDER.depth, TILE_L, CK.LANTERN);
