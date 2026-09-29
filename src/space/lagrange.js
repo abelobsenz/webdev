@@ -119,7 +119,7 @@ export class LagrangeColonies {
     this.sunDir = space.sim.sunDir;
     // shared geometry (built once, drawn by all four cylinders)
     this.parts = {
-      rotor: buildRotor(7), windows: buildWindows(), mirror: buildMirror(), stator: buildStator(3),
+      rotor: buildRotor(7), rotor5: buildRotor(19), windows: buildWindows(), mirror: buildMirror(), stator: buildStator(3),
       agri: buildAgriRing(), frame: buildPairFrame(), gate: buildGateway(), wheels: GATE.WHEELS.map((w) => buildGatewayWheel(w)),
     };
     this.mirMat = createMirrorMaterial();
@@ -193,9 +193,9 @@ export class LagrangeColonies {
       lampSets.push(addLamps(stator, pt.stator.lamps, { minPx: 1.2 }));
       const rotor = new THREE.Group();
       cyl.add(rotor);
-      const hull = craftMesh(pt.rotor.geo, { scale: 1 }, mat);
+      const hull = craftMesh((name === "L5" ? pt.rotor5 : pt.rotor).geo, { scale: 1 }, mat);
       rotor.add(hull);
-      lampSets.push(addLamps(hull, pt.rotor.lamps, { minPx: 1.2 }));
+      lampSets.push(addLamps(hull, (name === "L5" ? pt.rotor5 : pt.rotor).lamps, { minPx: 1.2 }));
       const win = new THREE.Mesh(pt.windows, winMat);
       win.frustumCulled = false; win.renderOrder = 3;
       bindWindow(win, this.sunDir);
@@ -461,7 +461,7 @@ export class LagrangeColonies {
     const cyl = tri(pt.rotor.geo) + tri(pt.windows) + 3 * (tri(pt.mirror.sheet) + tri(pt.mirror.back)) + tri(pt.stator.geo) + 3 * tri(pt.agri.geo);
     const pair = 2 * cyl + tri(pt.frame.geo);
     const gate = tri(pt.gate.geo) + pt.wheels.reduce((s, w) => s + tri(w.geo), 0);
-    const unique = tri(pt.rotor.geo) + tri(pt.windows) + tri(pt.mirror.sheet) + tri(pt.mirror.back) + tri(pt.stator.geo) + tri(pt.agri.geo) + tri(pt.frame.geo) + gate;
+    const unique = tri(pt.rotor.geo) + tri(pt.rotor5.geo) + tri(pt.windows) + tri(pt.mirror.sheet) + tri(pt.mirror.back) + tri(pt.stator.geo) + tri(pt.agri.geo) + tri(pt.frame.geo) + gate;
     let traffic = 0;
     for (const st of this.traffic) for (const s of st.sets) traffic += (s.design.geo.index.count / 3) * s.n;
     const life = this.life.triangles();

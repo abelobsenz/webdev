@@ -115,23 +115,28 @@ export class LagrangeLife {
     const nT = this.trams.length;
     // ---- fittings: scattered on the land strips' tiles, clear of hoops (every 1000 m from -15500)
     this.fitGeos = [0, 1, 2, 3].map(fittingGeo);
-    const fits = [[], [], [], []];
-    for (let s = 0; s < 3; s++) {
-      const c = (s * TAU) / 3;
-      for (let i = 0; i < 900; i++) {
-        const type = i % 7 === 0 ? 2 : i % 5 === 0 ? 3 : i % 3 === 0 ? 1 : 0;
-        const a = c + (r() - 0.5) * (Math.PI / 3 - 0.08);
-        let z = -HL + 700 + r() * (2 * HL - 1400);
-        const dz = ((z + HL - 500) % 1000 + 1000) % 1000;
-        if (dz < 60 || dz > 940) z += 120;
-        const lift = 15 + r() * 3;                       // on the tiles (up to 16 m)
-        _p.set(Math.cos(a) * (R + lift), Math.sin(a) * (R + lift), z);
-        _e.set(0, 0, a - Math.PI / 2); _q.setFromEuler(_e);
-        _q.multiply(new THREE.Quaternion().setFromAxisAngle(V(0, 1, 0), Math.floor(r() * 4) * Math.PI / 2));
-        fits[type].push(new THREE.Matrix4().compose(_p, _q, _s));
+    // Each fitting stands on the flat top of a shielding tile (the hull variant's own tiles),
+    // at a spot at least its own size from the tile's edge and clear of the outer works.
+    const tileFrame = new THREE.Matrix4(), local = new THREE.Matrix4(), yaw = new THREE.Quaternion();
+    this.fitMats = [lag.parts.rotor, lag.parts.rotor5].map((hullPart) => {
+      const fits = [[], [], [], []];
+      const { tiles, works } = hullPart;
+      const clearOfWorks = (a, z, pad) => works.every((w) => Math.hypot((a - w.a) * R, z - w.z) > w.rad + pad);
+      let placed = 0;
+      for (let tries = 0; placed < 2400 && tries < 12000; tries++) {
+        const tile = tiles[Math.floor(r() * tiles.length)];
+        const type = placed % 7 === 0 ? 2 : placed % 5 === 0 ? 3 : placed % 3 === 0 ? 1 : 0;
+        const x = (r() - 0.5) * (tile.w - 60), zl = (r() - 0.5) * (tile.l - 60);
+        if (!clearOfWorks(tile.a + x / R, tile.z + zl, 30)) continue;
+        const c = Math.cos(tile.a), s = Math.sin(tile.a);
+        tileFrame.set(-s, c, 0, c * R, c, s, 0, s * R, 0, 0, 1, tile.z, 0, 0, 0, 1);
+        yaw.setFromAxisAngle(V(0, 1, 0), Math.floor(r() * 4) * Math.PI / 2);
+        local.compose(_p.set(x, tile.top, zl), yaw, _s);
+        fits[type].push(new THREE.Matrix4().multiplyMatrices(tileFrame, local));
+        placed++;
       }
-    }
-    this.fitMats = fits;
+      return fits;
+    });
     // ---- crawlers on the hoop crests
     this.crawlGeo = crawlerGeo();
     this.crawlers = [];
@@ -153,12 +158,13 @@ export class LagrangeLife {
     this.crane = craneGeo();
     this.cranes = berths.map((b, i) => ({ b, phase: i * 1.37, rate: 0.05 + (i % 3) * 0.02 }));
     // ---- attach to every cylinder (shared matrix buffers)
-    this.shared = { trams: null, fits: [], crawl: null, jib: null, mast: null, docked: [] };
+    this.shared = { trams: null, fits: {}, crawl: null, jib: null, mast: null, docked: [] };
     this.tramLamps = new DynLamps(Array.from({ length: nT * 2 }, (_, i) => ({ p: new THREE.Vector3(), r: 5, color: i % 2 ? LAMP.RED : LAMP.WHITE, i: i % 2 ? 2.4 : 3.2 })), { minPx: 1.0 });
     this.crawlLamps = new DynLamps(Array.from({ length: CRAWLERS }, () => ({ p: new THREE.Vector3(), r: 3, color: LAMP.AMBER, i: 3, breathe: 0.9 })), { minPx: 1.0 });
     this.groups = [];
-    for (const P of lag.pairs) {
+    for (const [pi, P] of lag.pairs.entries()) {
       const g = { pair: P, parts: [] };
+      const fits = this.fitMats[pi];
       for (const C of P.cyls) {
         const hull = C.rotor.children[0];
         const stator = C.cyl.children[0];
@@ -166,7 +172,7 @@ export class LagrangeLife {
         C.rotor.add(tram);
         g.parts.push(tram);
         fits.forEach((list, k) => {
-          const im = this._shareList(instancedPart(hull, this.fitGeos[k], list.length), k, list);
+          const im = this._shareList(instancedPart(hull, this.fitGeos[k], list.length), `${pi}:${k}`, list);
           C.rotor.add(im); g.parts.push(im);
         });
         const cr = this._share(instancedPart(hull, this.crawlGeo, CRAWLERS), 'crawl');
@@ -304,9 +310,10 @@ export class LagrangeLife {
     if (!this.built) return 0;
     const tri = (g) => g.index.count / 3;
     let n = tri(this.tramGeo) * this.trams.length + tri(this.crawlGeo) * CRAWLERS + (tri(this.crane.mast) + tri(this.crane.jib)) * this.cranes.length;
-    this.fitMats.forEach((l, k) => { n += tri(this.fitGeos[k]) * l.length; });
     for (const [d, l] of this.docked) n += tri(d.geo) * l.length;
-    return n * 4;
+    n *= 4;                                              // every cylinder
+    for (const fits of this.fitMats) fits.forEach((l, k) => { n += 2 * tri(this.fitGeos[k]) * l.length; });   // each hull variant: one pair
+    return n;
   }
 }
 

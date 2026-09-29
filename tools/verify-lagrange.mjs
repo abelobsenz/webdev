@@ -39,9 +39,10 @@ ok(Math.abs(deg(lagrangePoint(later, 'L4').angleTo(later.moonPos)) - 60) < 0.01,
 
 // ---- geometry invariants (metres)
 const P = (g) => g.getAttribute('position').array;
-const rotor = buildRotor(7), stator = buildStator(3), agri = buildAgriRing(), frame = buildPairFrame(), mir = buildMirror();
+const rotors = [buildRotor(7), buildRotor(19)], stator = buildStator(3), agri = buildAgriRing(), frame = buildPairFrame(), mir = buildMirror();
+const rotorPos = Float32Array.from([...P(rotors[0].geo), ...P(rotors[1].geo)]);   // both colonies' hull variants
 let rMax = 0, zMaxRotor = 0;
-{ const a = P(rotor.geo); for (let i = 0; i < a.length; i += 3) { const z = Math.abs(a[i + 2]), r = Math.hypot(a[i], a[i + 1]); if (z <= COL.HL + 1) rMax = Math.max(rMax, r); zMaxRotor = Math.max(zMaxRotor, z); } }
+{ const a = rotorPos; for (let i = 0; i < a.length; i += 3) { const z = Math.abs(a[i + 2]), r = Math.hypot(a[i], a[i + 1]); if (z <= COL.HL + 1) rMax = Math.max(rMax, r); zMaxRotor = Math.max(zMaxRotor, z); } }
 ok(rMax <= COL.ROTOR_MAX_R, `rotor's outer works within ${COL.ROTOR_MAX_R} m of the axis (max ${rMax.toFixed(0)})`);
 {
   // stator stays outside the rotor's swept volume: beyond its ends, or outside its radius
@@ -52,7 +53,7 @@ ok(rMax <= COL.ROTOR_MAX_R, `rotor's outer works within ${COL.ROTOR_MAX_R} m of 
 {
   // mirrors: at every opening the sheet and its structure stay outside the rotor (in the hinge frame, the rotor lies at y < 0)
   const piv = new THREE.Matrix4(), hinge = new THREE.Matrix4(), inv = new THREE.Matrix4(), v = new THREE.Vector3();
-  const a = P(rotor.geo);
+  const a = rotorPos;
   let worst = Infinity;
   for (const alpha of [COL.MIRROR_MIN, (COL.MIRROR_MIN + COL.MIRROR_MAX) / 2, COL.MIRROR_MAX]) for (const w of WINDOW_CENTRES) {
     const c = Math.cos(w), s = Math.sin(w), r = COL.R + COL.MIRROR_OFF;
@@ -171,6 +172,25 @@ ok(lag.life.buildMs < 400, `near detail built in ${lag.life.buildMs.toFixed(0)} 
     if (Math.abs(Math.hypot(x, y) - (COL.R + 43)) > 1 || !(m < Math.PI / 6 - 0.02 || m > 2 * Math.PI / 3 - Math.PI / 6 + 0.02) || ((z + COL.HL - 500) % 1000 + 1000) % 1000 > 1) bc++;
   }
   ok(bc === 0, 'crawlers walk the hoop crests of the land strips');
+  // hull fittings: every one seated on the top of a shielding tile of its own hull variant
+  let unseated = 0, nf = 0;
+  const tf = new THREE.Matrix4(), pos = new THREE.Vector3(), lp = new THREE.Vector3();
+  [lag.parts.rotor, lag.parts.rotor5].forEach((hp, v) => {
+    for (const list of lag.life.fitMats[v]) for (const m of list) {
+      nf++;
+      pos.setFromMatrixPosition(m);
+      let seated = false;
+      for (const t of hp.tiles) {
+        if (Math.abs(t.z - pos.z) > 200) continue;
+        const c = Math.cos(t.a), s = Math.sin(t.a);
+        tf.set(-s, c, 0, c * COL.R, c, s, 0, s * COL.R, 0, 0, 1, t.z, 0, 0, 0, 1).invert();
+        lp.copy(pos).applyMatrix4(tf);
+        if (Math.abs(lp.y - t.top) < 0.01 && Math.abs(lp.x) <= t.w / 2 && Math.abs(lp.z) <= t.l / 2) { seated = true; break; }
+      }
+      if (!seated) unseated++;
+    }
+  });
+  ok(nf > 4000 && unseated === 0, `${nf} hull fittings, every one seated on a tile top (${unseated} not)`);
   // jibs: orthonormal, and the crane clear of the lane ships' hold points (0.22 km off each collar)
   const JA = lag.life.shared.jib.array; let bj = 0;
   const m4 = new THREE.Matrix4();

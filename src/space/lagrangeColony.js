@@ -137,6 +137,7 @@ export function buildRotor(seed = 7) {
   const B = new CB();
   const r = rng(seed);
   const lamps = [];
+  const tiles = [], works = [];      // (the tiles' tops and the works' footprints: where the near detail may stand)
   const dA = 70 / R;                         // longeron half-width, as an angle
   // land strips: the shielding hull, in long panels that alternate plate and darker slag
   for (const c of LAND_CENTRES) {
@@ -165,6 +166,7 @@ export function buildRotor(seed = 7) {
         else { k = (q % 3 === 1) ? CK.DECK : CK.CONSERVATORY; ht = 12; }
         radial(B, a, R, z);
         B.box(0, (ht - 4) / 2, 0, tileW, ht + 4, 290, k);
+        tiles.push({ a, z, top: ht, w: tileW, l: 290 });
         B.pop();
       }
     }
@@ -176,6 +178,7 @@ export function buildRotor(seed = 7) {
         const a = c + (r() - 0.5) * (Math.PI / 3 - 0.09);
         const z = zc + (r() - 0.5) * 600;
         const type = r();
+        works.push({ a, z, rad: type < 0.8 ? 300 : 40 });
         radial(B, a, R, z);
         if (type < 0.34) {
           // habitat block: lit decks under a plated roof, a lantern stair tower at one end
@@ -262,7 +265,7 @@ export function buildRotor(seed = 7) {
       lamps.push({ p: V(Math.cos(a) * (R + 70), Math.sin(a) * (R + 70), s * (HL + 10)), r: 18, color: i % 6 === 0 ? LAMP.RED : LAMP.WHITE, i: 3.0, breathe: 0.4, phase: i / 24 });
     }
   }
-  return { geo: B.geometry(), lamps };
+  return { geo: B.geometry(), lamps, tiles, works };
 }
 
 // ---------------------------------------------------------------- windows ----
