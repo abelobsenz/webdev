@@ -17,6 +17,7 @@ import { KM } from '../src/space/craftMesh.js';
 
 const V = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z);
 const out = {};
+const _cp = V();
 
 // ---- 1. designs: every class and seed builds finite, closed-enough geometry within its budget
 {
@@ -44,6 +45,33 @@ const out = {};
     for (const g of d.glows) assert.ok(g.p.z < c.z, `${name}#${seed} drive aft of centre`);
   }
   out.designBuildMs = +(performance.now() - t0).toFixed(1);
+}
+
+// ---- 1b. the clipper's counter-rotating habitat rings: spin gravity and a free swept path
+{
+  for (const seed of [2, 5]) {
+    const d = DESIGNS.clipper(seed), sp = d.spin;
+    const g = sp.omega * sp.omega * (sp.ringR + 8) / 9.81;
+    assert.ok(g > 0.35 && g < 0.45, `clipper ring floor at ${g.toFixed(2)} g`);
+    assert.ok(sp.rings.length === 2 && sp.rings[0].omega === -sp.rings[1].omega, 'rings counter-rotate');
+    assert.equal(sp.lamps.length, sp.perRing * 2, 'ring lamps split evenly');
+    const T = tree(tris(new THREE.Mesh(d.geo)));
+    let m = Infinity;
+    const M = new THREE.Matrix4(), w = V();
+    for (const ring of sp.rings) {
+      const p = ring.geo.attributes.position;
+      for (let a = 0; a < Math.PI * 2; a += Math.PI / 9) {
+        M.makeRotationZ(a);
+        for (let i = 0; i < p.count; i += 2) {
+          w.fromBufferAttribute(p, i);
+          if (Math.hypot(w.x, w.y) < 20) continue;             // the spokes' roots sit in the bearing races
+          m = Math.min(m, dist(T, w.applyMatrix4(M), 20));
+        }
+      }
+    }
+    out[`clipper${seed}RingClearanceM`] = +m.toFixed(2);
+    assert.ok(m > 1, `clipper rings sweep clear of the static hull (${m} m)`);
+  }
 }
 
 // ---- 2. the real scene (as the space mode assembles it)
@@ -163,7 +191,6 @@ function tree(t) {
   const h = t.length >> 1;
   return { box, l: tree(t.slice(0, h)), r: tree(t.slice(h)) };
 }
-const _cp = V();
 function dist(T, p, best = Infinity) {
   if (T.box.distanceToPoint(p) > best) return best;
   if (T.t) { for (const x of T.t) { x.closestPointToPoint(p, _cp); best = Math.min(best, _cp.distanceTo(p)); } return best; }

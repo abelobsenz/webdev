@@ -201,7 +201,7 @@ export const FORMATION = {
 const _p = new THREE.Vector3(), _pa = new THREE.Vector3(), _pb = new THREE.Vector3(), _vel = new THREE.Vector3();
 const _x = new THREE.Vector3(), _y = new THREE.Vector3(), _z = new THREE.Vector3(), _f = new THREE.Vector3(), _t = new THREE.Vector3();
 const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _s = new THREE.Vector3(), _w = new THREE.Vector3();
-const _n3 = new THREE.Matrix3();
+const _spin = new THREE.Matrix4();
 
 /**
  * Local pose of a ship at real time t: position (km), forward (unit), throttle, visibility and
@@ -284,7 +284,14 @@ export class StationTraffic {
         mat.uniformsNeedUpdate = true;
       };
       this.group.add(im);
-      return { design: d, im, n: 0 };
+      // spinning parts (a clipper's habitat rings): their own instanced meshes, same material
+      const spins = (d.spin?.rings || []).map((ring) => {
+        const sm = new THREE.InstancedMesh(ring.geo, mat, im.count);
+        sm.count = 0; sm.frustumCulled = false; sm.renderOrder = 3; sm.onBeforeRender = im.onBeforeRender;
+        this.group.add(sm);
+        return { im: sm, omega: ring.omega };
+      });
+      return { design: d, im, n: 0, spins };
     });
     // ships and their lamp slots
     let nl = 0;
@@ -299,13 +306,15 @@ export class StationTraffic {
       nl += ship.nLamps;
       ship.glow0 = nl; nl += r.design.glows.length;
       ship.puff0 = nl; nl += PUFF_SLOTS;
+      ship.spin0 = nl; ship.nSpin = r.design.spin?.lamps.length || 0; nl += ship.nSpin;
       this.ships.push(ship);
     }
-    for (const s of this.sets) s.im.count = s.n;
+    for (const s of this.sets) { s.im.count = s.n; for (const sp of s.spins) sp.im.count = s.n; }
     // the lamp buffer: static colours for the ship lamps, dynamic for glows and puffs
     const placeholder = Array.from({ length: nl }, () => ({ p: new THREE.Vector3(), r: 0, color: [0, 0, 0], i: 0 }));
     for (const sh of this.ships) {
       sh.design.lamps.forEach((l, k) => { placeholder[sh.lamp0 + k] = { ...l, p: l.p.clone(), dir: l.dir ? l.dir.clone() : undefined }; });
+      if (sh.nSpin) sh.design.spin.lamps.forEach((l, k) => { placeholder[sh.spin0 + k] = { ...l, p: l.p.clone(), dir: l.dir ? l.dir.clone() : undefined }; });
     }
     this.lamps = createLamps(placeholder, { minPx: 1.25 });
     this.lamps.renderOrder = 17;
@@ -357,7 +366,7 @@ export class StationTraffic {
     this.group.visible = camD < LAMP_RANGE;
     if (!this.group.visible) return;
     const hulls = camD < HULL_RANGE + 1800;
-    for (const s of this.sets) s.im.visible = hulls;
+    for (const s of this.sets) { s.im.visible = hulls; for (const sp of s.spins) sp.im.visible = hulls; }
     const L = this.aL.array, C = this.aC.array, D = this.aD.array;
     const bL = this.baseLamps, bD = this.baseDirs, bC = this.baseCols;
     const eng = this.engineColor;
@@ -373,6 +382,28 @@ export class StationTraffic {
       sh.mat.makeBasis(_x, _y, _z).scale(_s.set(k, k, k)).setPosition(sh.pos);
       sh.world.copy(sh.pos).applyMatrix4(this.group.matrixWorld);
       if (hulls) sh.set.im.setMatrixAt(sh.index, sh.mat);
+      // spinning rings: the ship's matrix turned about its own +Z (each ring its own sense)
+      const spins = sh.set.spins;
+      for (let j = 0; j < spins.length; j++) {
+        _spin.makeRotationZ(spins[j].omega * t + sh.seed).premultiply(sh.mat);
+        if (hulls) spins[j].im.setMatrixAt(sh.index, _spin);
+      }
+      if (sh.nSpin) {
+        const per = sh.design.spin.perRing, se = _spin.elements;
+        for (let j = 0; j < spins.length; j++) {
+          _spin.makeRotationZ(spins[j].omega * t + sh.seed).premultiply(sh.mat);
+          for (let i = sh.spin0 + j * per; i < sh.spin0 + (j + 1) * per; i++) {
+            const o = i * 4, x = bL[o], y = bL[o + 1], z = bL[o + 2];
+            L[o] = se[0] * x + se[4] * y + se[8] * z + se[12];
+            L[o + 1] = se[1] * x + se[5] * y + se[9] * z + se[13];
+            L[o + 2] = se[2] * x + se[6] * y + se[10] * z + se[14];
+            L[o + 3] = bL[o + 3] * k;
+            const ik = k > 0 ? 1 / k : 0, dx = bD[o], dy = bD[o + 1], dz = bD[o + 2];
+            D[o] = (se[0] * dx + se[4] * dy + se[8] * dz) * ik; D[o + 1] = (se[1] * dx + se[5] * dy + se[9] * dz) * ik; D[o + 2] = (se[2] * dx + se[6] * dy + se[10] * dz) * ik;
+            C[o] = bC[o] * sh.vis; C[o + 1] = bC[o + 1] * sh.vis; C[o + 2] = bC[o + 2] * sh.vis;
+          }
+        }
+      }
       // lamps: transform the ship-frame records by the ship's matrix
       const e = sh.mat.elements;
       const vis = sh.vis;
@@ -430,7 +461,7 @@ export class StationTraffic {
       }
     }
     this.aL.needsUpdate = true; this.aC.needsUpdate = true; this.aD.needsUpdate = true;
-    if (hulls) for (const s of this.sets) s.im.instanceMatrix.needsUpdate = true;
+    if (hulls) for (const s of this.sets) { s.im.instanceMatrix.needsUpdate = true; for (const sp of s.spins) sp.im.instanceMatrix.needsUpdate = true; }
   }
 }
 
@@ -438,8 +469,8 @@ export class StationTraffic {
 /** Sister-ship families: a few seeded designs per class (shared by both stations). */
 export function buildFamilies() {
   const fam = {};
-  const seeds = { hauler: [3, 8, 21], tanker: [5, 12], tug: [2, 7, 11], packet: [4, 9], barge: [6, 14], lighter: [1, 10] };
-  const accents = { hauler: [1.0, 0.72, 0.45], tanker: [1.0, 0.62, 0.35], tug: [1.0, 0.8, 0.35], packet: [0.55, 0.88, 1.0], barge: [1.0, 0.66, 0.4], lighter: [0.5, 1.0, 0.8] };
+  const seeds = { hauler: [3, 8, 21], tanker: [5, 12], tug: [2, 7, 11], packet: [4, 9], barge: [6, 14], lighter: [1, 10], clipper: [2, 5] };
+  const accents = { hauler: [1.0, 0.72, 0.45], tanker: [1.0, 0.62, 0.35], tug: [1.0, 0.8, 0.35], packet: [0.55, 0.88, 1.0], barge: [1.0, 0.66, 0.4], lighter: [0.5, 1.0, 0.8], clipper: [0.6, 0.9, 1.0] };
   for (const [k, list] of Object.entries(seeds)) fam[k] = list.map((sd) => ({ ...DESIGNS[k](sd), accent: accents[k], seed: sd }));
   return fam;
 }
@@ -454,12 +485,12 @@ export class FleetTraffic {
     const H = [];
     const roads = [harbourRoad(1), harbourRoad(-1)];
     this.harbourRoads = roads;
-    const mix = ['hauler', 'tanker', 'packet', 'hauler', 'packet', 'tanker', 'hauler', 'packet'];
+    const mix = ['hauler', 'tanker', 'packet', 'clipper', 'hauler', 'packet', 'tanker', 'hauler', 'packet', 'clipper'];
     roads.forEach((R, ri) => {
-      const n = 8;
+      const n = 10;
       for (let i = 0; i < n; i++) {
         const cls = mix[(i + ri * 3) % mix.length];
-        const lead = { route: R, phase: (i / n) * R.T + ri * 91, design: pick(cls, i + ri), scale: cls === 'packet' ? 1 : 1.6, slot: [0, 0, 0], seed: 1 + i + ri * 17, fidget: 0.6 };
+        const lead = { route: R, phase: (i / n) * R.T + ri * 91, design: pick(cls, i + ri), scale: cls === 'packet' || cls === 'clipper' ? 1 : 1.6, slot: [0, 0, 0], seed: 1 + i + ri * 17, fidget: 0.6 };
         H.push(lead);
         // every third hauler runs in convoy, a tug on each flank
         if (cls === 'hauler' && i % 3 === 0) {

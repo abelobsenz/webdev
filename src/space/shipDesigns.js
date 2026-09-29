@@ -340,4 +340,96 @@ export function buildLighter(seed = 1) {
 }
 
 /** The catalogue by class name. */
-export const DESIGNS = { hauler: buildHauler, tanker: buildTanker, tug: buildWorkTug, packet: buildPacket, barge: buildBarge, lighter: buildLighter };
+// ---------------------------------------------------------------- clipper ----
+/**
+ * Long-haul clipper for the outer system: a spine with a drive and shadow shield astern, a
+ * propellant tank string, and forward two counter-rotating habitat rings on a common bearing
+ * (a spin-gravity deck for passengers on a months-long run; counter-rotation cancels the
+ * spin's torque on the ship). The rings are a separate geometry (`spin`) turned about +Z by the
+ * traffic system; omega gives ~0.4 g on the ring floor. Bow: a glazed command drum and collar.
+ */
+export function buildClipper(seed = 1) {
+  const r = rng(seed * 86028121 + 17);
+  const B = new CB();
+  const glows = [], lamps = [], rcs = [];
+  const ringR = r.range(95, 120), ringZ = [r.range(150, 170), r.range(205, 225)];
+  const zBow = 290;
+  // drive: bell cluster, thrust frame and a broad shadow shield
+  B.lathe([[0.1, -150, CK.DARK], [16, -150, CK.DARK], [18, -142, CK.BRONZE], [18, -120, CK.HULL], [24, -116, CK.BRONZE], [24, -110, CK.HULL], [9, -96, CK.DARK], [0.1, -96, CK.DARK]], 24);
+  for (let k = 0; k < 4; k++) { const a = (k / 4) * TAU + Math.PI / 4; bell(B, Math.cos(a) * 9, Math.sin(a) * 9, -150, 6, 13, glows); }
+  B.at(0, 0, -100);
+  B.lathe([[0.1, 0, CK.DARK], [38, 0, CK.DARK], [40, 2, CK.BRONZE], [38, 4, CK.HULL], [0.1, 4, CK.HULL]], 32);
+  B.pop();
+  // spine: a heavy truss the length of the ship, a lit conduit along it
+  truss(B, V(0, 0, -96), V(0, 0, zBow - 30), 8, 12, 0.5);
+  B.tube([V(0, 4.6, -90), V(0, 4.6, zBow - 34)], 0.8, 6, CK.CONDUIT);
+  // tank string: four rings of tanks
+  for (let i = 0; i < 4; i++) {
+    const zc = -60 + i * 44;
+    for (let k = 0; k < 5; k++) {
+      const a = (k / 5) * TAU + i * 0.3;
+      B.at(Math.cos(a) * 17, Math.sin(a) * 17, zc);
+      tank(B, 10, 38, i % 2 ? CK.BRONZE : CK.HULL, CK.BRONZE, 14);
+      B.pop();
+    }
+    B.box(0, 0, zc, 20, 20, 3, CK.BRONZE);
+  }
+  // radiators: a cross of long wings astern of the tanks, edge-on to the drive
+  for (let k = 0; k < 4; k++) {
+    const a = (k / 4) * TAU;
+    const out = V(Math.cos(a), Math.sin(a), 0), n = V(-Math.sin(a), Math.cos(a), 0);
+    radiatorWing(B, out.clone().multiplyScalar(5), out, n, r.range(70, 100), 36, lamps, k === 0 ? LAMP.RED : k === 2 ? LAMP.GREEN : LAMP.WHITE);
+  }
+  // the ring bearing: a non-rotating hub drum with the spokes' races
+  B.at(0, 0, (ringZ[0] + ringZ[1]) / 2);
+  B.lathe([[0.1, -50, CK.HULL], [14, -50, CK.HULL], [16, -46, CK.BRONZE], [16, -30, CK.DARK], [14, -26, CK.HULL], [14, 26, CK.HULL], [16, 30, CK.DARK], [16, 46, CK.BRONZE], [14, 50, CK.HULL], [0.1, 50, CK.HULL]], 24);
+  B.pop();
+  // bow: command drum, glazed, with collar and masts
+  B.at(0, 0, zBow - 30);
+  B.lathe([[0.1, 0, CK.HULL], [16, 0, CK.HULL], [18, 3, CK.BRONZE], [18, 8, CK.GLASS], [19, 10, CK.LANTERN], [18, 12, CK.BRONZE], [18, 20, CK.GLASS], [14, 26, CK.HULL], [5, 30, CK.HULL], [0.1, 30, CK.HULL]], 28);
+  B.at(0, 0, 30);
+  lamps.push(...dockingCollar(B, 3).lamps);
+  B.pop();
+  const tip = mast(B, V(0, 16, 12), V(0, 1, 0), 16, 0.3);
+  dish(B, V(12, 11, 6), V(0.6, 1, 0.3), 5);
+  for (const s of [-1, 1]) rcs.push(...rcsQuad(B, V(s * 17, 0, 14), V(s, 0, 0), V(0, 0, 1), 1.4));
+  rcs.push(...rcsQuad(B, V(0, -17, 14), V(0, -1, 0), V(0, 0, 1), 1.4));
+  B.pop();
+  for (let k = 0; k < 4; k++) { const a = (k / 4) * TAU + Math.PI / 4; rcs.push(...rcsQuad(B, V(Math.cos(a) * 23, Math.sin(a) * 23, -126), V(Math.cos(a), Math.sin(a), 0), V(0, 0, 1), 1.6)); }
+  navSet(lamps, { hw: 24.5, y: 0, z: -113, stern: V(0, 26, -146), mastTip: tip, r: 1.2 });
+  // ---- the habitat rings (separate: they turn): rim of cabins, window band, spokes
+  const spinLamps = [], spinGeos = [];
+  ringZ.forEach((z0, ri) => {
+    const S = new CB();
+    S.at(0, 0, z0);
+    const sec = [];
+    const NS = 16;
+    for (let i = 0; i < NS; i++) {
+      const t = (i / NS) * TAU, c = Math.cos(t), s = Math.sin(t);
+      const x = Math.sign(c) * Math.pow(Math.abs(c), 2 / 2.6) * 11, y = Math.sign(s) * Math.pow(Math.abs(s), 2 / 2.6) * 8;
+      sec.push([ringR + x, y, c > 0.55 ? CK.GLASS : c < -0.6 ? CK.CONSERVATORY : Math.abs(s) > 0.9 ? CK.HULL : CK.BRONZE]);
+    }
+    sec.push([...sec[0]]);
+    // lathe about local z with (radius, z) pairs: the ring's section swept round the spin axis
+    S.lathe(sec, 72, 0, { closedProfile: true });
+    for (let k = 0; k < 4; k++) {
+      const a = (k / 4) * TAU + ri * Math.PI / 4;
+      S.tube([V(Math.cos(a) * 16, Math.sin(a) * 16, 0), V(Math.cos(a) * (ringR - 10), Math.sin(a) * (ringR - 10), 0)], 2.6, 8, k % 2 ? CK.HULL : CK.GLASS);
+    }
+    for (let k = 0; k < 24; k++) {
+      const a = (k / 24) * TAU;
+      spinLamps.push({ p: here(S, Math.cos(a) * (ringR + 11.5), Math.sin(a) * (ringR + 11.5), 0), r: 1.2, color: [1.0, 0.8, 0.55], i: 1.4, dir: V(Math.cos(a), Math.sin(a), 0) });
+    }
+    S.pop();
+    spinGeos.push(S.geometry());
+  });
+  // ~0.4 g on the ring floor (the rim's outer wall, ringR + 8 m): omega = sqrt(a / r)
+  const omega = Math.sqrt(3.9 / (ringR + 8));
+  const out = finish(B, glows, lamps, rcs, 'clipper', zBow + 150 + 20);
+  // the fore ring turns one way, the aft ring the other (lamps 0..23 ride the first, 24..47 the second)
+  out.spin = { rings: spinGeos.map((geo, i) => ({ geo, omega: i ? -omega : omega })), lamps: spinLamps, perRing: 24, ringZ, ringR, omega };
+  for (const g of spinGeos) out.radius = Math.max(out.radius, g.boundingSphere.center.length() + g.boundingSphere.radius);
+  return out;
+}
+
+export const DESIGNS = { hauler: buildHauler, tanker: buildTanker, tug: buildWorkTug, packet: buildPacket, barge: buildBarge, lighter: buildLighter, clipper: buildClipper };
