@@ -671,6 +671,11 @@ assert.ok(minClear > 0, `working lanes clear every structure with ${minClear} km
     let burning = 0, ring = 0;
     for (let i = 0; i < T.count; i++) if (T.iA[i * 4] < 0.5) { ring++; if (trafficBurn(T.iA, T.iB, i * 4, 12345) > 0.5) burning++; assert.ok(T.iB[i * 4 + 2] >= 1500, 'ring lane burn period set'); }
     out.ringBurningFraction = +(burning / Math.max(ring, 1)).toFixed(3);
+    // the port columns: the climbers boost, coast and circularise; over a whole cycle well under half burn
+    let pb = 0, pn = 0;
+    for (let i = 0; i < T.count; i++) if (T.iA[i * 4] > 1.5 && T.iA[i * 4] < 2.5) for (let t = 0; t < 2000; t += 50) { pn++; pb += trafficBurn(T.iA, T.iB, i * 4, t) > 0.5 ? 1 : 0; }
+    out.portBurningFraction = +(pb / Math.max(pn, 1)).toFixed(3);
+    assert.ok(out.portBurningFraction > 0.1 && out.portBurningFraction < 0.4, `port column drives mostly dark (${out.portBurningFraction})`);
     assert.ok(out.ringBurningFraction < 0.2, `most ring-lane ships coast (${out.ringBurningFraction} burning)`);
     const g = T.mesh.geometry;
     for (const n of ['iA', 'iB', 'iC']) assert.ok(g.attributes[n].count >= g.instanceCount, `traffic ${n} covers every instance`);

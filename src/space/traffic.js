@@ -120,15 +120,16 @@ export const trafficFade = (d) => { const x = Math.max(d, 1) / TRAFFIC_D0; const
  * CPU mirror of the shader's drive schedule (0 coasting .. 1 burning) for ship i at time t. Ships
  * in orbit coast; drives light only for manoeuvres: the ring lanes' station-keeping and phasing
  * burns (about an eighth of the time, each ship on its own period), the transfers' and the Moon
- * run's departure and insertion burns, the port shuttles' climb (the divers coast down and brake
- * near the ground), the Harbour arrivals' braking burn and the departures' boost.
+ * run's departure and insertion burns, the port shuttles' boost off the ground and circularising
+ * burn at the top of the column (they coast between; the divers coast down and brake near the
+ * ground), the Harbour arrivals' braking burn and the departures' boost.
  */
 export function trafficBurn(A, B, o, t) {
   const type = A[o];
   const sm = (a, b, x) => { const q = Math.min(Math.max((x - a) / (b - a), 0), 1); return q * q * (3 - 2 * q); };
   if (type < 0.5) { const u = fract(t / B[o + 2] + B[o + 3]); return sm(0, 0.015, u) * (1 - sm(0.1, 0.13, u)); }
   if (type < 1.5) { const s = fract(t / B[o + 2] + B[o + 3]) / 0.6; return Math.max(1 - sm(0.05, 0.16, s), sm(0.84, 0.95, s)); }
-  if (type < 2.5) { const ph = fract(t / A[o + 3] + B[o]); return B[o + 1] > 0 ? 1 - 0.7 * sm(0.55, 0.9, ph) : sm(0.72, 0.92, ph); }
+  if (type < 2.5) { const ph = fract(t / A[o + 3] + B[o]); return B[o + 1] > 0 ? Math.max(1 - sm(0.22, 0.36, ph), sm(0.84, 0.9, ph) * (1 - sm(0.95, 0.99, ph))) : sm(0.74, 0.9, ph); }
   if (type < 3.5) { const ph = fract(t / (3.2 * 86400) + A[o + 1]); return Math.max(1 - sm(0.02, 0.05, ph), sm(0.95, 0.98, ph)); }
   const ph = fract(t / A[o + 3] + A[o + 2]);
   return A[o + 1] < 0.5 ? sm(0.35, 0.65, ph) : 1 - sm(0.3, 0.55, ph);
@@ -154,7 +155,7 @@ float shipBurn(vec4 A, vec4 B, float t) {
   float type = A.x;
   if (type < 0.5) { float u = fract(t / B.z + B.w); return sstep(0.0, 0.015, u) * (1.0 - sstep(0.1, 0.13, u)); }
   if (type < 1.5) { float s = fract(t / B.z + B.w) / 0.6; return max(1.0 - sstep(0.05, 0.16, s), sstep(0.84, 0.95, s)); }
-  if (type < 2.5) { float ph = fract(t / A.w + B.x); return B.y > 0.0 ? 1.0 - 0.7 * sstep(0.55, 0.9, ph) : sstep(0.72, 0.92, ph); }
+  if (type < 2.5) { float ph = fract(t / A.w + B.x); return B.y > 0.0 ? max(1.0 - sstep(0.22, 0.36, ph), sstep(0.84, 0.9, ph) * (1.0 - sstep(0.95, 0.99, ph))) : sstep(0.74, 0.9, ph); }
   if (type < 3.5) { float ph = fract(t / (3.2 * 86400.0) + A.y); return max(1.0 - sstep(0.02, 0.05, ph), sstep(0.95, 0.98, ph)); }
   float ph = fract(t / A.w + A.z);
   return A.y < 0.5 ? sstep(0.35, 0.65, ph) : 1.0 - sstep(0.3, 0.55, ph);
