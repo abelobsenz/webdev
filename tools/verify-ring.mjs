@@ -14,7 +14,7 @@ import { Rings } from '../src/space/rings.js';
 import { Elevator } from '../src/space/elevator.js';
 import { HaloPorts, buildPortStation, PORT_LIFE, buildCourtCrane, buildPortTethers } from '../src/space/stations.js';
 import { HALO_PORTS } from '../src/space/earthData.js';
-import { TILE_L, WINDOW, MINOR_RANGE_KM, GANTRY, rotorGeometry, buildGantry, aircarLanes } from '../src/space/haloDistricts.js';
+import { TILE_L, WINDOW, MINOR_RANGE_KM, GANTRY, rotorGeometry, buildGantry, aircarLanes, FAR_TILES } from '../src/space/haloDistricts.js';
 import { buildPassengerClimber, buildFreightClimber, buildTetherSegment, GUIDE_OFFSET, RIBBON, CABLE_R, MARKER_PROUD, BORE_R } from '../src/space/climbers.js';
 import { buildRelayCollar, buildRelayRing, RELAY, relayOmega, RELAY_ALTS } from '../src/space/tetherStations.js';
 import { WHEELS, WHEEL, STEM, TUGS, CAPSULE, wheelOmega, segDist, counterKeepOuts } from '../src/space/counterLife.js';
@@ -49,8 +49,11 @@ const maxMajor = Math.max(...D.variants.map((v) => tris(v.major))) + Math.max(..
 const maxMinor = Math.max(...D.variants.map((v) => tris(v.minor))) + Math.max(...D.crests.map((c) => tris(c.minor)));
 const minorSlots = 2 * Math.ceil(MINOR_RANGE_KM / (TILE_L / 1000)) + 1;
 const movers = D.aircars.instanceMatrix.count * tris(D.aircars.geometry) + D.trains.instanceMatrix.count * tris(D.trains.geometry) + D.trams.instanceMatrix.count * tris(D.trams.geometry) + D.ships.reduce((s, im) => s + im.instanceMatrix.count * tris(im.geometry), 0) + 2 * tris(D.gantryGeo);
-out.tileMajorTris = maxMajor; out.tileMinorTris = maxMinor;
-out.districtWorstRenderedTris = (2 * WINDOW + 1) * maxMajor + minorSlots * maxMinor + movers;
+const maxFar = Math.max(...D.variants.map((v) => tris(v.far)));
+out.tileMajorTris = maxMajor; out.tileMinorTris = maxMinor; out.tileFarTris = maxFar;
+out.districtWorstRenderedTris = (2 * WINDOW + 1) * maxMajor + minorSlots * maxMinor + movers + 2 * FAR_TILES * maxFar;
+assert.ok(maxFar < maxMajor / 8, 'Far silhouettes are a small fraction of the full tiles');
+for (const v of D.variants) { assert.ok(finite(v.far)); let hi = -Infinity; eachVertex(v.far, (x, y) => { if (Math.abs(x) < S.hw - 1) hi = Math.max(hi, y - S.roofLow(x)); }); assert.ok(hi < -150, 'Silhouettes stay under the glass too'); }
 out.districtUniqueTris = D.variants.reduce((s, v) => s + tris(v.major) + tris(v.minor), 0) + D.crests.reduce((s, c) => s + tris(c.major) + tris(c.minor), 0) + tris(D.gantryGeo);
 assert.ok(out.districtWorstRenderedTris < 10e6, `Districts render at most ${out.districtWorstRenderedTris} triangles (budget 10M)`);
 assert.ok(out.districtUniqueTris < 4e6, 'Unique district geometry within 4M triangles');
@@ -161,10 +164,17 @@ for (const im of [D.trains, D.trams, D.pods, D.aircars, ...D.ships, ...D.rotorCr
 assert.equal(badInst, 0, 'Instance matrices are finite');
 const visSlots = D.slots.filter((s) => s.g.visible).length;
 out.visibleTiles = visSlots;
+// 250 km out: silhouettes only, round the camera's sector, none inside the near window
+space.camera.position.copy(a.clone().multiplyScalar(Math.cos(th)).addScaledVector(b, Math.sin(th)).multiplyScalar(R + 250)).applyQuaternion(sim.earthQuat);
+space.camera.updateMatrixWorld(true);
+rings.update(sim, 0, 0.016, space);
+const farCount = D.farMeshes.reduce((s, im) => s + im.count, 0);
+out.farTilesDrawn = farCount;
+assert.ok(!D.anchor.visible && D.farGroup.visible && farCount > FAR_TILES && farCount <= 2 * FAR_TILES, 'From 250 km the silhouettes carry the districts');
 // far away: nothing drawn
 space.camera.position.set(0, 0, 60000); space.camera.updateMatrixWorld(true);
 rings.update(sim, 0, 0.016, space);
-assert.ok(!D.anchor.visible, 'Districts hidden from far away');
+assert.ok(!D.anchor.visible && !D.farGroup.visible, 'Districts hidden from far away');
 
 // ------------------------------------------------------------ climbers ----
 const pc = buildPassengerClimber(), fc = buildFreightClimber();
