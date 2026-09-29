@@ -255,6 +255,19 @@ export function buildRotor(seed = 7) {
       const pts = P.slice(1, 10).map((p) => { const [r0, z0] = off(p, 14); return V(c * r0, sn * r0, z0); });
       B.tube(pts, 9, 6, CK.CONDUIT);
     }
+    // six buttress girders down the cap from the hub collar to the rim, over the longerons'
+    // ends (the cap's air load goes into them), and a ring girder where the cap meets the hull:
+    // the structure that reads on the sunlit cap from tens of kilometres
+    for (let k = 0; k < 6; k++) {
+      const a = Math.PI / 6 + (k * TAU) / 6, c = Math.cos(a), sn = Math.sin(a);
+      const pts = P.slice(1, 10).map((p) => { const [r0, z0] = off(p, 70); return V(c * r0, sn * r0, z0); });
+      B.tube(pts, 52, 6, CK.BRONZE);
+      for (let j = 1; j < 9; j += 2) {
+        const [r0, z0] = off(P[j], 30);
+        lamps.push({ p: V(c * (r0 + 60), sn * (r0 + 60), z0 + s * 40), r: 12, color: LAMP.WHITE, i: 2.6, breathe: 0.5, phase: j / 9 });
+      }
+    }
+    { const [r0, z0] = off(P[2], 40); B.push(new THREE.Matrix4().makeTranslation(0, 0, z0)); B.torus(r0, 46, 192, 8, CK.BRONZE); B.pop(); }
     P.forEach((p) => {
       if (p[2] !== CK.GLASS) return;
       const [r0, z0] = off(p, 8), n = Math.max(12, Math.round(r0 / 110));

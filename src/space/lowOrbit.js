@@ -36,7 +36,9 @@ const DEG = Math.PI / 180;
 const HALO_R = R_EARTH + 620;
 export const APRON_ALT = 9;                // km over the Halo deck (its vault crests at 5.5 km)
 const APRON_LON = THREE.MathUtils.degToRad(0.35);
-const APPROACH = { n: 10, d0: 70, step: 55 };   // strobes per port, first at 70 m, then every 55 m
+// strobes per port, first at 60 m, then every 45 m: a sequenced 'rabbit' that is dark between
+// its runs, so the approach reads as a flash chasing into the port, never a column of beads
+const APPROACH = { n: 6, d0: 60, step: 45 };
 const TETHER_KEEP = 20;                    // km: the elevator tether's exclusion zone
 const _tu = new THREE.Vector3(), _tp = new THREE.Vector3(), _tq = new THREE.Quaternion();
 const EARTH_W = TAU / 86400;            // the sim turns the Earth once per 86,400 s
@@ -508,7 +510,7 @@ void main() {
       // the pulse runs inward (outermost lamp first) once every 2.4 s, each port offset in time
       const u = (((rt / 2.4 + k * 0.29 - (per - 1 - j) / per) % 1) + 1) % 1;
       const flash = u < 0.08 ? 1 - u / 0.08 : 0;
-      A.lamps.gain(i, 0.12 + 1.6 * flash);
+      A.lamps.gain(i, 1.8 * flash * flash);
     }
     A.lamps.commit();
   }
