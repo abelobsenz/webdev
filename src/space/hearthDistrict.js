@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { CB, CK } from '../craft/craftGeometry.js';
-import { buildFreighter, buildShuttle, lathe } from '../craft/craftClasses.js';
+import { buildFreighter, buildShuttle, buildTug, lathe } from '../craft/craftClasses.js';
 import { merge } from './hull.js';
 import { createLamps, LAMP } from './lamps.js';
 import { placeLamps, addEngines } from './craftMesh.js';
@@ -25,6 +25,8 @@ import { RS } from './hearthLens.js';
 //   hamlets   a crew hamlet hangs under the ring midway along every arc: a spindle on a hanger
 //             from the ring tube, a habitat wheel spun for a full gravity at its floor turning on
 //             a bearing collar, radiators below it and a courier berthed at its foot
+//   patrol    inspection tugs circle the collector line high above the dishes and the Refuge,
+//             three each way at their own heights, working round the whole ring
 //   racks     in the Refuge's mirror-servicing yard, two inspection gantries ride the frame of
 //             every spare mirror, one over each half, stopping short of the rack's posts
 //   refuge    the wheels' rim lamps and garden lights turn with them
@@ -118,6 +120,17 @@ export function buildDishTruss() {
     if (k % 2 === 0) for (const r of [3.7, 5.9, 8.1]) { B.at(X(r) - 0.02, c * r, sn * r); B.box(0, 0, 0, 0.1, 0.16, 0.16, CK.BRONZE); B.pop(); }
   }
   return toHullKinds(B.geometry(), null, 1);
+}
+
+// ------------------------------------------------------------------ patrol ----
+export const PATROL = { r: 930, y0: 80, dy: 6, T: 2400, scale: 9, count: 6 };
+/** Patrol tug k at time t (stations frame, km): position and forward direction. */
+export function patrolPose(k, t, out, fwd) {
+  const dir = k % 2 ? 1 : -1, y = PATROL.y0 + PATROL.dy * k, a = dir * (t / PATROL.T) * TAU + (k / PATROL.count) * TAU;
+  // a slow weave in height keeps the line alive without leaving the lane
+  out.set(Math.cos(a) * PATROL.r, y + 1.0 * Math.sin(a * 7 + k), Math.sin(a) * PATROL.r);
+  if (fwd) fwd.set(-Math.sin(a) * dir, 0, Math.cos(a) * dir);
+  return out;
 }
 
 // ------------------------------------------------------------ rack gantries ----
@@ -318,6 +331,19 @@ export class HearthDistrict {
     this.droneLamps = createLamps(Array.from({ length: mats.length * DISH.radii.length }, (_, k) => ({ p: V(0, 0, 0), r: 0.012, color: k % 3 ? LAMP.TEAL : LAMP.AMBER, i: 3, breathe: 0.5, phase: (k * 0.37) % 1 })), { minPx: 1.1, mask });
     this.droneAttr = this.droneLamps.geometry.getAttribute('iLamp');
     hearth.stations.add(this.droneLamps);
+    // ---- the patrol tugs round the collector line
+    const tug = buildTug(80), ts = PATROL.scale, tm = new THREE.Matrix4().makeScale(ts, ts, ts);
+    const tugGeo = toHullKinds(tug.geo, tm);
+    const tugLamps = placeLamps(tug.lamps || [], tm, 4).map((l) => ({ ...l, p: l.p.clone().multiplyScalar(0.001), r: l.r * 0.001 }));
+    this.patrol = Array.from({ length: PATROL.count }, () => {
+      const pm = new THREE.Mesh(tugGeo, mat);
+      pm.add(createLamps(tugLamps, { minPx: 1.2, mask }));
+      const glows = tug.glows.map((g) => ({ ...g, p: g.p.clone().multiplyScalar(ts * 0.001), r: g.r * ts * 0.001 }));
+      addEngines(pm, glows, { scale: 0.7, length: 10, color: 0xffc080, core: 0xfff0d8, throttle: 0.25 });
+      hearth.stations.add(pm);
+      return pm;
+    });
+    this._f = V(0, 0, 1); this._xb = V(0, 0, 0);
     // ---- the repair racks' gantries (refuge-local)
     this.gantries = new THREE.InstancedMesh(buildRackGantry(), mat, 16);
     hearth.refuge.add(this.gantries);
@@ -381,7 +407,7 @@ export class HearthDistrict {
       for (let k = 0; k < 6; k++) { const a = (k / 6) * TAU; R.push({ p: V(Math.cos(a) * 6.8, 0.85, Math.sin(a) * 6.8), r: 0.18, color: [1.0, 0.78, 0.5], i: 1.4, breathe: 0.2, phase: (k + w) / 6 }); }
       rotor.add(createLamps(R, { minPx: 1.1, mask }));
     });
-    for (const o of [this.gantries, this.fittings, this.trusses, this.drones, this.hamlets, this.wheels, this.platforms, this.trams, this.coils, ...this.tankers.map((t) => t.mesh)]) { o.frustumCulled = false; o.renderOrder = 3; }
+    for (const o of [...this.patrol, this.gantries, this.fittings, this.trusses, this.drones, this.hamlets, this.wheels, this.platforms, this.trams, this.coils, ...this.tankers.map((t) => t.mesh)]) { o.frustumCulled = false; o.renderOrder = 3; }
     this._m = new THREE.Matrix4(); this._q = new THREE.Quaternion(); this._p = V(0, 0, 0); this._s = V(1, 1, 1); this._t = V(0, 0, 0); this._y = V(0, 1, 0); this._z = V(0, 0, 0);
     this.update(0);
   }
@@ -435,6 +461,12 @@ export class HearthDistrict {
     }
     this.gantries.instanceMatrix.needsUpdate = true;
     this.gantryAttr.needsUpdate = true;
+    for (let k = 0; k < this.patrol.length; k++) {
+      const pm = this.patrol[k];
+      patrolPose(k, t, pm.position, this._f);
+      this._xb.crossVectors(this._y, this._f).normalize();
+      pm.quaternion.setFromRotationMatrix(m.makeBasis(this._xb, this._y, this._f));
+    }
     const w = this.tankers[3];
     tankerPose(t, w.mesh.position);
     const u = (((t / TANKER.T) % 1) + 1) % 1, moving = (u < 0.25) || (u > 0.6 && u < 0.85);

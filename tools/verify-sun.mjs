@@ -14,7 +14,7 @@ import {
 import { FoundryYard, tenderVisit, VISIT, buildWheelCar, wheelCar, WHEEL, buildCraneWorks, cranePose, cartPose, droneOrbits, dronePos, crewPos, COURT, CRANE, CART, QUEUE } from '../src/space/foundryYard.js';
 import { buildTender } from '../src/craft/craftGeometry.js';
 import { Hearth, buildCollector } from '../src/space/hearth.js';
-import { buildRackGantry, rackGantry, RACK, buildDishTruss, backX, BACK, HAMLET, hamletMatrix, hamletAngle, buildHamletFixed, buildHamletWheel, buildStationFittings, dishDrone, dishSag, DISH, buildDishDrone, tramArc, tramAngle, RING, TRAM, tankerSlots, tankerPose, TANKER, MODULE, HearthDistrict } from '../src/space/hearthDistrict.js';
+import { PATROL, patrolPose, buildRackGantry, rackGantry, RACK, buildDishTruss, backX, BACK, HAMLET, hamletMatrix, hamletAngle, buildHamletFixed, buildHamletWheel, buildStationFittings, dishDrone, dishSag, DISH, buildDishDrone, tramArc, tramAngle, RING, TRAM, tankerSlots, tankerPose, TANKER, MODULE, HearthDistrict } from '../src/space/hearthDistrict.js';
 import { buildFeeder } from '../src/space/hearthWorks.js';
 import { SunSwarm } from '../src/space/sun.js';
 import { SpaceSim } from '../src/space/sim.js';
@@ -385,6 +385,24 @@ const stT = tree(tris(sc.geo));
   assert.ok(Math.abs(zmin - 1.07) < 1e-6, `ferry seated on its port (${((zmin - 1.07) * 1000).toFixed(2)} m)`);
   const portD = Math.min(...fv2.map((p) => p.distanceTo(V(MODULE.node, 0, 1.07))));
   assert.ok(portD < 0.12, `ferry hull over the port (${(portD * 1000).toFixed(0)} m)`);
+  // patrol tugs: high over every collector (dish, fittings, supports) and the Refuge, never meeting
+  {
+    const P = V(), Q = V();
+    let pc = Infinity, ps = Infinity;
+    const cols = hearth.collectorMounts.map((m) => m.collector.position.clone());
+    const ref = hearth.refugePosition;
+    for (let t = 0; t < PATROL.T; t += 4) for (let k = 0; k < PATROL.count; k++) {
+      patrolPose(k, t, P);
+      // a collector with its fittings and radiators fits in 14 km of its centre; the Refuge in 26 km
+      for (const c of cols) pc = Math.min(pc, P.distanceTo(c) - 14);
+      pc = Math.min(pc, P.distanceTo(ref) - 26);
+      assert.ok(Math.hypot(P.x, P.z) > 15 * 30 + 100, 'patrol clear of the disc');
+      for (let j = k + 1; j < PATROL.count; j++) ps = Math.min(ps, P.distanceTo(patrolPose(j, t, Q)));
+    }
+    assert.ok(pc > 10, `patrol tugs pass the collectors and the Refuge ${pc.toFixed(1)} km clear`);
+    assert.ok(ps > 3, `patrol tugs keep ${ps.toFixed(1)} km apart`);
+    results.patrolClearanceKm = +pc.toFixed(1); results.patrolSeparationKm = +ps.toFixed(1);
+  }
   // rack gantries: feet on the frame tubes, everything else clear of the racks, posts and mirrors
   {
     const gg = buildRackGantry();
