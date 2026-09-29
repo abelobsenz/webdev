@@ -14,7 +14,7 @@ import {
 import { FoundryYard, tenderVisit, VISIT, buildWheelCar, wheelCar, WHEEL, buildCraneWorks, cranePose, cartPose, droneOrbits, dronePos, crewPos, COURT, CRANE, CART, QUEUE } from '../src/space/foundryYard.js';
 import { buildTender } from '../src/craft/craftGeometry.js';
 import { Hearth, buildCollector } from '../src/space/hearth.js';
-import { buildDishTruss, backX, BACK, HAMLET, hamletMatrix, hamletAngle, buildHamletFixed, buildHamletWheel, buildStationFittings, dishDrone, dishSag, DISH, buildDishDrone, tramArc, tramAngle, RING, TRAM, tankerSlots, tankerPose, TANKER, MODULE, HearthDistrict } from '../src/space/hearthDistrict.js';
+import { buildRackGantry, rackGantry, RACK, buildDishTruss, backX, BACK, HAMLET, hamletMatrix, hamletAngle, buildHamletFixed, buildHamletWheel, buildStationFittings, dishDrone, dishSag, DISH, buildDishDrone, tramArc, tramAngle, RING, TRAM, tankerSlots, tankerPose, TANKER, MODULE, HearthDistrict } from '../src/space/hearthDistrict.js';
 import { buildFeeder } from '../src/space/hearthWorks.js';
 import { SunSwarm } from '../src/space/sun.js';
 import { SpaceSim } from '../src/space/sim.js';
@@ -385,6 +385,23 @@ const stT = tree(tris(sc.geo));
   assert.ok(Math.abs(zmin - 1.07) < 1e-6, `ferry seated on its port (${((zmin - 1.07) * 1000).toFixed(2)} m)`);
   const portD = Math.min(...fv2.map((p) => p.distanceTo(V(MODULE.node, 0, 1.07))));
   assert.ok(portD < 0.12, `ferry hull over the port (${(portD * 1000).toFixed(0)} m)`);
+  // rack gantries: feet on the frame tubes, everything else clear of the racks, posts and mirrors
+  {
+    const gg = buildRackGantry();
+    closed('rackGantry', gg);
+    const refT = tree(tris(hearth.refugeData.geo));
+    const gv = verts(gg, I);
+    const feet = gv.filter((p) => p.y < 0.05), body = gv.filter((p) => p.y > 0.12);
+    let footErr = 0, bodyClear = Infinity;
+    for (let t = 0; t < RACK.T; t += 6) for (let k = 0; k < 16; k++) {
+      const P = rackGantry(k, t);
+      for (const p of feet.filter((_, i) => i % 3 === 0)) footErr = Math.max(footErr, dist(refT, p.clone().add(P)));
+      for (const p of body) bodyClear = Math.min(bodyClear, dist(refT, p.clone().add(P), bodyClear + 1));
+    }
+    assert.ok(footErr < 0.09, `gantry shoes on the frame tubes (${(footErr * 1000).toFixed(0)} m)`);
+    assert.ok(bodyClear > 0.02, `gantries clear the racks and posts by ${(bodyClear * 1000).toFixed(0)} m`);
+    results.rackGantryClearanceMetres = +(bodyClear * 1000).toFixed(0);
+  }
   // dish trusses: seated on the back shell, outside the bearing drum, clear of the supports
   {
     const tg = buildDishTruss();
@@ -482,7 +499,7 @@ const stT = tree(tris(sc.geo));
   assert.ok(ta / 200 < 0.3, 'Hearth district frame under 0.3 ms');
   assert.ok(d.trams.instanceMatrix.array.every(Number.isFinite) && d.tramAttr.array.every(Number.isFinite), 'finite trams');
   let tri = 0;
-  for (const m of [d.fittings, d.trusses, d.drones, d.hamlets, d.wheels, d.platforms, d.trams, d.coils, ...d.tankers.map((x) => x.mesh)]) tri += triCount(m.geometry) * (m.isInstancedMesh ? m.count : 1);
+  for (const m of [d.gantries, d.fittings, d.trusses, d.drones, d.hamlets, d.wheels, d.platforms, d.trams, d.coils, ...d.tankers.map((x) => x.mesh)]) tri += triCount(m.geometry) * (m.isInstancedMesh ? m.count : 1);
   results.hearthDistrictRenderedTris = tri;
 }
 

@@ -25,6 +25,8 @@ import { RS } from './hearthLens.js';
 //   hamlets   a crew hamlet hangs under the ring midway along every arc: a spindle on a hanger
 //             from the ring tube, a habitat wheel spun for a full gravity at its floor turning on
 //             a bearing collar, radiators below it and a courier berthed at its foot
+//   racks     in the Refuge's mirror-servicing yard, two inspection gantries ride the frame of
+//             every spare mirror, one over each half, stopping short of the rack's posts
 //   refuge    the wheels' rim lamps and garden lights turn with them
 //
 // Everything draws with the Hearth's hull material, so it shares the disc's light and the
@@ -116,6 +118,31 @@ export function buildDishTruss() {
     if (k % 2 === 0) for (const r of [3.7, 5.9, 8.1]) { B.at(X(r) - 0.02, c * r, sn * r); B.box(0, 0, 0, 0.1, 0.16, 0.16, CK.BRONZE); B.pop(); }
   }
   return toHullKinds(B.geometry(), null, 1);
+}
+
+// ------------------------------------------------------------ rack gantries ----
+// The Refuge's repair racks (buildHearthRefuge, refuge-local km): mirrors 7 x 5 km at x = +-20,
+// y = -9, -3, 3, 9, framed by tubes (radius 0.11) along z = +-2.55; a centre post (radius 0.4) and
+// two posts at z = +-2.5 (radius 0.13) run through every rack at its x.
+export const RACK = { xs: [-20, 20], ys: [-9, -3, 3, 9], frameZ: 2.55, frameR: 0.11, beamY: 0.46, inner: 0.8, outer: 3.3, T: 260 };
+export function buildRackGantry() {
+  const B = new CB();
+  for (const sd of [-1, 1]) {
+    B.box(0, 0.18, sd * RACK.frameZ, 0.12, 0.26, 0.08, CK.DARK);            // leg, its foot on the frame tube
+    B.box(0, 0.06, sd * RACK.frameZ, 0.16, 0.04, 0.16, CK.BRONZE);         // shoe
+  }
+  B.box(0, RACK.beamY - 0.12, 0, 0.1, 0.1, RACK.frameZ * 2 + 0.1, CK.HULL);
+  B.box(0, RACK.beamY - 0.2, 0.6, 0.14, 0.08, 0.2, CK.GLASS);              // inspection cab
+  B.box(0, RACK.beamY - 0.2, -1.1, 0.08, 0.1, 0.12, CK.LANTERN);          // scanner head
+  // (origin: on the frame tube's crown; the shoes stand 0.04 km proud of it, seated 0.02 into it)
+  const g = B.geometry(); g.translate(0, -0.02, 0);
+  return toHullKinds(g, null, 1);
+}
+/** Gantry k's position (refuge-local km): rack, half and the run over it. */
+export function rackGantry(k, t, out = V(0, 0, 0)) {
+  const rack = k >> 1, half = k & 1 ? 1 : -1, x0 = RACK.xs[rack >> 2], y = RACK.ys[rack & 3];
+  const u = (((t / RACK.T) + k * 0.23) % 1 + 1) % 1, s = u < 0.5 ? smooth(0, 1, u * 2) : smooth(0, 1, 2 - u * 2);
+  return out.set(x0 + half * (RACK.inner + (RACK.outer - RACK.inner) * s), y + RACK.frameR, 0);
 }
 
 // ------------------------------------------------------------------ drones ----
@@ -291,6 +318,12 @@ export class HearthDistrict {
     this.droneLamps = createLamps(Array.from({ length: mats.length * DISH.radii.length }, (_, k) => ({ p: V(0, 0, 0), r: 0.012, color: k % 3 ? LAMP.TEAL : LAMP.AMBER, i: 3, breathe: 0.5, phase: (k * 0.37) % 1 })), { minPx: 1.1, mask });
     this.droneAttr = this.droneLamps.geometry.getAttribute('iLamp');
     hearth.stations.add(this.droneLamps);
+    // ---- the repair racks' gantries (refuge-local)
+    this.gantries = new THREE.InstancedMesh(buildRackGantry(), mat, 16);
+    hearth.refuge.add(this.gantries);
+    this.gantryLamps = createLamps(Array.from({ length: 16 }, (_, k) => ({ p: V(0, 0, 0), r: 0.03, color: k % 2 ? LAMP.TEAL : LAMP.WHITE, i: 2.6, breathe: 0.4, phase: k / 16 })), { minPx: 1.1, mask });
+    this.gantryAttr = this.gantryLamps.geometry.getAttribute('iLamp');
+    hearth.refuge.add(this.gantryLamps);
     // ---- the ring hamlets: fixed parts instanced, wheels turned each frame
     const hf = buildHamletFixed();
     this.hamletMats = Array.from({ length: RING.count }, (_, i) => hamletMatrix(i));
@@ -348,7 +381,7 @@ export class HearthDistrict {
       for (let k = 0; k < 6; k++) { const a = (k / 6) * TAU; R.push({ p: V(Math.cos(a) * 6.8, 0.85, Math.sin(a) * 6.8), r: 0.18, color: [1.0, 0.78, 0.5], i: 1.4, breathe: 0.2, phase: (k + w) / 6 }); }
       rotor.add(createLamps(R, { minPx: 1.1, mask }));
     });
-    for (const o of [this.fittings, this.trusses, this.drones, this.hamlets, this.wheels, this.platforms, this.trams, this.coils, ...this.tankers.map((t) => t.mesh)]) { o.frustumCulled = false; o.renderOrder = 3; }
+    for (const o of [this.gantries, this.fittings, this.trusses, this.drones, this.hamlets, this.wheels, this.platforms, this.trams, this.coils, ...this.tankers.map((t) => t.mesh)]) { o.frustumCulled = false; o.renderOrder = 3; }
     this._m = new THREE.Matrix4(); this._q = new THREE.Quaternion(); this._p = V(0, 0, 0); this._s = V(1, 1, 1); this._t = V(0, 0, 0); this._y = V(0, 1, 0); this._z = V(0, 0, 0);
     this.update(0);
   }
@@ -394,6 +427,14 @@ export class HearthDistrict {
     }
     this.wheels.instanceMatrix.needsUpdate = true;
     this.wheelAttr.needsUpdate = true;
+    const ga = this.gantryAttr.array;
+    for (let k = 0; k < 16; k++) {
+      rackGantry(k, t, P);
+      this.gantries.setMatrixAt(k, m.makeTranslation(P.x, P.y, P.z));
+      ga[k * 4] = P.x; ga[k * 4 + 1] = P.y + RACK.beamY + 0.05; ga[k * 4 + 2] = P.z;
+    }
+    this.gantries.instanceMatrix.needsUpdate = true;
+    this.gantryAttr.needsUpdate = true;
     const w = this.tankers[3];
     tankerPose(t, w.mesh.position);
     const u = (((t / TANKER.T) % 1) + 1) % 1, moving = (u < 0.25) || (u > 0.6 && u < 0.85);
