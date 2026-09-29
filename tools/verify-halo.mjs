@@ -198,6 +198,18 @@ for (const v of D.variants) {
   assert.ok(v.flampCount > 0 && v.lampCount > 0, 'Every variant has beacons and street lamps');
 }
 out.layerTris = layerTris;
+// people's loops: on the pavements (just above the deck, never inside a wall or the water)
+{
+  let bad = 0, loops = 0;
+  for (const v of D.variants) for (let i = 0; i < v.walks.length; i += 6) {
+    loops++;
+    const [type, cx, cz, a2, b2, y] = v.walks.subarray(i, i + 6);
+    for (const x of type ? [cx - a2, cx + a2, cx] : [cx - a2, cx + a2]) { const d = y - S.deck(x); if (!(d > 0 && d < 12)) bad++; }
+    if (Math.abs(cx) + a2 > S.hw - 700 || Math.abs(cz) + (type ? a2 : b2) > TILE_L / 2) bad++;
+  }
+  out.walkLoops = loops;
+  assert.ok(loops > 1000 && bad === 0, `Walk loops seated on the deck and inside the tile (${bad} bad)`);
+}
 out.waterVertices = waterV;
 assert.ok(waterV > 0, 'Districts carry water');
 assert.equal(waterUnder, 0, 'No water sunk more than 30 m under the deck');
@@ -250,6 +262,8 @@ assert.ok(out.closestApproachTris < 12e6, 'District tiles within 12M rendered tr
   let fine = 0, minor = 0, major = 0, mid = 0, frame = 0;
   for (const s of D.slots) if (s.g.visible) { fine += s.fine.visible; minor += s.minor.visible; major += s.major.visible; mid += s.mid.visible; frame += s.frame.visible; }
   out.slotsNear = { fine, minor, major, mid, frame };
+  out.people = D.people.count;
+  assert.ok(D.people.count > 50 && D.people.count <= D.people.instanceMatrix.count, 'People walking round the camera, within their buffer');
   assert.ok(fine >= 3 && fine <= fineSlots, 'Fine detail only on the nearest tiles');
   assert.ok(minor <= minorSlots && major <= majorSlots && mid > 0, 'Minor and major in range, silhouettes beyond');
   for (const s of D.slots) if (s.g.visible) assert.ok(!(s.major.visible && s.mid.visible), 'Massing and silhouette never drawn together');

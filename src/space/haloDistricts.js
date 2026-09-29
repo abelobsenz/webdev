@@ -6,7 +6,7 @@ import { CRAFT_FRAME } from './craftMesh.js';
 import { createLamps, LAMP } from './lamps.js';
 import { HALO_PORTS } from './earthData.js';
 import { createHaloMaterial } from './haloMaterial.js';
-import { DISTRICT_STYLE, standBox, vault, ribArc, cliffs, townCell, parkCell, farmCell, civicCell, worksCell, stadiumCell, marketCell, buildVaultFrame, harbourTown, HARBOUR, buildHarbourBoat } from './haloArchitecture.js';
+import { buildPerson, DISTRICT_STYLE, standBox, vault, ribArc, cliffs, townCell, parkCell, farmCell, civicCell, worksCell, stadiumCell, marketCell, buildVaultFrame, harbourTown, HARBOUR, buildHarbourBoat } from './haloArchitecture.js';
 import { bodyDir } from './sim.js';
 
 // The Halo, lived in. Seen from orbit the deck shader already paints a continent of towns and
@@ -41,6 +41,7 @@ const SEAM_TILES = 8;                        // the last tiles before theta = 0 
 export const FAR_TILES = 45;                 // silhouette tiles either side beyond the near window (180 km)
 export const FAR_RANGE_KM = 420;             // silhouettes drawn within this distance of the band
 export const VARIANTS = ['residential', 'agrarian', 'civic', 'works', 'lakeland', 'markets'];
+export const PEOPLE = { max: 1600, range: 900, spacing: 38, speed: 1.3 };   // walkers round the camera
 export const HARBOUR_V = VARIANTS.length;        // the harbour town under each hub arch (tile variant 6)
 const MOVER_RANGE = (WINDOW + 0.5) * TILE_L; // m either side of the anchor
 
@@ -284,17 +285,17 @@ const MAST_X = 16340;                        // crest lamp masts, outboard of th
 export function buildDistrictTile(variant, S, bay, seed = 1) {
   const B = new CB(), M = new CB(), N = new CB(), F = new CB(), lamps = [], flamps = [];
   const r = mulberry(seed * 7919 + variant * 104729 + 17);
-  const C = { B, M, N, F, lamps, flamps, S, r, style: DISTRICT_STYLE[variant], tileL: TILE_L };
+  const C = { B, M, N, F, lamps, flamps, S, r, style: DISTRICT_STYLE[variant], tileL: TILE_L, walks: [] };
   const steps = buildDistrictSteps(C, bay, variant);
   FAR = F;
   try { while (!steps.next().done); } finally { FAR = null; }
-  return { major: B.geometry(), minor: M.geometry(), fine: N.geometry(), far: F.geometry(), lamps, flamps, cells: B.cells };
+  return { major: B.geometry(), minor: M.geometry(), fine: N.geometry(), far: F.geometry(), lamps, flamps, cells: B.cells, walks: new Float32Array(C.walks) };
 }
 /** The same tile built a slice per call (the terraces and services, then six columns of cells at a time). */
 export function* buildDistrictTileSteps(variant, S, bay, seed = 1) {
   const B = new CB(), M = new CB(), N = new CB(), F = new CB(), lamps = [], flamps = [];
   const r = mulberry(seed * 7919 + variant * 104729 + 17);
-  const C = { B, M, N, F, lamps, flamps, S, r, style: DISTRICT_STYLE[variant], tileL: TILE_L };
+  const C = { B, M, N, F, lamps, flamps, S, r, style: DISTRICT_STYLE[variant], tileL: TILE_L, walks: [] };
   const steps = buildDistrictSteps(C, bay, variant);
   for (;;) {
     FAR = F;
@@ -303,7 +304,7 @@ export function* buildDistrictTileSteps(variant, S, bay, seed = 1) {
     if (done) break;
     yield null;
   }
-  return { major: B.geometry(), minor: M.geometry(), fine: N.geometry(), far: F.geometry(), lamps, flamps, cells: B.cells };
+  return { major: B.geometry(), minor: M.geometry(), fine: N.geometry(), far: F.geometry(), lamps, flamps, cells: B.cells, walks: new Float32Array(C.walks) };
 }
 function* buildDistrictSteps(C, bay, variant) {
   const { B, M, F, lamps, S, r } = C;
@@ -530,7 +531,7 @@ export class HaloDistricts {
     this.anchorTile = -1e9;
     this.body = space.addBody('halo-districts', [this.anchor], () => this.anchor.getWorldPosition(_c), (MOVER_RANGE + 20000) / 1000, { solid: true });
     this.mat = createHaloMaterial({ accent: [1.0, 0.76, 0.48], lit: 0.66 });
-    this.moverMat = createCraftMaterial({ accent: [0.6, 0.88, 1.0], lit: 0.7 });
+    this.moverMat = createHaloMaterial({ accent: [0.6, 0.88, 1.0], lit: 0.7 });
     const anchorWorld = this.anchor.userData.world;
     this._before = (mat) => (r, s, cam) => {
       updateCraftMaterial(mat, cam, CRAFT_FRAME.sunDir, anchorWorld, CRAFT_FRAME.time);
@@ -602,7 +603,7 @@ export class HaloDistricts {
     const lamps = createLamps(t.lamps, { minPx: 1.2 });
     // street lamps: only drawn close in, and allowed to shrink below a pixel with the distance
     const flamps = t.flamps ? createLamps(t.flamps, { minPx: 0.8, gain: 0.9 }) : null;
-    return { major: t.major, minor: t.minor, fine: t.fine, far: t.far, lamps, flamps, cells: t.cells, lampCount: t.lamps.length, flampCount: t.flamps ? t.flamps.length : 0 };
+    return { major: t.major, minor: t.minor, fine: t.fine, far: t.far, lamps, flamps, cells: t.cells, walks: t.walks, lampCount: t.lamps.length, flampCount: t.flamps ? t.flamps.length : 0 };
   }
   _mesh(geo, mat) {
     const m = new THREE.Mesh(geo, mat);
@@ -664,6 +665,7 @@ export class HaloDistricts {
     this.pods = inst(buildPod(), GANTRY.pods * 2);
     // harbour boats: ferries and sailing boats on their rounds of the basin (a hub tile or two
     // is ever inside the window; capacity for four)
+    this.people = inst(buildPerson(), PEOPLE.max);
     this.boats = [0, 1].map((fleet) => inst(buildHarbourBoat(fleet), 4 * HARBOUR.routes.reduce((n, rt) => n + (rt.fleet === fleet ? rt.n : 0), 0)));
     this.trains = inst(buildTrainCar(), 8 * 24);
     this.trams = inst(buildTram(), 320);
@@ -722,6 +724,7 @@ export class HaloDistricts {
     if (!this.anchor.visible) return;
     // per-slot distance LOD: small detail only close in
     const camL = this.anchor.worldToLocal(_c.copy(space.camera.position));
+    (this.camLocal || (this.camLocal = new THREE.Vector3())).copy(camL);
     for (const s of this.slots) {
       if (!s.g.visible) continue;
       const e = s.g.matrix.elements, dx = camL.x, dy = camL.y - e[13], dz = camL.z - e[14];
@@ -837,6 +840,49 @@ export class HaloDistricts {
     }
     for (const im of this.ships) im.instanceMatrix.needsUpdate = true;
     this._harbourBoats(t);
+    this._people(t);
+  }
+
+  /**
+   * People walking the pavements, plazas, park walks and quays round the camera (its own tile,
+   * within PEOPLE.range): each loop carries a walker every ~PEOPLE.spacing metres, alternate ones
+   * going the other way, at a strolling pace that differs a little between them.
+   */
+  _people(t) {
+    const im = this.people;
+    im.count = 0;
+    const s = this.slots[WINDOW];
+    if (this.camLocal && s && s.g.visible && s.fine.visible) {
+      const W = this.variants[this.tileVariant[s.k]].walks, cx0 = this.camLocal.x, cz0 = this.camLocal.z, R2 = PEOPLE.range * PEOPLE.range;
+      const uk = this.tileAngle(s.k) * this.Rm, st = this.tileStretch(s.k), cap = im.instanceMatrix.count;
+      for (let i = 0; i < W.length && im.count < cap; i += 6) {
+        const type = W[i], cx = W[i + 1], cz = W[i + 2], a = W[i + 3], b = W[i + 4], y = W[i + 5];
+        const ex = type ? a : a, ez = type ? a : b;
+        const dx = Math.max(Math.abs(cx0 - cx) - ex, 0), dz = Math.max(Math.abs(cz0 * 1 - cz * st) - ez, 0);
+        if (dx * dx + dz * dz > R2) continue;
+        const per = type ? TAU * a : 4 * (a + b);
+        const n = Math.max(1, Math.floor(per / PEOPLE.spacing));
+        for (let j = 0; j < n && im.count < cap; j++) {
+          const h = hash2(i + j * 7, 13), dir = j % 2 ? -1 : 1, v = PEOPLE.speed * (0.8 + 0.4 * h);
+          const sp = ((((j + h) / n) * per + dir * v * t) % per + per) % per;
+          let px, pz, hx, hz;
+          if (type) { const ang = sp / a; px = cx + a * Math.cos(ang); pz = cz + a * Math.sin(ang); hx = -Math.sin(ang) * dir; hz = Math.cos(ang) * dir; }
+          else {
+            // round the rectangle: +x along the near side, +z up the right, -x back, -z down the left
+            let q = sp;
+            if (q < 2 * a) { px = cx - a + q; pz = cz - b; hx = dir; hz = 0; }
+            else if ((q -= 2 * a) < 2 * b) { px = cx + a; pz = cz - b + q; hx = 0; hz = dir; }
+            else if ((q -= 2 * b) < 2 * a) { px = cx + a - q; pz = cz + b; hx = -dir; hz = 0; }
+            else { q -= 2 * a; px = cx - a; pz = cz + b - q; hx = 0; hz = -dir; }
+          }
+          this._place(_m, uk + pz * st, px + (h - 0.5) * 1.6, y, 1);
+          _r.makeRotationY(Math.atan2(hx, hz));
+          _m.multiply(_r);
+          im.setMatrixAt(im.count++, _m);
+        }
+      }
+    }
+    im.instanceMatrix.needsUpdate = true;
   }
 
   /** Ferries and sailing boats round each harbour basin in the window (tile-local circles). */

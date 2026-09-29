@@ -40,6 +40,15 @@ export const DISTRICT_STYLE = [
   { pal: 2, pitched: 0.3, trees: [0, 3, 1, 2], street: LAMPC.WARM, accent: LAMPC.TEAL },          // harbour towns under the arches
 ];
 
+/** A person, 1.75 m: legs, coat (the canvas kind: every colour going), head. +z forward. */
+export function buildPerson() {
+  const B = new CB();
+  for (const x of [-0.12, 0.12]) B.box(x, 0.42, 0, 0.14, 0.84, 0.16, CK.DARK);
+  B.box(0, 1.14, 0, 0.46, 0.64, 0.26, HK.AWNING);
+  B.box(0, 1.6, 0, 0.2, 0.26, 0.22, CK.DECK);
+  return B.geometry();
+}
+
 /** A harbour ferry (fleet 0) or a sailing boat (fleet 1), +z forward, waterline at y = 0. */
 export function buildHarbourBoat(fleet) {
   const B = new CB();
@@ -109,6 +118,8 @@ function railing(N, x, y, z, lx, lz) {
   N.box(x, y + 1.1, z, Math.max(lx, 0.12), 0.12, Math.max(lz, 0.12), CK.BRONZE);
   N.box(x, y + 0.55, z, Math.max(lx, 0.05) * (lx > lz ? 1 : 0.4) + 0.02, 1.0, Math.max(lz, 0.05) * (lz > lx ? 1 : 0.4) + 0.02, CK.DARK);
 }
+/** A walking loop for the people of the district (rectangle half sizes a x b, or circle radius a). */
+function walk(C, type, cx, cz, a, b, y) { if (C.walks) C.walks.push(type, cx, cz, a, b, y); }
 function pickTree(C) { const t = C.style.trees; return t[Math.floor(C.r() * t.length)]; }
 
 // ------------------------------------------------------------ buildings ----
@@ -241,6 +252,7 @@ function steppedBlock(C, cx, cz, sx, sz, hmax, fk) {
 function pocketSquare(C, cx, cz, sx, sz) {
   const { B, M, N, S, r } = C;
   const y = standBox(B, S, cx, cz, sx, sz, 1.2, HK.STONE, 10);
+  walk(C, 1, cx, cz, Math.min(sx, sz) * 0.16 + 6, 0, y);
   // a round basin and its jet
   const R = Math.min(sx, sz) * 0.16;
   latheAt(B, cx, y - 0.2, cz, [[R - 1.6, 0, HK.STONE], [R + 1.6, 0, HK.STONE], [R + 1.6, 1.4, HK.STONE], [R - 1.6, 1.4, HK.STONE]], 16, true);
@@ -261,7 +273,8 @@ export function townCell(C, x0, x1, z0, z1) {
   standBox(B, S, (x0 + x1) / 2, (z0 + z1) / 2, x1 - x0, z1 - z0, 0.5, HK.STREET, 8);
   for (let i = 0; i < nb; i++) for (let j = 0; j < nb; j++) {
     const cx = x0 + (i + 0.5) * bw, cz = z0 + (j + 0.5) * bd, sx = bw - 36, sz = bd - 36;
-    standBox(B, S, cx, cz, sx + 10, sz + 10, 0.9, HK.STONE, 6);            // pavements
+    const pave = standBox(B, S, cx, cz, sx + 10, sz + 10, 0.9, HK.STONE, 6);            // pavements
+    walk(C, 0, cx, cz, sx / 2 + 2.5, sz / 2 + 2.5, pave);
     const roll = r(), fk = facadeKind(C.style.pal + (r() < 0.25 ? (r() < 0.5 ? 1 : 5) : 0));
     if (roll < 0.1) pocketSquare(C, cx, cz, sx, sz);
     else if (roll < 0.38) setbackTower(C, cx, cz, sx, sz, hmax, fk);
@@ -343,6 +356,7 @@ export function parkCell(C, x0, x1, z0, z1, lakeFrac) {
   }
   // stone walks crossing the park, lamp-lit
   M.box(cx, S.deck(cx) + 1.8, cz, 8, 0.6, sz - 20, HK.STONE);
+  walk(C, 0, cx, cz, 2.2, sz / 2 - 12, S.deck(cx) + 2.1);
   M.box(cx, S.deck(cx) + 1.8, cz, sx - 20, 0.6, 8, HK.STONE);
   for (let t = -sz / 2 + 40; t < sz / 2; t += 60) C.flamps.push({ p: V3(cx + 7, S.deck(cx) + 5, cz + t), r: 1.2, color: C.style.street, i: 1.3 });
   void yg;
@@ -426,6 +440,7 @@ export function civicCell(C, x0, x1, z0, z1) {
     B.box(cx, y + 0.3, pz, 186, 1.8, 46, HK.STONE);
     for (let j = -3; j <= 3; j++) N.tube([V3(cx + j * 24, y + 1.1, pz), V3(cx + j * 24, y + 6 + 3 * Math.abs(Math.sin(j)), pz)], 0.5, 5, HK.WATER);
   }
+  walk(C, 1, cx, cz, 175, 0, y); walk(C, 1, cx, cz, 128, 0, y);
   for (let k = 0; k < 16; k++) { const a = (k / 16) * TAU; tree(M, N, cx + Math.cos(a) * 190, y, cz + Math.sin(a) * 190, 12 + r() * 5, pickTree(C)); }
   for (let k = 0; k < 8; k++) { const a = (k / 8) * TAU; C.flamps.push({ p: V3(cx + Math.cos(a) * 160, y + 6, cz + Math.sin(a) * 160), r: 1.6, color: C.style.street, i: 1.5 }); }
 }
@@ -658,6 +673,7 @@ export function harbourTown(C) {
   const y = Math.max(S.deck(-R - 250), S.deck(R + 250), S.deck(0)) + 1.0;
   // the basin and its quay wall (a stepped stone rim, bollards and lamps along the edge)
   latheAt(B, 0, y, 0, [[0.1, 0, HK.WATER], [R, 0, HK.WATER], [R, 1.2, HK.WATER], [0.1, 1.2, HK.WATER]], 48);
+  walk(C, 1, 0, 0, R + 24, 0, y + 2.5); walk(C, 1, 0, 0, R + 44, 0, y + 2.5);
   latheAt(B, 0, y - 3, 0, [[R - 2, 0, HK.STONE], [R + H.quay, 0, HK.STONE], [R + H.quay, 5.5, HK.STONE], [R + 8, 5.5, HK.STONE], [R + 8, 3.5, HK.STONE], [R - 2, 3.5, HK.STONE]], 64, true);
   if (F) {
     latheAt(F, 0, y, 0, [[0.1, 0, HK.WATER], [R, 0, HK.WATER], [R, 1.2, HK.WATER], [0.1, 1.2, HK.WATER]], 16);
