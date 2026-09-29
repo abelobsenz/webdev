@@ -78,6 +78,226 @@ varying float vWpx;
 ${SUNLIGHT_GLSL}
 ${NOISE_GLSL}
 ${FACADE_GLSL}
+#ifdef HALO_CELLS
+// ---- the district plan (src/space/haloDistricts.js: cellKinds, cellPlanTextures) painted on
+//      the deck, so the band reads as the same towns, parks, lakes and glasshouse ranges from
+//      orbit that the silhouettes and full districts raise onto it near the camera ----
+uniform sampler2D uPlanCells;
+uniform sampler2D uPlanTiles;
+uniform vec4 uPlan;            // seam tile index, seam tile length (km), tile count, deck span (km)
+vec3 planStone(float v) {
+  if (v < 0.5) return vec3(0.70, 0.62, 0.50);          // limestone
+  if (v < 1.5) return vec3(0.68, 0.47, 0.33);          // terracotta
+  if (v < 2.5) return vec3(0.70, 0.72, 0.72);          // white render
+  if (v < 3.5) return vec3(0.49, 0.41, 0.36);          // brick
+  if (v < 4.5) return vec3(0.66, 0.71, 0.62);          // sage ceramic
+  if (v < 5.5) return vec3(0.67, 0.58, 0.60);          // rose
+  return vec3(0.70, 0.72, 0.72);
+}
+float planPitched(float v) { return v < 0.5 ? 0.55 : v < 1.5 ? 0.8 : v < 2.5 ? 0.2 : v < 3.5 ? 0.35 : v < 4.5 ? 0.5 : v < 5.5 ? 0.4 : 0.3; }
+// coverage of [a, b] by a pixel w wide, and of a disc
+float pBox(float x, float a, float b, float w) { return clamp(min(x - a, b - x) / max(w, 1e-5) + 0.5, 0.0, 1.0); }
+float pDisc(float r, float R, float w) { return clamp((R - r) / max(w, 1e-5) + 0.5, 0.0, 1.0); }
+
+const vec3 P_STREET = vec3(0.17, 0.17, 0.18);
+const vec3 P_PAVE = vec3(0.46, 0.43, 0.38);
+const vec3 P_LAWN = vec3(0.075, 0.15, 0.045);
+const vec3 P_WOOD = vec3(0.03, 0.07, 0.025);
+const vec3 P_TILE = vec3(0.50, 0.25, 0.14);
+const vec3 P_FLAT = vec3(0.34, 0.34, 0.30);
+const vec3 P_GLASS = vec3(0.07, 0.09, 0.11);
+const vec3 P_WATER = vec3(0.018, 0.038, 0.058);
+const vec3 P_WARM = vec3(1.0, 0.72, 0.44);
+
+// One town block (bw x bd km, local coords q from its corner): a court block, a tower on its
+// podium, stepped terraces or a pocket square, by hash. Returns the albedo; lit windows in wl.
+vec3 planBlock(vec2 q, vec2 bs, float h, float tv, float aa, out float bld) {
+  vec2 c = q - 0.5 * bs;
+  float fp = pBox(q.x, 0.018, bs.x - 0.018, aa) * pBox(q.y, 0.018, bs.y - 0.018, aa);   // footprint
+  float pave = pBox(q.x, 0.013, bs.x - 0.013, aa) * pBox(q.y, 0.013, bs.y - 0.013, aa);
+  vec3 stone = planStone(tv) * (0.85 + 0.3 * fract(h * 13.7));
+  vec3 roof = fract(h * 7.3) < planPitched(tv) ? P_TILE * (0.85 + 0.35 * fract(h * 3.1)) : mix(P_FLAT, P_LAWN * 1.6, step(0.5, fract(h * 5.9)));
+  vec3 col;
+  if (h < 0.1) {
+    // pocket square: paving, a round basin, trees round it
+    float r = length(c);
+    col = mix(P_PAVE, P_WATER, pDisc(r, 0.03, aa));
+    col = mix(col, P_WOOD * 1.4, pBox(r, 0.045, 0.075, aa) * 0.7);
+    bld = 0.1;
+  } else if (h < 0.38) {
+    // tower on a planted podium: the tower's dark roof and lantern crown in the middle
+    col = mix(P_LAWN * 1.3, stone * 0.8, 0.35);
+    float tw = 0.02 + 0.03 * fract(h * 17.0);
+    float tower = pBox(c.x, -tw, tw, aa) * pBox(c.y, -tw, tw, aa);
+    col = mix(col, fract(h * 23.0) < 0.5 ? P_GLASS : stone * 0.7, tower);
+    bld = 0.6 + 0.4 * tower;
+  } else if (h < 0.78) {
+    // courtyard block: four wings round a green court
+    float wing = 0.015 + 0.008 * fract(h * 11.0);
+    float court = pBox(q.x, 0.018 + wing, bs.x - 0.018 - wing, aa) * pBox(q.y, 0.018 + wing, bs.y - 0.018 - wing, aa);
+    col = mix(roof, P_LAWN * 1.2, court);
+    bld = 1.0 - court;
+  } else {
+    // stepped terraces: storeys stepping down one way, a garden on every step
+    float st = fract((fract(h * 29.0) < 0.5 ? q.x / bs.x : q.y / bs.y) * 4.0);
+    col = mix(stone * 0.75, P_LAWN * 1.4, mix(0.35, pBox(st, 0.0, 0.35, aa * 4.0 / bs.x), 1.0 - smoothstep(0.02, 0.06, aa)));
+    bld = 0.8;
+  }
+  col = mix(P_PAVE, col, fp);
+  bld *= fp;
+  return mix(P_STREET, col, pave);
+}
+
+/**
+ * The plan at (u along, x across in the tile frame; km) for a pixel aa km wide: 1 where the
+ * tile is dressed, with its albedo, water cover and night light.
+ */
+float haloPlan(float u, float x, float aa, float night, out vec3 alb, out float water, out vec3 em) {
+  alb = vec3(0.0); water = 0.0; em = vec3(0.0);
+  float seam0 = uPlan.x * 4.0, k, zl;
+  if (u < seam0) { k = floor(u / 4.0); zl = u - (k + 0.5) * 4.0; }
+  else { float j = min(floor((u - seam0) / uPlan.y), 7.0); k = uPlan.x + j; zl = (u - seam0 - (j + 0.5) * uPlan.y) * 4.0 / uPlan.y; }
+  k = clamp(k, 0.0, uPlan.z - 1.0);
+  float tv = floor(texelFetch(uPlanTiles, ivec2(int(mod(k, 256.0)), int(floor(k / 256.0))), 0).r * 255.0 + 0.5) - 1.0;
+  if (tv < 0.0) return 0.0;
+  float ax = abs(x);
+  float dBlk = 1.0 - smoothstep(0.25 / 9.0, 0.25 / 3.0, aa);   // blocks resolved
+  float lampN = 0.04 + 0.5 * night;
+  if (ax > 15.0) {
+    // the foot of the terraced cliffs: promenade, the glazed concourse, then the stepped decks
+    // (stone slabs and their gardens) climbing to the wall
+    float conc = pBox(ax, 15.26, 15.42, aa);
+    float steps = fPulse(ax, 0.036, 0.0, 0.014, aa);
+    vec3 terr = mix(planStone(tv) * 0.8, P_LAWN * 1.5, steps);
+    alb = mix(P_PAVE, terr, smoothstep(15.44 - aa, 15.48 + aa, ax));
+    alb = mix(alb, P_GLASS * 1.5, conc);
+    float spine = pBox(ax, 15.337, 15.343, aa);
+    em = P_WARM * (conc * 0.06 + spine * 0.8 + fPulse(ax, 0.036, 0.013, 0.016, aa) * step(15.48, ax) * 0.25) * lampN;
+    return 1.0;
+  }
+  float ix = clamp(floor(x + 15.0), 0.0, 29.0), iz = clamp(floor(zl + 2.0), 0.0, 3.0);
+  float lx = x + 15.0 - ix, lz = zl + 2.0 - iz;
+  float mLo = (ix == 15.0 || ix == 8.0 || ix == 22.0) ? 0.09 : 0.03;
+  float mHi = (ix == 14.0 || ix == 7.0 || ix == 21.0) ? 0.09 : 0.03;
+  float inCell = pBox(lx, mLo, 1.0 - mHi, aa) * pBox(lz, 0.03, 0.97, aa);
+  // between the cells: streets with their lamps, the spine viaduct, the planted tram boulevards
+  vec3 gut = P_STREET;
+  float spineV = pBox(ax, 0.0, 0.018, aa), boul = pBox(abs(ax - 7.0), 0.0, 0.03, aa);
+  gut = mix(gut, vec3(0.32, 0.31, 0.3), spineV);
+  gut = mix(gut, P_LAWN, boul * 0.8);
+  vec3 gutEm = P_WARM * (0.25 + 1.2 * spineV + 0.4 * boul) * lampN;
+  float code = floor(texelFetch(uPlanCells, ivec2(int(ix), int(tv * 4.0 + iz)), 0).r * 255.0 + 0.5);
+  float cx = lx - mLo, sx = 1.0 - mLo - mHi, cz = lz - 0.03, sz = 0.94;   // inside the cell (km)
+  vec2 cc = vec2(lx - 0.5 * (mLo + 1.0 - mHi), lz - 0.5);                // from the cell centre
+  float hc = hash12(vec2(ix, k * 4.0 + iz) + 0.37);
+  vec3 cAlb = P_LAWN; vec3 cEm = vec3(0.0); float cW = 0.0;
+  if (code < 0.5) {
+    // the harbour under the arch: a basin 3 km across round the island of the Harbour Light,
+    // stone quays, and the ring quarter's blocks round it
+    vec2 hp = vec2(x, zl);
+    float rH = length(hp);
+    float basin = pDisc(rH, 1.5, aa), isl = pDisc(length(hp - vec2(0.72, 0.0)), 0.3, aa);
+    float quay = pBox(rH, 1.5, 1.56, aa);
+    vec2 q = mod(hp + 3.0, vec2(0.25)); float bld;
+    vec3 town = planBlock(q, vec2(0.25), hash12(floor((hp + 3.0) / 0.25) + k), tv, aa, bld);
+    town = mix(mix(planStone(tv) * 0.45, P_LAWN, 0.3), town, dBlk);
+    cAlb = mix(town, P_WATER, basin);
+    cAlb = mix(cAlb, P_LAWN * 1.2, isl * basin);
+    cAlb = mix(cAlb, P_PAVE * 1.2, quay);
+    cW = basin * (1.0 - isl);
+    cEm = P_WARM * (bld * (1.0 - basin) * 0.35 + quay * 1.2 + isl * basin * pDisc(length(hp - vec2(0.72, 0.0)), 0.05, aa) * 3.0) * lampN;
+    alb = cAlb; water = cW; em = cEm;
+    return 1.0;
+  }
+  if (code < 1.5) {
+    // town: four by four blocks on a street grid
+    vec2 bs = vec2(sx, sz) / 4.0;
+    vec2 bq = vec2(cx, cz), bi = floor(bq / bs), q = bq - bi * bs;
+    float bld;
+    vec3 blk = planBlock(q, bs, hash12(bi + vec2(ix * 4.0, k * 4.0 + iz) * 4.1 + tv), tv, aa, bld);
+    vec3 mean = mix(P_STREET, mix(planStone(tv) * 0.5, P_LAWN * 1.3, 0.25), 0.72);
+    cAlb = mix(mean, blk, dBlk);
+    float lit = mix(0.5, step(0.35, hash12(bi * 3.7 + floor(vec2(cx, cz) / 0.05) + k)), dBlk);
+    cEm = P_WARM * (mix(0.55, bld, dBlk) * lit * 0.45 + mix(0.28, 1.0 - bld, dBlk) * 0.3) * lampN;
+  } else if (code < 4.5) {
+    // parks: lawns and woods in drifts, two stone walks crossing, a pond or a lake
+    float n = vnoise(vec2(lx, lz + mod(k, 64.0) * 4.0) * 9.0 + ix) * 0.7 + vnoise(vec2(lx, lz) * 27.0 + ix * 3.0) * 0.3;
+    float woods = mix(0.35, smoothstep(0.45, 0.6, n), 1.0 - smoothstep(0.012, 0.04, aa));
+    cAlb = mix(P_LAWN, P_WOOD, woods);
+    float walks = max(pBox(cc.x, -0.004, 0.004, aa), pBox(cc.y, -0.004, 0.004, aa));
+    cAlb = mix(cAlb, P_PAVE, walks);
+    float R = code > 3.5 ? 0.29 : code > 2.5 ? 0.165 : 0.0;
+    float e = 0.7 + 0.3 * hash11(hc * 91.0);
+    float rr = length(vec2(cc.x, cc.y / e));
+    float lake = R > 0.0 ? pDisc(rr, R, aa) : 0.0;
+    cAlb = mix(cAlb, P_PAVE, R > 0.0 ? pBox(rr, R, R + 0.007, aa) : 0.0);
+    cAlb = mix(cAlb, P_WATER, lake);
+    cW = lake;
+    cEm = P_WARM * (walks * 0.5 + (R > 0.0 ? pBox(rr, R, R + 0.01, aa) : 0.0) * 0.9) * lampN;
+  } else if (code < 5.5) {
+    // glasshouse ranges along the ring with crops between them, a farmstead at the near end
+    float p = sx / 6.0, gi = floor(cx / p), gq = cx - gi * p;
+    float glass = pBox(gq, 0.2 * p, 0.8 * p, aa) * pBox(cz, 0.06, 0.93, aa);
+    vec3 crop = mix(vec3(0.16, 0.2, 0.07), vec3(0.36, 0.3, 0.12), hash11(gi + hc * 17.0));
+    crop *= 0.9 + 0.2 * fPulse(cz, 0.012, 0.0, 0.006, aa);
+    cAlb = mix(crop, vec3(0.34, 0.42, 0.38), glass);
+    cAlb = mix(cAlb, P_TILE, pBox(cx, 0.5 * sx - 0.09, 0.5 * sx + 0.09, aa) * pBox(cz, 0.024, 0.044, aa));
+    cEm = vec3(0.6, 1.0, 0.55) * glass * (0.01 + 0.08 * night) + P_WARM * pBox(cz, 0.02, 0.05, aa) * pBox(abs(cx - 0.5 * sx), 0.0, 0.25, aa) * 0.3 * lampN;
+  } else if (code < 6.5) {
+    // civic plaza: stone, the tower's glass drum, four halls, reflecting pools, a ring of trees
+    float r = length(cc);
+    cAlb = P_PAVE * 1.15;
+    cAlb = mix(cAlb, P_LAWN * 1.3, pBox(r, 0.18, 0.2, aa));
+    for (int q = 0; q < 4; q++) {
+      float a = float(q) * 1.5707963 + 0.7853982;
+      vec2 hq = cc - 0.3 * vec2(cos(a) * sx, sin(a) * sz);
+      cAlb = mix(cAlb, q == 1 || q == 3 ? vec3(0.32, 0.44, 0.36) : planStone(tv) * 0.8, pBox(hq.x, -0.075, 0.075, aa) * pBox(hq.y, -0.055, 0.055, aa));
+    }
+    float pool = pBox(cc.x, -0.09, 0.09, aa) * (pBox(cc.y, 0.18, 0.22, aa) + pBox(cc.y, -0.22, -0.18, aa));
+    cAlb = mix(cAlb, P_WATER, pool);
+    cW = pool;
+    float tower = pDisc(r, 0.1, aa);
+    cAlb = mix(cAlb, P_GLASS, tower);
+    cEm = P_WARM * (pBox(r, 0.155, 0.165, aa) * 1.0 + tower * 0.5 + pBox(r, 0.09, 0.1, aa) * 2.0) * lampN;
+  } else if (code < 7.5) {
+    // works: fabrication halls under dark photovoltaic sawtooth roofs, tanks, the yard
+    float halls = 2.0 + floor(hc * 2.0), hp = sx / halls, hi = floor(cx / hp), hq = cx - hi * hp;
+    float hall = pBox(hq, 0.035, hp - 0.035, aa) * pBox(cz, 0.04, 0.04 + 0.55 * sz, aa);
+    vec3 pv = vec3(0.05, 0.07, 0.12) * (0.8 + 0.4 * fPulse(cz, 0.064, 0.0, 0.03, aa));
+    cAlb = mix(vec3(0.22, 0.21, 0.2), pv, hall);
+    float tq = mod(cx - 0.09, (sx - 0.18) / 4.0);
+    float tank = pDisc(length(vec2(min(tq, (sx - 0.18) / 4.0 - tq), cz - 0.72 * sz)), 0.03, aa) * step(0.05, cx) * step(cx, sx - 0.05);
+    cAlb = mix(cAlb, vec3(0.6, 0.58, 0.54), tank);
+    cEm = vec3(1.0, 0.58, 0.26) * ((1.0 - hall) * 0.35 + pBox(cz, 0.0, 0.04, aa) * 0.8) * lampN;
+  } else if (code < 8.5) {
+    // sports ground: pitch, raked stands, the roof ring and its floodlit rim
+    float r = length(cc);
+    cAlb = mix(P_PAVE, vec3(0.5, 0.5, 0.52), pDisc(r, 0.3, aa));
+    cAlb = mix(cAlb, vec3(0.1, 0.24, 0.06) * (0.9 + 0.2 * fPulse(cc.x, 0.02, 0.0, 0.01, aa)), pDisc(r, 0.15, aa));
+    cAlb = mix(cAlb, P_GLASS * 2.0, pBox(r, 0.25, 0.29, aa));
+    cEm = vec3(0.85, 0.92, 1.0) * (pBox(r, 0.274, 0.278, aa) * 3.0 + pDisc(r, 0.15, aa) * 0.3) * lampN;
+  } else if (code < 9.5) {
+    // covered markets: three lantern-roofed arcades along the ring
+    float p = sx / 3.0, mq = mod(cx, p);
+    float arc = pBox(mq, 0.2 * p, 0.8 * p, aa) * pBox(cz, 0.04, 0.9, aa);
+    cAlb = mix(P_PAVE, vec3(0.62, 0.48, 0.32), arc);
+    cEm = (P_WARM * 0.8 + vec3(0.3, 0.0, 0.15)) * arc * (0.03 + 0.4 * night) + P_WARM * (1.0 - arc) * 0.2 * lampN;
+  } else {
+    // canal quarter: four canals between stone quays, gabled terraces lining both sides
+    float p = sx / 4.0, cq = mod(cx, p) - 0.5 * p;
+    float canal = pBox(cq, -0.011, 0.011, aa);
+    float houses = pBox(abs(cq), 0.018, 0.032, aa) * pBox(cz, 0.014, 0.9, aa);
+    cAlb = mix(P_PAVE, P_TILE * (0.85 + 0.3 * hash11(floor(cz / 0.044) + cx)), houses);
+    cAlb = mix(cAlb, P_WATER, canal);
+    cW = canal;
+    cEm = P_WARM * (houses * 0.35 + pBox(abs(cq), 0.012, 0.016, aa) * 0.8) * lampN;
+  }
+  alb = mix(gut, cAlb, inCell);
+  water = cW * inCell;
+  em = mix(gutEm, cEm, inCell);
+  return 1.0;
+}
+#endif
 
 float aaStep(float e, float x, float w) { return smoothstep(e - w, e + w, x); }
 // coverage of the band |d| < hw for a pixel aa wide: a band narrower than the pixel keeps its
@@ -257,6 +477,13 @@ void main() {
       alb = mix(alb, vec3(0.018, 0.038, 0.058), water);
       alb = mix(alb, mix(park, vec3(0.38, 0.36, 0.32), aaDisc(rH, 0.3, aa)), island);
       alb = mix(alb, vec3(0.36, 0.34, 0.3), bridge * step(abs(dr), rw + 0.12));
+#ifdef HALO_CELLS
+      // where the ring is dressed with districts, the deck carries their plan instead
+      vec3 pAlb, pEm; float pWater;
+      float plan = haloPlan(u, -v * uPlan.w, aa, nightSide, pAlb, pWater, pEm);
+      alb = mix(alb, pAlb, plan);
+      water = mix(water, pWater, plan);
+#endif
       vec3 diff = alb / 3.14159 * sunL * ndl;
       // water: wind-rippled, so the Sun's reflection breaks into a moving scatter of glints while
       // the ripples are resolved (tens of metres), a steady lobe once they are not
@@ -285,6 +512,9 @@ void main() {
       float banks = aaBand(abs(dr) - rw - 0.05, 0.02, aa) * (1.0 - wallT) * (1.0 - basin);
       em += uHabitatColor * (max(max(boul, rings2), avenue * 0.7) * (0.12 + 0.5 * nightSide) + quay * (0.3 + 0.9 * nightSide) + banks * (0.12 + 0.7 * nightSide));
       em += uHabitatColor * island * aaDisc(rH, 0.3, aa) * (0.25 + 0.6 * nightSide);
+#ifdef HALO_CELLS
+      em = mix(em, pEm, plan);
+#endif
     } else {
       // ---- underside, facing the Earth: structure, radiators, lights ----
       float dP = RDET(2.4), dR = RDET(6.0), dL = RDET(0.8);
@@ -751,6 +981,15 @@ export class Rings {
     // the Halo's districts, docks, gantries and traffic within reach (src/space/haloDistricts.js):
     // their own anchor and depth slice under the Earth-fixed frame, built on first approach
     if (space && space.earthFixed && space.addBody) this.districts = new HaloDistricts(space, this);
+    // the Halo's deck paints the districts' own plan (known before any of them is built)
+    if (this.districts) {
+      const D = this.districts, m = this.meshes[0].material, def = RINGS[0];
+      const pu = { uPlanCells: { value: D.plan.cells }, uPlanTiles: { value: D.plan.tiles }, uPlan: { value: new THREE.Vector4(D.seamK, D.seamLen / 1000, D.nTiles, def.width + 2 * Math.max(0.15, def.width * 0.012)) } };
+      Object.assign(m.uniforms, pu);
+      Object.assign(this.roofs[0].material.uniforms, pu);          // (declared in the shared source; unused under the glass)
+      m.defines = { ...(m.defines || {}), HALO_CELLS: 1 };
+      m.needsUpdate = true;
+    }
   }
 
   setSize(w, h) {

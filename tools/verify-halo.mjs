@@ -262,6 +262,22 @@ assert.ok(out.closestApproachTris < 12e6, 'District tiles within 12M rendered tr
   let depth = 0; for (const ch of fs) { if (ch === '{') depth++; if (ch === '}') depth--; assert.ok(depth >= 0); }
   assert.equal(depth, 0, 'Balanced braces');
   for (const fn of ['hash12', 'vnoise', 'hBox', 'haloPalette', 'haloTree']) assert.ok(new RegExp(`float ${fn}\\(|vec3 ${fn}\\(`).test(fs), `${fn} defined`);
+  // the deck's painted district plan (rings.js HALO_CELLS): no derivatives or implicit-LOD reads
+  // in it (it runs inside the deck's branches), only texelFetch; exact float literals; the
+  // define and its uniforms on the Halo's deck alone
+  const dm = rings.meshes[0].material, dfs = dm.fragmentShader;
+  assert.ok(dm.defines && dm.defines.HALO_CELLS && !(rings.meshes[1].material.defines || {}).HALO_CELLS, 'Plan painted on the Halo deck only');
+  const plan = dfs.slice(dfs.indexOf('#ifdef HALO_CELLS'), dfs.indexOf('#endif', dfs.indexOf('float haloPlan(')));
+  assert.ok(plan.includes('float haloPlan(') && plan.includes('vec3 planBlock('), 'Plan functions present');
+  assert.ok(!/fwidth|dFdx|dFdy|texture\(|texture2D/.test(plan), 'Plan: no derivatives or implicit-LOD texture reads');
+  assert.ok((plan.match(/texelFetch\(/g) || []).length === 2, 'Plan: two texelFetch reads');
+  for (const p of plan.matchAll(/pow\(([^,]+),/g)) assert.ok(/max\(|clamp\(/.test(p[1]), `plan pow base guarded: ${p[1]}`);
+  const pbad = plan.replace(/[0-9.]+e-?[0-9]+/g, "1.0").replace(/for \(int q = 0; q < 4; q\+\+\)/, '').replace(/q == [13]/g, '').match(/[^\w.]([0-9]+)\s*[*/+-]\s*[a-zA-Z(]|[a-zA-Z)]\s*[*/+-]\s*([0-9]+)(?![0-9.eE])/g) || [];
+  assert.equal(pbad.length, 0, `Plan: no bare integer literals in float expressions: ${pbad.slice(0, 4).join(' | ')}`);
+  for (const u of ['uPlanCells', 'uPlanTiles', 'uPlan']) assert.ok(dm.uniforms[u] && dm.uniforms[u].value, `plan uniform ${u} supplied`);
+  let pd = 0; for (const ch of plan) { if (ch === '{') pd++; if (ch === '}') pd--; assert.ok(pd >= 0); }
+  assert.equal(pd, 0, 'Plan: balanced braces');
+  for (const fn of ['fPulse', 'hash11', 'hash12', 'vnoise']) assert.ok(dfs.indexOf(`float ${fn}(`) >= 0 && dfs.indexOf(`float ${fn}(`) < dfs.indexOf('float haloPlan('), `${fn} defined before the plan`);
   // pow() bases in the kinds are all max()/clamp()ed or constants
   for (const p of body.matchAll(/pow\(([^,]+),/g)) assert.ok(/max\(|clamp\(|^\s*[0-9.]+\s*$/.test(p[1]), `pow base guarded: ${p[1]}`);
   // integer literals in float arithmetic (GLSL ES 3.0 has no implicit int -> float)
@@ -272,6 +288,67 @@ assert.ok(out.closestApproachTris < 12e6, 'District tiles within 12M rendered tr
     for (const u of Object.keys(f.uniforms)) if (!src.includes(u) && !f.vertexShader.includes(u)) throw new Error(`uniform ${u} unused?`);
     for (const m2 of src.matchAll(/uniform\s+\w+\s+(\w+)\s*;/g)) assert.ok(m2[1] in f.uniforms, `uniform ${m2[1]} supplied`);
   }
+}
+
+// ------------------------------------------------------------ plan, junction, build on arrival ----
+{
+  // the painted plan is the built plan: every variant's cells agree with its tile's cell counts,
+  // the textures hold every tile and variant, and the harbour's quarter is left to the harbour
+  const { CELL_NAMES, CELLS_X, CELLS_Z, cellKinds } = await import('../src/space/haloDistricts.js');
+  const P = D.plan;
+  assert.ok(P.cells.image.width === CELLS_X && P.cells.image.height === CELLS_Z * (HARBOUR_V + 1), 'Cell texture: every variant');
+  assert.ok(P.tiles.image.width * P.tiles.image.height >= D.nTiles, 'Tile texture: every tile');
+  for (let k = 0; k < D.nTiles; k++) assert.equal(P.tiles.image.data[k * 4], D.tileVariant[k] + 1, 'tile variant texel');
+  D.variants.forEach((v, vi) => {
+    const codes = cellKinds(vi), counts = {};
+    for (const c of codes) if (c) counts[CELL_NAMES[c]] = (counts[CELL_NAMES[c]] || 0) + 1;
+    for (const [name, n] of Object.entries(v.cells)) assert.equal(counts[name] || 0, n, `variant ${vi}: ${name} cells painted as built`);
+    for (let i = 0; i < codes.length; i++) assert.equal(P.cells.image.data[(vi * codes.length + i) * 4], codes[i], 'cell texel');
+    assert.ok(codes.filter((c) => CELL_NAMES[c] === 'canal').length <= 4, 'At most four canal quarters a tile');
+  });
+  const hc = cellKinds(HARBOUR_V);
+  for (let ix = 0; ix < CELLS_X; ix++) { const cx = -15000 + ix * 1000; for (let iz = 0; iz < CELLS_Z; iz++) assert.equal(hc[iz * CELLS_X + ix] === 0, cx >= -HARBOUR.ground && cx < HARBOUR.ground, 'Harbour ground left open'); }
+  out.planSeam = [D.seamK, +(D.seamLen / 1000).toFixed(3)];
+  // Meridian's junction: dressed like the other ports (districts from 10.5 km), its terminal
+  // quarter in the anchor, clear of the tether's vault opening (2.52 x 2.67 km) and the glass
+  const jdir = bodyDir(0, THREE.MathUtils.degToRad(HALO_PORTS[0].lon));
+  let jNear = Infinity;
+  for (let k = 0; k < D.nTiles; k++) {
+    if (D.tileVariant[k] < 0) continue;
+    const th = D.tileAngle(k), c = D.basis.a.clone().multiplyScalar(Math.cos(th)).addScaledVector(D.basis.b, Math.sin(th));
+    jNear = Math.min(jNear, Math.acos(THREE.MathUtils.clamp(c.dot(jdir), -1, 1)) * D.basis.R - TILE_L * D.tileStretch(k) / 2000);
+  }
+  out.junctionToDistrictKm = +jNear.toFixed(2);
+  assert.ok(jNear > 9.8 && jNear < 14, `Districts reach to within ${jNear} km of the junction (its wings end at 9.8)`);
+  const jq = D.junctionQuarter;
+  assert.ok(jq && jq.geometry.index.count > 30000 && D.junctionLampCount > 20, 'Junction quarter built');
+  let qMin = Infinity, qGlass = Infinity;
+  eachVertex(jq.geometry, (x, y, z) => { if (y > S.deck(x) + 2) { qMin = Math.min(qMin, Math.hypot(x, z)); if (Math.abs(x) < S.hw - 1) qGlass = Math.min(qGlass, S.roofLow(x) - y); } });
+  out.junctionQuarterInnerM = Math.round(qMin); out.junctionQuarterGlassGapM = Math.round(qGlass);
+  assert.ok(qMin > 4250, 'Quarter clear of the podium drum (4.2 km) and the vault opening');
+  assert.ok(qGlass > 300, 'Quarter towers 300 m under the glass');
+  const ja = D.junctionU / D.Rm;
+  assert.ok(Math.abs(D.basis.a.clone().multiplyScalar(Math.cos(ja)).addScaledVector(D.basis.b, Math.sin(ja)).dot(jdir) - 1) < 1e-9, 'Junction arc on the junction');
+  // a fresh module whose camera jumps straight to the band builds in that same frame
+  const R2 = new Rings(space, { ringSegs: 0.25 }), D2 = R2.districts;
+  const up = jdir.clone();
+  sim.step(0); space.earthFixed.quaternion.copy(sim.earthQuat); space.earthFixed.updateMatrixWorld(true);
+  space.camera.position.copy(up).multiplyScalar(D2.basis.R + 40).applyQuaternion(sim.earthQuat); space.camera.updateMatrixWorld(true);
+  R2.update(sim, 1, 0.016, space);
+  assert.ok(D2.built && D2.anchor.visible, 'Arriving at the band: districts built in the same frame');
+  assert.ok(D2.junctionQuarter.visible, 'Junction quarter placed in the window');
+  const jw = new THREE.Vector3(); D2.anchor.updateMatrixWorld(true); D2.junctionQuarter.updateMatrixWorld(true); D2.junctionQuarter.getWorldPosition(jw);
+  const jExpect = up.clone().multiplyScalar(D2.basis.R).applyQuaternion(sim.earthQuat);
+  out.junctionQuarterPlacementM = Math.round(jw.distanceTo(jExpect) * 1000);
+  assert.ok(jw.distanceTo(jExpect) < 0.05, 'Junction quarter centred on the junction');
+  // far out on the approach: a few milliseconds a frame, not the whole build
+  const R3 = new Rings(space, { ringSegs: 0.25 }), D3 = R3.districts;
+  space.camera.position.copy(up).multiplyScalar(D3.basis.R + 2000).applyQuaternion(sim.earthQuat); space.camera.updateMatrixWorld(true);
+  R3.update(sim, 1, 0.016, space);
+  assert.ok(D3.buildQueue && !D3.built && D3.stats.pieces < 20, 'On the approach the build is spread over frames');
+  space.earthFixed.remove(R2.group); space.earthFixed.remove(R3.group);
+  for (const Dx of [D2, D3]) { space.earthFixed.remove(Dx.anchor); if (Dx.farGroup) space.earthFixed.remove(Dx.farGroup); }
+  space.bodies = space.bodies.filter((b) => !b.name.startsWith('halo-districts') || b === D.body || b === D.farBody);
 }
 
 // ------------------------------------------------------------ fly in: LOD, update timing, buffers ----

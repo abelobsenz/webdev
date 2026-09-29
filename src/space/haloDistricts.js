@@ -6,8 +6,8 @@ import { CRAFT_FRAME } from './craftMesh.js';
 import { createLamps, LAMP } from './lamps.js';
 import { HALO_PORTS } from './earthData.js';
 import { createHaloMaterial } from './haloMaterial.js';
-import { canalCell, buildCraneJib, CRANE_JIB, buildPerson, buildDrone, DISTRICT_STYLE, standBox, vault, ribArc, cliffs, townCell, parkCell, farmCell, civicCell, worksCell, stadiumCell, marketCell, buildVaultFrame, harbourTown, HARBOUR, buildHarbourBoat } from './haloArchitecture.js';
-import { bodyDir } from './sim.js';
+import { canalCell, buildCraneJib, CRANE_JIB, buildPerson, buildDrone, DISTRICT_STYLE, standBox, vault, ribArc, cliffs, townCell, parkCell, farmCell, civicCell, worksCell, stadiumCell, marketCell, buildVaultFrame, harbourTown, HARBOUR, buildHarbourBoat, portQuarter } from './haloArchitecture.js';
+import { bodyDir, MERIDIAN_LON } from './sim.js';
 
 // The Halo, lived in. Seen from orbit the deck shader already paints a continent of towns and
 // fields under glass; within ~150 km of the band this module lays real districts over it:
@@ -46,6 +46,9 @@ export const DRONES = { perTile: 6, reach: 2, lift: 32, half: 2.2 };
 export const PEOPLE = { max: 1600, range: 900, spacing: 38, speed: 1.3 };   // walkers round the camera
 export const HARBOUR_V = VARIANTS.length;        // the harbour town under each hub arch (tile variant 6)
 const MOVER_RANGE = (WINDOW + 0.5) * TILE_L; // m either side of the anchor
+export const BUILD_START_KM = 3000;          // district building starts this far off the band
+const BUILD_BUDGET_MS = 5;                   // per frame while approaching (at least one piece)
+const ROT_YM90 = new THREE.Matrix4().makeRotationY(-Math.PI / 2);
 
 export function mulberry(seed) {
   let a = seed >>> 0;
@@ -323,30 +326,20 @@ function* buildDistrictSteps(C, bay, variant) {
   underDeck(B, M, lamps, S);
   const harbour = variant === HARBOUR_V ? harbourTown(C) : null;
   yield;
-  const weights = [
-    { town: 0.48, park: 0.18, farm: 0.1, civic: 0.06, lake: 0.08, works: 0, stadium: 0.02, market: 0.08 },
-    { town: 0.14, park: 0.2, farm: 0.52, civic: 0.02, lake: 0.08, works: 0.04, stadium: 0, market: 0 },
-    { town: 0.36, park: 0.2, farm: 0.04, civic: 0.18, lake: 0.1, works: 0, stadium: 0.04, market: 0.08 },
-    { town: 0.28, park: 0.12, farm: 0.18, civic: 0.04, lake: 0.04, works: 0.3, stadium: 0, market: 0.04 },
-    { town: 0.3, park: 0.2, farm: 0.06, civic: 0.04, lake: 0.24, works: 0, stadium: 0.04, market: 0.04, canal: 0.06 },
-    { town: 0.46, park: 0.14, farm: 0.02, civic: 0.1, lake: 0.04, works: 0.06, stadium: 0.06, market: 0.12 },
-    { town: 0.4, park: 0.22, farm: 0, civic: 0.14, lake: 0.06, works: 0, stadium: 0.04, market: 0.14 },
-  ][variant];
-  const kinds = Object.keys(weights);
-  const cells = Object.fromEntries(Object.keys(weights).map((k) => [k, 0]));
-  for (let cx = -15000; cx < 15000; cx += 1000) for (let cz = -TILE_L / 2; cz < TILE_L / 2; cz += 1000) {
-    if (cz === -TILE_L / 2 && cx > -15000 && (cx + 15000) % 5000 === 0) yield;
+  const codes = cellKinds(variant);
+  const cells = Object.fromEntries(CELL_NAMES.slice(1).map((k) => [k, 0]));
+  for (let ix = 0; ix < CELLS_X; ix++) for (let iz = 0; iz < CELLS_Z; iz++) {
+    const cx = -15000 + ix * 1000, cz = -TILE_L / 2 + iz * 1000;
+    if (iz === 0 && ix > 0 && ix % 5 === 0) yield;
     const edge = (x) => (x === 0 || Math.abs(x) === 7000 ? 90 : 30);
     const x0 = cx + edge(cx), x1 = cx + 1000 - edge(cx + 1000);
     const z0 = cz + 30, z1 = cz + 1000 - 30;
-    if (harbour && cx >= -harbour.ground && cx < harbour.ground) continue;   // the harbour quarter
-    let u = r(), kind = kinds[kinds.length - 1];
-    for (const k of kinds) { if (u < weights[k]) { kind = k; break; } u -= weights[k]; }
-    // civic towers only where the vault is high (away from the walls)
-    if (kind === 'civic' && Math.abs(cx + 500) > 11000) kind = 'town';
+    const kind = CELL_NAMES[codes[iz * CELLS_X + ix]];
+    if (!kind) continue;                                               // the harbour quarter
     cells[kind]++;
     if (kind === 'town') townCell(C, x0, x1, z0, z1);
-    else if (kind === 'park') parkCell(C, x0, x1, z0, z1, r() < 0.4 ? 0.35 : 0);
+    else if (kind === 'park') parkCell(C, x0, x1, z0, z1, 0);
+    else if (kind === 'pond') parkCell(C, x0, x1, z0, z1, 0.35);
     else if (kind === 'lake') parkCell(C, x0, x1, z0, z1, 0.62);
     else if (kind === 'farm') farmCell(C, x0, x1, z0, z1);
     else if (kind === 'civic') civicCell(C, x0, x1, z0, z1);
@@ -356,6 +349,62 @@ function* buildDistrictSteps(C, bay, variant) {
     else worksCell(C, x0, x1, z0, z1);
   }
   B.cells = cells;
+}
+
+// ------------------------------------------------------------ cell plan ----
+// Each variant's kilometre cells are chosen by a hash of (variant, cell), not by the builder's
+// random stream, so the plan is known before any geometry exists: the deck shader paints the
+// very same plan (towns as blocks and streets, parks, lakes, glasshouse ranges, civic plazas)
+// round the whole ring, and the silhouettes and full districts rise onto it without a change
+// of layout (src/space/rings.js, HALO_CELLS).
+export const CELLS_X = 30, CELLS_Z = TILE_L / 1000;
+export const CELL_NAMES = ['', 'town', 'park', 'pond', 'lake', 'farm', 'civic', 'works', 'stadium', 'market', 'canal'];
+const CELL_WEIGHTS = [
+  { town: 0.48, park: 0.18, farm: 0.1, civic: 0.06, lake: 0.08, works: 0, stadium: 0.02, market: 0.08 },
+  { town: 0.14, park: 0.2, farm: 0.52, civic: 0.02, lake: 0.08, works: 0.04, stadium: 0, market: 0 },
+  { town: 0.36, park: 0.2, farm: 0.04, civic: 0.18, lake: 0.1, works: 0, stadium: 0.04, market: 0.08 },
+  { town: 0.28, park: 0.12, farm: 0.18, civic: 0.04, lake: 0.04, works: 0.3, stadium: 0, market: 0.04 },
+  { town: 0.3, park: 0.2, farm: 0.06, civic: 0.04, lake: 0.24, works: 0, stadium: 0.04, market: 0.04, canal: 0.06 },
+  { town: 0.46, park: 0.14, farm: 0.02, civic: 0.1, lake: 0.04, works: 0.06, stadium: 0.06, market: 0.12 },
+  { town: 0.4, park: 0.22, farm: 0, civic: 0.14, lake: 0.06, works: 0, stadium: 0.04, market: 0.14 },
+];
+const _cellCache = [];
+/** Cell codes (index into CELL_NAMES, 0 = left to the harbour) of a variant, row-major by z. */
+export function cellKinds(variant) {
+  if (_cellCache[variant]) return _cellCache[variant];
+  const w = CELL_WEIGHTS[variant], kinds = Object.keys(w), out = new Uint8Array(CELLS_X * CELLS_Z);
+  let canals = 0;
+  for (let ix = 0; ix < CELLS_X; ix++) for (let iz = 0; iz < CELLS_Z; iz++) {
+    const cx = -15000 + ix * 1000;
+    if (variant === HARBOUR_V && cx >= -HARBOUR.ground && cx < HARBOUR.ground) continue;
+    let u = hash2(variant * 977 + ix * 31 + iz, 71 + variant), kind = kinds[kinds.length - 1];
+    for (const k of kinds) { if (u < w[k]) { kind = k; break; } u -= w[k]; }
+    // civic towers only where the vault is high (away from the walls)
+    if (kind === 'civic' && Math.abs(cx + 500) > 11000) kind = 'town';
+    if (kind === 'park' && hash2(ix * 13 + variant, iz * 17 + 5) < 0.4) kind = 'pond';
+    // canal quarters are the costliest cells (a thousand gabled houses each): four a tile at most
+    if (kind === 'canal' && ++canals > 4) kind = 'lake';
+    out[iz * CELLS_X + ix] = CELL_NAMES.indexOf(kind);
+  }
+  return (_cellCache[variant] = out);
+}
+/**
+ * The plan as textures for the deck shader: cells (CELLS_X x CELLS_Z rows per variant, code in
+ * red) and the variant of every tile (+1, 0 = undressed) laid out PLAN_W wide.
+ */
+export const PLAN_W = 256;
+export function cellPlanTextures(tileVariant) {
+  const nV = VARIANTS.length + 1, cd = new Uint8Array(CELLS_X * CELLS_Z * nV * 4);
+  for (let v = 0; v < nV; v++) {
+    const c = cellKinds(v);
+    for (let i = 0; i < c.length; i++) cd[(v * c.length + i) * 4] = c[i];
+  }
+  const cells = new THREE.DataTexture(cd, CELLS_X, CELLS_Z * nV);
+  const H = Math.ceil(tileVariant.length / PLAN_W), td = new Uint8Array(PLAN_W * H * 4);
+  for (let k = 0; k < tileVariant.length; k++) td[k * 4] = tileVariant[k] + 1;
+  const tiles = new THREE.DataTexture(td, PLAN_W, H);
+  for (const t of [cells, tiles]) { t.magFilter = t.minFilter = THREE.NearestFilter; t.generateMipmaps = false; t.needsUpdate = true; }
+  return { cells, tiles, rows: H };
 }
 
 /** Crest furniture for a tile: plain, or dressed for an arch foot at the tile's centre. */
@@ -496,8 +545,9 @@ export class HaloDistricts {
     this.archProfile = rings.archData.profile;
     // tiles near the ports, the foundry and Nauru stay bare (their stations own the deck)
     // (ports keep 10.5 km: their dome, podium quarter and concourse wings reach 9.8 km along the
-    // ring; Meridian's junction keeps 18, its deck and vault opening are the elevator's)
-    const exclude = [...HALO_PORTS.map((p) => [bodyDir(0, THREE.MathUtils.degToRad(p.lon)), p.name === 'Meridian' ? 18 : 10.5]), [bodyDir(0, THREE.MathUtils.degToRad(166.9) + 0.009), 14]];
+    // ring. Meridian's junction keeps the same: its vault opening is 2.5 km across, and its
+    // terminal quarter, laid here in the district material, fills the deck round the dome)
+    const exclude = [...HALO_PORTS.map((p) => [bodyDir(0, THREE.MathUtils.degToRad(p.lon)), 10.5]), [bodyDir(0, THREE.MathUtils.degToRad(166.9) + 0.009), 14]];
     const { a, b } = this.basis;
     this.tileVariant = new Int8Array(this.nTiles);
     const dir = new THREE.Vector3();
@@ -526,6 +576,10 @@ export class HaloDistricts {
       if (ok) this.gantryBays.push({ u, phase: hash2(j, 3) * TAU });
     }
     this.perHub = perHub;
+    // Meridian's junction on the ring (arc, m): its terminal quarter rides the district anchor
+    const jd = bodyDir(0, MERIDIAN_LON);
+    this.junctionU = ((Math.atan2(jd.dot(b), jd.dot(a)) + TAU) % TAU) * this.Rm;
+    this.plan = cellPlanTextures(this.tileVariant);
     this.anchor = new THREE.Group();
     this.anchor.scale.setScalar(0.001);
     this.anchor.visible = false;
@@ -591,6 +645,7 @@ export class HaloDistricts {
       this.vaultFrame = { geo: f.geo, lamps: createLamps(f.lamps, { minPx: 1.0, gain: 0.9 }), lampCount: f.lamps.length };
     });
     q.push(() => this._buildLife());
+    q.push(() => this._buildJunction());
     q.push(() => this._buildSlots());
     q.push(() => this._buildFar());
     this.buildQueue = q;
@@ -630,6 +685,26 @@ export class HaloDistricts {
       return im;
     });
     this.farBody = this.space.addBody('halo-districts-far', [this.farGroup], () => this.farGroup.getWorldPosition(_c), (FAR_TILES + WINDOW + 1) * TILE_L / 1000, { solid: true });
+  }
+  /**
+   * The junction's terminal quarter: the same ring of towers, court blocks and terraces as the
+   * other ports' podium quarters (portQuarter), laid in the tile frame and drawn with the
+   * district material (the junction station itself is the elevator's, in the plain craft
+   * material, which knows none of the Halo's facade kinds).
+   */
+  _buildJunction() {
+    const B = new CB(), lamps = [];
+    B.push(ROT_YM90);                           // portQuarter turns its builder frame into a station's
+    portQuarter(B, this.S, lamps, 157);
+    B.pop();
+    for (const l of lamps) l.p.applyMatrix4(ROT_YM90);
+    const m = this._mesh(B.geometry(), this.mat);
+    m.matrixAutoUpdate = false;
+    m.visible = false;
+    m.add(createLamps(lamps, { minPx: 1.2 }));
+    this.anchor.add(m);
+    this.junctionQuarter = m;
+    this.junctionLampCount = lamps.length;
   }
   _buildSlots() {
     const v0 = this.variants[0], c0 = this.crests[0];
@@ -715,12 +790,15 @@ export class HaloDistricts {
     const ca = cam.dot(a), cb = cam.dot(b), cn = cam.dot(n);
     const radial = Math.hypot(ca, cb) - this.basis.R;
     const off = Math.hypot(Math.max(Math.abs(cn) - this.def.width / 2, 0), Math.max(radial - 5, -radial, 0));
-    if (off > 600 && !this.buildQueue) { this.anchor.visible = false; return; }
+    // building starts well out on the approach (a few milliseconds of it a frame, at least one
+    // piece); a camera that arrives at the band before it is done (a jump straight to a Halo
+    // target) finishes it at once rather than showing an empty deck for the next fifty frames
+    if (off > BUILD_START_KM && !this.buildQueue) { this.anchor.visible = false; return; }
     if (!this.built) {
       this._queue();
-      this._step();                               // one piece per frame
-      this.anchor.visible = false;
-      return;
+      const t0 = performance.now(), urgent = off < NEAR_RANGE_KM;
+      do this._step(); while (this.buildQueue.length && (urgent || performance.now() - t0 < BUILD_BUDGET_MS));
+      if (!this.built) { this.anchor.visible = false; return; }
     }
     if (off > FAR_RANGE_KM) { this.anchor.visible = false; this.farGroup.visible = false; return; }
     this.anchor.visible = off < NEAR_RANGE_KM;
@@ -771,6 +849,13 @@ export class HaloDistricts {
       im.setMatrixAt(im.count++, this._place(_m, this.tileAngle(kk) * this.Rm, 0, 0, 1, this.tileStretch(kk)));
     }
     for (const im of this.farMeshes) im.instanceMatrix.needsUpdate = true;
+    // the junction's quarter, while it is inside the window
+    if (this.junctionQuarter) {
+      const C = TAU * this.Rm, jq = this.junctionQuarter;
+      let du = this.junctionU - this.anchorAngle * this.Rm; du -= Math.round(du / C) * C;
+      jq.visible = Math.abs(du) < MOVER_RANGE;
+      if (jq.visible) { this._place(jq.matrix, this.junctionU, 0, 0, 1); jq.matrixWorldNeedsUpdate = true; }
+    }
     for (let k = kc - WINDOW; k <= kc + WINDOW; k++) {
       const kk = ((k % this.nTiles) + this.nTiles) % this.nTiles;
       const slot = this.slots[k - kc + WINDOW];
