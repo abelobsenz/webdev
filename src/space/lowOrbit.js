@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import { createCraftMaterial, updateCraftMaterial } from '../craft/craftMaterial.js';
+import { createCraftMaterial } from '../craft/craftMaterial.js';
 import { buildShuttle, buildCourier } from '../craft/craftClasses.js';
-import { craftMesh, craftPart, addLamps, pixelRadius, KM, CRAFT_FRAME } from './craftMesh.js';
+import { craftMesh, craftPart, addLamps, pixelRadius, KM } from './craftMesh.js';
 import { createLamps, LAMP } from './lamps.js';
 import { createRibbonMaterial, buildRibbonGeometry } from './lines.js';
 import { R_EARTH, MERIDIAN_LON, bodyDir } from './sim.js';
@@ -74,7 +74,7 @@ void main() {
   float sun = aG.z * phase * clamp(aG.x * 0.004 / d, 0.0, 1.0);
   float night = aG.y * (1.0 - aG.z) * clamp(aG.x * 0.0015 / d, 0.0, 0.6);
   // near in, the model and its lamps take over
-  float near = smoothstep(aG.x * 0.004, aG.x * 0.02, d);
+  float near = smoothstep(aG.x * 0.004, aG.x * 0.02 + 1e-3, d);      // (edges kept apart for empty slots)
   vC = (vec3(1.0, 0.96, 0.9) * sun * 2.6 + vec3(1.0, 0.72, 0.42) * night * 2.2) * near * aG.w;
   gl_PointSize = uPx * clamp(2.0 + 3.0 * sun, 2.0, 4.0);
 }
@@ -834,4 +834,3 @@ export function leoTargets(space) {
   };
 }
 
-export { updateCraftMaterial, CRAFT_FRAME };
