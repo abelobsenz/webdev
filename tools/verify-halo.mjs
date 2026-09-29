@@ -277,6 +277,21 @@ assert.ok(out.closestApproachTris < 12e6, 'District tiles within 12M rendered tr
   for (const u of ['uPlanCells', 'uPlanTiles', 'uPlan']) assert.ok(dm.uniforms[u] && dm.uniforms[u].value, `plan uniform ${u} supplied`);
   let pd = 0; for (const ch of plan) { if (ch === '{') pd++; if (ch === '}') pd--; assert.ok(pd >= 0); }
   assert.equal(pd, 0, 'Plan: balanced braces');
+  // the walls and the vault (rewritten this pass): no derivatives inside the part branches, no
+  // bare integers, every helper and varying they use declared before main
+  for (const mat of [dm, rings.roofs[0].material]) {
+    const f2 = mat.fragmentShader.replace(/[0-9.]+e-?[0-9]+/g, '1.0'), main = f2.slice(f2.indexOf('void main() {'));
+    const ib = main.match(/[^\w.]([0-9]+)\s*[*/+-]\s*[a-zA-Z(]|[a-zA-Z)]\s*[*/+-]\s*([0-9]+)(?![0-9.eE])/g) || [];
+    assert.equal(ib.length, 0, `Ring shader main: no bare integer literals (${ib.slice(0, 4).join(' | ')})`);
+    for (const id of ['varying float vS;', 'varying vec3 vAx;', 'float fPulse(']) assert.ok(f2.indexOf(id) >= 0 && f2.indexOf(id) < f2.indexOf('void main() {'), `${id} declared`);
+    assert.ok(mat.vertexShader.includes('vS = dot(w.xyz, vAx);'), 'vS written');
+  }
+  {
+    const main = dfs.slice(dfs.indexOf('void main() {'));
+    const wallSrc = main.slice(main.indexOf('} else if (part < 1.5) {'), main.indexOf('// ---- rotor tubes'));
+    assert.ok(wallSrc.length > 2000 && !/fwidth|dFd/.test(wallSrc), 'Walls: no derivatives inside the branch');
+    assert.ok(dfs.indexOf('float planTile(') < dfs.indexOf('void main() {'), 'planTile before main');
+  }
   for (const fn of ['fPulse', 'hash11', 'hash12', 'vnoise']) assert.ok(dfs.indexOf(`float ${fn}(`) >= 0 && dfs.indexOf(`float ${fn}(`) < dfs.indexOf('float haloPlan('), `${fn} defined before the plan`);
   // pow() bases in the kinds are all max()/clamp()ed or constants
   for (const p of body.matchAll(/pow\(([^,]+),/g)) assert.ok(/max\(|clamp\(|^\s*[0-9.]+\s*$/.test(p[1]), `pow base guarded: ${p[1]}`);

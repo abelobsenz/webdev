@@ -42,11 +42,17 @@ varying vec3 vWorld;
 varying vec3 vN;
 varying vec3 vRad;
 varying float vWpx;
+varying float vS;
+varying vec3 vAx;
 void main() {
   vRing = aRing;
   vec4 w = modelMatrix * vec4(position, 1.0);
   vWorld = w.xyz;
   vN = normalize(mat3(modelMatrix) * normal);
+  // the ring's axis and the point's offset along it (the ring's plane passes through the Earth's
+  // centre): which face of a wall is inboard
+  vAx = normalize(mat3(modelMatrix) * uAxisBody);
+  vS = dot(w.xyz, vAx);
   // the band's width on screen, per vertex (the same estimate as the far-field ribbon), so the
   // hand-over between the two is a clean edge rather than a per-pixel fwidth threshold
   float dist = max(length(w.xyz - cameraPosition), 1e-3);
@@ -75,6 +81,8 @@ varying vec3 vRing;
 varying vec3 vWorld;
 varying vec3 vN;
 varying float vWpx;
+varying float vS;
+varying vec3 vAx;
 ${SUNLIGHT_GLSL}
 ${NOISE_GLSL}
 ${FACADE_GLSL}
@@ -152,13 +160,18 @@ vec3 planBlock(vec2 q, vec2 bs, float h, float tv, float aa, out float bld) {
  * The plan at (u along, x across in the tile frame; km) for a pixel aa km wide: 1 where the
  * tile is dressed, with its albedo, water cover and night light.
  */
-float haloPlan(float u, float x, float aa, float night, out vec3 alb, out float water, out vec3 em) {
-  alb = vec3(0.0); water = 0.0; em = vec3(0.0);
-  float seam0 = uPlan.x * 4.0, k, zl;
+/** District variant of the tile at arc u (km; -1 undressed), its index k and the position zl along it. */
+float planTile(float u, out float k, out float zl) {
+  float seam0 = uPlan.x * 4.0;
   if (u < seam0) { k = floor(u / 4.0); zl = u - (k + 0.5) * 4.0; }
   else { float j = min(floor((u - seam0) / uPlan.y), 7.0); k = uPlan.x + j; zl = (u - seam0 - (j + 0.5) * uPlan.y) * 4.0 / uPlan.y; }
   k = clamp(k, 0.0, uPlan.z - 1.0);
-  float tv = floor(texelFetch(uPlanTiles, ivec2(int(mod(k, 256.0)), int(floor(k / 256.0))), 0).r * 255.0 + 0.5) - 1.0;
+  return floor(texelFetch(uPlanTiles, ivec2(int(mod(k, 256.0)), int(floor(k / 256.0))), 0).r * 255.0 + 0.5) - 1.0;
+}
+float haloPlan(float u, float x, float aa, float night, out vec3 alb, out float water, out vec3 em) {
+  alb = vec3(0.0); water = 0.0; em = vec3(0.0);
+  float k, zl;
+  float tv = planTile(u, k, zl);
   if (tv < 0.0) return 0.0;
   float ax = abs(x);
   float dBlk = 1.0 - smoothstep(0.25 / 9.0, 0.25 / 3.0, aa);   // blocks resolved
@@ -353,7 +366,7 @@ void main() {
   // ribs across the vault every 2 km, fading toward a faint tint once they are under ~10 px
   // apart (a far-off vault read as graph paper laid over the deck); the long mullions only near
   float ribFade = 1.0 - smoothstep(2.0 / 26.0, 2.0 / 9.0, fk);
-  float rib = (1.0 - fPulse(u, 2.0, 0.0, 1.94, fk)) * mix(0.3, 1.0, ribFade);
+  float rib = (1.0 - fPulse(u, 2.0, 0.0, 1.94, fk)) * mix(0.14, 1.0, ribFade);
   float mull = (1.0 - fPulse(v * uWidth + 1.0, 2.0, 0.0, 1.965, fk)) * (1.0 - smoothstep(0.02, 0.07, fk));
   // glazing bars every 50 m both ways, seen from the deck and from low over the vault
   float vkm0 = v * uWidth;
@@ -372,9 +385,15 @@ void main() {
   float nhj = max(dot(N, normalize(H + jit)), 0.0);
   float sparkle = pow(nhj, 1800.0) * 5.0;
   float smoothG = pow(nh, 400.0) * 1.6;
-  vec3 glint = min(sunL * (mix(pow(nh, 150.0) * 0.9, sparkle, dPane) * 0.6 + smoothG * 0.4 + pow(nh, 40.0) * 0.05) * Fg, sunL * 0.5);
+  // (the vault is a cylinder: its Sun is a narrow streak along the ring, not a disc; unresolved
+  // panes spread it only a little, and its peak stays well under the Sun's own brightness)
+  vec3 glint = min(sunL * (mix(pow(nh, 700.0) * 0.8, sparkle, dPane) * 0.5 + smoothG * 0.25) * Fg, sunL * 0.22);
   vec3 sky = vec3(0.02, 0.03, 0.05) * uSunE * 0.05 * Fg + earthshine * 0.3 * Fg;
-  vec3 frameC = uAlbedo * 0.7 / 3.14159 * (sunL * ndl + earthshine * 2.0) + min(sunL * pow(nh, 60.0) * 0.3, sunL * 0.4);
+  // ribs: bronze box girders, a highlight along the edge that faces the Sun, darker flanks
+  float ribX = clamp((mod(u, 2.0) - 1.97) / 0.03, -1.0, 1.0) * (1.0 - smoothstep(0.004, 0.02, fk));
+  vec3 Nr = normalize(N + normalize(cross(rhat, vAx)) * ribX * 0.8);
+  float ndlR = max(dot(Nr, uSunDir), 0.0);
+  vec3 frameC = vec3(0.36, 0.28, 0.19) / 3.14159 * (sunL * mix(ndl, ndlR, abs(ribX)) + earthshine * 2.0) + min(sunL * pow(max(dot(Nr, H), 0.0), 90.0) * 0.25, sunL * 0.3);
   // the ribs carry strings of lamps (a bead every 500 m across the vault) that trace its
   // arches in the night, and glow as lines once the beads are too small to see
   float bead = aaLamp(vkm + 0.25, 0.5, 0.014);
@@ -538,45 +557,101 @@ void main() {
       em += uStreamColor * keel * (0.08 + 1.2 * kpulse);
     }
   } else if (part < 1.5) {
-    // ---- retaining walls: an inhabited terrace city two kilometres high. Galleries every
-    //      280 m of height behind glazed bands, piers every 120 m, a buttress every 3 km, a
-    //      plinth of dark service decks at the foot and a bronze parapet along the crest.
-    //      Every order falls to its exact mean while its cell still spans ~3 px. ----
+    // ---- retaining walls, 2.2 km high. Inboard: the terraced cliffs - thirteen decks of 160 m
+    //      in 500 m blocks of their district's stone or of glass, every deck capped by a stone
+    //      slab and its garden, light wells with glass lift shafts between the blocks, a cascade
+    //      down every third block. Outboard, facing space: heat radiators on stand-offs between
+    //      the docking bays (their lit mouths every 2 km) and the conduits that feed them. Both:
+    //      a buttress every 3 km standing proud and lit from the side it faces, a dark plinth
+    //      with the deck's shadow at its foot, a bronze parapet along the crest. Every order
+    //      falls to its exact mean while its cell still spans a few pixels. ----
     float wallH = max(1.2, uWidth * 0.07);
     float hk = v * wallH;                                  // height above the deck, km
     float vert = 1.0 - abs(dot(N, rhat));                  // 1 on the faces, 0 on the crest
-    float fh = max(fwidth(hk), 1e-5);
+    float fh = max(fv * wallH, 1e-5);                      // (v's derivative, taken in uniform flow)
     float fwk = max(fu, fh);
-    vec3 alb = uAlbedo * 1.1;
-    float rib = 1.0 - fPulse(u, 3.0, 0.0, 2.76, fk);
-    float band = fPulse(hk, 0.28, 0.14, 0.24, fh) * step(0.2, hk) * (1.0 - step(wallH - 0.12, hk));
-    float pier = 1.0 - fPulse(u, 0.12, 0.0, 0.1, fu);
-    float glaze = band * (1.0 - pier) * vert;
+    float inboard = 1.0 - step(0.0, dot(N, vAx) * vS);
+    float inner = inboard * vert, outer = (1.0 - inboard) * vert;
+    vec3 Tr = normalize(cross(rhat, vAx));                 // along the ring, toward increasing u
+    // neighbourhood cladding (one per 3 km bay): limestone, terracotta, white render, bronze
+    // panel, sage ceramic; the district's own stone where the ring is dressed
+    float bay = floor(u / 3.0);
+    float hb = hash12(vec2(bay, 7.0) + uSeed);
+    vec3 clad = hb < 0.25 ? vec3(0.62, 0.56, 0.46) : hb < 0.45 ? vec3(0.60, 0.41, 0.29) : hb < 0.7 ? vec3(0.70, 0.71, 0.70) : hb < 0.85 ? vec3(0.44, 0.35, 0.25) : vec3(0.50, 0.60, 0.52);
+#ifdef HALO_CELLS
+    float tk, tz;
+    float tvw = planTile(u, tk, tz);
+    if (tvw >= 0.0) clad = mix(clad, planStone(tvw), 0.7);
+#endif
+    float bayRes = 1.0 - smoothstep(0.25, 0.9, fu);
+    clad = mix(vec3(0.59, 0.54, 0.46), clad, bayRes);
+    // buttress: 240 m wide at the start of each bay, its flanks shaded by the way they face
+    float bq = mod(u, 3.0);
+    float butt = fPulse(u, 3.0, 0.0, 0.24, fu) * vert;
+    float flankRes = (1.0 - smoothstep(0.012, 0.05, fu)) * vert;
+    float flL = (1.0 - smoothstep(0.0, 0.02, bq)) * flankRes, flR = (1.0 - smoothstep(0.0, 0.02, 0.24 - bq)) * flankRes * step(bq, 0.24);
+    vec3 Nb = normalize(N * 0.35 - Tr * flL + Tr * flR);
+    float ndlW = max(dot(Nb, uSunDir), 0.0);
+    // ---- inboard: decks, slabs, gardens, blocks, wells, cascades
+    float dq = fPulse(hk, 0.16, 0.012, 0.13, fh);            // the glazed storeys of each deck
+    float slab = fPulse(hk, 0.16, 0.13, 0.148, fh);
+    float garden = fPulse(hk, 0.16, 0.148, 0.16, fh) * step(0.16, hk);
+    float blockM = fPulse(u, 0.5, 0.015, 0.485, fu);         // blocks, and the 30 m wells between
+    float bi = floor(u / 0.5);
+    float hbk = hash12(vec2(bi, 3.0) + uSeed);
+    float glassBlk = mix(0.38, step(0.62, hbk), 1.0 - smoothstep(0.12, 0.4, fu));
+    float cascade = step(abs(mod(bi, 3.0) - 1.0), 0.5) * fPulse(u, 0.5, 0.241, 0.259, fu) * step(0.16, hk) * step(hk, 2.07);
+    vec3 glassC = vec3(0.07, 0.09, 0.1);
+    vec3 face = mix(clad * 0.92, glassC, glassBlk);
+    vec3 innerC = mix(clad * 0.85, face, dq);
+    innerC = mix(innerC, clad * 1.08, slab);
+    innerC = mix(innerC, vec3(0.08, 0.17, 0.05), garden);
+    innerC = mix(vec3(0.05, 0.055, 0.06), innerC, blockM);  // the wells, in shadow
+    innerC = mix(innerC, vec3(0.62, 0.72, 0.76), cascade);
+    float innerGlaze = dq * blockM * mix(0.35, 1.0, glassBlk) * (1.0 - cascade);
+    // ---- outboard: radiators between the bays, conduits, bay mouths
+    float rad = step(0.3, hk) * step(hk, 1.8);
+    float seam = 1.0 - fPulse(u, 0.15, 0.0, 0.146, fu);
+    float mouth = fPulse(u, 2.0, 0.9, 1.1, fu) * fPulse(hk, 4.0, 1.42, 1.58, fh);
+    float frameB = fPulse(u, 2.0, 0.88, 1.12, fu) * fPulse(hk, 4.0, 1.40, 1.60, fh) - mouth;
+    vec3 outerC = mix(clad * 0.7, vec3(0.05, 0.055, 0.065) * (1.0 + 0.6 * seam), rad);
+    float cond = fPulse(hk, 4.0, 0.285, 0.295, fh) + fPulse(hk, 4.0, 1.805, 1.815, fh);
+    outerC = mix(outerC, vec3(0.5, 0.36, 0.2), clamp(cond + frameB, 0.0, 1.0));
+    outerC = mix(outerC, vec3(0.9, 0.7, 0.45), mouth);
+    // ---- together: buttress, plinth and its contact shadow, crest parapet
+    vec3 alb = mix(clad, innerC, inner);
+    alb = mix(alb, outerC, outer);
+    alb = mix(alb, clad * 0.8, butt * (1.0 - cascade));
     float plinth = (1.0 - smoothstep(0.14, 0.2, hk)) * vert;
-    float crest = smoothstep(wallH - 0.1, wallH - 0.05, hk) * vert;
-    alb *= 1.0 - 0.3 * rib;
-    alb = mix(alb, vec3(0.05, 0.06, 0.07), glaze * 0.85);
-    alb = mix(alb, uAlbedo * 0.45, plinth);
-    alb = mix(alb, vec3(0.5, 0.36, 0.2), crest * (1.0 - rib));
-    float spec = mix(0.5, 1.4, glaze);
-    col = alb / 3.14159 * (sunL * ndl + earthshine * 2.0);
+    alb = mix(alb, clad * 0.4, plinth);
+    alb *= 1.0 - 0.45 * inner * (1.0 - smoothstep(0.0, 0.35, hk));          // the deck's shade at the foot
+    alb *= 1.0 - 0.3 * vert * smoothstep(wallH - 0.1, wallH - 0.04, hk);      // under the parapet
+    float crest = smoothstep(wallH - 0.1, wallH - 0.05, hk) * vert + (1.0 - vert);
+    float rails = (1.0 - vert) * (fPulse(u, 0.25, 0.0, 0.004, fu) * 0.3 + 0.2);
+    alb = mix(alb, vec3(0.5, 0.36, 0.2), clamp(crest * (1.0 - butt) * 0.8 + rails, 0.0, 1.0));
+    float glaze = innerGlaze * (1.0 - butt);
+    float spec = mix(0.4, 1.4, glaze + rad * outer * 0.6);
+    col = alb / 3.14159 * (sunL * mix(ndl, ndlW, max(flL, flR)) + earthshine * 2.0);
     col += min(sunL * pow(max(dot(N, H), 0.0), mix(70.0, 200.0, glaze)) * spec, sunL * 0.6);
     // lit rooms behind the glazing: neighbourhoods a shade apart, warmer and fuller at night
-    float room = hash12(floor(vec2(u / 0.12, hk / 0.28)) + uSeed);
+    float room = hash12(floor(vec2(u / 0.03, hk / 0.16)) + uSeed);
     float hood = hash12(floor(vec2(u / 4.0, hk / 1.2)) + uSeed * 3.1);
-    float rl = 1.0 - smoothstep(0.03, 0.09, fwk);
+    float rl = 1.0 - smoothstep(0.012, 0.04, fwk);
     float lit = mix(0.42, step(0.52, room) * (0.6 + 0.8 * hood), rl);
-    // households differ: warm lamps, cool screens, the odd rose or green room (mean colour kept
-    // once the rooms are under a pixel)
     vec3 roomC = mix(vec3(1.0), mix(vec3(1.05, 0.9, 0.75), vec3(0.75, 0.88, 1.2), step(0.8, fract(room * 7.7))), rl);
     roomC = mix(roomC, vec3(1.2, 0.7, 0.85), step(0.96, fract(room * 3.3)) * rl);
     em += uHabitatColor * roomC * glaze * lit * (0.05 + 0.3 * nightSide);
-    // glass lift shafts in the light wells every 500 m (the terraces' wells), cars rising in them
-    float shaftL = aaBand(mod(u, 0.5) - 0.25, 0.011, fu) * vert * step(0.05, hk) * (1.0 - crest);
+    // pergola lamps along the gardens, the cascades' cool glow, the wells' lift shafts with cars
+    em += vec3(1.0, 0.78, 0.5) * garden * inner * blockM * (0.02 + 0.2 * nightSide);
+    em += vec3(0.35, 0.6, 0.7) * cascade * inner * (0.05 + 0.15 * nightSide);
+    float shaftL = fPulse(u, 0.5, 0.494, 0.506, fu) * inner * step(0.05, hk) * (1.0 - crest);
     float car = mix(0.25, smoothstep(0.9, 1.0, fract(hk / 0.6 - uTime * 0.05 + hash12(vec2(floor(u / 0.5), uSeed)))), 1.0 - smoothstep(0.02, 0.06, fh));
     em += vec3(0.85, 0.93, 1.0) * shaftL * (0.12 + 0.6 * car) * (0.3 + 0.7 * nightSide);
+    // the bays' lit mouths and the buttresses' lift slots
+    em += vec3(1.0, 0.75, 0.45) * mouth * outer * (0.35 + 0.8 * nightSide);
+    em += vec3(1.0, 0.74, 0.46) * fPulse(u, 3.0, 0.115, 0.125, fu) * vert * step(0.2, hk) * (1.0 - crest) * (0.1 + 0.5 * nightSide);
     float stripe = 1.0 - smoothstep(0.0, 0.06, abs(v - 0.9));
-    em += uHabitatColor * stripe * 0.2;
+    em += uHabitatColor * stripe * 0.2 * (1.0 - butt * 0.5);
     // small marker lamps every 25 km, filtered so they never shrink below their energy
     float md = abs(fract(u / 25.0 + 0.5) - 0.5) * 25.0;
     float mw = 0.12;
