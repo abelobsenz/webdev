@@ -282,15 +282,27 @@ function embarkationTerrace() {
   for(const x of [-230,230])closedWalk(B,[V(x,17,-26),V(x,17,-100)],7);
   passengerPaths.push({min:V(-336,11.1,-2),max:V(-275,14,2)},{min:V(-232,11.1,-91),max:V(-228,14,-36)},{min:V(228,11.1,-91),max:V(232,14,-36)},{min:V(-2,11.1,10),max:V(2,14,56)});
   // A small courier and its surveyed landing gear show how large the berth really is.
-  B.box(365,floor+.2,120,146,.4,120,CK.DARK);
+  // the courier's pad: a hazard-chevron apron with chasing edge lamps round a non-slip deck,
+  // a painted touchdown square under the ship
+  // (five boxes flush at floor + .4 where the courier's feet stand; no two share an edge)
+  B.box(365,floor+.2,120,128,.4,102,CK.DECK);
+  for(const s of [-1,1]) {
+    B.box(365,floor+.2,120+s*55.5,146,.4,9,DK.HAZARD);
+    B.box(365+s*68.5,floor+.2,120,9,.4,101.9,DK.HAZARD);
+    B.box(365+s*22,floor+.41,120,1.2,.02,46,DK.LIVERY);B.box(365,floor+.41,120+s*22,44.4,.02,1.2,DK.LIVERY);
+  }
   for(const dx of [-58,58])B.box(365+dx,floor+.47,120,1.2,.15,96,CK.BRONZE);
   const courier=parkedCourier(B,365,floor+.4,120);
   hall(B,385,floor,-80,60,45,19,{rooms});
   passengerPaths.push({min:V(309,11.1,-2),max:V(377,14,2)},{min:V(383,11.1,-49),max:V(387,14,-9)});
   // Baggage and courier servicing stay on the eastern margin, outside the gardens.
-  for(const z of [-170,-135,-100]) {B.box(455,floor+2.8,z,16,5.6,10,CK.HULL);B.box(455,floor+5.7,z,17,.25,11,CK.BRONZE);}
+  // baggage bins in the port's livery on dark plinths, each with a lit loading mouth
+  for(const z of [-170,-135,-100]) {
+    B.box(455,floor+.3,z,17,.6,11,CK.DARK);B.box(455,floor+3.1,z,16,5,10,DK.LIVERY);B.box(455,floor+5.7,z,17,.25,11,CK.BRONZE);
+    B.box(446.95,floor+2.4,z,.1,2.6,6,CK.LANTERN);
+  }
   for(const x of [441,473])B.tube([V(x,floor+.3,-193),V(x,floor+.3,55)],.32,8,CK.BRONZE);
-  B.box(456,floor+1.3,-35,22,2.6,34,CK.DARK);B.box(456,floor+4.5,-35,16,3.8,22,CK.HULL);
+  B.box(456,floor+1.3,-35,22,2.6,34,CK.DARK);B.box(456,floor+4.5,-35,16,3.8,22,DK.GRIME);
   const baggageBraces=[];
   for(const x of [434,481])for(const z of [-61,-9]) {
     const legStart=B.idx.length;B.box(x,floor+9,z,1.8,18,2.4,CK.HULL);
