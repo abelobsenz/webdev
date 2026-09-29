@@ -6,6 +6,8 @@ import { Orbit, MU, sunSyncInclination, sunlitFraction, periodOf } from '../src/
 import { LowOrbit } from '../src/space/lowOrbit.js';
 import { buildHotel, HOTEL, buildPolar, POLAR, buildFarmDrum, buildFarmFrame, FARM, buildPower, POWER, SKYHOOK } from '../src/space/leoStations.js';
 import { SHELLS } from '../src/space/constellations.js';
+import { buildRelayCollar, buildCrawler, crawlerAt, CRAWLERS, CRAWL_RANGE } from '../src/space/tetherStations.js';
+import { RIBBON } from '../src/space/climbers.js';
 
 let fails = 0;
 const ok = (cond, msg) => { if (!cond) { fails++; console.log('FAIL', msg); } };
@@ -266,6 +268,22 @@ function sweptHits(moving, fixed, ax, c = new THREE.Vector3(), cell = 1) {
     log(`${s.name} drone clearance (m)`, +worst.toFixed(1));
     ok(worst > 12, `${s.name} drones clear of the structure`);
   }
+}
+
+// ---- relay crawlers run the ribbon's faces through the collar bore without meeting it
+{
+  const col = buildRelayCollar(), cg = buildCrawler();
+  const cp = cg.attributes.position;
+  let cx = 0, cz = 0;
+  for (let i = 0; i < cp.count; i++) { cx = Math.max(cx, Math.abs(cp.getX(i))); cz = Math.max(cz, Math.abs(cp.getZ(i))); }
+  const corridorX = RIBBON.thick / 2 + cx + 0.5, corridorZ = 7 + cz + 0.5;
+  let inside = 0;
+  const p = col.geo.attributes.position;
+  for (let i = 0; i < p.count; i++) if (Math.abs(p.getX(i)) < corridorX && Math.abs(p.getZ(i)) < corridorZ && Math.abs(p.getY(i)) < CRAWL_RANGE + 10) inside++;
+  log('crawler corridor (m, x / z)', [+corridorX.toFixed(1), +corridorZ.toFixed(1)]);
+  ok(inside === 0, `relay collar keeps the crawler corridor open (${inside} vertices in it)`);
+  ok(corridorZ < RIBBON.width / 2, 'crawlers ride within the ribbon width');
+  for (let k = 0; k < CRAWLERS; k++) for (let t = 0; t < 2000; t += 13) { const c = crawlerAt(k, t, 0.7); ok(Math.abs(c.y) <= CRAWL_RANGE + 1e-6, 'crawler range'); }
 }
 
 // ---- sunlit logic: the far side of the Earth is dark, the day side lit
