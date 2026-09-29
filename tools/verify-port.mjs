@@ -92,6 +92,7 @@ const _ray = new THREE.Raycaster();
 const mat = new THREE.MeshBasicMaterial({ side: THREE.DoubleSide });
 let docks = 0, blocked = [], spinViolations = 0, minRayMargin = Infinity;
 let mooredHits = 0, mooredCount = 0; const mooredWhere = [];
+let liftBlocked = 0, liftRays = 0;
 for (const st of belt.stations) {
   const d = st.built.data;
   const test = [new THREE.Mesh(d.geo, mat)];
@@ -147,6 +148,18 @@ for (const st of belt.stations) {
     const margin = hit ? hit.distance - (L - 12) : 99;
     minRayMargin = Math.min(minRayMargin, margin);
     if (margin < 0) blocked.push(`${st.desc.name}(${st.desc.kind}) dock ${d.docks.indexOf(k)} hit at ${(L - hit.distance).toFixed(1)} m out`);
+  }
+  // lift cars: their envelope (corners of the cab) runs clear the length of each spoke
+  for (const p of d.parts) for (const L of p.lifts || []) {
+    const pm = new THREE.Mesh(p.geo, mat); pm.updateMatrixWorld(true);
+    const side = new THREE.Vector3().crossVectors(new THREE.Vector3(0, 0, 1), L.axis).normalize();
+    for (const [sx, sz] of [[-1.65, -1.6], [-1.65, 1.6], [1.3, -1.6], [1.3, 1.6], [0, 0]]) {
+      const a = L.a.clone().addScaledVector(side, sx).add(new THREE.Vector3(0, 0, sz)).addScaledVector(L.axis, -3.3);
+      const b = L.b.clone().addScaledVector(side, sx).add(new THREE.Vector3(0, 0, sz)).addScaledVector(L.axis, 3.3);
+      _ray.set(a, b.clone().sub(a).normalize()); _ray.far = a.distanceTo(b);
+      if (_ray.intersectObject(pm, false).length) liftBlocked++;
+      liftRays++;
+    }
   }
   // spinning parts sweep clear of the static structure (outside the bearing)
   const pos = d.geo.attributes.position.array;
@@ -246,6 +259,9 @@ out.docks = docks;
 }
 
 out.mooredShips = mooredCount;
+out.liftRays = liftRays;
+check(liftBlocked === 0, `${liftBlocked} lift car paths obstructed`);
+check(liftRays > 0, "no lift cars checked");
 check(mooredHits === 0, `held ships intersect: ${mooredWhere.slice(0, 5).join("; ")}`);
 out.minDockApproachMarginM = +minRayMargin.toFixed(1);
 check(blocked.length === 0, `blocked berths: ${blocked.slice(0, 6).join('; ')}`);
@@ -377,6 +393,16 @@ check(nonFinite === 0, `${nonFinite} non-finite transforms`);
   let tri = st.built.data.tris;
   for (const s of st.traffic.sets) tri += (s.design.geo.index.count / 3) * s.n;
   out.nearViewTriangles = tri;
+  // the heaviest station at its closest: hull, fittings, held ships, its traffic, its life
+  belt.buildAll(true);
+  let worst = 0, who = '';
+  for (const st of belt.stations) {
+    let n = st.built.data.tris + (st.built.fit ? st.built.fit.triangles : 0) + st.built.data.mooredTris + st.built.life.triangles();
+    if (st.traffic) for (const s of st.traffic.sets) n += (s.design.geo.index.count / 3) * s.n;
+    if (n > worst) { worst = n; who = st.desc.name; }
+  }
+  out.heaviestStation = { name: who, triangles: worst };
+  check(worst < 12e6, 'a station over the 12M near budget');
 }
 console.log(JSON.stringify(out));
 if (fail.length) { console.error('FAIL:\n  ' + fail.join('\n  ')); process.exit(1); }

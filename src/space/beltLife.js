@@ -225,7 +225,7 @@ const FIT_KINDS = new Set([CK.HULL, 20, 21, 24]);   // plate, livery, ported pla
  * Scatter fittings over the static plating of a station (data from buildBeltStation) under
  * parent (its craft mesh). Returns { meshes, count, triangles, ms }.
  */
-export function buildFittings(parent, data, seed = 1, max = 2600) {
+export function buildFittings(parent, data, seed = 1, max = 6000) {
   const t0 = performance.now();
   const r = rng(seed * 4099 + 7);
   const g = data.geo, P = g.attributes.position.array, F = g.attributes.aFacade.array, I = g.index.array;
@@ -243,7 +243,7 @@ export function buildFittings(parent, data, seed = 1, max = 2600) {
   }
   const spins = data.parts.filter((p) => p.mode === 'spin');
   const walks = data.walks || [];
-  const want = Math.min(max, Math.floor(total / 28));
+  const want = Math.min(max, Math.floor(total / 14));
   const mats = [[], [], [], []];
   const p = new THREE.Vector3(), q = new THREE.Vector3(), up = new THREE.Vector3(), fwd = new THREE.Vector3(), m = new THREE.Matrix4(), inv = new THREE.Quaternion();
   let tries = 0;
