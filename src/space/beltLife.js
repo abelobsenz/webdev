@@ -175,3 +175,108 @@ export class BeltLife {
     return this.drones.count * (sharedDrone().index.count / 3) + this.suits.count * (suitGeo().index.count / 3);
   }
 }
+
+// ------------------------------------------------------------ fittings ----
+// The near-detail layer: thousands of small fittings scattered over a station's plating (area
+// weighted, on hull, livery, worn and ported plate only), each standing on its face's outward
+// normal - equipment boxes, access hatches, pipe runs, vent stacks, stub antennas, handrails.
+// Instanced (four shared shapes), built the first time the station fills the view, hidden when
+// it does not. Kept clear of spinning parts' sweeps, berths and the crews' walks.
+
+let _fitGeos = null;
+/** The fitting shapes (+y out of the plate, feet at y = 0, metres). */
+export function fittingGeos() {
+  if (_fitGeos) return _fitGeos;
+  const box = new CB();
+  box.box(0, 0.5, 0, 2.4, 1.0, 1.6, 24);                     // equipment box in worn plate
+  box.box(0, 1.06, 0, 2.0, 0.12, 1.2, CK.DARK);
+  box.box(0.9, 0.5, 0.81, 0.3, 0.6, 0.04, CK.LANTERN);        // status panel
+  const hatch = new CB();
+  hatch.box(0, 0.08, 0, 1.8, 0.16, 1.8, CK.BRONZE);
+  hatch.box(0, 0.2, 0, 1.3, 0.1, 1.3, CK.DARK);
+  for (const s of [-1, 1]) hatch.tube([V(s * 1.1, 0.05, -0.5), V(s * 1.1, 0.35, -0.4), V(s * 1.1, 0.35, 0.4), V(s * 1.1, 0.05, 0.5)], 0.035, 4, CK.BRONZE);
+  const pipe = new CB();
+  pipe.tube([V(0, 0.45, -4), V(0, 0.45, 4)], 0.28, 6, CK.BRONZE);
+  for (const z of [-3.2, 0, 3.2]) pipe.box(0, 0.2, z, 0.5, 0.4, 0.3, CK.DARK);
+  pipe.tube([V(0.7, 0.35, -4), V(0.7, 0.35, 4)], 0.16, 5, CK.DARK);
+  const vent = new CB();
+  vent.box(0, 0.9, 0, 0.9, 1.8, 0.9, CK.HULL);
+  vent.box(0, 1.9, 0, 1.3, 0.2, 1.3, CK.DARK);
+  vent.tube([V(0.3, 1.9, 0.3), V(0.3, 4.2, 0.3)], 0.05, 4, CK.DARK);
+  _fitGeos = [box, hatch, pipe, vent].map((b) => { const g = b.geometry(); g.userData.shared = true; return g; });
+  return _fitGeos;
+}
+const FIT_KINDS = new Set([CK.HULL, 20, 21, 24]);   // plate, livery, ported plate, worn plate
+
+/**
+ * Scatter fittings over the static plating of a station (data from buildBeltStation) under
+ * parent (its craft mesh). Returns { meshes, count, triangles, ms }.
+ */
+export function buildFittings(parent, data, seed = 1, max = 2600) {
+  const t0 = performance.now();
+  const r = rng(seed * 4099 + 7);
+  const g = data.geo, P = g.attributes.position.array, F = g.attributes.aFacade.array, I = g.index.array;
+  // candidate faces and their areas
+  const faces = [], areas = [];
+  let total = 0;
+  const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3(), n = new THREE.Vector3(), e = new THREE.Vector3();
+  for (let i = 0; i < I.length; i += 3) {
+    const k = Math.round(F[I[i] * 3 + 2]);
+    if (!FIT_KINDS.has(k)) continue;
+    a.fromArray(P, I[i] * 3); b.fromArray(P, I[i + 1] * 3); c.fromArray(P, I[i + 2] * 3);
+    const ar = n.subVectors(b, a).cross(e.subVectors(c, a)).length() * 0.5;
+    if (ar < 2) continue;                                    // too small to carry a fitting
+    total += ar; faces.push(i); areas.push(total);
+  }
+  const spins = data.parts.filter((p) => p.mode === 'spin');
+  const walks = data.walks || [];
+  const want = Math.min(max, Math.floor(total / 28));
+  const mats = [[], [], [], []];
+  const p = new THREE.Vector3(), q = new THREE.Vector3(), up = new THREE.Vector3(), fwd = new THREE.Vector3(), m = new THREE.Matrix4(), inv = new THREE.Quaternion();
+  let tries = 0;
+  const clear = (pt) => {
+    for (const s of spins) {
+      q.copy(pt).sub(s.pivot).applyQuaternion(inv.copy(s.q).invert());
+      if (Math.hypot(q.x, q.y) > s.hub - 6 && Math.hypot(q.x, q.y) < s.radius + 6 && Math.abs(q.z) < s.halfW + 6) return false;
+    }
+    for (const d of data.docks) if (pt.distanceToSquared(d.p) < 22 * 22) return false;
+    for (const w of walks) {
+      const L2 = w.a.distanceToSquared(w.b);
+      const u = L2 > 0 ? THREE.MathUtils.clamp(q.subVectors(pt, w.a).dot(e.subVectors(w.b, w.a)) / L2, 0, 1) : 0;
+      if (q.copy(w.a).lerp(w.b, u).distanceToSquared(pt) < 16) return false;
+    }
+    return true;
+  };
+  while (mats[0].length + mats[1].length + mats[2].length + mats[3].length < want && tries++ < want * 3) {
+    // area-weighted face, a uniform point on it
+    const x = r() * total;
+    let lo = 0, hi = areas.length - 1;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (areas[mid] < x) lo = mid + 1; else hi = mid; }
+    const i = faces[lo];
+    a.fromArray(P, I[i] * 3); b.fromArray(P, I[i + 1] * 3); c.fromArray(P, I[i + 2] * 3);
+    let u = r(), v = r();
+    if (u + v > 1) { u = 1 - u; v = 1 - v; }
+    p.copy(a).addScaledVector(e.subVectors(b, a), u).addScaledVector(q.subVectors(c, a), v);
+    up.subVectors(b, a).cross(q.subVectors(c, a)).normalize();
+    if (!clear(p)) continue;
+    // lie along the face's longer edge, a random quarter turn
+    fwd.subVectors(b, a);
+    if (r() < 0.5) fwd.subVectors(c, a);
+    fwd.addScaledVector(up, -fwd.dot(up));
+    if (fwd.lengthSq() < 1e-8) continue;
+    const kind = r() < 0.34 ? 0 : r() < 0.45 ? 1 : r() < 0.6 ? 2 : 3;
+    mats[kind].push(poseMatrix(new THREE.Matrix4(), p, fwd, up, 0.7 + r() * 0.8).clone());
+    void m;
+  }
+  const meshes = fittingGeos().map((geo, k) => {
+    const im = instancedPart(parent, geo, mats[k].length);
+    for (let j = 0; j < mats[k].length; j++) im.setMatrixAt(j, mats[k][j]);
+    im.count = mats[k].length;
+    im.instanceMatrix.needsUpdate = true;
+    parent.add(im);
+    return im;
+  });
+  const count = mats.reduce((s, l) => s + l.length, 0);
+  const triangles = meshes.reduce((s, im) => s + im.count * (im.geometry.index.count / 3), 0);
+  return { meshes, count, triangles, ms: performance.now() - t0, mats };
+}

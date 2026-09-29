@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { SpaceSim, R_EARTH, GEO_ALT, MERIDIAN_LON, bodyDir } from '../src/space/sim.js';
 import { GeoBelt, beltLayout, beltPlace, courierLeg, BUILD_RANGE } from '../src/space/geoBelt.js';
 import { buildBeltStation, BUILDERS } from '../src/space/beltStations.js';
+import { buildFittings } from '../src/space/beltLife.js';
 import { createDressedMaterial, DRESS_GLSL, KM } from '../src/space/craftMesh.js';
 import { shipPose } from '../src/space/fleetTraffic.js';
 import { DESIGNS, design } from '../src/space/shipDesigns.js';
@@ -209,6 +210,41 @@ for (const st of belt.stations) {
   check(walkClearBad.length === 0, `crew walks obstructed: ${walkClearBad.slice(0, 4).join('; ')}`);
 }
 out.docks = docks;
+// near-detail fittings: capacity, clear of sweeps, berths and walks, inside the station
+{
+  const t1 = performance.now();
+  let worst = 0, total = 0, tris = 0, bad = [], maxTris = 0;
+  for (const st of belt.stations) {
+    const a0 = performance.now();
+    const f = buildFittings(st.built.mesh, st.built.data, st.desc.id + 3);
+    st.built.fit = f;
+    worst = Math.max(worst, performance.now() - a0);
+    total += f.count; tris += f.triangles; maxTris = Math.max(maxTris, f.triangles);
+    const d = st.built.data, p = new THREE.Vector3(), q = new THREE.Vector3(), e = new THREE.Vector3();
+    for (const im of f.meshes) check(im.count <= im.instanceMatrix.count, 'fitting capacity');
+    for (const list of f.mats) for (const M of list) {
+      p.setFromMatrixPosition(M);
+      if (!Number.isFinite(p.x)) bad.push('nan');
+      if (p.length() > d.radius + 1) bad.push(`${st.desc.name} outside`);
+      for (const s of d.parts) if (s.mode === 'spin') {
+        q.copy(p).sub(s.pivot).applyQuaternion(s.q.clone().invert());
+        const rr = Math.hypot(q.x, q.y);
+        if (rr > s.hub - 5 && rr < s.radius + 5 && Math.abs(q.z) < s.halfW + 5) bad.push(`${st.desc.name} in sweep`);
+      }
+      for (const k of d.docks) if (p.distanceTo(k.p) < 20) bad.push(`${st.desc.name} on a berth`);
+      for (const w of d.walks || []) {
+        const L2 = w.a.distanceToSquared(w.b);
+        const u = THREE.MathUtils.clamp(q.subVectors(p, w.a).dot(e.subVectors(w.b, w.a)) / L2, 0, 1);
+        if (q.copy(w.a).lerp(w.b, u).distanceTo(p) < 3.5) bad.push(`${st.desc.name} on a walk`);
+      }
+    }
+  }
+  out.fittings = { count: total, triangles: tris, maxStationTriangles: maxTris, worstBuildMs: +worst.toFixed(1), allMs: +(performance.now() - t1).toFixed(0) };
+  check(bad.length === 0, `fittings misplaced: ${bad.slice(0, 5).join('; ')}`);
+  check(worst < 60, 'fitting scatter over 60 ms for one station');
+  check(total > 15000, 'too few fittings');
+}
+
 out.mooredShips = mooredCount;
 check(mooredHits === 0, `held ships intersect: ${mooredWhere.slice(0, 5).join("; ")}`);
 out.minDockApproachMarginM = +minRayMargin.toFixed(1);

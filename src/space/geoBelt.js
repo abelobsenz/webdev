@@ -5,7 +5,7 @@ import { DynLamps, rng, smooth, TAU } from './lifeKit.js';
 import { R_EARTH, GEO_ALT, MERIDIAN_LON, bodyDir } from './sim.js';
 import { stationFrame } from './stations.js';
 import { buildBeltStation } from './beltStations.js';
-import { BeltLife } from './beltLife.js';
+import { BeltLife, buildFittings } from './beltLife.js';
 import { StationTraffic, makeRoute } from './fleetTraffic.js';
 import { design } from './shipDesigns.js';
 const _mx = new THREE.Vector3(), _mm = new THREE.Matrix4();
@@ -34,6 +34,7 @@ const R_GEO = R_EARTH + GEO_ALT;
 export const BUILD_RANGE = 5000;       // km: stations are built inside this
 export const DROP_RANGE = 40000;       // km: and let go beyond this
 export const TRAFFIC_RANGE = 3500;     // km: their berthing traffic runs inside this
+export const FIT_PX = 30;              // px (station radius): its fittings are scattered beyond this
 const KIND_COLOR = {
   comms: LAMP.RED, habitat: [1.0, 0.8, 0.5], depot: LAMP.AMBER, shipyard: LAMP.WHITE,
   relay: [1.0, 0.35, 0.2], transit: LAMP.TEAL, farm: LAMP.GREEN, science: LAMP.BLUE, anchorage: [1.0, 0.9, 0.7], drydock: LAMP.WHITE,
@@ -276,7 +277,12 @@ export class GeoBelt {
   }
 
   /** Build every station (tools and tests). */
-  buildAll() { for (const st of this.stations) this.build(st); }
+  buildAll(fittings = false) {
+    for (const st of this.stations) {
+      const b = this.build(st);
+      if (fittings && !b.fit) b.fit = buildFittings(b.mesh, b.data, st.desc.id + 3);
+    }
+  }
 
   /** Station world position/orientation (km) for the Earth's current attitude. */
   _place(st, earthQuat) {
@@ -303,6 +309,9 @@ export class GeoBelt {
       this.lights.gain(st.desc.id, 1 - smooth(4, 14, st.px));
       if (bb && st.px > 1.5) this._animate(st, bb, t);
       if (bb && st.px > 4) bb.life.update(t);
+      // the near-detail fittings: scattered the first time the station fills the view
+      if (bb && !bb.fit && st.px > FIT_PX && !queued) { bb.fit = buildFittings(bb.mesh, bb.data, st.desc.id + 3); queued = true; }
+      if (bb && bb.fit) { const on = st.px > FIT_PX * 0.7; for (const im of bb.fit.meshes) im.visible = on; }
       if (st.traffic) {
         const near = dist < TRAFFIC_RANGE;
         st.traffic.body.visible = near;
