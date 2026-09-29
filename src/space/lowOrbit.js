@@ -35,6 +35,7 @@ const DEG = Math.PI / 180;
 const HALO_R = R_EARTH + 620;
 export const APRON_ALT = 9;                // km over the Halo deck (its vault crests at 5.5 km)
 const APRON_LON = THREE.MathUtils.degToRad(0.35);
+const APPROACH = { n: 10, d0: 70, step: 55 };   // strobes per port, first at 70 m, then every 55 m
 const TETHER_KEEP = 20;                    // km: the elevator tether's exclusion zone
 const _tu = new THREE.Vector3(), _tp = new THREE.Vector3(), _tq = new THREE.Quaternion();
 const EARTH_W = TAU / 86400;            // the sim turns the Earth once per 86,400 s
@@ -332,6 +333,9 @@ export class LowOrbit {
       dawnline: { axis: 'z', c: new THREE.Vector3(0, 0, 0), r0: 110, r1: 420, h0: 40, h1: 80, n: 10 },
     };
     for (const s of this.stations) if (lanes[s.name]) this._addDrones(s, dg, lanes[s.name]);
+    // approach lights: a line of sequenced strobes out from every docking port, running in
+    // toward the collar like a runway's rabbit, so a pilot (and a visitor) can read the way in
+    for (const s of this.stations) if (s.ports.length && !s.name.startsWith('gleaner')) this._addApproach(s);
     // ---- Anansi skyhook
     this.skyhook = this._buildSkyhook();
     for (const s of this.stations) this.group.add(s.root);
@@ -464,6 +468,30 @@ void main() {
     }
     im.instanceMatrix.needsUpdate = true;
     lamps.commit();
+  }
+
+  _addApproach(s) {
+    const per = APPROACH.n, list = [];
+    s.ports.forEach((pt, k) => {
+      for (let j = 0; j < per; j++) {
+        const d = APPROACH.d0 + j * APPROACH.step;
+        list.push({ p: pt.p.clone().addScaledVector(pt.dir, d), r: j === 0 ? 2.2 : 1.6, color: j < 2 ? LAMP.GREEN : LAMP.WHITE, i: 3.4, phase: (k * 0.29) % 1 });
+      }
+    });
+    s.approach = { lamps: new DynLamps(list, { minPx: 1.0 }), n: list.length };
+    s.fixed.add(s.approach.lamps.mesh);
+  }
+
+  _animateApproach(s, rt) {
+    const A = s.approach, per = APPROACH.n;
+    for (let i = 0; i < A.n; i++) {
+      const j = i % per, k = (i / per) | 0;
+      // the pulse runs inward (outermost lamp first) once every 2.4 s, each port offset in time
+      const u = (((rt / 2.4 + k * 0.29 - (per - 1 - j) / per) % 1) + 1) % 1;
+      const flash = u < 0.08 ? 1 - u / 0.08 : 0;
+      A.lamps.gain(i, 0.12 + 1.6 * flash);
+    }
+    A.lamps.commit();
   }
 
   /** Relative swing angle psi(t): tip A points straight down (at the Earth) when psi = pi mod 2 pi. */
@@ -632,6 +660,7 @@ void main() {
       const vis = s.px > 0.8;
       s.fixed.visible = vis;
       if (vis || s.px > 0.25) { s.root.updateMatrixWorld(); if (s.animate) s.animate(realTime); }
+      if (s.approach) { const on = s.px > 6; s.approach.lamps.mesh.visible = on; if (on) this._animateApproach(s, realTime); }
       if (s.drones) { const on = s.px > 12; s.drones.im.visible = on; s.drones.lamps.mesh.visible = on; if (on) this._animateDrones(s, realTime); }
       gl.set(gi++, s.root.position, s.glintSize, 1, s.lit, 1);
     }
