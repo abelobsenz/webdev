@@ -29,7 +29,8 @@ export const DECK = {
   exch: 7.2,                  // the Exchange's half-length along the ring (km)
   court: { u0: 6.8, u1: 10.0, a0: 1.3, a1: 3.3 },   // the Service Court's footprint (+ side)
   sector: 2 * Math.PI * 2117 / 768,                  // district pitch (km): the halls' sectors
-  win: { blocks: 40, vaults: 12, portals: 10, shield: 30, trees: 5, trams: 8 },
+  win: { blocks: 40, vaults: 12, portals: 10, shield: 30, trees: 5, trams: 8, glass: 24 },
+  glassA: 3.62, glassStep: 1.44,   // glasshouses on the garden terraces: across, pitch (the cross streets')
   anchor: 3,
   segs: 1800,                 // the band's segments (moon.js: buildBand(R_MOON + 380, 11, 1800))
   window: 260,                // km off the deck beyond which none of it is drawn
@@ -222,6 +223,28 @@ export function buildShieldGallery() {
   return B.geometry();
 }
 
+/** A garden glasshouse on the terraces (metres, long axis along the ring): a glazed barrel
+ * 90 m long over a stone plinth, a lantern at the crown, two lower wings, a pool before it. */
+export function buildGlasshouse() {
+  const B = new CB();
+  B.box(0, 1.5, 0, 96, 3, 40, LK.WALL);
+  B.at(0, 3, 0);
+  barrel(B, -45, 45, 0, 17, 16, 10, LK.CONSERVATORY);
+  B.pop();
+  for (const e of [-1, 1]) {
+    B.box(e * 45.3, 11, 0, 0.6, 16, 34, LK.CONSERVATORY);
+    B.at(e * 62, 3, 0);
+    barrel(B, -14, 14, 0, 11, 9, 8, LK.CONSERVATORY);
+    B.pop();
+    B.box(e * 76.3, 7, 0, 0.6, 8, 22, LK.CONSERVATORY);
+  }
+  B.box(0, 20.5, 0, 22, 3, 6, LK.LIGHT);
+  B.box(0, 19, 0, 26, 1, 8, LK.BRONZE);
+  B.box(0, 0.2, 34, 60, 0.4, 16, LK.POOL);
+  B.box(0, 0.15, 34, 64, 0.3, 20, LK.WALL);
+  return B.geometry();
+}
+
 // ------------------------------------------------------------------------- runtime --
 
 const _m = new THREE.Matrix4(), _x = new THREE.Vector3(), _y = new THREE.Vector3(), _z = new THREE.Vector3();
@@ -277,11 +300,13 @@ export class LunarRingDeck {
     this.treeRows = [[-0.018, 0.016], [0.018, 0.016], [-0.84, 0.02], [0.84, 0.02], [-DECK.walk - 0.012, 0.02], [-DECK.walk + 0.012, 0.02], [DECK.walk - 0.012, 0.02], [DECK.walk + 0.012, 0.02]];
     this.trees = lunarInstanced(buildTree(), this.treeRows.reduce((n, [, st]) => n + Math.ceil(perKm(W.trees) / st), 0), {}, this.mat);
     this.trees.name = 'Ring avenue trees';
+    this.glass = lunarInstanced(buildGlasshouse(), Math.ceil(perKm(W.glass) / DECK.glassStep) * 2, {}, this.mat);
+    this.glass.name = 'Ring garden glasshouses';
     const nTram = TRAM.lanes.length * Math.ceil(2 * W.trams / TRAM.spacing + 2) * TRAM.cars;
     this.trams = lunarInstanced(kit('tram'), nTram, {}, this.mat, { tint: true });
     this.trams.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     this.trams.name = 'Ring boulevard trams';
-    this.statics = [...this.blocks.map((b) => b.mesh), this.vaults, this.portals, this.shield, this.trees];
+    this.statics = [...this.blocks.map((b) => b.mesh), this.vaults, this.portals, this.shield, this.trees, this.glass];
     this.all = [...this.statics, this.trams];
     for (const m of this.all) { m.count = 0; m.visible = false; parent.add(m); }
     this.key = null;
@@ -359,6 +384,20 @@ export class LunarRingDeck {
       }
     }
     this.shield.count = n;
+    // glasshouses on the garden terraces, midway between the cross streets, away from the
+    // halls and the district plazas at each sector's centre; one in three plots left open
+    n = 0;
+    const gs = DECK.glassStep;
+    for (let u = Math.floor((u0 - W.glass) / gs) * gs + gs / 2; u < u0 + W.glass; u += gs) {
+      const dU = u - Math.round(u / DECK.sector) * DECK.sector;
+      if (Math.abs(dU) < 1.3) continue;
+      for (const sd of [-1, 1]) {
+        if (hash12(Math.round(u / gs) * 3.1, sd * 7.0) < 0.33) continue;
+        if (!deckClear(u, sd * DECK.glassA, 0.2) || n >= this.glass.instanceMatrix.count) continue;
+        this.glass.setMatrixAt(n++, deckMatrix(_m, u, sd * DECK.glassA, 0, 1, 1, 1, sd < 0));
+      }
+    }
+    this.glass.count = n;
     // the avenues
     n = 0;
     for (const [a, st] of this.treeRows) {

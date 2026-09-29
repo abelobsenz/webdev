@@ -11,7 +11,7 @@ import { SpaceSim } from '../src/space/sim.js';
 import { MoonSurface } from '../src/space/moonSurface.js';
 import { createLunarMaterial, lunarMesh, setFloods, FLOODS } from '../src/space/lunarMaterial.js';
 import { YARD, buildYard, buildYardFrame, buildGantry, buildCarrier, LunarOrbitals } from '../src/space/lunarOrbitals.js';
-import { LunarRingDeck, DECK, plot, plotHash, deckClear, deckTop, hash12, buildTerraceBlock, buildTree, buildVaults, buildPortal, buildShieldGallery } from '../src/space/lunarRingDeck.js';
+import { LunarRingDeck, DECK, plot, plotHash, deckClear, deckTop, hash12, buildTerraceBlock, buildTree, buildVaults, buildPortal, buildShieldGallery, buildGlasshouse } from '../src/space/lunarRingDeck.js';
 import { buildLunarRingDistricts } from '../src/space/lunarPort.js';
 
 let fails = 0;
@@ -151,7 +151,7 @@ sim.syncFromHours(12);
   ok(agree === 2000, `plot hash matches the uint reference ${agree}/2000`);
   ok(pockets > 150 && pockets < 330, `pocket squares ${pockets}/2000 (12 %)`);
   ok(Number.isFinite(hash12(1, 2)), 'hash12 twin');
-  for (const [name, g] of [['block solid', buildTerraceBlock(40, false)], ['block court', buildTerraceBlock(40, true)], ['tree', buildTree()], ['vaults', buildVaults()], ['portal', buildPortal()], ['shield gallery', buildShieldGallery()]]) {
+  for (const [name, g] of [['block solid', buildTerraceBlock(40, false)], ['block court', buildTerraceBlock(40, true)], ['tree', buildTree()], ['vaults', buildVaults()], ['portal', buildPortal()], ['shield gallery', buildShieldGallery()], ['glasshouse', buildGlasshouse()]]) {
     sane(g, name);
     const b = bbox(g);
     if (name.startsWith('block')) ok(b.max.x - b.min.x <= 214 && b.max.z <= 297 && b.min.z >= -297 && b.min.y >= -0.01, `${name} on its plot`);
@@ -187,6 +187,12 @@ sim.syncFromHours(12);
       worst.exch = Math.min(worst.exch, Math.abs(uu) - DECK.exch);
       const C = DECK.court;
       if (a > C.a0 && a < C.a1) worst.court = Math.min(worst.court, Math.max(C.u0 - uu, uu - C.u1));
+      if (x === D.glass) {
+        // glasshouses (+-78 m along, 3.6 km across) clear of the halls (3.15 .. 4.88 km across)
+        const dU = uu - Math.round(uu / DECK.sector) * DECK.sector;
+        worst.hall = Math.min(worst.hall, Math.abs(dU) * 1000 - 80 - report.hallHalfAlongM);
+        ok(Math.abs(Math.abs(a) - DECK.glassA) < 1e-3, 'glasshouse on the terraces');
+      }
       if (x === D.shield) {
         const dU = uu - Math.round(uu / DECK.sector) * DECK.sector;
         worst.hall = Math.min(worst.hall, Math.abs(dU) * 1000 - 100 - report.hallHalfAlongM);
@@ -221,6 +227,7 @@ sim.syncFromHours(12);
   ok(maxTris < 4e6, `deck ${maxTris} triangles`);
   ok(D.blocks.reduce((n, b) => n + b.mesh.count, 0) > 200, 'terraces stand round the camera');
   ok(D.trams.count > 20, 'trams run on the boulevard');
+  ok(D.glass.count > 10, 'glasshouses on the terraces');
   // far from the ring: nothing drawn
   cam.set(0, 0, 9000); D.update(10, cam);
   ok(D.all.every((x) => x.count === 0 && !x.visible), 'deck hidden far off');
