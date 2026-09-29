@@ -571,5 +571,60 @@ assert.ok(minClear > 0, `working lanes clear every structure with ${minClear} km
   for (const s of d.seats) assert.ok(dist(T, s, 5) < 0.5, 'every seat on the real surface');
   assert.ok(fleet.tenders.every((t) => t.mesh.children.includes(fleet.tenderDetail.parts[fleet.tenders.indexOf(t)])), 'each tender carries its fittings');
 }
+// ---- 9. the refined craft material: spliced, self-consistent, occlusion envelope set
+{
+  const { craftMesh, createDressedMaterial, REFINE_GLSL } = await import('../src/space/craftMesh.js');
+  const g = new THREE.BoxGeometry(10, 20, 300);
+  g.setAttribute('aFacade', new THREE.Float32BufferAttribute(new Float32Array(g.attributes.position.count * 3), 3));
+  const plain = craftMesh(g, {}).material, dressed = createDressedMaterial({});
+  for (const mat of [plain, dressed]) {
+    const fs = mat.fragmentShader, vs = mat.vertexShader;
+    assert.ok(mat.userData.refined && fs.includes('craftRefine(k, f, fw, px, alb, rough, metal, em, bump, cav);'), 'refinement spliced');
+    assert.equal((fs.match(/void main\(\) \{/g) || []).length, 1, 'one main');
+    assert.equal((fs.match(/gl_FragColor/g) || []).length, 1, 'one output write');
+    for (const u of fs.matchAll(/uniform\s+\w+\s+(\w+)\s*;/g)) assert.ok(u[1] in mat.uniforms, `uniform ${u[1]} supplied`);
+    for (const v of fs.matchAll(/varying\s+(\w+)\s+(\w+)\s*;/g)) assert.ok(vs.includes(`varying ${v[1]} ${v[2]};`), `varying ${v[2]} written`);
+    let depth = 0; for (const ch of fs) { if (ch === '{') depth++; if (ch === '}') depth--; assert.ok(depth >= 0); }
+    assert.equal(depth, 0, 'balanced braces');
+  }
+  assert.ok(dressed.fragmentShader.indexOf('beltKinds(k') < dressed.fragmentShader.indexOf('craftRefine(k, f'), 'dressed kinds before the refinement');
+  const h = plain.uniforms.uAoH.value;
+  assert.ok(h.x > 0 && h.z > 150 && h.z < 200, `occlusion envelope from the box (${h.toArray()})`);
+  assert.equal(dressed.uniforms.uAoH.value.x, 0, 'instanced hulls without an envelope skip the occlusion');
+  const body = REFINE_GLSL.replace(/\/\/.*$/gm, '');
+  assert.ok(!/\b(fwidth|dFdx|dFdy|texture|pow)\s*\(/.test(body), 'no derivatives, texture reads or pow in the refinement');
+  const ints = body.match(/(?<![\w.])\d+(?![\w.])/g) || [];
+  assert.equal(ints.length, 0, `refinement literals all floats (${ints.slice(0, 5)})`);
+  for (const p of plain.fragmentShader.matchAll(/pow\(([^,]+),/g)) assert.ok(/max\(|clamp\(|^\s*nh\s*$|^\s*[0-9.]+\s*$|1\.0 - clamp/.test(p[1]), `pow base guarded: ${p[1]}`);
+}
+
+// ---- 10. the lanes: coasting ships show running lights only, drives are sparks within ~3,500 km
+{
+  const { trafficFade, trafficBurn, TRAFFIC_CULL } = await import('../src/space/traffic.js');
+  assert.ok(trafficFade(900) > 0.2 && trafficFade(4000) < TRAFFIC_CULL, 'drive fade: bright near, gone by 4,000 km');
+  const { Rings } = await import('../src/space/rings.js');
+  const { Traffic } = await import('../src/space/traffic.js');
+  const T = new Traffic({ ...space, scene: new THREE.Scene(), addBody() { return {}; } }, new Rings({}, { ringSegs: 0.5 }), { traffic: 3000 });
+  if (T) {
+    let burning = 0, ring = 0;
+    for (let i = 0; i < T.count; i++) if (T.iA[i * 4] < 0.5) { ring++; if (trafficBurn(T.iA, T.iB, i * 4, 12345) > 0.5) burning++; assert.ok(T.iB[i * 4 + 2] >= 1500, 'ring lane burn period set'); }
+    out.ringBurningFraction = +(burning / Math.max(ring, 1)).toFixed(3);
+    assert.ok(out.ringBurningFraction < 0.2, `most ring-lane ships coast (${out.ringBurningFraction} burning)`);
+    const g = T.mesh.geometry;
+    for (const n of ['iA', 'iB', 'iC']) assert.ok(g.attributes[n].count >= g.instanceCount, `traffic ${n} covers every instance`);
+    assert.ok(g.index.array.every((i) => i < g.attributes.position.count), 'traffic quad index in range');
+  }
+  const lanes = space.lanes;
+  if (lanes) {
+    const cam = space.camera;
+    cam.position.set(0, 0, 400000); cam.updateMatrixWorld(true);
+    lanes.update(sim, 0, 0.016, space);
+    assert.ok(!lanes.harbourLamps.visible && !lanes.portLamps.visible, 'lane lights hidden from far off');
+    lanes.harbourFrame.getWorldPosition(cam.position).add(V(0, 0, 200)); cam.updateMatrixWorld(true);
+    lanes.update(sim, 0, 0.016, space);
+    assert.ok(lanes.harbourLamps.visible && lanes.harbourLamps.material.uniforms.uGain.value > 0.99, 'lane lights full on the lanes');
+  }
+}
+
 console.log(JSON.stringify(out));
 console.log('FLEET_VERIFIED');
