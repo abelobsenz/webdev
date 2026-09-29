@@ -290,6 +290,22 @@ uniform vec3 uAoC;
 uniform vec3 uAoH;
 varying vec3 vObjP;
 varying vec3 vObjN;
+varying float vKind2;
+flat varying float vKindP;
+// The facade kind of a fragment. Kinds are per vertex, so across a quad whose corners carry two
+// kinds (a girdle beside plain hull, a livery band) the interpolated value swept through every
+// kind in between: thin rainbow bands of lanterns, gardens, conduits and solar cells at each
+// seam. With the provoking vertex's kind P (flat) and the interpolated kind and kind squared,
+// the other kind Q and its weight w solve exactly for a two-kind triangle; the fragment takes
+// Q past halfway, P before it, so every seam is a clean line between the two kinds.
+float craftKind(float m1, float m2, float P) {
+  float d = m1 - P;
+  if (abs(d) < 0.02) return P;
+  float q = (m2 - P * P) / d - P;
+  if (abs(q - P) < 0.5) return floor(m1 + 0.5);
+  float w = d / (q - P);
+  return clamp(floor((w > 0.5 ? q : P) + 0.5), 0.0, 40.0);
+}
 void craftRefine(float k, vec2 f, vec2 fw, float px, inout vec3 alb, inout float rough, inout float metal, inout vec3 em, inout vec2 bump, inout float cav) {
   float det = 1.0 - smoothstep(0.4, 1.2, px);
   float detP = 1.0 - smoothstep(0.8, 2.3, px);
@@ -412,9 +428,12 @@ export function refineCraftMaterial(m) {
     const bumpAt = '  N = normalize(N + T * bump.x + B * bump.y);';
     const main = fs.lastIndexOf('void main() {');
     const l0 = fs.indexOf('  // light: the Sun, earthshine', main), l1 = fs.indexOf('  gl_FragColor = vec4(col, 1.0);', main);
-    if (vs.includes(vA) && vs.includes(vB) && fs.includes(bumpAt) && main > 0 && l0 > main && l1 > l0) {
-      const v2 = vs.replace(vA, `${vA}\nvarying vec3 vObjP;\nvarying vec3 vObjN;`).replace(vB, `${vB}\n  vObjP = position;\n  vObjN = normal;`);
+    const kAt = '  float k = floor(vFac.z + 0.5);';
+    if (vs.includes(vA) && vs.includes(vB) && fs.includes(bumpAt) && fs.includes(kAt) && main > 0 && l0 > main && l1 > l0) {
+      const v2 = vs.replace(vA, `${vA}\nvarying vec3 vObjP;\nvarying vec3 vObjN;\nvarying float vKind2;\nflat varying float vKindP;`)
+        .replace(vB, `${vB}\n  vObjP = position;\n  vObjN = normal;\n  vKind2 = aFacade.z * aFacade.z;\n  vKindP = aFacade.z;`);
       let f2 = fs.slice(0, l0) + LIGHT_GLSL + fs.slice(l1);
+      f2 = f2.replace(kAt, '  float k = craftKind(vFac.z, vKind2, vKindP);');
       f2 = f2.replace(bumpAt, `  float cav = 1.0;\n  craftRefine(k, f, fw, px, alb, rough, metal, em, bump, cav);\n${bumpAt}`);
       const at = f2.lastIndexOf('void main() {');
       f2 = f2.slice(0, at) + REFINE_GLSL + '\n' + f2.slice(at);

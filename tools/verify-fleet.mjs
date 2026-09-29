@@ -588,6 +588,15 @@ assert.ok(minClear > 0, `working lanes clear every structure with ${minClear} km
     assert.equal(depth, 0, 'balanced braces');
   }
   assert.ok(dressed.fragmentShader.indexOf('beltKinds(k') < dressed.fragmentShader.indexOf('craftRefine(k, f'), 'dressed kinds before the refinement');
+  // the seam kind solve (craftKind, mirrored): a two-kind triangle resolves to one kind or the
+  // other, never a kind in between, with the switch halfway
+  const kind = (m1, m2, P) => { const d = m1 - P; if (Math.abs(d) < 0.02) return P; const q = (m2 - P * P) / d - P; if (Math.abs(q - P) < 0.5) return Math.floor(m1 + 0.5); const w = d / (q - P); return Math.min(Math.max(Math.floor((w > 0.5 ? q : P) + 0.5), 0), 40); };
+  for (const [P, Q] of [[1, 8], [8, 1], [20, 1], [1, 24], [0, 11], [3, 2]]) for (let w = 0; w <= 1.0001; w += 0.01) {
+    const r = kind(P + w * (Q - P), P * P + w * (Q * Q - P * P), P);
+    assert.equal(r, w < 0.495 ? P : w > 0.505 ? Q : r, `seam kind ${P}/${Q} at ${w.toFixed(2)} -> ${r}`);
+    assert.ok(r === P || r === Q, `seam kind never between (${P}/${Q} -> ${r})`);
+  }
+  assert.ok(plain.fragmentShader.includes('float k = craftKind(vFac.z, vKind2, vKindP);') && plain.vertexShader.includes('flat varying float vKindP;'), 'seam kinds resolved');
   const h = plain.uniforms.uAoH.value;
   assert.ok(h.x > 0 && h.z > 150 && h.z < 200, `occlusion envelope from the box (${h.toArray()})`);
   assert.equal(dressed.uniforms.uAoH.value.x, 0, 'instanced hulls without an envelope skip the occlusion');
