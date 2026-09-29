@@ -358,7 +358,15 @@ void main() {
   vec3 p = vWorld - uCenter;
   float b = dot(p, uSunDir);
   float sh = b > 0.0 ? 1.0 : smoothstep(${(R_MOON - 20).toFixed(1)}, ${(R_MOON + 20).toFixed(1)}, length(p - uSunDir * b));
-  vec3 col = vec3(0.42) * 0.3 * uSunE * sh * 0.5 + vec3(0.8, 0.88, 1.0) * (0.04 + 0.12 * (1.0 - sh));
+  // the deck as a structure, not an overlay line: its mean albedo (paving, gardens, roofs), lit
+  // by how squarely the Sun stands over it (the deck faces out from the Moon; its edges and
+  // underside take the grazing light), dark on the Moon's night side except for the warm
+  // lights of its streets (the old flat blue-white glow read as a drawn ellipse)
+  vec3 rad = normalize(p);
+  float mu = dot(rad, uSunDir);
+  vec3 alb = vec3(0.19, 0.2, 0.17);
+  vec3 col = alb * uSunE * sh * (0.06 + 0.26 * max(mu, 0.0) + 0.05 * max(-mu, 0.0));
+  col += vec3(1.0, 0.72, 0.45) * 0.045 * (1.0 - sh * smoothstep(-0.1, 0.2, mu));
   float fade = 1.0 - smoothstep(1.6, 3.2, vPx);
   gl_FragColor = vec4(col * vCoverage * fade, 0.0);
 }

@@ -674,7 +674,26 @@ void main() {
       wk = (1.0 - smoothstep(0.0, 0.35, wbox)) * nearSite;
       if (wk > 0.0) {
         float gn = snoise(vec3(wuv * 1.7, 11.0)) * 0.5 + 0.5;
-        vec3 reg = mix(vec3(0.19, 0.18, 0.165), vec3(0.3, 0.285, 0.26), gn);
+        vec3 reg = mix(vec3(0.15, 0.143, 0.13), vec3(0.24, 0.228, 0.205), gn);
+        // haul tracks and spoil: darker ruts in bands along the planning axes, where resolved
+        float trk = (1.0 - smoothstep(0.012, 0.03, fp)) * smoothstep(0.55, 0.9, snoise(vec3(wuv.x * 0.6, wuv.y * 9.0, 4.0)) * 0.5 + 0.5);
+        reg *= 1.0 - 0.18 * trk;
+        // the array (lunarWorks.js ARRAY, 1.5 x 1.75 km) stands in meadow, not bare regolith:
+        // grass between the tracker rows, the rows' shade in strips 16 m apart where they
+        // resolve, the service roads every 18 rows and 36 columns pale gravel
+        vec2 arr = vec2(max(0.8 - wuv.x, wuv.x - 2.3), max(-4.9 - wuv.y, wuv.y + 3.15));
+        float inArr = 1.0 - smoothstep(0.0, 0.03, max(arr.x, arr.y));
+        if (inArr > 0.0) {
+          vec3 meadow = mix(vec3(0.05, 0.075, 0.03), vec3(0.075, 0.09, 0.04), snoise(vec3(wuv * 7.0, 2.0)) * 0.5 + 0.5);
+          float rowsR = 1.0 - smoothstep(0.004, 0.012, fp);
+          float rowSh = mix(0.35, 1.0 - smoothstep(0.0, 0.3, abs(fract((wuv.y + 4.9) / 0.016) - 0.5)), rowsR);
+          meadow *= 1.0 - 0.35 * rowSh;
+          float rdv = abs(fract((wuv.y + 4.9) / (0.016 * 18.0) - 0.5) - 0.5) * 0.288;
+          float rdu = abs(fract((wuv.x - 0.8) / (0.014 * 36.0) - 0.5) - 0.5) * 0.504;
+          float road = max(1.0 - smoothstep(0.005, 0.005 + fp, rdv), 1.0 - smoothstep(0.005, 0.005 + fp, rdu)) * min(1.0, 0.01 / max(fp, 0.01));
+          meadow = mix(meadow, vec3(0.2, 0.19, 0.17), road);
+          reg = mix(reg, meadow, inArr);
+        }
         alb = mix(alb, reg, wk);
       }
     }
