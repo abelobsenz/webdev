@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import { HarbourStation, HS } from '../src/space/harbour.js';
 import { LIFE, cranePose, podR, PODS_PER_LINE, dronePose, armFrame, ROAD, roadPose, berthDronePose, PROM, concourseR, tramAngle } from '../src/space/harbourLife.js';
-import { buildConcordYard, buildWaterStore, YARD, STORE, sectionPoint, movementPlan, movementPose, MOVEMENTS, routeAround } from '../src/space/geoRoads.js';
+import { buildConcordYard, buildWaterStore, YARD, STORE, sectionPoint, movementPlan, movementPose, movementPhase, MOVEMENTS, routeAround, GeoRoads } from '../src/space/geoRoads.js';
 import { approachVoyage, voyage } from '../src/space/fleet.js';
 import { WATER, waterRunPose } from '../src/space/waterRun.js';
 import { YARD_POS, STORE_POS } from '../src/space/geoRoads.js';
@@ -472,6 +472,21 @@ assert.ok(RW.gantry.apothem - 10 > RY.apothem + 22 + 30, 'the gantry rings stay 
   assert.ok(gTether > 0.3, `the water tanker keeps ${gTether} km off the tether and its climbers`);
   assert.ok(gHarbour > 0.5, 'the water run stays below the Harbour');
   assert.ok(gOther > 0.5, `the water run keeps ${gOther} km off the freighter movements and the arriving liner`);
+}
+
+// ===================================================================== docking guidance
+{
+  const gs = GeoRoads.prototype.guideState;
+  let chaseBeforeStay = false, prev = 0;
+  for (let u = 0; u < 1; u += 0.0005) {
+    const [ph] = movementPhase(u), m = gs(u);
+    if (ph === 'stay') assert.equal(m, 2, 'guidance steady while alongside');
+    if (ph === 'dock') assert.equal(m, 1, 'guidance chases while docking');
+    if (ph === 'in' || ph === 'out' || ph === 'turn' || ph === 'flip') assert.equal(m, 0, 'guidance dark on the roads');
+    if (prev === 1 && m === 2) chaseBeforeStay = true;
+    prev = m;
+  }
+  assert.ok(chaseBeforeStay, 'the chase hands over to the steady light as she berths');
 }
 
 // ===================================================================== totals

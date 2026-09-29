@@ -9,6 +9,8 @@ import { stationFrame, CORRIDORS } from './stations.js';
 import { YardWorks } from './yardWorks.js';
 import { StoreWorks } from './storeWorks.js';
 import { WaterRun } from './waterRun.js';
+import { DynLamps } from './lifeKit.js';
+import { HS } from './harbour.js';
 
 // THE GEOSTATIONARY ROADS: the Harbour's neighbourhood along the geostationary arc.
 //
@@ -592,6 +594,23 @@ export class GeoRoads {
       space.addBody(`movement${i}`, [g], () => g.getWorldPosition(_w), 1100 * KM * c.scale * 0.5 + 0.4, { solid: true, hint: 0.45 });
       return { group: g, mesh: m, engines, glow, c, pos: new THREE.Vector3(), fwd: new THREE.Vector3(0, 0, 1) };
     });
+    // docking guidance: a ring of lamps round every arm head's docking collar that chases
+    // toward the face while its freighter comes in, holds steady green while she lies
+    // alongside and breathes amber as she backs out (drawn metres, the Harbour life holder)
+    this.guideN = 12;
+    const gl = [];
+    for (const arm of arms) {
+      const up = V(0, 1, 0), side = arm.side;
+      for (let k = 0; k < this.guideN; k++) {
+        const a = (k / this.guideN) * TAU;
+        const p = arm.d.clone().multiplyScalar(arm.L + 420 * HS).addScaledVector(side, Math.cos(a) * 600 * HS).addScaledVector(up, Math.sin(a) * 600 * HS);
+        p.y += arm.y;
+        gl.push({ p, r: 7, color: LAMP.AMBER, i: 2.6 });
+      }
+    }
+    this.guide = new DynLamps(gl, { minPx: 1.2 });
+    el.station.life.root.add(this.guide.mesh);
+    this.guideCol = this.guide.C.array;
     // the water run: a tanker between the Water Store and the yard (waterRun.js)
     this.waterRun = new WaterRun(space);
     this._q = new THREE.Quaternion();
@@ -605,7 +624,36 @@ export class GeoRoads {
     return movementPose(u, c, outPos, outFwd);
   }
 
+  /** Docking guidance for arm i's freighter at cycle fraction u: [mode, fraction] (0 off, 1 chase, 2 steady, 3 backing). */
+  guideState(u) {
+    const [ph, s] = movementPhase(u);
+    if ((ph === 'glide' && s > 0.55) || ph === 'dock') return 1;
+    if (ph === 'stay') return 2;
+    if (ph === 'back') return 3;
+    return 0;
+  }
+
+  updateGuide(t) {
+    const n = this.guideN, C = this.guideCol;
+    for (let i = 0; i < this.movers.length; i++) {
+      const c = this.movers[i].c;
+      const u = (((t / c.T) + c.offset) % 1 + 1) % 1;
+      const mode = this.guideState(u);
+      const arm = c.arm;
+      for (let k = 0; k < n; k++) {
+        const j = (arm * n + k) * 4;
+        let g = 0, r = 1, gr = 0.6, b = 0.22;                       // amber
+        if (mode === 1) { const ph = ((k / n - t * 0.8) % 1 + 1) % 1; g = 0.15 + 1.2 * Math.max(0, 1 - ph * 5); }
+        else if (mode === 2) { g = 0.8; r = 0.16; gr = 1.0; b = 0.42; }  // green
+        else if (mode === 3) g = 0.5 + 0.4 * Math.sin(t * 1.5);
+        C[j] = r * 2.6 * g; C[j + 1] = gr * 2.6 * g; C[j + 2] = b * 2.6 * g;
+      }
+    }
+    this.guide.C.needsUpdate = true;
+  }
+
   update(sim, realTime, dt, space) {
+    this.updateGuide(realTime);
     const q = this._q.copy(sim.earthQuat).multiply(this.frameQ);
     const o = this._w.copy(this.origin).applyQuaternion(sim.earthQuat);
     for (const [i, mv] of this.movers.entries()) {
