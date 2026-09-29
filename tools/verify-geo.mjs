@@ -85,6 +85,28 @@ for (let u = 0; u < 1; u += 0.002) {
   assert.ok(c.r >= CR.padA - 1e-9 && c.r <= CR.padB + 1e-9 && Math.abs(c.z) <= CR.padZ + 1e-9);
   assert.ok(c.r - CR.legX - 60 > CR.r0 && c.r + CR.legX + 60 < CR.r1, 'crane bogies stay on their rails');
 }
+// the fleet's tugs load the outer racks of some arms from a station over them: those arms' cranes stay parked
+{
+  const src = (await import('node:fs')).readFileSync(new URL('../src/space/fleet.js', import.meta.url), 'utf8');
+  const tugArms = [...new Set([...src.matchAll(/rack\((\d)\)/g)].map((m) => +m[1]))];
+  assert.ok(tugArms.length, 'fleet tug stations found');
+  for (const i of tugArms) assert.ok(CR.parked.includes(i), `arm ${i}'s crane is parked (a fleet tug loads its outer rack)`);
+  results.parkedCraneArms = tugArms;
+  // a parked crane stands at the inboard pad, far from the tug's station over the 9,700 m rack
+  const parked = cranePose(0.97);
+  assert.ok(parked.r + CR.legX + 60 < 9700 - 800 && !parked.carrying, 'parked cranes stand clear of the tug station');
+}
+// the gallery town stays between the girdles, off the drones' racetrack and inside the conveyors
+{
+  const TW = LIFE.town;
+  for (let k = 0; k < TW.segs; k++) {
+    const g = TW.r0 + k * TW.pitch;
+    const a = g + 80, b = g + 80 + 3 * TW.len + 2 * TW.gap;
+    assert.ok(a > g + 40 + 10 && b < g + TW.pitch - 40 - 10, 'town blocks clear both girdles');
+  }
+  assert.ok(TW.top - 40 - 205 > DR.y + 18 + 20 + 10, 'town masts and roofs clear the drones (their 18 m bob and 20 m size)');
+  assert.ok(110 < CV.pod - CV.podR, 'town blocks stay inside the conveyor lines');
+}
 // pods in order on each line and inside the line's span
 for (const ls of [1, -1]) for (let j = 0; j < PODS_PER_LINE; j++) { const r = podR(123.4, j, ls); assert.ok(r >= CV.r0 - 1e-6 && r <= CV.r1 + 1e-6); }
 
@@ -122,6 +144,14 @@ for (const t of [5, 40, 77, 140, 200]) {
     if (onBlock) continue;                                          // resting on the block (by design)
     boxGap = Math.min(boxGap, hc.dist(p, 60) - 9);
   }
+}
+// the drones also clear the station's new kit (town blocks, collars, conveyor houses)
+{
+  const kc = new Collider(instances(life.kit), 120);
+  let g = Infinity;
+  for (const t of [0, 51, 133, 377]) for (const [ai, F] of armF.entries()) for (let j = 0; j < DR.perArm; j++) { dronePose(t, j, ai, P, V()); P.applyMatrix4(F); g = Math.min(g, kc.dist(P, 120) - 5); }
+  results.armDroneKitClearM = +g.toFixed(1);
+  assert.ok(g > 5, `arm drones clear the gallery town by ${g} m`);
 }
 Object.assign(results, { podClearM: +podGap.toFixed(1), craneLoadClearM: +loadGap.toFixed(1), armDroneClearM: +droneGap.toFixed(1), berthBoxClearM: +boxGap.toFixed(1) });
 assert.ok(podGap > 2, `conveyor pods clear the Harbour by ${podGap} m`);

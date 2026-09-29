@@ -34,7 +34,10 @@ import {
 //      (the keel is at y 330), z across (s * side); scale HS to drawn metres
 export const LIFE = {
   conveyor: { r0: 1500, r1: 12000, rail: 330, pod: 430, podR: 60, podL: 240, spacing: 500, speed: 42 },
-  crane: { r0: 1400, r1: 11650, railZ: 420, railY: 410, padA: 1790, padB: 11000, padZ: 190, pad: 596, travel: 1000, bridge: 1320, legX: 150, T: 260 },
+  // (arms 1, 2 and 5 have their outer racks loaded by the fleet's tugs from a station 530 m
+  // above the rack at 9,700 m, src/space/fleet.js: their cranes stand parked at the inboard pad)
+  crane: { r0: 1400, r1: 11650, railZ: 420, railY: 410, padA: 1790, padB: 11000, padZ: 190, pad: 596, travel: 1000, bridge: 1320, legX: 150, T: 260, parked: [1, 2, 5] },
+  town: { r0: 2000, pitch: 1400, segs: 7, len: 360, gap: 60, top: -200 },
   drone: { y: -520, r0: 2400, r1: 11600, z: 300, perArm: 6, speed: 55 },
   finger0: 12600,
 };
@@ -123,6 +126,28 @@ function buildArmKit(B, lamps) {
     B.tube([V(CR.r0, CR.railY, zc), V(CR.r1, CR.railY, zc)], 16, 8, CK.DARK);
     for (const r of [CR.r0, 3400, 4800, 6200, 7600, 9000, 10400, CR.r1]) B.tube([V(r, 360, 0), V(r, CR.railY, zc)], 14, 6, CK.HULL);
     for (const r of [CR.r0, CR.r1]) { B.box(r, CR.railY + 20, zc, 40, 50, 50, CK.BRONZE); lamps.push({ p: V(r, CR.railY + 60, zc), r: 12, color: LAMP.RED, i: 2.0 }); }
+  }
+  // the gallery town: lit terrace blocks slung under the gallery on its ring side (hotels, crew
+  // quarters, offices over the cargo), three to a span between the girdles, with balconies,
+  // roof gardens facing the rings and masts; lit window collars round the gallery by the girdles
+  const TW = LIFE.town;
+  for (let k = 0; k < TW.segs; k++) {
+    const g = TW.r0 + k * TW.pitch;
+    B.push(new THREE.Matrix4().makeTranslation(g + 60, 0, 0).multiply(new THREE.Matrix4().makeRotationY(Math.PI / 2)));
+    lathe(B, [[232, -12, CK.BRONZE], [240, -10, CK.BRONZE], [240, -6, CK.LANTERN], [240, 6, CK.LANTERN], [240, 10, CK.BRONZE], [232, 12, CK.BRONZE]], 32);
+    B.pop();
+    for (let j = 0; j < 3; j++) {
+      const rc = g + 80 + TW.len / 2 + j * (TW.len + TW.gap), y0 = TW.top;
+      const tall = (k + j) % 3 === 1 ? 40 : 0;
+      B.box(rc, y0 - 15, 0, TW.len, 30, 220, CK.DARK);                                   // slab seated in the gallery skin
+      B.box(rc, y0 - 75 - tall / 2, 0, TW.len - 20, 90 + tall, 200, CK.HULL);
+      for (const [yy, kk] of [[y0 - 55, CK.LANTERN], [y0 - 90, CK.LANTERN], [y0 - 120 - tall, (k + j) % 2 ? CK.LANTERN : CK.GLASS]]) B.box(rc, yy, 0, TW.len - 18, 14, 202, kk);
+      B.box(rc, y0 - 124 - tall, 0, TW.len - 10, 8, 210, CK.BRONZE);
+      B.box(rc, y0 - 130 - tall, 0, TW.len - 60, 4, 160, CK.GARDEN);                     // roof garden, facing the rings
+      for (let x = -TW.len / 2 + 30; x <= TW.len / 2 - 30; x += 40) for (const yy of [y0 - 62, y0 - 97]) for (const zs of [-1, 1]) B.box(rc + x, yy, zs * 104, 24, 3, 8, CK.BRONZE);
+      for (const x of [-TW.len / 2 + 20, TW.len / 2 - 20]) B.tube([V(rc + x, y0 - 128 - tall, 60), V(rc + x, y0 - 200 - tall, 60)], 3, 6, CK.DARK);
+      lamps.push({ p: V(rc + TW.len / 2 - 20, y0 - 205 - tall, 60), r: 6, color: j % 2 ? LAMP.AMBER : LAMP.WHITE, i: 1.4, breathe: 0.2, phase: (k * 3 + j) / 21 });
+    }
   }
   // the crane's two end pads: saddles like the racks'
   for (const [r, z] of [[CR.padA, -CR.padZ], [CR.padB, CR.padZ]]) {
@@ -340,7 +365,7 @@ export class HarbourLife {
     const c = this._crane, nA = this.arms.length;
     for (const a of this.arms) {
       const i = a.i;
-      cranePose(t / CR.T + this.cranePhase[i], c);
+      cranePose(CR.parked.includes(i) ? 0.97 : t / CR.T + this.cranePhase[i], c);
       T.makeTranslation(c.r, 0, 0); m.multiplyMatrices(a.F, T); this.craneFrames.setMatrixAt(i, m);
       T.makeTranslation(c.r, 0, c.z); m.multiplyMatrices(a.F, T); this.trolleys.setMatrixAt(i, m);
       const hookY = c.hook + 150 + 40;
