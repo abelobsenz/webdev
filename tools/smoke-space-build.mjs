@@ -18,6 +18,7 @@ import { Aurora } from '../src/space/aurora.js';
 import { Meteors } from '../src/space/meteors.js';
 import { SkyLife } from '../src/space/skyStars.js';
 import { SKY_UNIFORMS } from '../src/space/sky.js';
+import { LagrangeColonies } from '../src/space/lagrange.js';
 
 const sim = new SpaceSim();
 sim.syncFromHours(12);
@@ -44,7 +45,7 @@ const mods = [];
 space.aurora = new Aurora(space, { earthQ: 2 }); mods.push(space.aurora);
 space.skyLife = new SkyLife(space, SKY_UNIFORMS); mods.push(space.skyLife);
 space.meteors = new Meteors(space); mods.push(space.meteors);
-for (const [k, C] of [['fleet', Fleet], ['works', WorkingStations], ['geoRoads', GeoRoads], ['lanes', Lanes], ['releaseYard', ReleaseYard]]) { space[k] = new C(space); mods.push(space[k]); }
+for (const [k, C] of [['fleet', Fleet], ['works', WorkingStations], ['geoRoads', GeoRoads], ['lanes', Lanes], ['releaseYard', ReleaseYard], ['lagrange', LagrangeColonies]]) { space[k] = new C(space); mods.push(space[k]); }
 // the fleet's lazily built near detail (liners, Selene, tenders), forced so it is exercised too
 space.fleet._linerDetail(null, true); space.fleet._seleneDetail(null, 0, true); space.fleet._tenderDetail(null, true);
 // the lazily built near detail (Helianth district and flotilla, foundry yard): force it, then animate it below
