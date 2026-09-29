@@ -377,10 +377,10 @@ export class QuarterLife {
       const w = W[i];
       let x, z, yaw;
       if (w.circle) {
-        const [px, pz, r] = w.circle, a = (w.ph + t * w.v) / r;
+        const px = w.circle[0], pz = w.circle[1], r = w.circle[2], a = (w.ph + t * w.v) / r;
         x = px + Math.cos(a) * r; z = pz + Math.sin(a) * r; yaw = -a + (w.v > 0 ? 0 : Math.PI);
       } else {
-        const [ax, az] = w.a, [bx, bz] = w.b, Lw = Math.hypot(bx - ax, bz - az);
+        const ax = w.a[0], az = w.a[1], bx = w.b[0], bz = w.b[1], Lw = Math.hypot(bx - ax, bz - az);
         let q = (w.ph + t * w.v) % (2 * Lw), dir = 1;
         if (q > Lw) { q = 2 * Lw - q; dir = -1; }
         const f = q / Lw;
@@ -395,7 +395,7 @@ export class QuarterLife {
     const ph = (t % 190) / 190;
     const u = ph < 0.13 ? 0 : ph < 0.5 ? (ph - 0.13) / 0.37 : ph < 0.63 ? 1 : 1 - (ph - 0.63) / 0.37;
     const e = u * u * (3 - 2 * u);
-    const [ax, az] = this.q.tram.a, [bx, bz] = this.q.tram.b;
+    const ax = this.q.tram.a[0], az = this.q.tram.a[1], bx = this.q.tram.b[0], bz = this.q.tram.b[1];
     this.tram.setMatrixAt(0, seat(_m, ax + (bx - ax) * e, az + (bz - az) * e, this.tramYaw, 0.5));
     this.tram.instanceMatrix.needsUpdate = true;
   }

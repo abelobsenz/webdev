@@ -797,7 +797,7 @@ export class LunarOrbitals {
     }
     // --- relays and ferries (Moon frame, metres) ---
     for (let i = 0; i < RELAYS.length; i++) {
-      const [on, ph] = RELAYS[i], o = ORBITS[on];
+      const ph = RELAYS[i][1], o = ORBITS[RELAYS[i][0]];
       orbitPos(o, t, ph, _p);
       _y.copy(_p).normalize().negate();            // the dish down at the Moon
       _z.copy(o.n); _x.crossVectors(_y, _z);
@@ -810,7 +810,7 @@ export class LunarOrbitals {
     this.relayLamps.geometry.attributes.iLamp.needsUpdate = true;
     const FL = this.ferryLamps.geometry.attributes.iLamp.array;
     for (let i = 0; i < FERRY_SLOTS.length; i++) {
-      const [on, ph, dr] = FERRY_SLOTS[i], o = ORBITS[on];
+      const ph = FERRY_SLOTS[i][1], dr = FERRY_SLOTS[i][2], o = ORBITS[FERRY_SLOTS[i][0]];
       // station-keeping approaches: each ferry closes on its station and falls back again over
       // an orbit (a slow relative drift, as on a co-orbital approach corridor)
       const drift = ph * (0.75 + 0.25 * Math.cos(o.w * t * 0.5 + i));
@@ -903,7 +903,7 @@ export class LunarOrbitals {
   _moveYard(t) {
     const Y = this.yard;
     // the gantries: each works its own reach of the dock, three minutes a traverse
-    Y.gantries.forEach((gq, i) => { const u = 0.5 - 0.5 * Math.cos(t * TAU / 360 + i * 2); gq.mesh.position.z = (gq.z0 + u * 220) * 1e-3; });
+    for (let i = 0; i < Y.gantries.length; i++) { const gq = Y.gantries[i], u = 0.5 - 0.5 * Math.cos(t * TAU / 360 + i * 2); gq.mesh.position.z = (gq.z0 + u * 220) * 1e-3; }
     for (let i = 0; i < YARD.pods; i++) {
       const P = this.podPaths[i], a = Math.max(-2.7, Math.min(-0.44, P.a0 + 0.6 * Math.sin(t * P.w + i))), r = Y.hullR(P.z) + P.dr;
       _p.set(Math.cos(a) * r, Math.sin(a) * r, P.z + 6 * Math.sin(t * 0.05 + i));
