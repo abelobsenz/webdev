@@ -172,7 +172,7 @@ export function tramArc(i) {
 export const TRAM = { len: 0.56, half: 0.09, h: 0.16, T: 340, dwell: 0.12 };
 /** Tram i's angle at time t. */
 export function tramAngle(i, t) {
-  const { a0, a1 } = tramArc(i), u = (((t / TRAM.T) + i * 0.173) % 1 + 1) % 1, D = TRAM.dwell, run = 0.5 - D;
+  const a0 = (i / RING.count) * TAU + RING.delta, a1 = ((i + 1) / RING.count) * TAU - RING.delta, u = (((t / TRAM.T) + i * 0.173) % 1 + 1) % 1, D = TRAM.dwell, run = 0.5 - D;
   const s = u < D ? 0 : u < 0.5 ? smooth(0, 1, (u - D) / run) : u < 0.5 + D ? 1 : 1 - smooth(0, 1, (u - 0.5 - D) / run);
   // the ends of the run stop half a car short of the platform ends
   const pad = (TRAM.len * 0.6) / RING.R;
@@ -218,8 +218,10 @@ export function tankerSlots() {
   return { queue, berth, fwd: f.prograde.clone(), f };
 }
 /** The working tanker's position at t: from the queue's head up to the berth, dwelling, and back astern. */
+let _slots = null, _head = null;
 export function tankerPose(t, out = V(0, 0, 0)) {
-  const s = tankerSlots(), head = s.queue[0].clone().addScaledVector(s.fwd, 10), u = (((t / TANKER.T) % 1) + 1) % 1;
+  if (!_slots) { _slots = tankerSlots(); _head = _slots.queue[0].clone().addScaledVector(_slots.fwd, 10); }
+  const s = _slots, head = _head, u = (((t / TANKER.T) % 1) + 1) % 1;
   const k = u < 0.25 ? smooth(0, 0.25, u) : u < 0.6 ? 1 : 1 - smooth(0.6, 0.85, u);
   return out.copy(head).lerp(s.berth, k);
 }
@@ -331,7 +333,7 @@ export class HearthDistrict {
       this._z.crossVectors(this._y, this._t);    // outward (x) for the basis: x = up x fwd
       m.makeBasis(this._z, this._y, this._t).setPosition(P);
       this.trams.setMatrixAt(i, m);
-      for (const e of [0, 1]) {
+      for (let e = 0; e < 2; e++) {
         const k = (i * 2 + e) * 4, o = (e ? -1 : 1) * TRAM.len * 0.5;
         a[k] = P.x + this._t.x * o; a[k + 1] = P.y + TRAM.h * 0.6; a[k + 2] = P.z + this._t.z * o;
       }

@@ -84,13 +84,14 @@ export function buildCassette() {
   return B.geometry();
 }
 
+const CRANE_ORDER = [0, 1, 2, 3, 4, 3, 2, 1];     // the load bounces along the five stacks
 /**
  * Crane state at time t for court s: bridge z, trolley x (court-relative), cassette base y and
  * whether it hangs. The cassette moves from stack n to stack n+1 (bouncing along the five).
  */
 export function cranePose(t, s, out = {}) {
   const cyc = t / CRANE.T + (s > 0 ? 0 : 0.5), n = Math.floor(cyc), u = cyc - n;
-  const order = [0, 1, 2, 3, 4, 3, 2, 1], a = order[((n % 8) + 8) % 8], b = order[(((n + 1) % 8) + 8) % 8];
+  const a = CRANE_ORDER[((n % 8) + 8) % 8], b = CRANE_ORDER[(((n + 1) % 8) + 8) % 8];
   const za = COURT.stacks[a], zb = COURT.stacks[b];
   const xa = (a % 2 ? 1 : -1) * CRANE.pickX, xb = (b % 2 ? 1 : -1) * CRANE.pickX;
   const seat = COURT.roofTop;
@@ -225,6 +226,7 @@ export class FoundryYard {
       this.root.add(m);
       return { mesh: m, eng };
     });
+    this.moving = [this.bridges, this.trolleys, this.cassettes, this.cables, this.carts, this.drones, this.wheelCars];
     this.built = true;
     this.animate(0);
   }
@@ -238,7 +240,8 @@ export class FoundryYard {
   animate(t) {
     const P = this._p, m = this._m, q = this._q.identity(), S = this._s, c = this._c;
     let ci = 0;
-    [-1, 1].forEach((s, i) => {
+    for (let i = 0; i < 2; i++) {
+      const s = i ? 1 : -1;
       cranePose(t, s, c);
       const x0 = s * COURT.x;
       this.bridges.setMatrixAt(i, m.compose(P.set(x0, CRANE.railY + 4, c.z), q, S.set(1, 1, 1)));
@@ -247,8 +250,8 @@ export class FoundryYard {
       this.cassettes.setMatrixAt(i, m.compose(P.set(x0 + c.x, c.y, c.z), q, S.set(1, 1, 1)));
       // two falls from the hoist block to the spreader (always, so the load never floats)
       const top = bridgeTop - 52 + 2, bottom = c.y + CRANE.box[1] + 10;
-      for (const dz of [-60, 60]) this.cables.setMatrixAt(ci++, m.compose(P.set(x0 + c.x, bottom, c.z + dz * 0.5), q, S.set(1, Math.max(top - bottom, 1), 1)));
-    });
+      for (let f = 0; f < 2; f++) this.cables.setMatrixAt(ci++, m.compose(P.set(x0 + c.x, bottom, c.z + (f ? 30 : -30)), q, S.set(1, Math.max(top - bottom, 1), 1)));
+    }
     for (let k = 0; k < 4; k++) {
       const s = k < 2 ? -1 : 1;
       cartPose(t, k, P);
@@ -268,7 +271,7 @@ export class FoundryYard {
       m.makeRotationY(Math.PI / 2 - a).setPosition(P);          // +z along the spoke, outward
       this.wheelCars.setMatrixAt(k, m);
     }
-    for (const im of [this.bridges, this.trolleys, this.cassettes, this.cables, this.carts, this.drones, this.wheelCars]) im.instanceMatrix.needsUpdate = true;
+    for (const im of this.moving) im.instanceMatrix.needsUpdate = true;
     this.droneLamps.commit(); this.cartLamps.commit(); this.crew.commit();
   }
 }

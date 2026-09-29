@@ -9,7 +9,7 @@ import { helianthCircuits, circuitPose } from '../src/space/helianthTraffic.js';
 import {
   HelianthDistrict, buildPetalFittings, buildCrawler, buildBerths, petalMatrix, petalTop, spineY, DECK_TOP, CATWALK, CREW_LANE, crawlerZ, crewOnCatwalk,
   flotillaLayout, courierRoute, courierPose, COURIER, FLOTILLA, PETAL, buildConcentrator, buildRelayPlatform, BERTH,
-  petalBottom, SPOKE, spokeTop, spokeCarR, buildSpokeCar, buildHubWorks, GALLERY, FIN,
+  petalBottom, SPOKE, spokeTop, spokeCarR, buildSpokeCar, buildHubWorks, GALLERY, FIN, buildSwarmTender, tenderLocal, tenderStatites, crownCrew,
 } from '../src/space/helianthDistrict.js';
 import { FoundryYard, buildWheelCar, wheelCar, WHEEL, buildCraneWorks, cranePose, cartPose, droneOrbits, dronePos, crewPos, COURT, CRANE, CART, QUEUE } from '../src/space/foundryYard.js';
 import { buildTender } from '../src/craft/craftGeometry.js';
@@ -200,11 +200,30 @@ const stT = tree(tris(sc.geo));
   assert.ok(apart > 150, `couriers keep ${apart.toFixed(0)} m apart`);
   results.courierStatiteClearanceKm = +(pathClear / 1000).toFixed(1); results.courierSeparationMetres = +apart.toFixed(0);
 }
+// swarm tenders hold off their statites' rims, clear of every facet; crown crews keep to their lanes
+{
+  const con = buildConcentrator(), st = buildSwarmTender(), L = flotillaLayout();
+  closed('swarmTender', st.geo);
+  const conT = tree(tris(con.geo, I, 1));
+  let tc = Infinity;
+  for (const p of verts(st.geo, tenderLocal(), 3)) tc = Math.min(tc, dist(conT, p, tc + 1));
+  assert.ok(tc > 40, `swarm tenders hold ${tc.toFixed(0)} m off their statites`);
+  assert.ok(Math.abs(tenderLocal().determinant() - 8) < 1e-6, 'tender placement is a proper, uniform scale');
+  const ids = tenderStatites(L);
+  assert.ok(ids.length >= 5 && ids.every((i) => L[i].kind === 0), `${ids.length} tenders, all at concentrators`);
+  results.swarmTenderClearanceMetres = +tc.toFixed(0);
+  const lanes = sc.service.crewRoutes, P = V();
+  for (let t = 0; t < 600; t += 3) for (let j = 0; j < lanes.length * 4; j++) {
+    crownCrew(j, t, lanes, P);
+    const Lb = lanes[j % lanes.length];
+    assert.ok(P.x > Lb.min.x && P.x < Lb.max.x && P.z > Lb.min.z && P.z < Lb.max.z && Math.abs(P.y - Lb.min.y - 1.7) < 1e-9, 'crown crews walk inside their EVA lanes');
+  }
+}
 // the district as the space mode builds it: lazily, a step a frame; then its per-frame cost
 {
   const station = new THREE.Group(), scene = new THREE.Scene(), bodies = [];
   const space = { scene, addBody: (n, o, c, r, opt) => { const b = { n, o, c, r, ...opt }; bodies.push(b); return b; } };
-  const [d, tc] = time(() => new HelianthDistrict(station, V(0, -1, 0), space));
+  const [d, tc] = time(() => new HelianthDistrict(station, V(0, -1, 0), space, sc.service.crewRoutes));
   const cam = V(0, 0, 50);
   const stepMs = [];
   for (let f = 0; f < 10 && !d.built; f++) stepMs.push(time(() => d.update(f * 0.016, cam))[1]);
@@ -430,7 +449,7 @@ const stT = tree(tris(sc.geo));
   assert.ok(ta / 200 < 0.3, 'Hearth district frame under 0.3 ms');
   assert.ok(d.trams.instanceMatrix.array.every(Number.isFinite) && d.tramAttr.array.every(Number.isFinite), 'finite trams');
   let tri = 0;
-  for (const m of [d.fittings, d.drones, d.platforms, d.trams, d.coils, ...d.tankers.map((x) => x.mesh)]) tri += triCount(m.geometry) * (m.isInstancedMesh ? m.count : 1);
+  for (const m of [d.fittings, d.drones, d.hamlets, d.wheels, d.platforms, d.trams, d.coils, ...d.tankers.map((x) => x.mesh)]) tri += triCount(m.geometry) * (m.isInstancedMesh ? m.count : 1);
   results.hearthDistrictRenderedTris = tri;
 }
 

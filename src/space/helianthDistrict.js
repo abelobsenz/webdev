@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { CB, CK, sectionEllipse } from '../craft/craftGeometry.js';
+import { CB, CK, sectionEllipse, buildTender } from '../craft/craftGeometry.js';
 import { buildShuttle, buildTug, lathe } from '../craft/craftClasses.js';
 import { createCraftMaterial, updateCraftMaterial } from '../craft/craftMaterial.js';
 import { craftMesh, addEngines, addLamps, placeMerge, placeLamps, KM, CRAFT_FRAME } from './craftMesh.js';
@@ -21,7 +21,9 @@ import { createLamps, LAMP } from './lamps.js';
 //             cradle (seated by its surveyed lowest point)
 //   flotilla  the Helianth's own neighbourhood of the swarm (km): forty-eight concentrator
 //             statites and relay platforms hovering 60-400 km round the station, every one
-//             turned to the Sun and slewing slowly, and couriers working between them
+//             turned to the Sun and slewing slowly, and couriers working between them; swarm
+//             tenders hold at some of them, a spare facet on their booms, replacing mirrors
+//   crown     suited crews walk the service crown's EVA lanes under its floodlights
 //
 // Heavy geometry is built lazily on first approach (build()), spread across frames; beyond
 // range the district and the flotilla are hidden. The verifier (tools/verify-sun.mjs) builds
@@ -182,8 +184,9 @@ export function buildCrawler() {
 }
 
 /** Crawler pose on its catwalk: z along the petal, pausing at each receiver station. */
+const STOPS = RECEIVERS.map((r) => PETAL.inner + r * (PETAL.outer - PETAL.inner));
 export function crawlerZ(t, i) {
-  const stops = RECEIVERS.map((r) => PETAL.inner + r * (PETAL.outer - PETAL.inner));
+  const stops = STOPS;
   const legs = stops.length - 1, T = 900, u = (((t / T + i * 0.37) % 1) + 1) % 1;
   // out along the stations and back: a ping-pong over legs, dwelling 40 % of each leg
   const x = u < 0.5 ? u * 2 * legs : (1 - u) * 2 * legs;
@@ -376,10 +379,40 @@ export function buildRelayPlatform() {
   return { geo: B.geometry(), lamps };
 }
 
+const _eul = new THREE.Euler();
 /** Slew of statite i at time t: a small, slow wander about Sun-pointing (radians). */
 export function statiteSlew(s, t, out = new THREE.Quaternion()) {
-  const e = new THREE.Euler(0.04 * Math.sin(t * 0.011 + s.phase), s.spin + 0.02 * t * (s.kind ? 0.2 : 0.05), 0.04 * Math.cos(t * 0.013 + s.phase * 1.7));
-  return out.setFromEuler(e);
+  return out.setFromEuler(_eul.set(0.04 * Math.sin(t * 0.011 + s.phase), s.spin + 0.02 * t * (s.kind ? 0.2 : 0.05), 0.04 * Math.cos(t * 0.013 + s.phase * 1.7)));
+}
+
+// ----------------------------------------------------------- swarm tenders ----
+// A tender holds off a concentrator's rim on its anti-Sun side, a replacement facet on a boom
+// reaching over the outer ring (statite frame, metres, before the statite's own scale).
+export const TENDER_AT = { every: 9, r: 2350, y: 520, len: 300, scale: 2 };
+export function buildSwarmTender() {
+  const te = buildTender(TENDER_AT.len), I = new THREE.Matrix4();
+  const B = new CB();
+  // the boom from the tender's flank toward the rim, a spreader and the facet it carries
+  B.tube([V(40, 0, 60), V(260, -60, 160), V(420, -140, 160)], 7, 8, CK.BRONZE);
+  B.at(430, -150, 160); B.box(0, 0, 0, 30, 20, 60, CK.DARK); B.pop();
+  B.at(560, -170, 160, 0, 0, Math.PI / 2 - 0.2); B.push(new THREE.Matrix4().makeRotationX(Math.PI / 2));
+  lathe(B, [[0, -2, CK.PANEL], [150, -2, CK.PANEL], [150, 2, CK.BRONZE], [0, 2, CK.DARK]], 6, Math.PI / 6);
+  B.pop(); B.pop();
+  const parts = [{ geo: te.geo, m: I }, ...te.arms.map((A) => ({ geo: A.geo, m: I })), { geo: B.geometry(), m: I }];
+  return { geo: placeMerge(parts), lamps: [{ p: V(0, 30, 0), r: 6, color: LAMP.AMBER, i: 2.6, breathe: 0.5 }, { p: V(560, -150, 160), r: 5, color: LAMP.WHITE, i: 2.2 }] };
+}
+/** The tender's frame relative to its statite (+z toward the statite's axis, +y away from the Sun). */
+export function tenderLocal(out = new THREE.Matrix4()) {
+  const S = TENDER_AT.scale;
+  return out.makeBasis(V(0, 0, 1), V(0, 1, 0), V(-1, 0, 0)).scale(V(S, S, S)).setPosition(TENDER_AT.r, TENDER_AT.y, 0);
+}
+export const tenderStatites = (layout) => layout.map((s, i) => (s.kind === 0 && i % TENDER_AT.every === 0 ? i : -1)).filter((i) => i >= 0);
+
+/** EVA crews on the service crown's lanes (station metres): lane boxes from the crown's survey. */
+export function crownCrew(j, t, lanes, out) {
+  const L = lanes[j % lanes.length], u = (((t / (240 + 30 * (j % 3))) + j * 0.29) % 1 + 1) % 1, s = u < 0.5 ? u * 2 : 2 - u * 2;
+  const x = (L.min.x + L.max.x) / 2 + ((j >> 1) % 2 ? 5 : -5);
+  return out.set(x, L.min.y + 1.7, L.min.z + 10 + (L.max.z - L.min.z - 20) * s);
 }
 
 // ---------------------------------------------------------------- couriers ----
@@ -455,7 +488,8 @@ export function crewOnCatwalk(j, t, out) {
 // ---------------------------------------------------------------- district ----
 export class HelianthDistrict {
   /** station: the collector's group (km); sunDir: its light direction; scene: where the flotilla lives. */
-  constructor(station, sunDir, space) {
+  constructor(station, sunDir, space, lanes = []) {
+    this.lanes = lanes;
     this.station = station; this.sunDir = sunDir; this.space = space; this._center = new THREE.Vector3();
     this.built = false; this.queue = null;
     this.near = new THREE.Group(); this.near.visible = false; station.add(this.near);
@@ -538,6 +572,27 @@ export class HelianthDistrict {
           this.couriers.push({ mesh: m, r, engines });
         }
       },
+      () => {
+        const st = buildSwarmTender();
+        this.tenderIdx = tenderStatites(this.layout);
+        this.tenderLocal = tenderLocal();
+        this.tenders = mk(st.geo, this.tenderIdx.map(() => new THREE.Matrix4()));
+        this.flotilla.add(this.tenders);
+        this.tenderLamps = new MovingLamps(this.tenderIdx.length * 2, { r: 12, color: LAMP.AMBER, i: 2.6, breathe: 0.5 });
+        this.tenderLamps.mesh.scale.setScalar(0.001);
+        this.tenderLampLocal = st.lamps.map((l) => l.p.clone());
+        this.flotilla.add(this.tenderLamps.mesh);
+        if (this.lanes.length) {
+          this.crownCrew = new MovingLamps(this.lanes.length * 4, { r: 1.2, color: LAMP.WHITE, i: 2.4 });
+          this.crownCrew.mesh.scale.setScalar(0.001);
+          this.near.add(this.crownCrew.mesh);
+          const flood = [];
+          for (const L of this.lanes) for (const z of [L.min.z, L.max.z]) flood.push({ p: V((L.min.x + L.max.x) / 2, L.max.y + 14, z), r: 5, color: LAMP.WHITE, i: 2.2, dir: V(0, -1, 0) });
+          const fl = createLamps(flood, { minPx: 1.1 });
+          fl.scale.setScalar(0.001);
+          this.near.add(fl);
+        }
+      },
     ];
   }
 
@@ -588,9 +643,21 @@ export class HelianthDistrict {
       this.spokeCars.instanceMatrix.needsUpdate = true;
       this.spokeLamps.commit();
     }
-    if (this.statites) for (const im of this.statites) {
-      im.userData.idx.forEach((i, n) => { const s = this.layout[i]; im.setMatrixAt(n, this._m.compose(s.p, statiteSlew(s, t, this._q), this._s.set(s.size, s.size, s.size))); });
+    if (this.statites) for (let k = 0; k < 2; k++) {
+      const im = this.statites[k], idx = im.userData.idx;
+      for (let n = 0; n < idx.length; n++) { const s = this.layout[idx[n]]; im.setMatrixAt(n, this._m.compose(s.p, statiteSlew(s, t, this._q), this._s.set(s.size, s.size, s.size))); }
       im.instanceMatrix.needsUpdate = true;
+    }
+    if (this.tenders) {
+      for (let n = 0; n < this.tenderIdx.length; n++) {
+        const s = this.layout[this.tenderIdx[n]];
+        this._m.compose(s.p, statiteSlew(s, t, this._q), this._s.set(s.size, s.size, s.size)).multiply(this.tenderLocal);
+        this.tenders.setMatrixAt(n, this._m);
+        for (let j = 0; j < 2; j++) this.tenderLamps.set(n * 2 + j, P.copy(this.tenderLampLocal[j]).applyMatrix4(this._m));
+      }
+      this.tenders.instanceMatrix.needsUpdate = true;
+      this.tenderLamps.commit();
+      if (this.crownCrew) { for (let j = 0; j < this.crownCrew.count; j++) this.crownCrew.set(j, crownCrew(j, t, this.lanes, P)); this.crownCrew.commit(); }
     }
     for (const c of this.couriers) {
       const thr = courierPose(c.r, t, P, F);

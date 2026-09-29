@@ -368,7 +368,7 @@ export class WorkingStations {
     this.helianth=new HelianthTraffic(this.solar,s.userData.sunDir);
     space.addBody('solarCollector',[this.solar],()=>this.solar.getWorldPosition(new THREE.Vector3()),19.8,{solid:true,hint:.9});
     // catwalks, crawlers, crews, berths and the statite flotilla (src/space/helianthDistrict.js)
-    this.district=new HelianthDistrict(this.solar,s.userData.sunDir,space);
+    this.district=new HelianthDistrict(this.solar,s.userData.sunDir,space,this.solarData.service?.crewRoutes||[]);
     // gantry cranes, stock traffic, furnace light and crews at the foundry (src/space/foundryYard.js)
     this.yard=new FoundryYard(this.foundry,this.foundryData);
     this._cam=new THREE.Vector3();this._fw=new THREE.Vector3();
