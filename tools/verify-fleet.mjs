@@ -597,6 +597,18 @@ assert.ok(minClear > 0, `working lanes clear every structure with ${minClear} km
     assert.ok(r === P || r === Q, `seam kind never between (${P}/${Q} -> ${r})`);
   }
   assert.ok(plain.fragmentShader.includes('float k = craftKind(vFac.z, vKind2, vKindP);') && plain.vertexShader.includes('flat varying float vKindP;'), 'seam kinds resolved');
+  // the liner's and the tenders' paint: kinds only, on the real skin, a band not the whole hull
+  const { markLiner, markTender } = await import('../src/space/fleet.js');
+  const lg = fleet.linerGeo.geo, pg = markLiner(lg), cnt = {};
+  const kz = pg.attributes.aFacade.array, k0 = lg.attributes.aFacade.array;
+  for (let i = 2; i < kz.length; i += 3) cnt[kz[i]] = (cnt[kz[i]] || 0) + 1;
+  out.linerPaint = { livery: cnt[20] || 0, grime: cnt[24] || 0, pearl: cnt[1] || 0 };
+  assert.ok(out.linerPaint.livery > 150 && out.linerPaint.grime > 300 && out.linerPaint.pearl > out.linerPaint.livery, `liner paint (${JSON.stringify(out.linerPaint)})`);
+  for (let i = 2; i < kz.length; i += 3) if (kz[i] !== k0[i]) assert.ok(k0[i] === 1, 'only pearl skin repainted');
+  assert.ok(pg.attributes.position === lg.attributes.position && pg.index === lg.index, 'paint shares the hull buffers');
+  assert.ok(fleet.docked.geometry.attributes.aFacade.array.some((k, i) => i % 3 === 2 && k === 20), 'the berthed liner wears her livery');
+  const tg = markTender(fleet.tenderData.geo);
+  assert.ok(tg.attributes.aFacade.array.some((k, i) => i % 3 === 2 && k === 24), 'tenders in working plate');
   const h = plain.uniforms.uAoH.value;
   assert.ok(h.x > 0 && h.z > 150 && h.z < 200, `occlusion envelope from the box (${h.toArray()})`);
   assert.equal(dressed.uniforms.uAoH.value.x, 0, 'instanced hulls without an envelope skip the occlusion');
