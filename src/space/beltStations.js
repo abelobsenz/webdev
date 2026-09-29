@@ -38,6 +38,7 @@ const X = V(1, 0, 0), Y = V(0, 1, 0), Z = V(0, 0, 1);
 const TO_Y = new THREE.Matrix4().makeRotationX(-Math.PI / 2);        // lathe z -> +y
 const TO_X = new THREE.Matrix4().makeRotationY(Math.PI / 2);         // lathe z -> +x
 const G = 9.81;
+export const LIFT_SIDE = 10.5;     // m: a wheel's lift cars ride this far off the spoke's axis
 
 /** Working context of one station build. */
 class Ctx {
@@ -279,6 +280,7 @@ function buildHabitat(c) {
   // the wheel (spins about z): rim, spokes with lift shafts, a bearing collar round the hub
   const nSpokes = r.pick([3, 4, 6]);
   const seg = 96;
+  const lifts = [];
   c.part(V(0, 0, 0), new THREE.Quaternion(), 'spin', rate, (Bp, lamps) => {
     const offs = twin ? [-rimW * 0.62, rimW * 0.62] : [0];
     for (const zo of offs) {
@@ -291,6 +293,9 @@ function buildHabitat(c) {
         const p0 = u.clone().multiplyScalar(hubR * 1.25).setZ(zo * 0.5), p1 = u.clone().multiplyScalar(R - rimH * 0.98).setZ(zo);
         Bp.tube([p0, p1], 4.2, 10, DK.LIVERY);
         Bp.tube([p0.clone().addScaledVector(V(-u.y, u.x, 0), 7), p1.clone().addScaledVector(V(-u.y, u.x, 0), 7)], 1.2, 6, CK.GLASS);   // lift shaft
+        // the lift car rides the shaft's outer rail, hub collar to rim
+        const side = V(-u.y, u.x, 0).multiplyScalar(LIFT_SIDE);
+        lifts.push({ a: u.clone().multiplyScalar(hubR * 1.45 + 8).setZ(zo * 0.5).add(side), b: u.clone().multiplyScalar(R - rimH - 8).setZ(zo).add(side), axis: u.clone() });
         for (let t = 0.2; t < 0.95; t += 0.25) Bp.tube([p0.clone().lerp(p1, t).addScaledVector(V(-u.y, u.x, 0), -1.5), p0.clone().lerp(p1, t).addScaledVector(V(-u.y, u.x, 0), 8)], 0.8, 5, CK.BRONZE);
         lamps.push({ p: p1.clone().addScaledVector(u, -rimH * 0.2).setZ(zo + (twin ? rimW * 0.3 : rimW * 0.55)), r: 2.4, color: LAMP.AMBER, i: 3, breathe: 0.4 });
       }
@@ -301,7 +306,7 @@ function buildHabitat(c) {
       const a = (k / 24) * TAU;
       lamps.push({ p: V(Math.cos(a) * (R + 1.5), Math.sin(a) * (R + 1.5), 0), r: 3.2, color: k % 6 ? [1.0, 0.8, 0.55] : LAMP.WHITE, i: 2.2 });
     }
-  }, { radius: R + 4, hub: hubR * 1.45, halfW });
+  }, { radius: R + 4, hub: hubR * 1.45, halfW, lifts });
   c.spinR = R;
 }
 

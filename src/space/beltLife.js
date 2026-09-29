@@ -38,6 +38,19 @@ export function suitGeo() {
   _suitGeo.userData.shared = true;
   return _suitGeo;
 }
+let _carGeo = null;
+/** A wheel's lift car (+z along the spoke, +y along the wheel's axis): glazed cab in a livery frame. */
+export function liftCarGeo() {
+  if (_carGeo) return _carGeo;
+  const B = new CB();
+  B.box(0, 0, 0, 2.6, 3.2, 6, 20);
+  B.box(0, 0, 0, 2.7, 1.4, 4.6, CK.GLASS);
+  for (const z of [-3.1, 3.1]) B.box(0, 0, z, 2.9, 3.4, 0.3, CK.BRONZE);
+  B.box(-1.5, 0, 0, 0.3, 0.8, 6.6, CK.DARK);            // the rail shoes
+  _carGeo = B.geometry();
+  _carGeo.userData.shared = true;
+  return _carGeo;
+}
 function sharedDrone() {
   if (!_droneGeo) { _droneGeo = droneGeo(5); _droneGeo.userData.shared = true; }
   return _droneGeo;

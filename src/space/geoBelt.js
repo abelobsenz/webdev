@@ -5,7 +5,8 @@ import { DynLamps, rng, smooth, TAU } from './lifeKit.js';
 import { R_EARTH, GEO_ALT, MERIDIAN_LON, bodyDir } from './sim.js';
 import { stationFrame } from './stations.js';
 import { buildBeltStation } from './beltStations.js';
-import { BeltLife, buildFittings } from './beltLife.js';
+import { BeltLife, buildFittings, liftCarGeo } from './beltLife.js';
+import { instancedPart, poseMatrix } from './lifeKit.js';
 import { StationTraffic, makeRoute } from './fleetTraffic.js';
 import { design } from './shipDesigns.js';
 const _mx = new THREE.Vector3(), _mm = new THREE.Matrix4();
@@ -237,6 +238,8 @@ export class GeoBelt {
       m.quaternion.copy(p.q);
       if (p.lamps.length) addLamps(m, p.lamps, { minPx: 1.1 });
       mesh.add(m);
+      // lift cars riding a wheel's spokes (children of the turning part)
+      if (p.lifts && p.lifts.length) { p.liftIm = instancedPart(m, liftCarGeo(), p.lifts.length); m.add(p.liftIm); }
       return { ...p, mesh: m, base: p.pivot.clone() };
     });
     addLamps(mesh, data.lamps, { minPx: 1.2 });
@@ -341,7 +344,19 @@ export class GeoBelt {
   _animate(st, b, t) {
     for (const p of b.parts) {
       const m = p.mesh;
-      if (p.mode === 'spin') m.quaternion.copy(p.q).multiply(_q.setFromAxisAngle(_Z, (p.rate * t) % TAU));
+      if (p.mode === 'spin') {
+        m.quaternion.copy(p.q).multiply(_q.setFromAxisAngle(_Z, (p.rate * t) % TAU));
+        if (p.liftIm) {
+          // each car: a ride of ~90 s hub to rim, a stop at each end
+          for (let j = 0; j < p.lifts.length; j++) {
+            const L = p.lifts[j];
+            const s = smooth(0.1, 0.9, 0.5 - 0.5 * Math.cos(TAU * (t / 240 + j * 0.37)));
+            _w.copy(L.a).lerp(L.b, s);
+            p.liftIm.setMatrixAt(j, poseMatrix(_mm, _w, L.axis, _Z));
+          }
+          p.liftIm.instanceMatrix.needsUpdate = true;
+        }
+      }
       else if (p.mode === 'slew') m.quaternion.copy(p.q).multiply(_q.setFromAxisAngle(_Z, p.amp * Math.sin(p.rate * t + p.phase)));
       else if (p.mode === 'rail') m.position.copy(p.base).setZ(p.base.z + p.travel * Math.sin((TAU * t) / p.period));
       else if (p.mode === 'sun') {
