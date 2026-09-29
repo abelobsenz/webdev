@@ -151,7 +151,7 @@ export function buildHotel() {
       W.box(arcM / 2, r0 - 2.2, 0, 0.5, 2.4, 2 * hw - 1, CK.DARK);                  // rib crown
     }
     W.pop();
-    if (k % 3 === 0) for (const s of [-1, 1]) {
+    if (k % 4 === 0) for (const s of [-1, 1]) {
       const c = Math.cos(a), sn = Math.sin(a);
       wheelLamps.push({ p: V(-sn * (R + 2.4), c * (R + 2.4), s * (hw + 1.6)), r: 0.7, color: LAMP.AMBER, i: 1.7, breathe: 0.15, phase: k / segs });
     }
@@ -289,7 +289,7 @@ export function buildHabitat() {
     }
     W.pop();
     const c = Math.cos(a), sn = Math.sin(a);
-    if (k % 2 === 0) for (const s of [-1, 1]) wheelLamps.push({ p: V(-sn * (R + 7), c * (R + 7), s * (hw + step * 2.5 + 3)), r: 2.2, color: LAMP.AMBER, i: 1.8, breathe: 0.12, phase: k / segs });
+    if (k % 6 === 0) for (const s of [-1, 1]) wheelLamps.push({ p: V(-sn * (R + 7), c * (R + 7), s * (hw + step * 2.5 + 3)), r: 2.2, color: LAMP.AMBER, i: 1.6, breathe: 0.12, phase: k / segs });   // on the frames only
     if (k % 4 === 1) wheelLamps.push({ p: V(-sn * (r0 - 17), c * (r0 - 17), 0), r: 2.6, color: WARM, i: 1.7 });
     if (k % 8 === 4) for (const s of [-1, 1]) wheelLamps.push({ p: V(-sn * (R + 47), c * (R + 47), s * (hw - 30)), r: 1.8, color: LAMP.RED, i: 2.4, breathe: 0.5, phase: k / 40 });
   }
