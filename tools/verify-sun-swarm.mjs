@@ -418,3 +418,60 @@ console.log('SUN_SWARM_VERIFIED');
   console.log(JSON.stringify({ loopTris: tri(g), loopApexR: +hi.toFixed(3) }));
 }
 console.log('SUN_LOOPS_VERIFIED');
+// ================================================================== the Swarm Yard
+{
+  const { YARD, SwarmYard, buildYardFixed, buildYardWheel, buildCollectorStage, cranePose, yardMatrix } = await import('../src/space/swarmYard.js');
+  const f = buildYardFixed(), P = f.geo.attributes.position, p = V();
+  // the yard lies wholly inside the sunward shell's window, clear of its streets and of the relay beams
+  const m = yardMatrix(D), c = V().setFromMatrixPosition(m);
+  const box = new THREE.Box3().setFromBufferAttribute(P), ext = Math.max(-box.min.x, box.max.x, -box.min.z, box.max.z) / 1000 + 2;
+  assert.ok(Math.hypot(c.x, c.z) + ext < SWARM.layers[0].hole, `the yard inside the window (${(Math.hypot(c.x, c.z) + ext).toFixed(0)} km)`);
+  assert.ok(m.elements.every(Number.isFinite), 'finite yard pose');
+  let streetGap = Infinity;
+  for (const st of swarmStreets(D)) {
+    if (st.layer !== YARD.layer) continue;
+    const ab = st.b.clone().sub(st.a), u = THREE.MathUtils.clamp(c.clone().sub(st.a).dot(ab) / ab.lengthSq(), 0, 1);
+    streetGap = Math.min(streetGap, st.a.clone().addScaledVector(ab, u).distanceTo(c) - ext);
+  }
+  let beamGap = Infinity;
+  const rm = new THREE.Matrix4(), a = V(), b = V(), ab = V();
+  for (const r of swarmLayout(D).filter((q) => q.kind === 1 && Math.hypot(q.p.x, q.p.z) <= SWARM.beamR)) {
+    swarmMatrix(D, r, rm); a.set(420, 600, 0).applyMatrix4(rm).multiplyScalar(0.001);
+    b.copy(a).normalize().multiplyScalar(SWARM.beamEnd); b.y = 2.2 + Math.sign(a.y) * 3; ab.subVectors(b, a);
+    const u = THREE.MathUtils.clamp(c.clone().sub(a).dot(ab) / ab.lengthSq(), 0, 1);
+    beamGap = Math.min(beamGap, a.clone().addScaledVector(ab, u).distanceTo(c) - ext);
+  }
+  assert.ok(streetGap > 10 && beamGap > 5, `yard clear of streets (${streetGap.toFixed(0)} km) and beams (${beamGap.toFixed(0)} km)`);
+  // the line: jigs far enough apart for finished collectors, each stage within its jig's reach
+  for (let j = 1; j < YARD.jigs.length; j++) assert.ok(YARD.jigs[j] - YARD.jigs[j - 1] > 2 * SWARM.rimR + 1500, 'jigs apart');
+  const stageTris = [0, 1, 2, 3, 4].map((s) => tri(buildCollectorStage(s)));
+  for (let s = 1; s < 5; s++) assert.ok(stageTris[s] > stageTris[s - 1], 'each stage adds to the last');
+  // the cranes' swept volume above the rails holds none of the fixed yard
+  const xs = [0, 1].map((k) => [cranePose(k, 0).x, YARD.jigs[1 + 2 * k]]).flat();
+  const x0 = Math.min(...xs, YARD.racks.x + 1000) - 300, x1 = Math.max(...xs) + 300;
+  let inCrane = 0, inWheel = 0;
+  const W = YARD.wheel;
+  for (let i = 0; i < P.count; i++) {
+    p.fromBufferAttribute(P, i);
+    if (p.x > x0 && p.x < x1 && p.y > YARD.rail.y + 5 && p.y < YARD.rail.y + 400 && Math.abs(p.z) < YARD.rail.z + 200) inCrane++;
+    const rho = Math.hypot(p.x - W.x, p.y - W.y);
+    if (Math.abs(p.z - W.z) < 320 && rho > 450 && rho < W.R + 350) inWheel++;
+  }
+  assert.equal(inCrane, 0, 'nothing fixed in the cranes\' path');
+  assert.equal(inWheel, 0, 'nothing fixed in the wheel\'s sweep');
+  // the wheel spins for a full gravity at its floor
+  assert.ok(Math.abs(W.omega * W.omega * W.R - 9.81) < 1e-9, 'a full gravity in the wheel');
+  const wb = new THREE.Box3().setFromBufferAttribute(buildYardWheel().attributes.position);
+  assert.ok(Math.max(wb.max.x, wb.max.y) < W.R + 350 && wb.max.z - wb.min.z < 640, 'wheel within its sweep');
+  // the class: buffers, animation, timings
+  const g = new THREE.Group(), [yd, ms] = time(() => new SwarmYard(g, D, V(0, -1, 0)));
+  const [, tf] = time(() => { for (let i = 0; i < 300; i++) yd.animate(i * 0.7); });
+  g.updateMatrixWorld(true);
+  buffers('swarmYard', g);
+  const lm = new THREE.Matrix4();
+  for (let k = 0; k < YARD.cranes; k++) { yd.loads.getMatrixAt(k, lm); assert.ok(Math.abs(lm.elements[13] - 20 - (YARD.rail.y + 180)) < 1e-6, 'blank seated on its gantry'); }
+  assert.ok(tf / 300 < 0.05, 'yard frame cheap');
+  Object.assign(out, { yardTris: yd.triangles(), yardBuildMs: +ms.toFixed(1), yardFrameMs: +(tf / 300).toFixed(4), yardStreetGapKm: Math.round(streetGap), yardBeamGapKm: Math.round(beamGap) });
+  console.log(JSON.stringify({ yardTris: out.yardTris, yardBuildMs: out.yardBuildMs, yardStreetGapKm: out.yardStreetGapKm, yardBeamGapKm: out.yardBeamGapKm }));
+}
+console.log('SWARM_YARD_VERIFIED');

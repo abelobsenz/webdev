@@ -7,6 +7,7 @@ import { KM } from './craftMesh.js';
 import { craftInstances, MovingLamps } from './helianthDistrict.js';
 import { truss, dish, mast, radiatorWing } from './shipKit.js';
 import { droneGeo } from './lifeKit.js';
+import { SwarmYard } from './swarmYard.js';
 
 // The Helianth's own reach of the Dyson swarm, in 3D: the collector shells it sits in.
 //
@@ -28,7 +29,8 @@ import { droneGeo } from './lifeKit.js';
 // harvest on to the Earth in one golden beam.
 //
 // Traffic: service tugs run the streets, and spiral-sweeping cleaning drones work the faces
-// of the collectors nearest you.
+// of the collectors nearest you. In the sunward shell's window new collectors are built on
+// an assembly line (src/space/swarmYard.js).
 //
 // LOD: collectors and relays are sorted into cells; the cells near the camera draw the full
 // build (near InstancedMesh), the rest a slab mirror with its receiver (mid InstancedMesh),
@@ -588,6 +590,8 @@ export class HelianthSwarm {
     this.droneLamps.mesh.geometry.instanceCount = 0;
     this.group.add(this.droneLamps.mesh);
     this.hosts = new Int32Array(SWARM.droneHosts); this.nHosts = 0; this._hd = new Float32Array(SWARM.nearCap);
+    // the yard where collectors are built, in the sunward shell's window (src/space/swarmYard.js)
+    this.yard = new SwarmYard(this.group, D, this.sunDir);
     this.group.traverse((o) => { o.frustumCulled = false; });
     this.beamGroup.traverse((o) => { o.frustumCulled = false; });
     this.built = true;
@@ -673,6 +677,7 @@ export class HelianthSwarm {
       }
     }
     if (this.nHosts) { this.dronesIM.instanceMatrix.needsUpdate = true; this.droneLamps.commit(); }
+    this.yard.animate(t);
     // the Helianth's beam: toward the Earth (at the world origin), in the station's frame
     if (sim) {
       p.copy(this._w).negate().normalize().applyQuaternion(this._iq);
@@ -686,6 +691,6 @@ export class HelianthSwarm {
     const tri = (g) => (g.index ? g.index.count : g.attributes.position.count) / 3;
     let n = 0;
     for (const im of [this.colNear, this.colMid, this.relNear, this.relMid, this.rings, this.tugs, this.dronesIM]) n += tri(im.geometry) * im.count;
-    return n;
+    return n + this.yard.triangles();
   }
 }
