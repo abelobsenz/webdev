@@ -8,6 +8,8 @@ import { HarbourStation, HS } from '../src/space/harbour.js';
 import { LIFE, cranePose, podR, PODS_PER_LINE, dronePose, armFrame, ROAD, roadPose } from '../src/space/harbourLife.js';
 import { buildConcordYard, buildWaterStore, YARD, STORE, sectionPoint, movementPlan, movementPose, MOVEMENTS, routeAround } from '../src/space/geoRoads.js';
 import { approachVoyage, voyage } from '../src/space/fleet.js';
+import { WATER, waterRunPose } from '../src/space/waterRun.js';
+import { YARD_POS, STORE_POS } from '../src/space/geoRoads.js';
 import { YardWorks, WORKS, craneBay, cranePlate, droneSites, dronePos, crewPodPos, podStops } from '../src/space/yardWorks.js';
 import { StoreWorks, PLUMB, storeDronePos } from '../src/space/storeWorks.js';
 import { TL, cartZ, rimWalker, apronWalker } from '../src/space/terraceLife.js';
@@ -163,6 +165,7 @@ assert.ok(boxGap > 1, `berth boxes clear the ships and fingers by ${boxGap} m`);
 // positive control: a pod line through the gallery's axis must collide
 { P.set(6000, 0, 0).applyMatrix4(armF[0]); assert.ok(hc.dist(P, 200) < 230 * HS, 'positive control: the gallery axis lies inside the gallery'); }
 
+let plans;
 // ---- the Ring Road: clear of the station, its ships and the turning rings; lanes never meet
 {
   let g = Infinity, sep = Infinity, ringGap = Infinity;
@@ -187,7 +190,7 @@ assert.ok(boxGap > 1, `berth boxes clear the ships and fingers by ${boxGap} m`);
   // the Harbour's other traffic (freighter movements, the arriving liner) never comes near the lanes (km)
   const laneDist = (p) => Math.min(...ROAD.lanes.map((l) => Math.hypot(Math.hypot(p.x, p.z) - ROAD.R * 1e-3, p.y - l.y * 1e-3)));
   let other = Infinity;
-  const plans = MOVEMENTS.map((mv) => {
+  plans = MOVEMENTS.map((mv) => {
     const c = movementPlan(h.arms, mv.arm, mv);
     c.departure = [c.stage.clone(), c.stage.clone().addScaledVector(c.dock.d, 1.6), ...routeAround(c.stage, c.gateD, 16.5, 2.5), c.gateD.clone().addScaledVector(c.dD, -3), c.gateD.clone()];
     c.approach = [c.gateA.clone(), c.gateA.clone().addScaledVector(c.dA, -3), ...routeAround(c.gateA, c.stage, 17, 1.5), c.stage.clone().addScaledVector(c.dock.d, 2.2), c.stage.clone()];
@@ -364,6 +367,39 @@ Object.assign(results, { releaseCrawlerClearM: +crawlGap.toFixed(1), releaseGant
 assert.ok(crawlGap > 1, `spar crawlers clear the yard by ${crawlGap} m`);
 assert.ok(gantryGap > 5, `inspection gantries clear the cradles by ${gantryGap} m`);
 assert.ok(RW.gantry.apothem - 10 > RY.apothem + 22 + 30, 'the gantry rings stay outside the hoops (the liners pass inside)');
+
+// ===================================================================== the water run
+{
+  const Q = V(), F = V();
+  // store and yard hulls in the Harbour frame (km): the store sits unrotated at STORE_POS; the yard's
+  // local z (the hull's bow) points east (-x), its local x north (+z)
+  const yq = new THREE.Matrix4().makeBasis(V(0, 0, 1), V(0, 1, 0), V(-1, 0, 0)).setPosition(YARD_POS).multiply(new THREE.Matrix4().makeScale(1e-3, 1e-3, 1e-3));
+  const sq = new THREE.Matrix4().makeTranslation(STORE_POS.x, STORE_POS.y, STORE_POS.z).multiply(new THREE.Matrix4().makeScale(1e-3, 1e-3, 1e-3));
+  const wc = new Collider([{ geo: yd.dockGeo, m: yq }, { geo: yd.hullGeo, m: yq }, { geo: yd.wheelGeo, m: yq }, { geo: sd.geo, m: sq }, { geo: sd.ships, m: sq }, { geo: sw.data.geo, m: sq }], 0.4);
+  let gHull = Infinity, gTether = Infinity, gOther = Infinity, gHarbour = Infinity;
+  const lv = approachVoyage();
+  for (let t = 0; t < WATER.T; t += 1.1) {
+    waterRunPose(t, Q, F);
+    assert.ok(Number.isFinite(Q.x + Q.y + Q.z) && Math.abs(F.length() - 1) < 1e-6, 'finite water-run pose');
+    for (const d of [-0.18, 0, 0.18]) {
+      const p = Q.clone().addScaledVector(F, d);
+      gHull = Math.min(gHull, wc.dist(p, 1.2) - WATER.halfW);
+      if (p.y < -7.3 && p.y > -13.4) gTether = Math.min(gTether, Math.hypot(p.x, p.z) - WATER.halfW - 0.2);
+      gHarbour = Math.min(gHarbour, -7.3 - (p.y + WATER.halfW));
+    }
+  }
+  const path = [];
+  for (let t = 0; t < WATER.T; t += 20) { waterRunPose(t, Q, F); path.push(Q.clone()); }
+  for (let u = 0; u < 1; u += 0.005) {
+    for (const c of plans) { movementPose(u, c, Q, F); for (const p of path) gOther = Math.min(gOther, p.distanceTo(Q) - 0.3 * c.scale - 0.25); }
+    voyage(u, lv, Q, F); for (const p of path) gOther = Math.min(gOther, p.distanceTo(Q) - 1.5);
+  }
+  Object.assign(results, { waterRunHullClearKm: +gHull.toFixed(3), waterRunTetherClearKm: +gTether.toFixed(2), waterRunBelowHarbourKm: +gHarbour.toFixed(2), waterRunOtherTrafficKm: +gOther.toFixed(2) });
+  assert.ok(gHull > 0.1, `the water tanker clears the store, the yard and its wheel by ${gHull} km`);
+  assert.ok(gTether > 0.3, `the water tanker keeps ${gTether} km off the tether and its climbers`);
+  assert.ok(gHarbour > 0.5, 'the water run stays below the Harbour');
+  assert.ok(gOther > 0.5, `the water run keeps ${gOther} km off the freighter movements and the arriving liner`);
+}
 
 // ===================================================================== totals
 results.totalLifeTriangles = results.terraceLifeTriangles + results.harbourLifeTriangles + results.yardWorksTriangles + results.storeWorksTriangles + results.releaseWorksTriangles;

@@ -8,6 +8,7 @@ import { R_EARTH, GEO_ALT, MERIDIAN_LON, bodyDir } from './sim.js';
 import { stationFrame, CORRIDORS } from './stations.js';
 import { YardWorks } from './yardWorks.js';
 import { StoreWorks } from './storeWorks.js';
+import { WaterRun } from './waterRun.js';
 
 // THE GEOSTATIONARY ROADS: the Harbour's neighbourhood along the geostationary arc.
 //
@@ -591,6 +592,8 @@ export class GeoRoads {
       space.addBody(`movement${i}`, [g], () => g.getWorldPosition(_w), 1100 * KM * c.scale * 0.5 + 0.4, { solid: true, hint: 0.45 });
       return { group: g, mesh: m, engines, glow, c, pos: new THREE.Vector3(), fwd: new THREE.Vector3(0, 0, 1) };
     });
+    // the water run: a tanker between the Water Store and the yard (waterRun.js)
+    this.waterRun = new WaterRun(space);
     this._q = new THREE.Quaternion();
     this._w = new THREE.Vector3();
   }
@@ -617,6 +620,7 @@ export class GeoRoads {
       const px = pixelRadius(space.camera, mv.group.position, 0.55 * mv.c.scale, space.size.y);
       mv.mesh.visible = px > 0.35;
     }
+    this.waterRun.update(realTime, q, o, space, lookQuat);
     // escort tugs ride their ships' flanks in and out, and wait on their stands between
     for (const [i, e] of this.escorts.entries()) {
       const c = this.movers[i].c;
