@@ -3,7 +3,8 @@ import { FullscreenPass, FS_VERT } from '../core/fullscreen.js';
 import { SNOISE_GLSL } from './glsl.js';
 import { NOISE_GLSL } from '../shaders/noise.glsl.js';
 import { LAND_MASK_PNG } from './landmask.js';
-import { CITIES, RANGES, DESERTS, HALO_PORTS, WILDS } from './earthData.js';
+import { CITIES, RANGES, DESERTS, HALO_PORTS, WILDS, FISHING } from './earthData.js';
+import { LANE_BAKE_GLSL, buildLaneTexture } from './earthDetail.js';
 import { bodyDir } from './sim.js';
 
 // GPU bake of the planet's surface and weather into cube maps (body frame).
@@ -29,10 +30,12 @@ uniform vec4 uPorts[7];
 uniform vec4 uWild[10];
 uniform vec4 uSc[5];
 uniform float uTexelKm;
+uniform vec4 uFish[5];
 varying vec2 vUv;
 ${NOISE_GLSL}
 ${SNOISE_GLSL}
 #define PI 3.14159265359
+${LANE_BAKE_GLSL}
 
 vec3 faceDir(vec2 st) {
   float sc = st.x * 2.0 - 1.0, tc = st.y * 2.0 - 1.0;
@@ -287,6 +290,22 @@ void main() {
       float onLand = mix(0.1, 1.0, landS);
       warm += w * (core * 0.12 + lit * 0.11 * (1.0 - 0.45 * modern)) * onLand;
       cool += w * (lit * (0.02 + 0.1 * modern) + core * 0.05 * modern) * onLand;
+      // the harbour: container terminals and quays strung along the waterfront, their floodlit
+      // berths in dashes (sodium-warm and LED-white), within ~30 km of the old core
+      float hb = coastStrip * exp(-dk / (18.0 + 14.0 * w)) * smoothstep(3.0, 7.0, dk);
+      float dash = 0.35 + 0.65 * smoothstep(0.35, 0.8, sfbm(d * 900.0 + float(i) * 2.9, 2) * 0.5 + 0.5);
+      warm += w * hb * dash * 0.22;
+      cool += w * hb * dash * 0.16 * (0.4 + modern);
+      // ships at anchor in the roads off the port: a scatter of lights over the water
+      float roads = (1.0 - landS) * exp(-pow(max(dk - 22.0 - 10.0 * w, 0.0) / 14.0, 2.0)) * smoothstep(6.0, 14.0, dk) * (1.0 - smoothstep(0.98, 1.0, mc));
+      if (roads > 0.01) {
+        vec3 aq = d * 2400.0;
+        vec3 ac = floor(aq);
+        vec3 ah = hash33(ac + float(i));
+        float ship = step(0.78, ah.x) * exp(-dot(aq - ac - 0.5, aq - ac - 0.5) / 0.08);
+        warm += w * roads * ship * 0.5;
+        cool += w * roads * ship * 0.25;
+      }
     }
     // towns everywhere people live (a jittered lattice ~60 km apart, denser round the metros
     // and along the coasts and river valleys), joined by a lit web of roads and local rail
@@ -409,7 +428,31 @@ void main() {
     }
     warm *= 1.0 - 0.85 * wild;
     cool *= 1.0 - 0.85 * wild;
-    gl_FragColor = vec4(min(warm, 8.0), min(cool, 8.0), min(net, 8.0), 1.0);
+    // the light-fleets on the fishing grounds: clusters of boats under blinding green-white
+    // lamps, a few tens of km across, working the shelf edges
+    {
+      float ground = 0.0;
+      for (int i = 0; i < 5; i++) ground = max(ground, boxMask(latD, lonD, uFish[i], 1.5));
+      ground *= 1.0 - land;
+      if (ground > 0.0) {
+        vec3 fq = d * 190.0;                                            // ~34 km cells
+        vec3 fc = floor(fq);
+        float fleet = 0.0;
+        for (int x = 0; x <= 1; x++) for (int y = 0; y <= 1; y++) for (int z = 0; z <= 1; z++) {
+          vec3 cell = fc + vec3(float(x), float(y), float(z));
+          vec3 h = hash33(cell + 41.7);
+          if (h.x < 0.55) continue;
+          vec3 o = cell + 0.25 + 0.5 * hash33(cell + 3.3);
+          float r2 = dot(fq - o, fq - o);
+          // a fleet of boats in a ragged patch, brighter at its heart
+          fleet += exp(-r2 / (0.03 + 0.06 * h.y)) * (0.5 + h.z) * (0.6 + 0.4 * sfbm(d * 1400.0 + h * 9.0, 2));
+        }
+        cool += fleet * ground * 0.9;
+        warm += fleet * ground * 0.12;
+      }
+    }
+    // the alpha channel marks the sea lanes for the Earth shader's ships (an exact leg index + 1)
+    gl_FragColor = vec4(min(warm, 8.0), min(cool, 8.0), min(net, 8.0), nearestLane(d));
     return;
   }
 
@@ -615,6 +658,8 @@ function cyclones() {
   return out;
 }
 
+const LANES = buildLaneTexture();
+
 export class EarthBake {
   constructor(renderer, size, cloudSize) {
     this.renderer = renderer;
@@ -654,6 +699,9 @@ export class EarthBake {
         // stratocumulus decks: lat, lon (rad), extent (rad), strength: California, Peru, Namibia, Canaries, Western Australia
         uSc: { value: [[27, -128, 11, 1], [-17, -85, 13, 1], [-17, 5, 11, 0.9], [22, -24, 8, 0.7], [-27, 103, 9, 0.7]].map(([la, lo, e, w]) => new THREE.Vector4(la * D2R, lo * D2R, e * D2R, w)) },
         uTexelKm: { value: (Math.PI / 2 / size) * 6371 },
+        uFish: { value: FISHING.map((b) => new THREE.Vector4(b[0], b[1], b[2], b[3])) },
+        uLanes: { value: LANES.tex },
+        uNumLane: { value: LANES.count },
       },
       depthTest: false, depthWrite: false,
     });

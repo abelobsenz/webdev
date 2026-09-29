@@ -1,0 +1,290 @@
+import * as THREE from 'three';
+import { SEA_LANES, ARCOLOGIES } from './earthData.js';
+import { bodyDir } from './sim.js';
+
+// Detail the orbital Earth draws on top of its bakes, each scale resolved only while it spans a
+// few pixels and otherwise replaced by its mean (so nothing sparkles as the planet turns):
+//   - ships on the sea lanes of the Concord, moving on the sim clock: the white water at the bow,
+//     the Kelvin wake's two arms (rougher water, bright off the glint's core) and the long
+//     turbulent wake (a calm slick streak through the glint), their lights at night
+//   - the sea's own texture in the sunglint: mesoscale eddies and the fronts between them, slicks
+//     drawn out along the currents, internal-wave packets running in from the shelf breaks
+//   - lightning in deep convection: cells that flash every few seconds to a minute in bursts of
+//     return strokes, lighting the cloud from within over ten kilometres or so
+//   - the arcologies: pale platforms with their rings and spokes by day, the brightest lights of
+//     their regions at night
+//   - noctilucent clouds: ice at the summer mesopause over the high north, lit long after dusk
+
+export const SHIP_V = 0.012;          // km/s (~23 knots)
+export const SHIP_SPACING = 70;       // km between ship slots on each side of a lane
+export const SHIP_PERIOD = SHIP_SPACING / SHIP_V;
+export const LANE_WINDOW = 30;        // km: the bake marks a lane this far either side
+export const MAX_LANE_LEGS = 64;
+const D2R = Math.PI / 180;
+
+/** The lanes as great-circle legs: [{ a, b (body-frame unit vectors), occ (slot occupancy), len (rad) }]. */
+export function laneLegs() {
+  const legs = [];
+  for (const L of SEA_LANES) {
+    for (let i = 0; i < L.pts.length - 1; i++) {
+      const a = bodyDir(L.pts[i][0] * D2R, L.pts[i][1] * D2R, new THREE.Vector3());
+      const b = bodyDir(L.pts[i + 1][0] * D2R, L.pts[i + 1][1] * D2R, new THREE.Vector3());
+      legs.push({ a, b, occ: Math.min(0.95, 0.35 + 0.5 * L.w), len: Math.acos(THREE.MathUtils.clamp(a.dot(b), -1, 1)) });
+    }
+  }
+  return legs.slice(0, MAX_LANE_LEGS);
+}
+
+/** Lane legs as a float texture (row 0: A.xyz, occupancy; row 1: B.xyz, length in radians). */
+export function buildLaneTexture(legs = laneLegs()) {
+  const W = Math.max(legs.length, 1);
+  const data = new Float32Array(W * 2 * 4);
+  legs.forEach((l, i) => {
+    data.set([l.a.x, l.a.y, l.a.z, l.occ], i * 4);
+    data.set([l.b.x, l.b.y, l.b.z, l.len], (W + i) * 4);
+  });
+  const tex = new THREE.DataTexture(data, W, 2, THREE.RGBAFormat, THREE.FloatType);
+  tex.minFilter = tex.magFilter = THREE.NearestFilter;
+  tex.needsUpdate = true;
+  return { tex, count: legs.length };
+}
+
+/** Arcology uniforms: centre (body frame) + radius km; kind, seed, 0, 0. */
+export function arcologyUniforms() {
+  return {
+    pos: ARCOLOGIES.map(([la, lo, r]) => { const v = bodyDir(la * D2R, lo * D2R, new THREE.Vector3()); return new THREE.Vector4(v.x, v.y, v.z, r); }),
+    kind: ARCOLOGIES.map(([, , , k], i) => new THREE.Vector4(k, (i * 0.618034) % 1, 0, 0)),
+  };
+}
+
+/** The ship clock: time within one slot period and the periods elapsed (so a wrap never reshuffles a slot). */
+export function shipClock(t, out = { t: 0, wrap: 0 }) {
+  const w = Math.floor(t / SHIP_PERIOD);
+  out.t = t - w * SHIP_PERIOD;
+  out.wrap = ((w % 4096) + 4096) % 4096;
+  return out;
+}
+
+/** Bake GLSL: the index + 1 of the nearest lane leg within LANE_WINDOW km of d, else 0. */
+export const LANE_BAKE_GLSL = /* glsl */ `
+uniform sampler2D uLanes;
+uniform int uNumLane;
+float nearestLane(vec3 d) {
+  float best = ${LANE_WINDOW.toFixed(1)}, id = 0.0;
+  for (int i = 0; i < ${MAX_LANE_LEGS}; i++) {
+    if (i >= uNumLane) break;
+    vec4 A = texelFetch(uLanes, ivec2(i, 0), 0);
+    vec4 B = texelFetch(uLanes, ivec2(i, 1), 0);
+    vec3 N = normalize(cross(A.xyz, B.xyz));
+    float off = abs(dot(d, N)) * 6371.0;
+    if (off >= best) continue;
+    vec3 pp = normalize(d - N * dot(d, N));
+    float along = atan(dot(cross(A.xyz, pp), N), dot(A.xyz, pp));
+    if (along < -0.004 || along > B.w + 0.004) continue;
+    best = off;
+    id = float(i + 1);
+  }
+  return id;
+}
+`;
+
+export const EARTH_DETAIL_GLSL = /* glsl */ `
+uniform sampler2D uLaneTex;
+uniform float uShipT;
+uniform float uShipWrap;
+uniform vec4 uArco[${ARCOLOGIES.length}];
+uniform vec4 uArcoK[${ARCOLOGIES.length}];
+uniform float uNlcGain;
+const float SHIP_V = ${SHIP_V.toFixed(4)};
+const float SHIP_SP = ${SHIP_SPACING.toFixed(1)};
+
+// An elongated light or mark (sx, sy km) drawn no smaller than the pixel: its peak falls as its
+// drawn area grows, so what it adds to a pixel is kept as it shrinks below one.
+float od_blob(float x, float y, float sx, float sy, float fp) {
+  float X = max(sx, fp * 0.6), Y = max(sy, fp * 0.6);
+  return exp(-(x * x) / (X * X) - (y * y) / (Y * Y)) * (sx * sy) / (X * Y);
+}
+float od_line(float dist, float w, float fp) {
+  float W = max(w, fp * 0.6);
+  return exp(-dist * dist / (W * W)) * w / W;
+}
+
+// Ships on the lane leg the bake found near b (laneA: the lights bake's alpha, an exact integer
+// where a lane is near). rough: extra roughness (Kelvin arms), slick: calmer water (turbulent
+// wake), foam: white water, light: the ship's lights.
+void od_ships(vec3 b, float laneA, float fp, out float rough, out float slick, out float foam, out vec3 light) {
+  rough = 0.0; slick = 0.0; foam = 0.0; light = vec3(0.0);
+  float id = floor(laneA + 0.5);
+  if (id < 0.5 || abs(laneA - id) > 0.02 || fp > 40.0) return;
+  int i = int(id) - 1;
+  vec4 A = texelFetch(uLaneTex, ivec2(i, 0), 0);
+  vec4 B = texelFetch(uLaneTex, ivec2(i, 1), 0);
+  vec3 N = normalize(cross(A.xyz, B.xyz));
+  float y = dot(b, N) * 6371.0;
+  if (abs(y) > 14.0 + fp) return;
+  vec3 pp = normalize(b - N * dot(b, N));
+  float along = atan(dot(cross(A.xyz, pp), N), dot(A.xyz, pp)) * 6371.0;
+  float lenK = B.w * 6371.0;
+  if (along < -3.0 || along > lenK + 3.0) return;
+  // the ends of a leg ease out so ships do not stop dead at a waypoint
+  float ends = smoothstep(-3.0, 6.0, along) * smoothstep(-3.0, 6.0, lenK - along);
+  float dayK = 1.0 - smoothstep(4.0, 9.0, fp);
+  for (int k = 0; k < 2; k++) {
+    // two-way traffic: outbound keeps to one side of the lane, inbound to the other
+    float dir = k == 0 ? 1.0 : -1.0;
+    float yl = y - dir * 2.6;
+    float u = along * dir - SHIP_V * uShipT;
+    float slotF = u / SHIP_SP;
+    float slot = floor(slotF);
+    vec3 hh = hash33(vec3(slot - uShipWrap, id * 7.0 + float(k), 3.7));
+    if (hh.x > A.w) continue;
+    // km ahead of this slot's ship (each ship a little off its slot's centre)
+    float x = (slotF - slot - 0.5 - 0.35 * (hh.y - 0.5)) * SHIP_SP;
+    float yo = yl - 0.8 * (hh.z - 0.5);
+    float Ls = 0.22 + 0.25 * hh.z;                    // hull length (km)
+    // lights at night: a warm deck and white masthead, the big liners brighter
+    light += mix(vec3(1.0, 0.82, 0.6), vec3(0.9, 0.95, 1.0), hh.y) * od_blob(x, yo, Ls * 0.6, 0.06, fp) * (4.0 + 10.0 * hh.z) * ends;
+    if (dayK <= 0.0) continue;
+    // the hull and the bow wave
+    foam += od_blob(x, yo, Ls * 0.5, 0.035, fp) * 0.9 * dayK * ends;
+    float d = -x;                                     // km astern
+    if (d > 0.0 && d < 30.0) {
+      float spread = 0.354 * d;                       // the Kelvin half-angle, 19.5 deg
+      float wa = 0.03 + 0.012 * d;
+      float arm = od_line(abs(yo) - spread, wa, fp) * exp(-d / 7.0) * smoothstep(0.0, 0.3, d);
+      float turb = od_line(yo, 0.05 + 0.018 * d, fp) * exp(-d / 16.0);
+      rough += arm * 0.9 * dayK * ends;
+      slick += turb * 0.9 * dayK * ends;
+      foam += od_line(yo, 0.03 + 0.012 * d, fp) * exp(-d / 0.9) * 0.45 * dayK * ends;
+    }
+  }
+}
+
+// The sea's texture in the glint: a roughness factor (1 = the mean) from the eddies and fronts,
+// slicks along the currents and internal waves over the shelf breaks (shelf: the bake's 0 deep
+// .. 1 on the shelf). Every term fades to its mean below a few pixels.
+float od_seaTexture(vec3 b, float fp, float shelf) {
+  vec3 q = b * 60.0;                                  // 1 unit ~ 106 km
+  vec3 w = vec3(snoise(q * 0.5 + 11.0), snoise(q * 0.5 + 23.0), snoise(q * 0.5 + 37.0));
+  float e = snoise(q + w * 1.6);
+  // fronts: sharp lines of convergence (rough, foam-streaked) where eddies meet
+  float fr = od_line(e, 0.012, fp / 53.0) * (1.0 - smoothstep(8.0, 20.0, fp));
+  // eddies: broad swirls of calmer and rougher water
+  float ed = 0.12 * e * (1.0 - smoothstep(60.0, 150.0, fp));
+  // slicks: calm streaks drawn out along the swirl
+  float sl = smoothstep(0.62, 0.9, snoise(q * 6.0 + w * 5.0) * 0.5 + 0.5) * (1.0 - smoothstep(2.0, 7.0, fp));
+  // internal waves: packets of crests ~1.5 km apart running in from the shelf break
+  float iw = 0.0;
+  float brk = clamp(shelf * (1.0 - shelf) * 4.0, 0.0, 1.0);
+  if (brk > 0.05 && fp < 1.2) {
+    vec3 p = b * 160.0;                               // 40 km cells
+    vec3 c = floor(p);
+    vec3 h = hash33(c + 5.3);
+    vec3 o = c + 0.5 + 0.4 * (h - 0.5);
+    float r = length(p - o) * 40.0;                   // km from the packet's origin
+    vec3 dirv = normalize(h - 0.5 + 1e-4);
+    float cone = smoothstep(0.2, 0.7, dot(normalize(p - o + 1e-5), dirv));
+    float zr = (r - 12.0) / 6.0;
+    float env = exp(-zr * zr) * cone;
+    iw = cos(r * 6.2832 / (1.3 + 0.5 * h.x)) * env * brk * (1.0 - smoothstep(0.35, 1.2, fp));
+  }
+  return clamp(1.0 + 0.9 * fr + ed - 0.3 * sl + 0.35 * iw, 0.5, 2.2);
+}
+
+// Lightning in deep convection (conv: 0..1, the deck's convective share at this point).
+float od_lightning(vec3 bC, float fpC, float conv, float t) {
+  if (conv <= 0.0) return 0.0;
+  vec3 p = bC * 255.0;                                // ~25 km cells
+  vec3 base = floor(p - 0.5);
+  float L = 0.0;
+  for (int i = 0; i < 2; i++) for (int j = 0; j < 2; j++) for (int k = 0; k < 2; k++) {
+    vec3 c = base + vec3(float(i), float(j), float(k));
+    vec3 h = hash33(c + 19.1);
+    // each cell its own rhythm: a flash every few seconds in the strongest, a minute in the weakest
+    float period = 3.0 + 45.0 * h.x * h.x;
+    float ph = t / period + h.y * 13.0;
+    float n = floor(ph);
+    float hk = hash13(c + n * 1.37);
+    if (hk > 0.65) continue;                          // not every cycle flashes
+    float tf = (ph - n) * period;                     // seconds since the flash began
+    // two to four return strokes over ~0.3 s, then the fading glow of the in-cloud discharge
+    float t1 = 0.06 + 0.05 * hk, t2 = 0.17 + 0.08 * h.z;
+    float s = exp(-tf / 0.025) + 0.8 * exp(-max(tf - t1, 0.0) / 0.025) * step(t1, tf) + 0.6 * exp(-max(tf - t2, 0.0) / 0.03) * step(t2, tf) * step(0.3, h.z);
+    s += 0.3 * exp(-tf / 0.3);
+    vec3 o = c + 0.2 + 0.6 * hash33(c + n);           // this flash's place in the cell
+    float d2 = dot(p - o, p - o) * 625.0;             // km^2
+    float R = 5.0 + 9.0 * hk;                         // the lit patch, spread by scattering
+    float Rp = max(R, fpC * 0.7);
+    L += s * exp(-d2 / (Rp * Rp)) * (R * R) / (Rp * Rp);
+  }
+  return L * conv;
+}
+
+// Arcologies: day = (albedo rgb, cover); night emission out.
+vec4 od_arcology(vec3 b, float fp, out vec3 night) {
+  night = vec3(0.0);
+  vec4 day = vec4(0.0);
+  vec3 gold = vec3(1.0, 0.8, 0.5), white = vec3(0.95, 0.97, 1.0);
+  for (int i = 0; i < ${ARCOLOGIES.length}; i++) {
+    vec4 A = uArco[i];
+    vec3 dv = b - A.xyz;
+    float dk = length(dv) * 6371.0;
+    float R = A.w;
+    if (dk > R * 5.0 + fp * 4.0) continue;
+    vec3 e = normalize(cross(vec3(0.0, 1.0, 0.0), A.xyz));
+    vec3 nn = cross(A.xyz, e);
+    vec2 P = vec2(dot(dv, e), dot(dv, nn)) * 6371.0;
+    float kind = uArcoK[i].x, seed = uArcoK[i].y;
+    // the lens is an ellipse; the others round
+    vec2 Pq = kind > 1.5 ? vec2(P.x, P.y / 0.55) : P;
+    float r = length(Pq);
+    float ang = atan(P.y, P.x) + seed * 6.28;
+    float w = max(fp * 0.6, 0.15);
+    // the structure's lines: the outer ring, an inner ring, six spokes (a star's run past the rim)
+    float ring = od_line(r - R, 0.25, fp) + 0.7 * od_line(r - R * 0.55, 0.18, fp);
+    float spokeA = abs(sin(ang * 3.0)) * r;           // distance to the nearest of six spokes
+    float spokeR = kind > 0.5 && kind < 1.5 ? R * 1.35 : R;
+    float spokes = od_line(spokeA, 0.14, fp) * (1.0 - smoothstep(spokeR - 0.3, spokeR + 0.3, r));
+    float core = od_blob(P.x, P.y, R * 0.18, R * 0.18, fp);
+    float districts = exp(-r * r / (R * R * 5.0)) * (0.6 + 0.4 * snoise(vec3(P * 0.8, seed * 10.0)));
+    // unresolved, the whole city is one glow that keeps its energy
+    float rg = max(R, fp * 1.2);
+    float far = exp(-dk * dk / (rg * rg)) * pow(R / rg, 1.9) * smoothstep(R * 0.5, R * 2.0, fp);
+    night += gold * (ring * 5.0 + spokes * 4.0 + districts * 0.35) + white * core * 30.0 + mix(gold, white, 0.5) * far * 6.0;
+    // by day: a pale platform with darker lines, fading to its mean with range
+    float plat = 1.0 - smoothstep(R * 1.08 - w, R * 1.08 + w, r);
+    float lines = clamp(ring + spokes, 0.0, 1.0);
+    vec3 alb = mix(vec3(0.42, 0.41, 0.38), vec3(0.16, 0.17, 0.18), lines * 0.8);
+    alb = mix(alb, vec3(0.5, 0.52, 0.5), core);
+    float cov = plat * (1.0 - smoothstep(R * 2.5, R * 6.0, fp));
+    day = mix(day, vec4(alb, 1.0), cov);
+  }
+  return day;
+}
+
+// Noctilucent clouds (added in front of the planet and its limb).
+vec3 od_nlc(vec3 ro, vec3 rd, vec3 sun, float tMax) {
+  vec2 tN = sphereHits(ro, rd, Rg + 83.0);
+  if (tN.x > tN.y) return vec3(0.0);
+  float t = tN.x > 0.0 ? tN.x : tN.y;
+  if (t <= 0.0 || t > tMax) return vec3(0.0);
+  vec3 p = ro + rd * t;
+  vec3 n = normalize(p);
+  vec3 bb = uToBody * n;
+  // the summer (northern, in June) polar mesosphere, ~52 - 76 N
+  float band = smoothstep(0.78, 0.86, bb.y) * (1.0 - smoothstep(0.965, 0.99, bb.y));
+  if (band <= 0.0) return vec3(0.0);
+  float muS = dot(n, sun);
+  float dark = 1.0 - smoothstep(-0.06, 0.06, muS);
+  float lit = earthShadow(p, sun);
+  if (lit * dark <= 0.0) return vec3(0.0);
+  vec3 q = bb * (6371.0 / 40.0);
+  float pch = smoothstep(0.35, 0.75, snoise(q * 0.3 + 3.0) * 0.5 + 0.5 + 0.25 * snoise(q * 0.08 + 7.0));
+  float fpN = t * uPixAng;
+  float bill = mix(1.0, 0.55 + 0.45 * sin(dot(q, vec3(0.8, 0.1, 0.6)) * 24.0 + 3.0 * snoise(q * 0.6)), 1.0 - smoothstep(2.0, 6.0, fpN));
+  float dens = band * pch * bill;
+  float mu = max(abs(dot(rd, n)), 0.025);
+  float fwd = phaseMie(dot(rd, sun));
+  return vec3(0.35, 0.62, 1.0) * dens * min(1.0 / mu, 40.0) * lit * dark * uSunE * 2.5e-4 * (0.3 + fwd) * uNlcGain;
+}
+`;

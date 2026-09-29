@@ -216,7 +216,42 @@ lint('stars', skyStars.material);
 lint('aurora-arcs', aurora.arcMat);
 lint('aurora-oval', aurora.ovalMat);
 lint('earth', earth.material);
-if (earthDetail && earthDetail.lintTargets) for (const [n, m] of earthDetail.lintTargets()) lint(n, m);
+{
+  const { EarthBake } = await import('../src/space/earthBake.js');
+  const tb = performance.now();
+  const bake = new EarthBake(null, 64, 64);
+  ok(performance.now() - tb < 100, 'bake construction');
+  lint('earth-bake', bake.mat);
+  ok(/nearestLane\(d\)/.test(bake.mat.fragmentShader), 'bake writes the lane index');
+}
+
+// ---- sea lanes, ships and arcologies -----------------------------------------------------------
+{
+  const D = earthDetail;
+  const legs = D.laneLegs();
+  ok(legs.length > 20 && legs.length <= D.MAX_LANE_LEGS, `lane legs ${legs.length}`);
+  for (const l of legs) {
+    ok(l.len > 0.002 && l.len < Math.PI / 2, `lane leg length ${(l.len * 6371).toFixed(0)} km`);
+    ok(l.occ > 0 && l.occ < 1, 'lane occupancy');
+    ok(new THREE.Vector3().crossVectors(l.a, l.b).length() > 1e-3, 'lane leg defines a great circle');
+  }
+  // lane indices survive the half-float lights target exactly
+  ok(legs.length + 1 < 2048, 'lane ids exact in half float');
+  // the ship clock is continuous across a wrap: a ship's absolute position never jumps
+  const shipAt = (t, k) => { const c = D.shipClock(t); const slot = k + c.wrap; return (slot + 0.5) * D.SHIP_SPACING + D.SHIP_V * c.t; };
+  for (const t of [D.SHIP_PERIOD - 0.5, D.SHIP_PERIOD * 17 - 1e-3, 3.1e7]) {
+    const a = shipAt(t, 3), b = shipAt(t + 1, 3);
+    ok(Math.abs(b - a - D.SHIP_V) < 1e-6 || Math.abs(b - a - D.SHIP_V - D.SHIP_SPACING) < 1e-6 && false, `ship clock continuous at ${t}`);
+  }
+  const au = D.arcologyUniforms();
+  ok(au.pos.every((v) => v.w >= 3 && v.w <= 8 && Math.abs(Math.hypot(v.x, v.y, v.z) - 1) < 1e-6), 'arcology centres and radii');
+  // arcologies stand clear of each other and of Meridian
+  for (let i = 0; i < au.pos.length; i++) for (let j = i + 1; j < au.pos.length; j++) {
+    const a = au.pos[i], b = au.pos[j];
+    ok(Math.acos(Math.min(1, a.x * b.x + a.y * b.y + a.z * b.z)) * 6371 > (a.w + b.w) * 6, 'arcologies apart');
+  }
+  ok(earth.uniforms.uShipT.value >= 0 && earth.uniforms.uShipT.value < D.SHIP_PERIOD, 'earth ship clock wrapped');
+}
 
 const total = performance.now() - t0;
 console.log(JSON.stringify({ auroraTris: aurora.triangles, auroraBuildMs: +auroraBuild.toFixed(1), earthBuildMs: +earthBuild.toFixed(1), stars: skyStars.points.geometry.attributes.position.count, totalMs: +total.toFixed(0) }));

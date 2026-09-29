@@ -4,6 +4,7 @@ import { NOISE_GLSL } from '../shaders/noise.glsl.js';
 import { U } from '../core/uniforms.js';
 import { SNOISE_GLSL, SPACE_UTIL_GLSL } from './glsl.js';
 import { R_EARTH, MERIDIAN_LON, bodyDir } from './sim.js';
+import { EARTH_DETAIL_GLSL, buildLaneTexture, arcologyUniforms, shipClock } from './earthDetail.js';
 
 // The planet, rendered in one pass on a proxy sphere at the top of the
 // atmosphere. Each fragment ray-traces the ground and the cloud shell and
@@ -91,6 +92,8 @@ float ringShadow(vec3 p, vec3 s) {
   }
   return lit;
 }
+
+${EARTH_DETAIL_GLSL}
 
 // ---- clouds ---------------------------------------------------------------------------
 // The baked weather (earthBake.js: potential, stratiform share, open cells, cirrus) drifts
@@ -485,6 +488,10 @@ void main() {
   vec3 landCol = landAlb / S_PI * (uSunE * sunT * ndl * shadow + skyAmb * (0.6 + 0.4 * shadow));
   // ocean with sun glint
   vec3 seaCol;
+  // ships on the lane the bake found here (the lights bake's alpha, read unfiltered)
+  float shRough, shSlick, shFoam;
+  vec3 shipLight;
+  od_ships(b, textureLod(uLights, b, 0.0).a, fp, shRough, shSlick, shFoam, shipLight);
   {
     // sea-surface roughness from the wind (Cox-Munk, ~7 m/s): a broad smooth glint, gently
     // varied by weather systems, with calm slicks streaking it where they are resolved
@@ -494,6 +501,10 @@ void main() {
     float slick = smoothstep(0.55, 0.8, snoise(b * vec3(90.0, 260.0, 90.0) + wind * 3.0) * 0.5 + 0.5) * (1.0 - smoothstep(2.0, 8.0, fp));
     al -= 0.05 * slick;
 #endif
+    // the sea's texture in the glint, and the ships' wakes through it
+    al *= od_seaTexture(b, fp, B.a);
+    al *= 1.0 + 0.7 * shRough - 0.45 * clamp(shSlick, 0.0, 1.0);
+    al = clamp(al, 0.05, 0.6);
     al = mix(al, 0.5, ice);
     vec3 Hh = normalize(V + sun);
     float nh = max(dot(n, Hh), 0.0), nv = max(dot(n, V), 1e-3), nl = max(dot(n, sun), 0.0);
@@ -509,6 +520,8 @@ void main() {
     vec3 body = seaAlb / S_PI * (uSunE * sunT * nl * shadow + skyAmb);
     seaCol = body * (1.0 - Fv) + Fv * skyRefl + spec * (1.0 - ice);
     seaCol = mix(seaCol, seaAlb / S_PI * (uSunE * sunT * nl * shadow + skyAmb), ice);
+    // white water at the bows and close astern
+    seaCol += vec3(0.55) * clamp(shFoam, 0.0, 1.0) * (1.0 - ice) / S_PI * (uSunE * sunT * nl * shadow + skyAmb);
   }
   vec3 col = mix(seaCol, landCol, landF);
 
@@ -519,6 +532,11 @@ void main() {
     vec3 sc = site.rgb / S_PI * (uSunE * sunT * max(mu, 0.0) * shadow + skyAmb);
     col = mix(col, sc, site.a);
   }
+
+  // the arcologies: pale platforms by day, the brightest lights of their regions at night
+  vec3 arcoNight;
+  vec4 arco = od_arcology(b, fp, arcoNight);
+  if (arco.a > 0.0) col = mix(col, arco.rgb / S_PI * (uSunE * sunT * max(mu, 0.0) * shadow + skyAmb), arco.a);
 
   // night lights of the Concord: warm old cores, cool new districts, transit filaments
   // (baked), with district and block lattices where they are resolved, and Meridian
@@ -540,6 +558,8 @@ void main() {
     emis *= 1.0 / (1.0 + le / 0.75);
   }
   emis += meridianNight(b, fp);
+  emis += arcoNight * 0.12;
+  emis += shipLight * 0.05 * (1.0 - landF);
 
   // clouds: the low and middle deck (8 km) and the cirrus above it (12.5 km), each on its own
   // shell, so they part in parallax at a slant and the cirrus shadows the deck beneath it
@@ -592,11 +612,11 @@ void main() {
     cloudCol += mix(vec3(1.0, 0.62, 0.34), vec3(0.8, 0.85, 0.95), 0.3) * under * 1.1 * nightC;
     // lightning: storm cells brighten in soft, brief pulses (no hard on/off), only where a
     // cell spans a few pixels; from high orbit single-pixel strikes read as blinking lights
-    vec3 cell = floor(bC * 260.0);
-    float hsh = hash13(cell);
-    float pulse = smoothstep(0.93, 1.0, sin(uTime * (0.35 + 0.5 * hsh) + hsh * 60.0)) * step(0.985, hash13(cell + 7.0));
-    float flash = pulse * smoothstep(0.6, 1.0, lcl.x * clamp(lcl.y / 40.0, 0.0, 1.0)) * nightC * (1.0 - smoothstep(6.0, 16.0, fpC));
-    cloudCol += vec3(0.75, 0.82, 1.0) * flash * 1.2;
+    // (deep convection: thick, cumuliform cloud; the storms of the ITCZ, the cyclones' walls)
+    float convS = weatherAt(bC, fpC).g;
+    float conv = smoothstep(0.55, 0.95, lcl.x * clamp(lcl.y / 40.0, 0.0, 1.0)) * (1.0 - 0.8 * convS) * nightC * (1.0 - smoothstep(25.0, 60.0, fpC));
+    float flash = od_lightning(bC, fpC, conv, uTime);
+    cloudCol += vec3(0.75, 0.82, 1.0) * flash * 0.9;
     // faint moonlight
     cloudCol += vec3(0.5, 0.6, 0.8) * 0.004 * max(dot(nC, uMoonDir), 0.0) * nightC;
   }
@@ -631,8 +651,10 @@ void main() {
   vec3 L = integrateAtmo(ro, rd, t0, tEnd, hitG, sun, T);
   // artistic: thin the blue veil over the disc a little, keep the limb at full strength
   L *= mix(1.0, uAtmoGain, smoothstep(0.08, 0.6, dot(n, -rd)) * (hitG ? 1.0 : 0.0));
+  // noctilucent clouds at the summer mesopause
+  vec3 nlc = od_nlc(ro, rd, sun, hitG ? tG.x : 1e9);
   if (hitG) {
-    gl_FragColor = vec4(col * T + L, 1.0);
+    gl_FragColor = vec4(col * T + L + nlc, 1.0);
     vec4 clip = projectionMatrix * viewMatrix * vec4(pG, 1.0);
     gl_FragDepth = clamp(clip.z / clip.w * 0.5 + 0.5, 0.0, 1.0);
   } else {
@@ -642,12 +664,18 @@ void main() {
     vec3 cc = ciCol * li + cloudCol * lcv * (1.0 - li);
     float ca = li + lcv * (1.0 - li);
     float a = max(ca, 1.0 - dot(T, vec3(1.0 / 3.0)));
-    gl_FragColor = vec4(cc * T + L, a);
+    gl_FragColor = vec4(cc * T + L + nlc, a);
     gl_FragDepth = gl_FragCoord.z;
   }
   gl_FragColor.rgb *= uReady;
 }
 `;
+
+// the lane legs (shared with the bake, which marks where each runs) and the arcologies
+const LANES = buildLaneTexture();
+const ARCO = arcologyUniforms();
+export { LANES as EARTH_LANES };
+const _clock = { t: 0, wrap: 0 };
 
 export class Earth {
   constructor(bake, quality) {
@@ -674,6 +702,12 @@ export class Earth {
       uPixAng: { value: 0.001 },
       uReady: { value: 0 },
       uAtmoGain: { value: 0.36 },
+      uLaneTex: { value: LANES.tex },
+      uShipT: { value: 0 },
+      uShipWrap: { value: 0 },
+      uArco: { value: ARCO.pos },
+      uArcoK: { value: ARCO.kind },
+      uNlcGain: { value: 1 },
     };
     this.material = new THREE.ShaderMaterial({
       vertexShader: VERT,
@@ -707,5 +741,9 @@ export class Earth {
     u.uTime.value = realTime;
     u.uMoonDir.value.copy(sim.moonPos).normalize();
     u.uReady.value = this.bake.ready ? 1 : 0;
+    // the ships run on the sim clock (wrapped per slot period so float precision never drifts)
+    shipClock(sim.t, _clock);
+    u.uShipT.value = _clock.t;
+    u.uShipWrap.value = _clock.wrap;
   }
 }
