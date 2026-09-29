@@ -141,10 +141,8 @@ export class Lanes {
     // with the camera's distance from its lanes (the Harbour's corridors reach 1,500 km).
     const hd = this.harbourFrame.getWorldPosition(_v).distanceTo(cam.position);
     const hg = 1 - smooth(900, 2600, hd);
-    for (const l of [this.harbourLamps, this.outerLamps]) {
-      l.visible = hg > 0.002;
-      l.material.uniforms.uGain.value = hg;
-    }
+    this.harbourLamps.visible = this.outerLamps.visible = hg > 0.002;
+    this.harbourLamps.material.uniforms.uGain.value = this.outerLamps.material.uniforms.uGain.value = hg;
     _inv.copy(space.earthFixed.matrixWorld).invert();
     _v.copy(cam.position).applyMatrix4(_inv);
     let pd = Infinity;
