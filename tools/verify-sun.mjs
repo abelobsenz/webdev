@@ -11,7 +11,7 @@ import {
   flotillaLayout, courierRoute, courierPose, COURIER, FLOTILLA, PETAL, buildConcentrator, buildRelayPlatform, BERTH,
   petalBottom, SPOKE, spokeTop, spokeCarR, buildSpokeCar, buildHubWorks, GALLERY, FIN, buildSwarmTender, tenderLocal, tenderStatites, crownCrew, buildGate, gateFrame, GATE,
 } from '../src/space/helianthDistrict.js';
-import { FoundryYard, tenderVisit, VISIT, buildWheelCar, wheelCar, WHEEL, buildCraneWorks, cranePose, cartPose, droneOrbits, dronePos, crewPos, COURT, CRANE, CART, QUEUE } from '../src/space/foundryYard.js';
+import { FoundryYard, buildConveyors, billetPos, CONVEYOR, tenderVisit, VISIT, buildWheelCar, wheelCar, WHEEL, buildCraneWorks, cranePose, cartPose, droneOrbits, dronePos, crewPos, COURT, CRANE, CART, QUEUE } from '../src/space/foundryYard.js';
 import { buildTender } from '../src/craft/craftGeometry.js';
 import { Hearth, buildCollector } from '../src/space/hearth.js';
 import { FERRY, ferryShip, ferryDockLocal, ferryRoute, ferryPose, PATROL, patrolPose, buildRackGantry, rackGantry, RACK, buildDishTruss, backX, BACK, HAMLET, hamletMatrix, hamletAngle, buildHamletFixed, buildHamletWheel, buildStationFittings, dishDrone, dishSag, DISH, buildDishDrone, tramArc, tramAngle, RING, TRAM, tankerSlots, tankerPose, TANKER, MODULE, HearthDistrict } from '../src/space/hearthDistrict.js';
@@ -320,6 +320,30 @@ const stT = tree(tris(sc.geo));
     const lx = Math.abs(P.x) - COURT.x;
     assert.ok(Math.abs(lx) < CRANE.pickX - w / 2 - 20 && Math.abs(lx) > COURT.spineR + 10, 'crews walk the roof strip between the pipe and the set-down places');
     assert.ok(Math.abs(P.y - COURT.roofTop - 1.7) < 1e-9, 'crews on the roof');
+  }
+  // casting conveyors: rooted in the furnace skin and on the slab, clear of everything else; the
+  // billets ride inside the gallery, and nothing of it enters the crane's or the carts' ways
+  {
+    const cv = buildConveyors();
+    closed('conveyors', cv.geo);
+    for (const s of [-1, 1]) {
+      assert.ok(dist(foT, V(s * (CONVEYOR.x0 + 2), CONVEYOR.y, CONVEYOR.z)) < 20, 'conveyor rooted in the furnace skin');
+      assert.ok(dist(foT, V(s * CONVEYOR.tower, COURT.slabTop - 0.5, CONVEYOR.z)) < 1, 'transfer tower founded on the slab');
+    }
+    let cc = Infinity;
+    for (const p of verts(cv.geo, I, 2)) {
+      const ax = Math.abs(p.x);
+      if (ax < CONVEYOR.x0 + 60 || (ax > CONVEYOR.tower - 40 && p.y < COURT.slabTop + 5)) continue;   // the two roots
+      cc = Math.min(cc, dist(foT, p, cc + 1));
+      assert.ok(ax < COURT.x - CART.laneX - CART.size[0] / 2 - 20, 'conveyor keeps out of the cart lane');
+      assert.ok(ax < COURT.x - CRANE.railX - 30 || p.y < CRANE.railY - 200, 'conveyor keeps under and outside the crane');
+    }
+    assert.ok(cc > 8, `conveyor galleries clear the works by ${cc.toFixed(0)} m`);
+    results.conveyorClearanceMetres = +cc.toFixed(0);
+    for (let t = 0; t < CONVEYOR.T; t += 3) for (let j = 0; j < CONVEYOR.billets; j++) {
+      const b = billetPos(1, j, t);
+      assert.ok(b.x > CONVEYOR.x0 && b.x < CONVEYOR.x1 && Math.abs(b.z - CONVEYOR.z) < CONVEYOR.w / 2 - 6, 'billets ride inside the gallery');
+    }
   }
   // garden-wheel lift cars on their spokes
   {

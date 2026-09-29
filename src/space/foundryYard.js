@@ -12,6 +12,8 @@ import { craftInstances, MovingLamps } from './helianthDistrict.js';
 //             travels the court, its trolley crosses it, and a spreader lifts a cast billet
 //             cassette from one stack's roof, carries it clear over the court's spine pipe and
 //             sets it down on the next stack: the cassette is always seated or hanging
+//   casting   a conveyor gallery runs from each outer furnace to a transfer tower on its court,
+//             cast billets riding it out between the furnace's bracing tubes
 //   carts     tracked stock carts shuttle each court's outer side lane inside the crane columns
 //   furnaces  the three reduction furnaces glow through their glazed bands; the process pods
 //             breathe with the arc light of the melt
@@ -105,6 +107,32 @@ export function cranePose(t, s, out = {}) {
   out.hanging = u > 0.005 && u < 0.795;
   out.from = a; out.to = b;
   return out;
+}
+
+/** Casting conveyors (foundry metres): furnace skin to the transfer tower on the court's edge. */
+export const CONVEYOR = { y: 250, z: 2820, x0: 4815, x1: 5680, tower: 5680, h: 40, w: 60, billets: 7, T: 90 };
+export function buildConveyors() {
+  const B = new CB(), lamps = [];
+  for (const s of [-1, 1]) {
+    const xa = s * CONVEYOR.x0, xb = s * CONVEYOR.x1, xm = (xa + xb) / 2, L = Math.abs(xb - xa);
+    // the gallery: a box truss with a glowing cooling tunnel under its belt
+    B.box(xm, CONVEYOR.y - CONVEYOR.h / 2 + 5, CONVEYOR.z, L, 8, CONVEYOR.w - 1, CK.DARK);
+    for (const dz of [-1, 1]) B.box(xm, CONVEYOR.y, CONVEYOR.z + dz * (CONVEYOR.w / 2 - 3), L, CONVEYOR.h, 6, CK.HULL);
+    B.box(xm, CONVEYOR.y - CONVEYOR.h / 2 + 12, CONVEYOR.z, L - 20, 6, CONVEYOR.w - 14, CK.LANTERN);
+    for (let x = Math.min(xa, xb) + 60; x < Math.max(xa, xb) - 30; x += 90) B.box(x, CONVEYOR.y + CONVEYOR.h / 2 - 2, CONVEYOR.z, 8, 6, CONVEYOR.w, CK.BRONZE);
+    // the transfer tower on the slab edge, the gallery landing on its shoulder
+    const xt = s * CONVEYOR.tower;
+    B.box(xt, (COURT.slabTop + CONVEYOR.y + 40) / 2, CONVEYOR.z, 50, CONVEYOR.y + 40 - COURT.slabTop, 70, CK.HULL);
+    B.box(xt, CONVEYOR.y + 50, CONVEYOR.z, 60, 20, 80, CK.BRONZE);
+    B.box(xt - s * 26, CONVEYOR.y - 60, CONVEYOR.z, 3, 60, 40, CK.GLASS);
+    lamps.push({ p: V(xt, CONVEYOR.y + 66, CONVEYOR.z), r: 8, color: LAMP.AMBER, i: 2.2, breathe: 0.4 });
+  }
+  return { geo: B.geometry(), lamps };
+}
+/** Billet j on conveyor s at time t: its centre (foundry metres). */
+export function billetPos(s, j, t, out = V(0, 0, 0)) {
+  const u = (((t / CONVEYOR.T) + j / CONVEYOR.billets) % 1 + 1) % 1, x = CONVEYOR.x0 + 30 + (CONVEYOR.x1 - CONVEYOR.x0 - 90) * u;
+  return out.set(s * x, CONVEYOR.y - CONVEYOR.h / 2 + 8 + 6, CONVEYOR.z);
 }
 
 /** Cart k's pose (court-relative lane x, z): two carts per court share the outer lane, each its own half
@@ -221,6 +249,12 @@ export class FoundryYard {
     this.carts = craftInstances(buildCart(), Array.from({ length: 4 }, () => new THREE.Matrix4()), opt);
     this.wheelCars = craftInstances(buildWheelCar(), Array.from({ length: 6 }, () => new THREE.Matrix4()), opt);
     this.root.add(this.wheelCars);
+    const cvy = buildConveyors(), cm = craftMesh(cvy.geo, opt);
+    addLamps(cm, cvy.lamps, { minPx: 1.2 });
+    this.root.add(cm);
+    const bb = new CB(); bb.box(0, 6, 0, 36, 12, 24, CK.LANTERN); bb.box(0, 13, 0, 30, 2, 20, CK.BRONZE);
+    this.billets = craftInstances(bb.geometry(), Array.from({ length: CONVEYOR.billets * 2 }, () => new THREE.Matrix4()), opt);
+    this.root.add(this.billets);
     this.orbits = droneOrbits();
     this.drones = craftInstances(buildDrone(), this.orbits.map(() => new THREE.Matrix4()), opt);
     this.root.add(this.bridges, this.trolleys, this.cassettes, this.cables, this.carts, this.drones);
@@ -241,7 +275,7 @@ export class FoundryYard {
       this.root.add(m);
       return { mesh: m, eng, i };
     });
-    this.moving = [this.bridges, this.trolleys, this.cassettes, this.cables, this.carts, this.drones, this.wheelCars];
+    this.moving = [this.billets, this.bridges, this.trolleys, this.cassettes, this.cables, this.carts, this.drones, this.wheelCars];
     this.built = true;
     this.animate(0);
   }
@@ -280,6 +314,11 @@ export class FoundryYard {
       this.droneLamps.set(k, P.setY(P.y + 6));
     }
     for (let j = 0; j < this.crew.count; j++) this.crew.set(j, crewPos(j, t, P));
+    for (let k = 0; k < CONVEYOR.billets * 2; k++) {
+      billetPos(k < CONVEYOR.billets ? -1 : 1, k % CONVEYOR.billets, t, P);
+      P.y -= 6;
+      this.billets.setMatrixAt(k, m.compose(P, q, S.set(1, 1, 1)));
+    }
     for (let k = 0; k < 6; k++) {
       const a = (k / 6) * TAU;
       wheelCar(k, t, P);
