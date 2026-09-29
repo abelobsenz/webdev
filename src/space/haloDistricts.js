@@ -371,6 +371,41 @@ function outerWall(B, M, lamps, S, bay) {
   }
 }
 
+/**
+ * The rotor sheaths under the wall feet: octagonal casings (the ring's own tube section) carry
+ * bearing hoops every 500 m and a crawler track on the upper outboard face; hangers tie each
+ * wall foot to its sheath. Crawlers (movers) ride the track over the hoops.
+ */
+export function rotorGeometry(S) {
+  const apo = S.tubeR * Math.cos(Math.PI / 8), side = 2 * S.tubeR * Math.sin(Math.PI / 8);
+  const face = Math.PI / 8;                               // the upper outboard face's normal angle
+  return { apo, side, face, crawlerLift: 22, hoop: 12 };
+}
+function rotors(B, M, lamps, S) {
+  const G = rotorGeometry(S);
+  for (const sg of [-1, 1]) {
+    const cx = sg * S.tubeX, cy = S.tubeY;
+    for (let z = -TILE_L / 2 + 250; z < TILE_L / 2; z += 500) {
+      for (let k = 0; k < 8; k++) {
+        const a = ((k + 0.5) / 8) * TAU, nx = Math.cos(a), ny = Math.sin(a);
+        B.at(cx + sg * nx * (G.apo + G.hoop / 2), cy + ny * (G.apo + G.hoop / 2), z, 0, 0, Math.atan2(ny, sg * nx) - Math.PI / 2);
+        B.box(0, 0, 0, G.side + 12, G.hoop, 20, k % 2 ? CK.BRONZE : CK.HULL);
+        B.pop();
+      }
+      // hanger from the wall's outer foot to the sheath's upper inboard face
+      const fa = (5 * Math.PI) / 8, top = V3(sg * (S.outer - 30), -380, z), bot = V3(sg * (S.tubeX + Math.cos(fa) * (G.apo - 5)), cy + Math.sin(fa) * (G.apo - 5), z);
+      B.tube([top, bot], 9, 8, CK.DARK);
+      lamps.push({ p: V3(cx + sg * (G.apo + 30) * Math.cos(G.face), cy + (G.apo + 30) * Math.sin(G.face), z), r: 6, color: LAMP.TEAL, i: 2.0, breathe: 0.4, phase: (z / TILE_L + 0.5) % 1 });
+    }
+    // crawler track: two rails along the upper outboard face
+    for (const off of [-40, 40]) {
+      const a = G.face, nx = Math.cos(a), ny = Math.sin(a), tx = -ny, ty = nx;
+      const px = cx + sg * (nx * (G.apo + G.hoop + 2) + tx * off), py = cy + ny * (G.apo + G.hoop + 2) + ty * off;
+      M.box(px, py, 0, 4, 4, TILE_L, CK.BRONZE);
+    }
+  }
+}
+
 function crest(B, M, lamps, S, hubArch) {
   // wall crests: gantry rails, walkway, lamp masts; at a hub a gap under the arch corbel
   const gap = hubArch ? hubArch.gap : 0;
@@ -433,6 +468,7 @@ export function buildDistrictTile(variant, S, bay, seed = 1) {
   cliffs(B, M, lamps, S, r);
   spine(B, M, lamps, S, true);
   outerWall(B, M, lamps, S, bay);
+  rotors(B, M, lamps, S);
   const weights = [
     { town: 0.56, park: 0.18, farm: 0.1, civic: 0.08, lake: 0.08, works: 0 },
     { town: 0.14, park: 0.2, farm: 0.52, civic: 0.02, lake: 0.08, works: 0.04 },
@@ -533,6 +569,17 @@ function buildTram() {
   B.box(0, 0.35, 0, 2.2, 0.7, 28, CK.DARK);
   B.box(0, 2.4, 15.05, 2.3, 1.4, 0.2, CK.LANTERN);
   B.box(0, 2.4, -15.05, 2.3, 1.4, 0.2, CK.LANTERN);
+  return B.geometry();
+}
+function buildCrawler(sg, G) {
+  // rides the sheath's upper outboard face: its +y along that face's normal
+  const B = new CB();
+  B.push(new THREE.Matrix4().makeRotationZ(-sg * (Math.PI / 2 - G.face)));
+  B.box(0, 0, 0, 70, 12, 60, CK.HULL);
+  B.box(0, 8, 0, 40, 6, 36, CK.GLASS);
+  for (const x of [-40, 40]) for (const z of [-24, 24]) B.box(x, -(G.crawlerLift - 2 + 6) / 2, z, 8, G.crawlerLift - 2 - 6, 8, CK.DARK);   // bogies down to the rail tops
+  B.box(0, 13, 0, 30, 2, 26, CK.LANTERN);
+  B.pop();
   return B.geometry();
 }
 function buildPod() {
@@ -694,6 +741,8 @@ export class HaloDistricts {
     this.trains = inst(buildTrainCar(), 8 * 24);
     this.trams = inst(buildTram(), 320);
     this.ships = this.shipClasses.map((c) => inst(c.geo, SLOTS * 4));
+    const G = rotorGeometry(S);
+    this.rotorCrawlers = [-1, 1].map((sg) => inst(buildCrawler(sg, G), 64));
     // services: [x (m), y above radius (m), speed (m/s), spacing (m), cars, car pitch (m), seed]
     const yT = S.deck(0) + 34 + 1.6 + 0.1;
     this.lines = [
@@ -703,6 +752,10 @@ export class HaloDistricts {
         { im: this.trams, x: bx - 8, y: S.deck(bx) + 1.2, v: 14, gap: 2600, cars: 1, pitch: 0, off: 700 * i },
         { im: this.trams, x: bx + 8, y: S.deck(bx) + 1.2, v: -14, gap: 2600, cars: 1, pitch: 0, off: 1900 + 500 * i },
       ]),
+      ...[-1, 1].map((sg, i) => {
+        const r = G.apo + G.hoop + 2 + G.crawlerLift;
+        return { im: this.rotorCrawlers[i], x: sg * (S.tubeX + r * Math.cos(G.face)), y: S.tubeY + r * Math.sin(G.face), v: sg * 6, gap: 5200, cars: 1, pitch: 0, off: 900 * i };
+      }),
     ];
   }
 
@@ -782,7 +835,7 @@ export class HaloDistricts {
     const R = this.Rm, u0 = this.anchorAngle * R, C = TAU * R;
     const tileOk = (u) => { const k = Math.floor((((u % C) + C) % C) / TILE_L); return k < this.nTiles && this.tileVariant[k] >= 0; };
     // trains and trams: each service is a lattice of vehicles u = off + v t + i gap
-    for (const im of [this.trains, this.trams]) im.count = 0;
+    for (const im of [this.trains, this.trams, ...this.rotorCrawlers]) im.count = 0;
     for (const L of this.lines) {
       const im = L.im, head = L.off + L.v * t;
       const i0 = Math.ceil((u0 - MOVER_RANGE - head) / L.gap), i1 = Math.floor((u0 + MOVER_RANGE - head) / L.gap);
@@ -794,7 +847,7 @@ export class HaloDistricts {
         }
       }
     }
-    this.trains.instanceMatrix.needsUpdate = true; this.trams.instanceMatrix.needsUpdate = true;
+    for (const im of [this.trains, this.trams, ...this.rotorCrawlers]) im.instanceMatrix.needsUpdate = true;
     // gantries and their crawler pods
     let g = 0;
     this.pods.count = 0;

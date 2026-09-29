@@ -193,15 +193,66 @@ export function buildPortStation({ junction = false } = {}) {
   return { geo, ships, lamps, gates, pierRoutes, pierY };
 }
 
+/** A cargo crane for a port's cargo court (metres): a slewing jib on a lattice mast. */
+export function buildCourtCrane() {
+  const B = new CB(), lamps = [];
+  // slewing head at the origin (the part that turns); mast built separately below it
+  B.box(0, 0, 0, 90, 60, 90, CK.HULL);
+  B.box(0, 40, -30, 60, 40, 50, CK.GLASS);
+  for (const x of [-18, 18]) B.tube([V(x, 30, 0), V(x, 30, 900)], 7, 6, CK.BRONZE);
+  for (let z = 60; z < 900; z += 60) {
+    B.tube([V(-18, 30, z), V(18, 30, z + 30)], 3, 4, CK.DARK);
+    B.tube([V(-18, 30, z), V(0, 70, z)], 3, 4, CK.DARK);
+    B.tube([V(18, 30, z), V(0, 70, z)], 3, 4, CK.DARK);
+  }
+  B.tube([V(0, 70, 0), V(0, 70, 900)], 5, 6, CK.HULL);
+  B.box(0, 20, -120, 70, 50, 90, CK.DARK);                        // counterweight
+  B.tube([V(0, 60, -150), V(0, 160, 0), V(0, 70, 880)], 2, 4, CK.CONDUIT);
+  // trolley and a hanging container
+  B.box(0, 18, 620, 50, 16, 40, CK.BRONZE);
+  B.tube([V(0, 10, 620), V(0, -20, 620)], 1.5, 4, CK.DARK);
+  B.box(0, -45, 620, 60, 50, 120, CK.PANEL);                      // the load rides 30 m over the stacks
+  lamps.push({ p: V(0, 80, 905), r: 10, color: LAMP.RED, i: 2.6, breathe: 0.5 });
+  lamps.push({ p: V(0, 70, 30), r: 8, color: LAMP.AMBER, i: 2.0 });
+  return { geo: B.geometry(), lamps };
+}
+export function buildCraneMast(h = 300) {
+  const B = new CB();
+  for (const x of [-30, 30]) for (const z of [-30, 30]) B.tube([V(x, -h, z), V(x, -30, z)], 5, 6, CK.HULL);
+  for (let y = -h + 40; y < -30; y += 50) B.box(0, y, 0, 70, 4, 70, CK.DARK);
+  return B.geometry();
+}
+/** Tether pod for the port tethers: a small freight car riding the cable. */
+function buildTetherPod() {
+  const B = new CB();
+  B.push(new THREE.Matrix4().makeRotationX(-Math.PI / 2));
+  lathe(B, [[14, -30, CK.DARK], [34, -26, CK.HULL], [38, -12, CK.GLASS], [38, 10, CK.HULL], [30, 24, CK.BRONZE], [14, 30, CK.DARK]], 20, 0, { closedProfile: true });
+  B.pop();
+  return B.geometry();
+}
+
+export const PORT_LIFE = {
+  shuttlePeriod: 900, approachKm: 12, gateY: -8000, craneY: 520, craneZ: 21150, podSpeed: 180, podSpan: 22000,
+  tetherX: [-9000, 0, 9000], tetherTopY: -1420,
+};
+
 /**
  * The Halo's ports as scene objects: one station at each ground port (Meridian's is the
- * junction, built by the elevator). Each is its own depth-sliced body.
+ * junction, built by the elevator). Each is its own depth-sliced body. Close in, each port is
+ * working: shuttles climb the port columns to the gate rings and drop away again, the cargo
+ * courts' cranes slew over the containers, freight pods ride the three port tethers.
  */
 export class HaloPorts {
   constructor(space, ports) {
     this.list = [];
     const st = buildPortStation({ junction: false });
+    this.station = st;
     const mat = createCraftMaterial({ accent: [0.55, 0.9, 1.0], lit: 0.6 });
+    const crane = buildCourtCrane(), mastGeo = buildCraneMast(PORT_LIFE.craneY);
+    const shuttleGeo = buildShuttle(110).geo, podGeo = buildTetherPod();
+    // crane seats: on the cargo courts outboard of the rotor (x = +-1050, z = +-20100)
+    this.craneSeats = [];
+    for (const sd of [-1, 1]) for (const x of [-1050, 1050]) this.craneSeats.push(V(x, st.pierY + 90 + PORT_LIFE.craneY, sd * PORT_LIFE.craneZ));
     for (const p of ports) {
       if (p.name === 'Meridian') continue;
       const lon = THREE.MathUtils.degToRad(p.lon);
@@ -213,12 +264,45 @@ export class HaloPorts {
       const s = craftPart(m, st.ships);
       m.add(s);
       addLamps(m, st.lamps, { minPx: 1.3 });
+      // working parts (all in the station's metres)
+      const life = new THREE.Group();
+      const cranes = this.craneSeats.map((c) => {
+        const head = craftPart(m, crane.geo);
+        head.position.copy(c);
+        addLamps(head, crane.lamps, { minPx: 1.2 });
+        life.add(head);
+        return head;
+      });
+      const mastList = this.craneSeats.map((c) => { const mm = craftPart(m, mastGeo); mm.position.copy(c); life.add(mm); return mm; });
+      const inst = (geo, n) => {
+        const im = new THREE.InstancedMesh(geo, mat, n);
+        im.frustumCulled = false; im.renderOrder = 3; im.onBeforeRender = m.onBeforeRender;
+        life.add(im);
+        return im;
+      };
+      const shuttles = inst(shuttleGeo, 2), pods = inst(podGeo, 6);
+      m.add(life);
       g.add(m);
       space.earthFixed.add(g);
       const _p = new THREE.Vector3();
       space.addBody(`port-${p.name}`, [g], () => g.getWorldPosition(_p), 24, { solid: true, hint: 0.6 });
-      this.list.push({ name: p.name, group: g, mesh: m, ships: s });
+      this.list.push({ name: p.name, group: g, mesh: m, ships: s, life, cranes, masts: mastList, shuttles, pods, seed: (lon * 1000) | 0 });
     }
+  }
+
+  /** Shuttle at gate side s (0 west/departures, 1 east/arrivals): y (m) of its centre, or null. */
+  shuttleY(t, side, seed) {
+    const L = PORT_LIFE, ph = ((t / L.shuttlePeriod + side * 0.5 + (seed % 97) / 97) % 1 + 1) % 1;
+    const berth = L.gateY - 150, far = berth - L.approachKm * 1000;
+    if (ph < 0.3) { const e = 1 - ph / 0.3; return berth - (berth - far) * e * e; }        // rising, braking into the gate
+    if (ph < 0.55) return berth;                                                            // at the gate
+    if (ph < 0.85) { const e = (ph - 0.55) / 0.3; return berth - (berth - far) * e * e; }  // dropping away
+    return null;
+  }
+  podY(t, k, seed) {
+    const L = PORT_LIFE, span = L.podSpan;
+    const u = (((t * L.podSpeed + k * span / 2 + seed) % span) + span) % span;
+    return (k % 2 ? L.tetherTopY - 300 - u : L.tetherTopY - 300 - (span - u));
   }
 
   update(sim, realTime, dt, space) {
@@ -227,9 +311,31 @@ export class HaloPorts {
       const px = pixelRadius(space.camera, p.group.getWorldPosition(_w), 22, space.size.y);
       p.ships.visible = px > 120;
       p.group.visible = px > 0.6;
+      p.life.visible = px > 160;
+      if (!p.life.visible) continue;
+      const t = realTime;
+      for (let i = 0; i < p.cranes.length; i++) p.cranes[i].rotation.y = 0.6 * Math.sin(t * 0.02 + i * 1.9 + p.seed) + (i < 2 ? 0 : Math.PI);
+      let n = 0;
+      for (let side = 0; side < 2; side++) {
+        const y = this.shuttleY(t, side, p.seed);
+        if (y === null) continue;
+        const x = side ? 12000 : -12000;
+        // nose up the column (+y), belly toward +z
+        _mm.set(1, 0, 0, x, 0, 0, 1, y, 0, -1, 0, 0, 0, 0, 0, 1);
+        p.shuttles.setMatrixAt(n++, _mm);
+      }
+      p.shuttles.count = n;
+      p.shuttles.instanceMatrix.needsUpdate = true;
+      for (let k = 0; k < 6; k++) {
+        const x = PORT_LIFE.tetherX[k % 3];
+        _mm.makeTranslation(x, this.podY(t, k, p.seed), 0);
+        p.pods.setMatrixAt(k, _mm);
+      }
+      p.pods.instanceMatrix.needsUpdate = true;
     }
   }
 }
+const _mm = new THREE.Matrix4();
 const _w = new THREE.Vector3();
 
 // ------------------------------------------------------------ counterweight works ----
