@@ -301,3 +301,56 @@ float ef_cloudSelfShadow(vec3 nC, vec3 sun, float muC, float fpC, float bias, fl
   return exp(-1.5 * occ);
 }
 `;
+
+// ---- GLSL, part 3: the deck's relief at a slant (after lowCloud and landBias; needs RC) ---------
+/** The relief march: steps through the tops' layer, the view slant below which it runs, and the footprint (km) above which it fades out. */
+export const RELIEF = { steps: 4, muLo: 0.3, muHi: 0.45, fpLo: 2.0, fpHi: 4.0 };
+export const EARTH_FINE_RELIEF_GLSL = /* glsl */ `
+// The deck seen at a slant: march the ray down through the layer of the tops (RC .. RC + the
+// tops' height) and stop where it first meets a top, so toward the horizon the towers stand up,
+// hide what lies behind them and show their sides, and at the limb they break the skyline.
+// Seen from above the layer is thin next to a pixel and the flat shell is kept (the relief
+// scale falls smoothly to zero, so nothing jumps between the two). Returns whether the deck is
+// met, and there: the cloud (cover, tau), the ray distance and the land's bias.
+bool ef_deck(vec3 ro, vec3 rd, vec2 tC, out vec2 lcl, out float tHit, out float bias) {
+  bool hitBase = tC.x < tC.y && tC.y > 0.0;
+  float tBase = hitBase ? max(tC.x, 0.0) : max(-dot(ro, rd), 0.0);
+  vec3 nB = normalize(ro + rd * tBase);
+  vec3 bB = uToBody * nB;
+  bias = landBias(bB);
+  float fpB = max(tBase * uPixAng, 1e-3);
+  float muV = abs(dot(rd, nB));
+  float relK = (1.0 - smoothstep(${f(RELIEF.muLo)}, ${f(RELIEF.muHi)}, muV)) * (1.0 - smoothstep(${f(RELIEF.fpLo)}, ${f(RELIEF.fpHi)}, fpB));
+  lcl = vec2(0.0);
+  tHit = tBase;
+  if (relK > 0.01) {
+    float top = EF_TOP_KM * relK;
+    vec2 tT = sphereHits(ro, rd, RC + top);
+    if (tT.x < tT.y && tT.y > 0.0) {
+      float t0 = max(tT.x, 0.0);
+      float tPrev = t0;
+      float gPrev = length(ro + rd * t0) - RC;
+      for (int k = 1; k <= ${RELIEF.steps}; k++) {
+        float t = mix(t0, tBase, float(k) / ${f(RELIEF.steps)});
+        vec3 p = ro + rd * t;
+        vec2 c = lowCloud(uToBody * normalize(p), max(t * uPixAng, 1e-3), bias, EF_CLOUD_OCT);
+        float g = length(p) - RC - top * c.x * sqrt(clamp(c.y / 48.0, 0.0, 1.0));
+        if (g <= 0.0) {
+          tHit = mix(tPrev, t, clamp(gPrev / max(gPrev - g, 1e-4), 0.0, 1.0));
+          lcl = c;
+          return true;
+        }
+        if (k == ${RELIEF.steps}) {
+          // the ray reached the base (or, at the limb, its lowest point) over clear air
+          lcl = hitBase ? c : vec2(0.0);
+          return hitBase;
+        }
+        tPrev = t;
+        gPrev = g;
+      }
+    }
+  }
+  if (hitBase) lcl = lowCloud(bB, fpB, bias, EF_CLOUD_OCT);
+  return hitBase;
+}
+`;

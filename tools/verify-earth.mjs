@@ -448,7 +448,14 @@ lint('meteors', metMat);
   // the Earth shader calls the fine module with the tier's octave counts, and nowhere else evaluates
   // cloud detail with a boolean (the old signature)
   const efs = stripComments(earth.material.fragmentShader);
-  ok(/lowCloud\(bC, fpC, biasC, EF_CLOUD_OCT\)/.test(efs) && /EF_SHADOW_OCT : 0\)/.test(efs), 'deck and ground shadows at the tier octave counts');
+  ok(/ef_deck\(ro, rd, tC, lcl, tCl, biasC\)/.test(efs) && /lowCloud\(bB, fpB, bias, EF_CLOUD_OCT\)/.test(efs) && /EF_SHADOW_OCT : 0\)/.test(efs), 'deck and ground shadows at the tier octave counts');
+  // the relief march: bounded, continuous with the flat shell (its scale is zero before the switch)
+  ok(F.RELIEF.steps >= 3 && F.RELIEF.steps <= 5 && F.RELIEF.muLo < F.RELIEF.muHi && F.RELIEF.fpLo < F.RELIEF.fpHi, 'relief march parameters');
+  ok(/if \(relK > 0\.01\)/.test(efs) && /float lcv = deckHit \? cA : 0\.0;/.test(efs), 'relief faded in, limb tops counted');
+  // worst-case cloud evaluations per pixel at the lowest tier (deck relief + self shadow + ground
+  // shadow + coarse shade): the per-pixel cost stays bounded
+  const evals = F.RELIEF.steps + F.SHADOW_MARCH.steps + 2;
+  ok(evals <= 10, `cloud evaluations per pixel ${evals}`);
   ok(!/lowCloud\([^;]*,\s*(true|false)\)/.test(efs), 'lowCloud takes an octave count');
   ok(/ef_cloudSelfShadow\(/.test(efs) && /ef_land\(/.test(efs) && /ef_seaColour\(/.test(efs) && /ef_limbGain\(/.test(efs) && /ef_skyAmbient\(/.test(efs), 'fine terms wired into the Earth shader');
   // (dFdx of the relief stays in uniform control flow: ef_land is called at the top level of main)

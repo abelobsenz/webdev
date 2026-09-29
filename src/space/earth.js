@@ -7,7 +7,7 @@ import { R_EARTH, MERIDIAN_LON, bodyDir } from './sim.js';
 import { Aurora } from './aurora.js';
 import { EARTH_DETAIL_GLSL, buildLaneTexture, buildArcTexture, arcologyUniforms, shipClock, trainClock } from './earthDetail.js';
 import { buildArcs } from './earthBake.js';
-import { EARTH_FINE_GLSL, EARTH_FINE_SHADOW_GLSL } from './earthFine.js';
+import { EARTH_FINE_GLSL, EARTH_FINE_SHADOW_GLSL, EARTH_FINE_RELIEF_GLSL } from './earthFine.js';
 
 // The planet, rendered in one pass on a proxy sphere at the top of the
 // atmosphere. Each fragment ray-traces the ground and the cloud shell and
@@ -39,7 +39,8 @@ uniform mat3 uToBody;
 uniform vec3 uSunDir;
 uniform float uSunE;
 uniform float uCloudRot;      // the weather's slow eastward drift (rad)
-uniform float uCloudTexel;    // km per weather texel
+uniform float uCloudTexel;
+uniform float uSurfTexel;    // km per surface texel    // km per weather texel
 uniform float uTime;          // real seconds
 uniform float uSimDay;        // fraction of day for lightning seeds
 uniform vec4 uRingN[4];       // ring axis (inertial) + radius
@@ -183,6 +184,7 @@ vec2 lowCloud(vec3 b, float fp, float bias, int oct) {
   return vec2(cover, tau);
 }
 ${EARTH_FINE_SHADOW_GLSL}
+${EARTH_FINE_RELIEF_GLSL}
 
 // High ice cloud on its own shell: thin, fibrous, drawn out along the wind. x = cover, y = tau
 vec2 cirrusCloud(vec3 b, float fp, bool fine) {
@@ -459,6 +461,13 @@ void main() {
   vec4 B = texture(uSurfB, b);
   float H = A.a * 2.0 - 1.0;
   vec3 alb = A.rgb * A.rgb;
+  // the bake's own structure sharpened where a pixel is finer than its texels (an unsharp mask
+  // against a coarser mip): rivers, coasts, forest edges and deserts' margins crisp, not bilinear
+  float sharpK = 0.75 * (1.0 - smoothstep(0.35, 1.4, fp / uSurfTexel));
+  if (sharpK > 0.0) {
+    vec3 aC = textureLod(uSurfA, b, 2.0).rgb;
+    alb = clamp(alb + sharpK * (alb - aC * aC), alb * 0.55, alb * 1.6);
+  }
   // the coast drawn below the bake's texels: headlands, coves, barrier islands
   float Hd = H + ef_coast(b, H, fp);
   float ew = max(fwidth(Hd), 1e-4);
@@ -629,14 +638,16 @@ void main() {
 
   // clouds: the low and middle deck (8 km) and the cirrus above it (12.5 km), each on its own
   // shell, so they part in parallax at a slant and the cirrus shadows the deck beneath it
+  // (at a slant the deck is marched as a height field: towers stand up toward the horizon)
   vec2 tC = sphereHits(ro, rd, RC);
-  vec3 pC = ro + rd * max(tC.x, 0.0);
+  vec2 lcl;
+  float tCl, biasC;
+  bool deckHit = ef_deck(ro, rd, tC, lcl, tCl, biasC);
+  vec3 pC = ro + rd * tCl;
   vec3 nC = normalize(pC);
   vec3 bC = uToBody * nC;
-  float fpC = max(max(tC.x, 0.0) * uPixAng, 1e-3);
+  float fpC = max(tCl * uPixAng, 1e-3);
   float muVC = max(abs(dot(rd, nC)), 0.04);
-  float biasC = landBias(bC);
-  vec2 lcl = tC.x < tC.y ? lowCloud(bC, fpC, biasC, EF_CLOUD_OCT) : vec2(0.0);
   // what the deck hides of what lies below: the covered share times its direct-beam opacity
   float cA = lcl.x * (1.0 - exp(-lcl.y * 0.5 / muVC));
   // relief: the tops' height read from the optical depth, so towers catch the Sun on one side;
@@ -745,7 +756,7 @@ void main() {
     gl_FragDepth = clamp(clip.z / clip.w * 0.5 + 0.5, 0.0, 1.0);
   } else {
     // limb: clouds that poke above the horizon, then the glowing air
-    float lcv = cA * step(tC.x, tC.y);
+    float lcv = deckHit ? cA : 0.0;
     float li = iA * step(tI.x, tI.y);
     vec3 cc = ciCol * li + cloudCol * lcv * (1.0 - li);
     float ca = li + lcv * (1.0 - li);
@@ -782,6 +793,7 @@ export class Earth {
       uSunE: U.uSunIlluminance,
       uCloudRot: { value: 0 },
       uCloudTexel: { value: (Math.PI / 2 / bake.clouds.width) * 6371 },
+      uSurfTexel: { value: (Math.PI / 2 / (bake.surfA.width || 1024)) * 6371 },
       uTime: { value: 0 },
       uSimDay: { value: 0 },
       uRingN: { value: [0, 1, 2, 3].map(() => new THREE.Vector4(0, 1, 0, 1)) },
