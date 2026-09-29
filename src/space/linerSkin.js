@@ -146,3 +146,87 @@ export function smoothLiner(liner) {
   g.userData.smoothSkin = true;
   return g;
 }
+
+// ---------------------------------------------------------------- tender spine ----
+// The same treatment for the reclamation tenders' spine (buildTender: a rounded beam lofted
+// from 25 sections of 20 points, n = 3.2, the girdles on every sixth section): 64 x 97 on the
+// builder's surface, normals from the surface itself, girdles as 3 m bands. The pods, pod
+// clamps, command pod, mast and engines are the builder's.
+
+const TS = { z0: -140, z1: 118, n: 3.2, NR0: 20, NJ0: 24, NR: 64, NJ: 96 };
+const lerp = (a, b, t) => a + (b - a) * t;
+const ss = (a, b, x) => { const t = Math.min(Math.max((x - a) / (b - a), 0), 1); return t * t * (3 - 2 * t); };
+function spineSection(u) { return [9 + 4 * (1 - u) + 3 * ss(0.85, 1, u), 8 + 5 * (1 - u)]; }
+function superPt(t, a, b, n, out) {
+  const c = Math.cos(t), s = Math.sin(t);
+  out[0] = Math.sign(c) * Math.pow(Math.abs(c), 2 / n) * a;
+  out[1] = Math.sign(s) * Math.pow(Math.abs(s), 2 / n) * b;
+  return out;
+}
+
+/** The tender's smooth spine (tender metres at scale s), with caps: position, normal, aFacade, index. */
+export function buildTenderSpine(s = 1) {
+  const { z0, z1, n, NR, NJ } = TS, cols = NR + 1;
+  const grid = [], P = [0, 0];
+  for (let j = 0; j <= NJ; j++) {
+    const u = j / NJ, z = lerp(z0, z1, u), [w, h] = spineSection(u), row = [];
+    for (let i = 0; i <= NR; i++) { superPt(((i % NR) / NR) * TAU, w, h, n, P); row.push([P[0], P[1], z]); }
+    grid.push(row);
+  }
+  const pos = [], nrm = [], fac = [], idx = [];
+  const girdleStep = (z1 - z0) / 4;                     // the builder's j % 6 on 24 sections
+  let along = 0;
+  for (let j = 0; j <= NJ; j++) {
+    if (j) along += grid[j][0][2] - grid[j - 1][0][2];
+    let per = 0;
+    for (let i = 0; i <= NR; i++) {
+      const p = grid[j][i];
+      if (i) per += Math.hypot(p[0] - grid[j][i - 1][0], p[1] - grid[j][i - 1][1]);
+      const a = grid[j][(i + 1) % NR], b = grid[j][(i + NR - 1) % NR];
+      const c = grid[Math.min(j + 1, NJ)][i], d = grid[Math.max(j - 1, 0)][i];
+      const tx = a[0] - b[0], ty = a[1] - b[1], tz = a[2] - b[2];
+      const lx = c[0] - d[0], ly = c[1] - d[1], lz = c[2] - d[2];
+      let nx = ly * tz - lz * ty, ny = lz * tx - lx * tz, nz = lx * ty - ly * tx;
+      if (nx * p[0] + ny * p[1] < 0) { nx = -nx; ny = -ny; nz = -nz; }
+      const L = Math.hypot(nx, ny, nz) || 1;
+      pos.push(p[0] * s, p[1] * s, p[2] * s); nrm.push(nx / L, ny / L, nz / L);
+      const zr = (p[2] - z0) / girdleStep, g = Math.round(zr);
+      fac.push(per, along, g > 0 && Math.abs(zr - g) * girdleStep < 1.5 ? CK.BRONZE : CK.HULL);
+    }
+  }
+  for (let j = 0; j < NJ; j++) for (let i = 0; i < NR; i++) {
+    const a = j * cols + i, b = a + 1, c = a + cols, d = c + 1;
+    idx.push(a, b, d, a, d, c);
+  }
+  for (const [j, dir, kind] of [[0, -1, CK.DARK], [NJ, 1, CK.HULL]]) {
+    const base = pos.length / 3, z = grid[j][0][2];
+    pos.push(0, 0, z * s); nrm.push(0, 0, dir); fac.push(0, 0, kind);
+    for (let i = 0; i < NR; i++) { const p = grid[j][i]; pos.push(p[0] * s, p[1] * s, z * s); nrm.push(0, 0, dir); fac.push(p[0], p[1], kind); }
+    for (let i = 0; i < NR; i++) { const a = base + 1 + i, b = base + 1 + ((i + 1) % NR); if (dir > 0) idx.push(base, a, b); else idx.push(base, b, a); }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('normal', new THREE.Float32BufferAttribute(nrm, 3));
+  g.setAttribute('aFacade', new THREE.Float32BufferAttribute(fac, 3));
+  g.setIndex(idx);
+  return g;
+}
+
+/** The tender's geometry with the smooth spine in place of the builder's loft (or the builder's, unchanged, if its layout differs). */
+export function smoothTender(tender) {
+  const geo = tender.geo, s = (tender.length || 300) / 300;
+  const { NR0, NJ0 } = TS;
+  const verts = (NJ0 + 1) * (NR0 + 1) + 2 * (NR0 + 1), tris = NJ0 * NR0 * 2 + 2 * NR0;
+  const ix = geo.index.array;
+  let ok = ix.length > tris * 3 + 3 && Math.abs(geo.attributes.position.getZ(0) - TS.z0 * s) < 1e-3;
+  for (let i = 0; ok && i < tris * 3; i++) if (ix[i] >= verts) ok = false;
+  for (let i = tris * 3; ok && i < tris * 3 + 3; i++) if (ix[i] < verts) ok = false;
+  if (!ok) return geo;
+  const rest = new THREE.BufferGeometry();
+  for (const k of ['position', 'normal', 'aFacade']) rest.setAttribute(k, geo.attributes[k]);
+  rest.setIndex(new THREE.BufferAttribute(new Uint32Array(ix.slice(tris * 3)), 1));
+  const g = mergeGeometries([buildTenderSpine(s), rest], false);
+  g.computeBoundingBox(); g.computeBoundingSphere();
+  g.userData.smoothSkin = true;
+  return g;
+}

@@ -9,7 +9,7 @@ import { R_EARTH, R_MOON, MERIDIAN_LON, bodyDir } from './sim.js';
 import { stationFrame, CORRIDORS } from './stations.js';
 import { HS } from './harbour.js';
 import { FleetTraffic } from './fleetTraffic.js';
-import { smoothLiner } from './linerSkin.js';
+import { smoothLiner, smoothTender } from './linerSkin.js';
 import { buildLinerDetail, buildFreighterDetail, buildTenderDetail, buildEvaWorker, evaPose, evaLines, EVA_PARTIES } from './linerDetail.js';
 import { buildWheelDetail, buildLiftCar, buildRingCrane, liftPose, craneAngle, RING } from './seleneDetail.js';
 
@@ -259,7 +259,7 @@ export class Fleet {
     // ---- reclamation tenders above the Halo near the Nauru port
     const tender = buildTender(620);
     this.tenderData = tender;
-    const tenderPainted = markTender(tender.geo);
+    const tenderPainted = markTender(smoothTender(tender));   // smooth spine (src/space/linerSkin.js), works paint
     const relic = buildRelic();
     this.tenders = [];
     this.tenderGroup = new THREE.Group();

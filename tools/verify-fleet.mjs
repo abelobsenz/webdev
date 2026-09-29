@@ -634,6 +634,26 @@ assert.ok(minClear > 0, `working lanes clear every structure with ${minClear} km
     assert.ok(mx < sm.attributes.position.count, 'smoothed liner index in range');
     assert.ok(fleet.docked.geometry.index.count === sm.index.count, 'the berthed liner draws the smooth skin');
   }
+  {
+    const { smoothTender } = await import('../src/space/linerSkin.js');
+    const st = smoothTender(fleet.tenderData);
+    assert.ok(st.userData.smoothSkin, 'the tender spine replaced (builder loft layout recognised)');
+    out.tenderTriangles = [fleet.tenderData.geo.index.count / 3, st.index.count / 3];
+    let mx = 0; for (const i of st.index.array) if (i > mx) mx = i;
+    assert.ok(mx < st.attributes.position.count, 'smoothed tender index in range');
+    assert.ok(fleet.tenders[0].mesh.geometry.index.count === st.index.count, 'the tenders draw the smooth spine');
+    // the new spine hugs the builder's: every builder spine vertex within 0.05 m of the new surface's radius
+    const bp = fleet.tenderData.geo.attributes.position, np = st.attributes.position;
+    const s = fleet.tenderData.length / 300;
+    for (let j = 0; j <= 24; j += 6) {
+      const bz = bp.getZ(j * 21), nz = np.getZ(j * 4 * 65);
+      assert.ok(Math.abs(bz - nz) < 1e-3 * s, `spine station ${j} matches (${bz} vs ${nz})`);
+      for (let i = 0; i < 20; i++) {
+        const br = Math.hypot(bp.getX(j * 21 + i), bp.getY(j * 21 + i)), nr = Math.hypot(np.getX(j * 4 * 65 + i * 3.2 | 0), np.getY(j * 4 * 65 + i * 3.2 | 0));
+        if (i % 5 === 0) assert.ok(Math.abs(br - nr) < 0.05 * s, `spine radius at ${j},${i}: ${br} vs ${nr}`);
+      }
+    }
+  }
   // Selene's foil tank shells: smooth, and their inner chords clear every vertex of the old tank
   const sg = fleet.refineryMesh.geometry, sp = sg.attributes.position;
   assert.ok(1.006 * Math.cos(Math.PI / 48) ** 2 > 1.0005, 'tank shell chords clear the builder tank');
