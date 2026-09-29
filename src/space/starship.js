@@ -1,20 +1,22 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { CK } from '../craft/craftGeometry.js';
-import { craftMesh, craftPart, addEngines, addLamps, KM } from './craftMesh.js';
+import { craftMesh, craftPart, addLamps, KM } from './craftMesh.js';
+import { createEngine, ENGINE_FRAME } from './exhaust.js';
 import { createGlowMesh } from '../craft/craftMaterial.js';
 
-// The Concord starcourier "Lodestar": the ship the visitor flies in the orbital view. 48 m long,
-// drawn in metres with the craft material (view-space sunlight, the Earth's shadow, earthshine,
-// the Earth mirrored in its glazing) like every other hull out here:
-//   hull      a round spindle, pearl plating; a panoramic glazed band round the nose, a bridge
-//             crown (glazed dome) on the forward back, window rows along both flanks
-//   trim      bronze bands, a docking collar at the nose, a glowing conduit along the spine
-//   ring      a habitat ring (glazed outer rim) on four spokes, turning on a bearing collar
-//   drive     three bronze bells with plasma plumes, a thrust frame, RCS quads fore and aft
-//   radiators two wings that swing out from the flanks when the drive is quiet
-//   legs      three landing legs that fold flat along the aft hull
-//   details   comms dish on a mast, whip antennas, running lights, strobes and a beacon
+// The Concord starcourier "Lodestar": the ship the visitor flies in the orbital view. A 36 m
+// lifting-body cutter drawn in metres with the craft material (view-space sunlight, the Earth's
+// shadow, earthshine, the Earth mirrored in its glazing) like every other hull out here:
+//   hull      a manta-lens section: broad and flat with sharp chines trimmed in bronze, a raised
+//             crew deck under a glazed canopy, window rows along the upper flanks, a glowing
+//             conduit down the spine, a docking ring behind the canopy
+//   radiators swept radiator wings from the chines and twin canted radiator fins at the stern
+//             (the only way a ship this size sheds its drive heat)
+//   drive     one main engine and two smaller ones on a thrust frame, physically based nozzles
+//             that glow with their own heat and a faint vacuum plume (space/exhaust.js)
+//   legs      a landing tripod that folds into the belly
+//   details   RCS quads fore and aft, a comms dish, antennas, running lights, strobes, beacons
 // Nose toward -Z, up +Y, starboard +X.
 
 const TAU = Math.PI * 2;
@@ -137,29 +139,51 @@ function tube(pts, r, k, n = 12) {
   return loft(rings, k, { capStart: true, capEnd: true });
 }
 
-// --------------------------------------------------------------- the spindle --
-export const SHIP = { L: 46, Z0: -24, len: 48 };
-const hullR = (t) => 4.6 * Math.pow(Math.sin((Math.min(t / 0.42, 1) * Math.PI) / 2), 0.62) * (1 - 0.22 * smooth(0.55, 1, t));
+// ------------------------------------------------------------------ the hull --
+export const SHIP = { Z0: -20, L: 36 };
 const zOf = (t) => SHIP.Z0 + SHIP.L * t, tOf = (z) => (z - SHIP.Z0) / SHIP.L;
-export const shipHullR = (z) => hullR(Math.min(Math.max(tOf(z), 0), 1));
-
-/** A shell strip laid on the hull (outer +o, inner -i) over t0..t1 and angles a0..a1 (0 = +X, pi/2 = top). */
-function hullStrip(t0, t1, a0, a1, k, { o = 0.07, i = 0.12, nt = 16, na = 24, taper = 0 } = {}) {
+const C = (t) => Math.min(Math.max(t, 0), 1);
+/** Section of the hull at station t: half-width, top and bottom heights, exponents. */
+function sec(t) {
+  const w = 5.2 * Math.pow(Math.sin((Math.min(t / 0.6, 1) * Math.PI) / 2), 0.8) * (1 - 0.18 * smooth(0.8, 1, t));
+  const hump = 0.85 * Math.exp(-(((t - 0.3) / 0.13) ** 2));
+  const ht = 1.9 * Math.pow(Math.sin((Math.min(t / 0.45, 1) * Math.PI) / 2), 0.75) * (1 - 0.25 * smooth(0.75, 1, t)) + hump * smooth(0.05, 0.2, t);
+  const hb = 1.5 * Math.pow(Math.sin((Math.min(t / 0.4, 1) * Math.PI) / 2), 0.75) * (1 - 0.15 * smooth(0.75, 1, t));
+  return { w, ht, hb, nx: 3.0, ny: 1.35 };
+}
+const sgnPow = (c, e) => Math.sign(c) * Math.pow(Math.abs(c), e);
+/** Point on the hull at station t and section angle a (0 = starboard chine, pi/2 = top). */
+function hullPt(t, a, off = 0) {
+  const S = sec(C(t)), c = Math.cos(a), s = Math.sin(a);
+  const p = V3(S.w * sgnPow(c, 2 / S.nx), (s > 0 ? S.ht : S.hb) * sgnPow(s, 2 / S.ny), zOf(C(t)));
+  if (off) {
+    // offset along the section's outward normal (from the tangent round the section)
+    const e = 1e-3, c2 = Math.cos(a + e), s2 = Math.sin(a + e);
+    const q = V3(S.w * sgnPow(c2, 2 / S.nx), (s2 > 0 ? S.ht : S.hb) * sgnPow(s2, 2 / S.ny), 0);
+    const tx = q.x - p.x, ty = q.y - p.y, L = Math.hypot(tx, ty) || 1;
+    p.x += (ty / L) * off; p.y += (-tx / L) * off;
+  }
+  return p;
+}
+function hullRing(t, n = 72) { const o = []; for (let i = 0; i < n; i++) o.push(hullPt(t, (i / n) * TAU)); return o; }
+/** A shell strip on the hull over t0..t1 and section angles a0..a1 (proud by o, sunk by i). */
+function hullStrip(t0, t1, a0, a1, k, { o = 0.06, i = 0.12, nt = 16, na = 16 } = {}) {
   const rings = [];
   for (let j = 0; j <= nt; j++) {
-    const u = j / nt, t = lerp(t0, t1, u), z = zOf(t), R = hullR(t);
-    const sq = taper ? Math.pow(Math.sin(Math.PI * u), taper) : 1;
-    const am = (a0 + a1) / 2, ah = ((a1 - a0) / 2) * Math.max(sq, 0.02);
-    const out = [], inn = [];
-    for (let q = 0; q <= na; q++) { const a = am - ah + (2 * ah * q) / na; out.push(V3(Math.cos(a) * (R + o), Math.sin(a) * (R + o), z)); inn.push(V3(Math.cos(a) * (R - i), Math.sin(a) * (R - i), z)); }
+    const t = lerp(t0, t1, j / nt), out = [], inn = [];
+    for (let q = 0; q <= na; q++) { const a = lerp(a0, a1, q / na); out.push(hullPt(t, a, o)); inn.push(hullPt(t, a, -i)); }
     rings.push([...out, ...inn.reverse()]);
   }
   return loft(rings, k, { capStart: true, capEnd: true });
 }
-/** A band round the hull at station z (width w, proud by h). */
-function hullBand(z, w, h, k, n = 64) {
-  const r = (zz, o) => circle(shipHullR(zz) + o, zz, n);
-  return loft([r(z - w / 2, -0.1), r(z - w / 2, h), r(z + w / 2, h), r(z + w / 2, -0.1)], k, { closeRings: true });
+/** A flat, tapered plate (radiator) given its planform corners and thickness. */
+function plate(root0, root1, tip1, tip0, th, k) {
+  const q = [root0, root1, tip1, tip0], up = V3(0, th / 2, 0);
+  const rings = [];
+  // loft across the span: rings are the two chords (closed as thin boxes)
+  for (const [a, b] of [[root0, root1], [tip0, tip1]]) rings.push([a.clone().add(up), b.clone().add(up), b.clone().sub(up), a.clone().sub(up)]);
+  void q;
+  return loft(rings, k, { capStart: true, capEnd: true });
 }
 
 export class Starship {
@@ -167,197 +191,171 @@ export class Starship {
     this.root = new THREE.Group();            // km units: position and orientation of the ship
     this.root.name = 'Lodestar';
     this.movers = {};
-    this.state = { throttle: 0, boost: 0, legs: 0, radiators: 1, rcs: 0, ringRate: 0.45 };
+    this.state = { throttle: 0, aux: 0, boost: 0, legs: 0, rcs: 0 };
     this._build();
   }
 
   _build() {
-    const S = [];                               // static hull parts (metres)
+    const S = [];
 
-    // ---- hull: nose dock, spindle, thrust frame at the stern
-    const hr = [];
-    const K = 80;
+    // ---- hull (a lens section, chines at a = 0 and pi), the stern closed by the thrust frame
+    const rings = [];
+    const K = 88;
     for (let k = 0; k <= K; k++) {
       const t = 0.5 - 0.5 * Math.cos((Math.PI * k) / K);
-      hr.push(circle(Math.max(hullR(t), 0.0015), zOf(t), 64));
+      rings.push(t < 1e-4 ? hullRing(1e-4).map(() => V3(0, 0, SHIP.Z0)) : hullRing(t));
     }
-    S.push(loft(hr, CK.HULL, { capEnd: true, capKind: CK.DARK }));
-    // docking collar and port at the nose
-    S.push(revolve([[0.0, -24.9, CK.DARK], [0.55, -24.9, CK.DARK], [0.62, -24.6, CK.DARK], [0.62, -24.6, CK.BRONZE], [1.0, -24.45, CK.BRONZE], [1.05, -23.9, CK.BRONZE], [0.8, -23.2, CK.BRONZE]], 40));
-    // glazing: the panoramic band round the nose, the bridge crown, the flank decks
-    S.push(hullStrip(0.085, 0.13, -Math.PI / 2 + 0.22, Math.PI * 1.5 - 0.22, CK.GLASS, { nt: 8, na: 48 }));
-    {
-      // bridge crown: a glazed blister over the forward back (a dome lofted along the hull)
-      const rings = [];
-      for (let j = 0; j <= 20; j++) {
-        const u = j / 20, t = lerp(0.16, 0.34, u), z = zOf(t), R = hullR(t);
-        const w = 2.2 * Math.pow(Math.sin(Math.PI * u), 0.45), hgt = 1.55 * Math.pow(Math.sin(Math.PI * Math.pow(u, 0.8)), 0.6);
-        const ring = [];
-        for (let q = 0; q <= 16; q++) { const a = (q / 16) * Math.PI; ring.push(V3(Math.cos(a) * Math.max(w, 0.01), R - 0.35 + Math.sin(a) * Math.max(hgt + 0.35, 0.01), z)); }
-        ring.push(V3(-Math.max(w, 0.01) * 0.8, R - 0.8, z), V3(Math.max(w, 0.01) * 0.8, R - 0.8, z));
-        rings.push(ring);
-      }
-      S.push(loft(rings, CK.GLASS, { capStart: true, capEnd: true }));
-      // its bronze coaming
-      const edge = (sgn) => { const o = []; for (let j = 1; j < 20; j++) { const u = j / 20, t = lerp(0.16, 0.34, u), w = 2.2 * Math.pow(Math.sin(Math.PI * u), 0.45); o.push(V3(sgn * (w + 0.05), hullR(t) - 0.28, zOf(t))); } return o; };
-      S.push(tube(edge(1), 0.09, CK.BRONZE, 8), tube(edge(-1), 0.09, CK.BRONZE, 8));
-    }
-    for (const s of [1, -1]) {
-      const a = s > 0 ? 0 : Math.PI;
-      S.push(hullStrip(0.3, 0.52, a - 0.2, a + 0.2, CK.GLASS, { nt: 18, na: 6 }));
-      S.push(hullStrip(0.56, 0.7, a + s * 0.36 - 0.1, a + s * 0.36 + 0.1, CK.GLASS, { nt: 10, na: 4 }));
-    }
-    // bronze bands and the spine conduit
-    for (const z of [-13.2, -2.4, 10.5, 18.6]) S.push(hullBand(z, 0.7, 0.12, CK.BRONZE));
-    {
-      const pts = [];
-      for (let z = -11; z <= 16; z += 3) pts.push(V3(0, shipHullR(z) + 0.28, z));
-      S.push(tube(pts, 0.3, CK.CONDUIT, 12));
-      for (let z = -9.5; z <= 15; z += 4.5) S.push(revolve([[0, -0.25, CK.BRONZE], [0.42, -0.25, CK.BRONZE], [0.42, 0.25, CK.BRONZE], [0, 0.25, CK.BRONZE]], 16, { cx: 0, cy: 0 }).translate(0, 0, 0).applyMatrix4(new THREE.Matrix4().makeTranslation(0, shipHullR(z) + 0.28, z)));
-    }
-    // bearing race for the ring
-    S.push(hullBand(1.0, 2.4, 0.35, CK.DARK));
+    S.push(loft(rings, CK.HULL, { capEnd: true, capKind: CK.DARK }));
 
-    // ---- stern: thrust frame and three bells
+    // ---- canopy over the crew deck, window rows along the upper flanks
+    {
+      const cr = [], N = 22;
+      for (let j = 0; j <= N; j++) {
+        const u = j / N, t = lerp(0.13, 0.33, u), S0 = sec(t);
+        const w = 1.25 * Math.pow(Math.sin(Math.PI * u), 0.4), h = 0.62 * Math.pow(Math.sin(Math.PI * Math.pow(u, 0.75)), 0.6);
+        const base = S0.ht - 0.28, ring = [];
+        for (let q = 0; q <= 16; q++) { const a = (q / 16) * Math.PI; ring.push(V3(Math.cos(a) * Math.max(w, 0.01), base + Math.sin(a) * Math.max(h + 0.28, 0.01), zOf(t))); }
+        ring.push(V3(-Math.max(w, 0.01) * 0.8, base - 0.4, zOf(t)), V3(Math.max(w, 0.01) * 0.8, base - 0.4, zOf(t)));
+        cr.push(ring);
+      }
+      S.push(loft(cr, CK.GLASS, { capStart: true, capEnd: true }));
+      for (const sg of [1, -1]) {
+        const pts = [];
+        for (let j = 1; j < N; j++) { const u = j / N, t = lerp(0.13, 0.33, u); pts.push(V3(sg * (1.25 * Math.pow(Math.sin(Math.PI * u), 0.4) + 0.04), sec(t).ht - 0.22, zOf(t))); }
+        S.push(tube(pts, 0.07, CK.BRONZE, 8));
+      }
+    }
+    for (const a of [0.42, Math.PI - 0.42]) S.push(hullStrip(0.34, 0.62, a - 0.08, a + 0.08, CK.GLASS, { nt: 20, na: 4 }));
+
+    // ---- chines trimmed in bronze, a spine conduit, a docking ring behind the canopy
+    for (const a of [0, Math.PI]) {
+      const pts = []; for (let t = 0.08; t <= 0.97; t += 0.03) pts.push(hullPt(t, a, 0.02));
+      S.push(tube(pts, 0.1, CK.BRONZE, 8));
+    }
+    {
+      const pts = []; for (let t = 0.4; t <= 0.93; t += 0.035) pts.push(hullPt(t, Math.PI / 2, 0.16));
+      S.push(tube(pts, 0.22, CK.CONDUIT, 10));
+      const d = hullPt(0.38, Math.PI / 2);
+      S.push(revolve([[0.0, 0.0, CK.DARK], [0.75, 0.0, CK.DARK], [0.75, 0.0, CK.BRONZE], [0.95, 0.12, CK.BRONZE], [0.95, 0.42, CK.BRONZE], [0.6, 0.5, CK.BRONZE], [0.0, 0.5, CK.BRONZE]], 32).applyMatrix4(new THREE.Matrix4().makeRotationX(-Math.PI / 2)).translate(d.x, d.y - 0.1, d.z));
+    }
+
+    // ---- radiator wings from the chines (swept, slight anhedral) and stern fins
+    this.navTips = [];
+    for (const sg of [1, -1]) {
+      const r0 = hullPt(0.55, sg > 0 ? 0 : Math.PI), r1 = hullPt(0.93, sg > 0 ? 0 : Math.PI);
+      r0.x -= sg * 0.3; r1.x -= sg * 0.3;
+      const span = 6.8, drop = -0.7;
+      const t0 = V3(r0.x + sg * span, r0.y + drop, r0.z + 7.2), t1 = V3(r0.x + sg * span, r0.y + drop, r0.z + 11.0);
+      S.push(plate(r0, r1, t1, t0, 0.24, CK.RADIATOR));
+      S.push(tube([r0.clone().add(V3(0, 0, -0.1)), t0.clone().add(V3(sg * 0.05, 0, -0.1))], 0.14, CK.BRONZE, 8));
+      S.push(tube([t0.clone().add(V3(sg * 0.02, 0, -0.1)), t1.clone().add(V3(sg * 0.02, 0, 0.1))], 0.12, CK.BRONZE, 8));
+      this.navTips.push(t0.clone().add(V3(sg * 0.15, 0, -0.15)));
+    }
+    for (const sg of [1, -1]) {
+      const b0 = hullPt(0.76, Math.PI / 2 - sg * 0.55, -0.05), b1 = hullPt(0.97, Math.PI / 2 - sg * 0.55, -0.05);
+      const dir = V3(sg * Math.sin(0.42), Math.cos(0.42), 0);
+      const t0 = b0.clone().addScaledVector(dir, 3.2).add(V3(0, 0, 3.6)), t1 = b1.clone().addScaledVector(dir, 3.2).add(V3(0, 0, 0.9));
+      // a fin: the plate helper takes a planform in its own plane; build it along the canted direction
+      const up = V3(0, 0, 0).add(new THREE.Vector3().crossVectors(dir, V3(0, 0, 1)).normalize().multiplyScalar(0.11));
+      const ring = (a, b) => [a.clone().add(up), b.clone().add(up), b.clone().sub(up), a.clone().sub(up)];
+      S.push(loft([ring(b0, b1), ring(t0, t1)], CK.RADIATOR, { capStart: true, capEnd: true }));
+      S.push(tube([b0.clone(), t0.clone()], 0.1, CK.BRONZE, 8));
+    }
+
+    // ---- thrust frame, engine housings and nozzles
     const zs = zOf(1);
-    S.push(revolve([[hullR(1) - 0.05, zs, CK.DARK], [hullR(1) + 0.15, zs + 0.2, CK.DARK], [hullR(1) - 0.2, zs + 1.1, CK.DARK], [2.6, zs + 1.4, CK.DARK], [0, zs + 1.4, CK.DARK]], 48));
-    const bells = [];
-    this.nozzles = [];
-    for (let k = 0; k < 3; k++) {
-      const a = Math.PI / 2 + (k / 3) * TAU, cx = Math.cos(a) * 2.05, cy = Math.sin(a) * 2.05;
-      const prof = [[0.62, zs + 1.2, CK.DARK], [0.7, zs + 1.9, CK.DARK], [0.7, zs + 1.9, CK.BRONZE], [0.98, zs + 2.9, CK.BRONZE], [1.32, zs + 4.1, CK.BRONZE], [1.42, zs + 4.55, CK.BRONZE],
-        [1.34, zs + 4.6, CK.DARK], [1.2, zs + 4.1, CK.DARK], [0.86, zs + 2.9, CK.DARK], [0.55, zs + 2.0, CK.DARK], [0.42, zs + 1.6, CK.DARK]];
-      bells.push(revolve(prof, 32, { closed: true, cx, cy }));
-      this.nozzles.push({ p: V3(cx, cy, zs + 4.3), r: 1.25, dir: V3(0, 0, 1) });
+    this.engineMounts = [
+      { p: V3(0, 0.05, zs), rt: 0.55, re: 1.65, len: 3.2, main: true },
+      { p: V3(2.9, -0.15, zs), rt: 0.3, re: 0.82, len: 1.8 },
+      { p: V3(-2.9, -0.15, zs), rt: 0.3, re: 0.82, len: 1.8 },
+    ];
+    for (const e of this.engineMounts) {
+      const R = e.main ? 1.15 : 0.62;
+      S.push(revolve([[R + 0.25, 0, CK.DARK], [R + 0.25, 0.55, CK.DARK], [R + 0.25, 0.55, CK.BRONZE], [R + 0.3, 0.75, CK.BRONZE], [R, 1.25, CK.BRONZE], [R, 1.25, CK.DARK], [e.rt + 0.1, 1.5, CK.DARK], [0, 1.5, CK.DARK]], 32, { cx: e.p.x, cy: e.p.y }).translate(0, 0, zs));
     }
-    S.push(...bells);
 
-    // ---- RCS quads, fore and aft
+    // ---- RCS quads (fore on the chines, aft on the wing roots)
     this.rcs = [];
-    for (const z of [-15.5, 15.2]) for (let k = 0; k < 4; k++) {
-      const a = Math.PI / 4 + (k / 4) * TAU, R = shipHullR(z) + 0.25, c = V3(Math.cos(a) * R, Math.sin(a) * R, z);
-      const box = stock(new THREE.BoxGeometry(0.8, 0.8, 1.0), CK.DARK);
-      box.applyMatrix4(new THREE.Matrix4().compose(c, new THREE.Quaternion().setFromEuler(new THREE.Euler(0, 0, a)), V3(1, 1, 1)));
+    for (const [t, a] of [[0.2, 0], [0.2, Math.PI], [0.88, 0.25], [0.88, Math.PI - 0.25]]) {
+      const c = hullPt(t, a, 0.25), sx = Math.sign(c.x);
+      const box = stock(new THREE.BoxGeometry(0.55, 0.55, 0.8), CK.DARK).translate(c.x, c.y, c.z);
       S.push(box);
-      for (const d of [V3(0, 0, 1), V3(0, 0, -1), V3(-Math.sin(a), Math.cos(a), 0), V3(Math.sin(a), -Math.cos(a), 0)]) {
-        const nz = stock(new THREE.CylinderGeometry(0.08, 0.16, 0.3, 10), CK.BRONZE);
-        nz.applyMatrix4(new THREE.Matrix4().compose(c.clone().addScaledVector(d, 0.52), new THREE.Quaternion().setFromUnitVectors(V3(0, 1, 0), d), V3(1, 1, 1)));
+      for (const d of [V3(0, 1, 0), V3(0, -1, 0), V3(sx, 0, 0), V3(0, 0, t < 0.5 ? -1 : 1)]) {
+        const nz = stock(new THREE.CylinderGeometry(0.06, 0.13, 0.24, 10), CK.BRONZE);
+        nz.applyMatrix4(new THREE.Matrix4().compose(c.clone().addScaledVector(d, 0.38), new THREE.Quaternion().setFromUnitVectors(V3(0, 1, 0), d), V3(1, 1, 1)));
         S.push(nz);
-        this.rcs.push({ p: c.clone().addScaledVector(d, 0.72), r: 0.35, dir: d.clone() });
+        this.rcs.push({ p: c.clone().addScaledVector(d, 0.55), r: 0.3, dir: d.clone() });
       }
     }
 
-    // ---- comms mast and dish, whip antennas
+    // ---- comms dish and antennas on the spine
     {
-      const z = 7.5, y0 = shipHullR(z) - 0.1;
-      S.push(stock(new THREE.CylinderGeometry(0.16, 0.22, 3.2, 12), CK.DARK).translate(0, y0 + 1.6, z));
-      const dish = revolve([[0.0, 0.0, CK.DECK], [0.6, 0.08, CK.DECK], [1.2, 0.3, CK.DECK], [1.7, 0.62, CK.DECK], [1.72, 0.66, CK.BRONZE], [1.62, 0.7, CK.BRONZE], [1.1, 0.42, CK.DARK], [0.5, 0.2, CK.DARK], [0.0, 0.14, CK.DARK]], 36);
-      dish.applyMatrix4(new THREE.Matrix4().compose(V3(0, y0 + 3.3, z), new THREE.Quaternion().setFromEuler(new THREE.Euler(-Math.PI / 2 + 0.55, 0, 0)), V3(1, 1, 1)));
+      const b = hullPt(0.66, Math.PI / 2);
+      S.push(stock(new THREE.CylinderGeometry(0.1, 0.14, 1.2, 10), CK.DARK).translate(b.x, b.y + 0.55, b.z));
+      const dish = revolve([[0.0, 0.0, CK.DECK], [0.5, 0.06, CK.DECK], [0.95, 0.24, CK.DECK], [1.0, 0.27, CK.BRONZE], [0.93, 0.3, CK.DARK], [0.45, 0.13, CK.DARK], [0.0, 0.1, CK.DARK]], 32);
+      dish.applyMatrix4(new THREE.Matrix4().compose(V3(b.x, b.y + 1.2, b.z), new THREE.Quaternion().setFromEuler(new THREE.Euler(-Math.PI / 2 + 0.7, 0, 0)), V3(1, 1, 1)));
       S.push(dish);
-      for (const [x, zz, h] of [[0.9, -6, 2.6], [-0.9, -6, 2.2], [0, 13.5, 1.8]]) S.push(stock(new THREE.CylinderGeometry(0.03, 0.05, h, 6), CK.DARK).translate(x, shipHullR(zz) + h / 2 - 0.05, zz));
+      for (const [t, x, h] of [[0.5, 0.6, 1.4], [0.5, -0.6, 1.1], [0.82, 0, 0.9]]) { const q = hullPt(t, Math.PI / 2); S.push(stock(new THREE.CylinderGeometry(0.025, 0.04, h, 6), CK.DARK).translate(x, q.y + h / 2 - 0.05, q.z)); }
     }
 
-    // the merged hull, in metres, scaled into km by the craft mesh
-    const hull = craftMesh(merge(S), { accent: [0.5, 0.82, 1.0], lit: 0.7, fill: 0.03, flood: 1 });
+    const hull = craftMesh(merge(S), { accent: [0.5, 0.82, 1.0], lit: 0.75, fill: 0.03, flood: 1 });
     hull.name = 'Lodestar hull';
     this.root.add(hull);
     this.hull = hull;
 
-    // ---- habitat ring (turns): rim with glazed outer face, four spokes, the hub collar
-    {
-      const R = 12.2, parts = [];
-      const sec = (a) => { const o = []; for (let i = 0; i < 20; i++) { const t = (i / 20) * TAU, c = Math.cos(t), s = Math.sin(t); o.push([R + 1.5 * Math.sign(c) * Math.pow(Math.abs(c), 0.7), 1.7 * Math.sign(s) * Math.pow(Math.abs(s), 0.7)]); } return o; };
-      const rings = [];
-      for (let k = 0; k < 96; k++) { const a = (k / 96) * TAU; rings.push(sec(a).map(([r, zz]) => V3(Math.cos(a) * r, Math.sin(a) * r, 1.0 + zz))); }
-      parts.push(loft(rings, CK.HULL, { closeRings: true }));
-      // glazed outer rim (a shell just proud of the outer face)
-      const gl = [];
-      for (let k = 0; k < 96; k++) { const a = (k / 96) * TAU, rr = [R + 1.56, R + 1.56, R + 1.3, R + 1.3], zz = [-1.0, 1.0, 1.0, -1.0]; gl.push(rr.map((r, i) => V3(Math.cos(a) * r, Math.sin(a) * r, 1.0 + zz[i]))); }
-      parts.push(loft(gl, CK.GLASS, { closeRings: true }));
-      for (let k = 0; k < 4; k++) {
-        const a = (k / 4) * TAU + Math.PI / 4;
-        const d = V3(Math.cos(a), Math.sin(a), 0);
-        parts.push(tube([d.clone().multiplyScalar(5.5).setZ(1.0), d.clone().multiplyScalar(8.5).setZ(1.0), d.clone().multiplyScalar(11.2).setZ(1.0)], 0.55, CK.HULL, 12));
-        // a lantern-lit lift car halfway up each spoke
-        parts.push(revolve([[0, -0.7, CK.LANTERN], [0.75, -0.7, CK.LANTERN], [0.75, 0.7, CK.LANTERN], [0, 0.7, CK.LANTERN]], 12).applyMatrix4(new THREE.Matrix4().compose(d.clone().multiplyScalar(8.3).setZ(1.0), new THREE.Quaternion().setFromUnitVectors(V3(0, 0, 1), d), V3(1, 1, 1))));
-      }
-      parts.push(revolve([[5.05, 0.1, CK.BRONZE], [5.8, 0.1, CK.BRONZE], [5.8, 1.9, CK.BRONZE], [5.05, 1.9, CK.BRONZE]], 64, { closed: true }));
-      const ring = craftPart(hull, merge(parts));
-      ring.name = 'Lodestar ring';
-      hull.add(ring);
-      this.movers.ring = ring;
-      this.ringLamps = [];
-      for (let k = 0; k < 8; k++) { const a = (k / 8) * TAU; this.ringLamps.push({ p: V3(Math.cos(a) * (R + 1.7), Math.sin(a) * (R + 1.7), 1.0), r: 0.28, color: [1.0, 0.82, 0.56], i: 1.6, phase: k / 8 }); }
-      addLamps(ring, this.ringLamps, { minPx: 1.2, gain: 0.8 });
-    }
-
-    // ---- radiator wings (swing out from the flanks)
-    this.movers.radiators = [];
-    for (const s of [1, -1]) {
-      const hinge = new THREE.Group();
-      hinge.position.set(s * (shipHullR(9) + 0.2), 0, 9.2);
-      const rad = [];
-      const panel = stock(new THREE.BoxGeometry(12, 0.22, 4.4), CK.RADIATOR, 1);
-      panel.translate(s * 6.3, 0, -2.6);
-      rad.push(panel);
-      const boom = stock(new THREE.BoxGeometry(12.6, 0.36, 0.4), CK.BRONZE).translate(s * 6.3, 0, -0.3);
-      rad.push(boom);
-      const knuckle = revolve([[0, -0.6, CK.DARK], [0.45, -0.6, CK.DARK], [0.45, 0.6, CK.DARK], [0, 0.6, CK.DARK]], 16);
-      knuckle.applyMatrix4(new THREE.Matrix4().makeRotationX(Math.PI / 2));
-      rad.push(knuckle);
-      const m = craftPart(hull, merge(rad));
-      hinge.add(m);
-      hull.add(hinge);
-      this.movers.radiators.push({ g: hinge, s });
-    }
-
-    // ---- landing legs (fold flat along the aft hull)
+    // ---- landing tripod (folds flat into the belly)
     this.movers.legs = [];
-    for (const [x, z] of [[0, -9], [2.7, 11.6], [-2.7, 11.6]]) {
-      const R = shipHullR(z), y = -Math.sqrt(Math.max(R * R - x * x, 0)) + 0.1;
+    for (const [x, z] of [[0, -8.5], [2.6, 8.5], [-2.6, 8.5]]) {
+      const t = tOf(z), a = -Math.PI / 2 + Math.atan2(x, 3) * 0.6;
+      const at = hullPt(t, -Math.PI / 2 + (x ? Math.sign(x) * 0.45 : 0), -0.05);
       const hinge = new THREE.Group();
-      hinge.position.set(x, y, z);
-      hinge.rotation.order = 'ZYX';                  // fold about the leg's own hinge (local X)
-      hinge.rotation.z = x ? -Math.sign(x) * 0.28 : 0; // the aft pair splays a little outboard
+      hinge.position.copy(at);
+      hinge.rotation.order = 'ZYX';
+      hinge.rotation.z = x ? -Math.sign(x) * 0.22 : 0;
+      void a;
       const leg = [];
-      leg.push(stock(new THREE.CylinderGeometry(0.28, 0.34, 7.2, 12), CK.DARK).translate(0, -3.6, 0));
-      leg.push(stock(new THREE.CylinderGeometry(0.2, 0.2, 3.6, 10), CK.BRONZE).translate(0, -6.4, 0));
-      leg.push(revolve([[0, -0.2, CK.DARK], [1.05, -0.2, CK.DARK], [1.05, 0.12, CK.DARK], [0.5, 0.35, CK.DARK], [0, 0.4, CK.DARK]], 20).applyMatrix4(new THREE.Matrix4().makeRotationX(Math.PI / 2)).translate(0, -8.3, 0));
+      leg.push(stock(new THREE.CylinderGeometry(0.2, 0.26, 4.6, 12), CK.DARK).translate(0, -2.3, 0));
+      leg.push(stock(new THREE.CylinderGeometry(0.14, 0.14, 2.2, 10), CK.BRONZE).translate(0, -4.3, 0));
+      leg.push(revolve([[0, -0.15, CK.DARK], [0.8, -0.15, CK.DARK], [0.8, 0.1, CK.DARK], [0.4, 0.28, CK.DARK], [0, 0.32, CK.DARK]], 20).applyMatrix4(new THREE.Matrix4().makeRotationX(Math.PI / 2)).translate(0, -5.45, 0));
       const m = craftPart(hull, merge(leg));
       hinge.add(m);
       hull.add(hinge);
-      this.movers.legs.push({ g: hinge, out: x ? -0.3 : -0.62 });   // the forward leg stands a little shorter: the ship sits level
+      this.movers.legs.push({ g: hinge, out: x ? -0.34 : -0.42 });
     }
 
-    // ---- engines and lights
-    this.engines = addEngines(hull, this.nozzles, { scale: 0.95, length: 16, color: 0x86d6ff, core: 0xf2fbff, throttle: 0 });
+    // ---- engines (metres, in the hull's frame: their axis +Z, exhaust aft)
+    this.engines = [];
+    for (const e of this.engineMounts) {
+      const eng = createEngine({ rt: e.rt, re: e.re, len: e.len, plumeAngle: 0.55 });
+      eng.position.set(e.p.x, e.p.y, zs + 1.45);
+      hull.add(eng);
+      this.engines.push({ g: eng, main: !!e.main });
+    }
     this.rcsGlow = createGlowMesh(this.rcs, { color: [0.85, 0.92, 1.0], strength: 0, scale: KM });
     hull.add(this.rcsGlow);
     const lamps = [
-      { p: V3(-(shipHullR(-4) + 0.3), 0, -4), r: 0.35, color: [1.0, 0.12, 0.08], i: 2.2 },                     // port
-      { p: V3(shipHullR(-4) + 0.3, 0, -4), r: 0.35, color: [0.12, 1.0, 0.35], i: 2.2 },                        // starboard
-      { p: V3(0, shipHullR(19) + 0.5, 19.2), r: 0.32, color: [1.0, 1.0, 1.0], i: 1.8 },                         // stern
-      { p: V3(0, shipHullR(3) + 0.35, 3), r: 0.4, color: [1.0, 0.1, 0.05], i: 2.4, breathe: 1 },               // beacon, top
-      { p: V3(0, -(shipHullR(3) + 0.35), 3), r: 0.4, color: [1.0, 0.1, 0.05], i: 2.4, breathe: 1, phase: 0.5 },// beacon, belly
-      { p: V3(0, 0, -25.0), r: 0.3, color: [1.0, 0.86, 0.6], i: 2.0 },                                           // dock light
+      { p: this.navTips[1], r: 0.3, color: [1.0, 0.12, 0.08], i: 2.2 },                                          // port
+      { p: this.navTips[0], r: 0.3, color: [0.12, 1.0, 0.35], i: 2.2 },                                          // starboard
+      { p: V3(0, 0.6, zs + 0.2), r: 0.28, color: [1.0, 1.0, 1.0], i: 1.8 },                                      // stern
+      { p: hullPt(0.5, Math.PI / 2, 0.3), r: 0.34, color: [1.0, 0.1, 0.05], i: 2.4, breathe: 1 },               // beacon, top
+      { p: hullPt(0.5, -Math.PI / 2, 0.3), r: 0.34, color: [1.0, 0.1, 0.05], i: 2.4, breathe: 1, phase: 0.5 },   // beacon, belly
+      { p: hullPt(0.1, -Math.PI / 2, 0.15), r: 0.26, color: [1.0, 0.92, 0.8], i: 1.6 },                         // landing light
     ];
-    addLamps(hull, lamps, { minPx: 1.3, gain: 1 });
+    addLamps(hull, lamps, { minPx: 1.2, gain: 1 });
   }
 
-  /** Animate: throttle 0..1, boost 0/1, legs 0..1, rcs activity 0..1, dt seconds. */
+  /** Animate: throttle 0..1 (main), aux 0..1 (small engines), boost 0/1, legs 0..1, rcs 0..1. */
   update(dt, s) {
     const st = this.state, k = (r) => 1 - Math.exp(-dt * r);
-    st.throttle += (s.throttle - st.throttle) * k(3);
-    st.boost += (s.boost - st.boost) * k(2);
+    st.throttle += (s.throttle - st.throttle) * k(6);
+    st.aux += ((s.aux ?? s.throttle) - st.aux) * k(6);
+    st.boost += (s.boost - st.boost) * k(3);
     st.legs += (s.legs - st.legs) * k(1.2);
-    st.rcs += (s.rcs - st.rcs) * k(10);
-    // radiators swing in under hard thrust, out when the drive is quiet
-    const radT = 1 - smooth(0.35, 0.8, st.throttle + st.boost * 0.5);
-    st.radiators += (radT - st.radiators) * k(0.8);
-    for (const r of this.movers.radiators) r.g.rotation.y = -r.s * lerp(1.35, 0.12, st.radiators) + (r.s > 0 ? 0 : 0);
-    for (const l of this.movers.legs) l.g.rotation.x = lerp(-1.5, l.out, st.legs);
-    this.movers.ring.rotation.z += st.ringRate * dt;
-    for (const e of this.engines) e.setThrottle(st.throttle * (1 + 0.5 * st.boost));
-    this.rcsGlow.material.uniforms.uStrength.value = st.rcs * 5;
+    st.rcs += (s.rcs - st.rcs) * k(12);
+    for (const l of this.movers.legs) l.g.rotation.x = lerp(-1.52, l.out, st.legs);
+    for (const e of this.engines) e.g.setThrust(e.main ? Math.min(1.5, st.throttle * (1 + 0.8 * st.boost)) : st.aux, dt);
+    this.rcsGlow.material.uniforms.uStrength.value = st.rcs * 4;
   }
 }
+
+export { ENGINE_FRAME };

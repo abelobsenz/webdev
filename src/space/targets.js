@@ -120,8 +120,8 @@ TARGET_ORDER.push('concordYard', 'waterStore');
 // the visitor's own ship (src/space/starship.js); not in the list, it appears once flown
 TARGET_INFO.lodestar = {
   key:'',name:'Lodestar',district:'Concord starcourier · the helm is yours (V)',
-  lore:'A starcourier of the Concord fleet, lent to visitors: a pearl spindle with a glazed bridge crown and a panoramic band round her nose, a habitat ring turning a quarter-g promenade, three bronze drive bells, radiator wings that open when she idles, and legs to set down on the Moon. Her drive scales itself to whatever is near: a walking pace beside a berth, seconds from the Harbour to the Moon.',
-  facts:[['Length','48 m'],['Ring','24 m across, 4.3 rpm'],['Crew and guests','6 + 12']],
+  lore:'A 36 m cutter of the Concord fleet, lent to visitors: a flat lifting-body hull with bronze-trimmed chines and a glazed crew deck, swept radiator wings to shed her drive heat, one main engine and two smaller ones whose skirts glow from their own heat when they burn. She flies as ships really do - 1.2 g on the main drive, momentum kept until thrust takes it away - and for the long reaches carries a jump drive that folds space round her in a bubble.',
+  facts:[['Length','36 m'],['Main drive','1.2 g (3 g boost)'],['Jump','bubble drive, many c']],
 };
 
 // The counterweight's release yard (src/space/releaseYard.js).
