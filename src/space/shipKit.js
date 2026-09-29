@@ -193,7 +193,10 @@ export function radiatorWing(B, p, out, n, span, chord, lamps, color = null) {
   B.push(new THREE.Matrix4().makeBasis(X, Y, Z).setPosition(p));
   const boom = Math.min(span * 0.12, chord * 0.4);
   B.tube([V(0, 0, 0), V(boom, 0, 0)], chord * 0.035 + 0.2, 8, CK.BRONZE);
-  B.box(boom + span / 2, 0, 0, span, chord * 0.012 + 0.08, chord, CK.RADIATOR);
+  // the panel: a finned radiator (DK HOTRAD) with its facade scaled to the wing, so every wing
+  // glows at the root and cools to a fifth of that at the tip whatever its span
+  const fs = 150 / Math.max(span, 1);
+  slab(B, boom, boom + span, -chord / 2, chord / 2, 0, chord * 0.012 + 0.08, DK_HOTRAD, (x, z) => [(z + chord / 2) * fs, (x - boom) * fs]);
   B.box(boom + span / 2, 0, chord / 2, span + 0.4, chord * 0.03 + 0.2, chord * 0.03 + 0.2, CK.BRONZE);   // hot manifold
   B.box(boom + span / 2, 0, -chord / 2, span + 0.4, chord * 0.025 + 0.15, chord * 0.025 + 0.15, CK.BRONZE);   // return
   const ribs = Math.max(2, Math.round(span / (chord * 0.5)));
@@ -261,8 +264,12 @@ export function bridge(B, w, h, l, lamps) {
 /** Engine bell opening toward -z at the current frame's (x, y, z); pushes the glow record. */
 export function bell(B, x, y, z, r, len, glows, k = CK.BRONZE) {
   B.at(x, y, z);
-  B.lathe([[r * 0.55, 0, CK.HULL], [r * 0.5, -len * 0.2, CK.DARK], [r * 0.72, -len * 0.55, k], [r, -len, CK.DARK], [r * 0.93, -len * 1.02, CK.CONDUIT],
-    [r * 0.87, -len, CK.DARK], [r * 0.62, -len * 0.55, CK.DARK], [r * 0.4, -len * 0.2, CK.DARK], [r * 0.43, 0, CK.HULL]], 18, 0, { closedProfile: true });
+  // the outer skin heat-tinted (DK NOZZLE: facade y from the throat, two tint cycles a bell)
+  const from = B.fac.length / 3;
+  B.lathe([[r * 0.55, 0, CK.HULL], [r * 0.5, -len * 0.2, k], [r * 0.72, -len * 0.55, DK_NOZZLE], [r * 0.9, -len * 0.82, DK_NOZZLE], [r, -len, DK_NOZZLE], [r * 0.93, -len * 1.02, CK.CONDUIT],
+    [r * 0.87, -len, CK.DARK], [r * 0.62, -len * 0.55, CK.DARK], [r * 0.4, -len * 0.2, CK.DARK], [r * 0.43, 0, CK.HULL]], 28, 0, { closedProfile: true });
+  const ys = 52 / Math.max(len, 1e-3);
+  for (let i = from; i < B.fac.length / 3; i++) B.fac[i * 3 + 1] = -B.fac[i * 3 + 1] * ys;
   glows.push({ p: here(B, 0, 0, -len), r: r * 0.9, dir: hereDir(B, 0, 0, -1) });
   // gimbal actuators: two bronze struts from the thrust frame to the bell's throat
   for (const s of [-1, 1]) B.tube([V(s * r * 0.9, 0, len * 0.15), V(s * r * 0.6, 0, -len * 0.3)], r * 0.06 + 0.05, 5, CK.BRONZE);
@@ -351,6 +358,26 @@ export function hullDressing(B, r, { z0, z1, w, h, n = 10, lamps = null, kinds =
     });
   }
 }
-const DK_GRIME = 24, DK_LIVERY = 20;     // (craftMesh.js DK kinds, kept literal: no import cycle)
+const DK_GRIME = 24, DK_LIVERY = 20, DK_HOTRAD = 27, DK_NOZZLE = 29;     // (craftMesh.js DK kinds, kept literal: no import cycle)
+
+/**
+ * Double-sided slab in the local XZ plane at height y (thickness th), with explicit facade
+ * coordinates fac(x, z) -> [fx, fy] on every face (the builder's box gives its broad faces their
+ * plane coordinates, which a radiator or a panel whose pattern runs from a root cannot use).
+ */
+export function slab(B, x0, x1, z0, z1, y, th, k, fac) {
+  const h = th / 2;
+  const q = (xa, za, ya) => B.v(xa, ya, za, ...fac(xa, za), k);
+  for (const [yy, s] of [[y + h, 1], [y - h, -1]]) {
+    const a = q(x0, z0, yy), b = q(x1, z0, yy), c = q(x1, z1, yy), d = q(x0, z1, yy);
+    const n = V(0, s, 0);
+    B.tri(a, b, c, n); B.tri(a, c, d, n);
+  }
+  const e = [[[x0, z0], [x1, z0], V(0, 0, -1)], [[x1, z0], [x1, z1], V(1, 0, 0)], [[x1, z1], [x0, z1], V(0, 0, 1)], [[x0, z1], [x0, z0], V(-1, 0, 0)]];
+  for (const [[xa, za], [xb, zb], n] of e) {
+    const a = q(xa, za, y - h), b = q(xb, zb, y - h), c = q(xb, zb, y + h), d = q(xa, za, y + h);
+    B.tri(a, b, c, n); B.tri(a, c, d, n);
+  }
+}
 
 export { CB, CK, TAU };

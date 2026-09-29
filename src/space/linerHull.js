@@ -4,6 +4,7 @@ import { CB, CK } from '../craft/craftGeometry.js';
 import { buildLinerSkin, linerProf } from './linerSkin.js';
 import { hullPoint, hullNormal, clearOfGangways, KEEL_CLEAR, EVA_PARTIES } from './linerDetail.js';
 import { DK } from './craftMesh.js';
+import { slab } from './shipKit.js';
 
 // THE CONCORD-CLASS LINER, REBUILT FOR HER FRAMING. The builder's liner (src/craft/craftGeometry.js
 // buildLiner) is kept as the reference every fitting, gangway and clamp is surveyed against; this
@@ -135,23 +136,6 @@ function latheAlong(B, a, b, prof, seg, phase = 0) {
   B.lathe(prof.map(([r, z, k]) => [r, z === 'L' ? L : z, k]), seg, phase);
   B.pop();
   return L;
-}
-
-/** Double-sided slab in the local XZ plane with explicit facade coordinates (fx, fy)(x, z). */
-function slab(B, x0, x1, z0, z1, y, th, k, fac) {
-  const h = th / 2;
-  const q = (xa, za, ya) => B.v(xa, ya, za, ...fac(xa, za), k);
-  for (const [yy, s] of [[y + h, 1], [y - h, -1]]) {
-    const a = q(x0, z0, yy), b = q(x1, z0, yy), c = q(x1, z1, yy), d = q(x0, z1, yy);
-    const n = V(0, s, 0);
-    B.tri(a, b, c, n); B.tri(a, c, d, n);
-  }
-  // edges (thin): the four sides
-  const e = [[[x0, z0], [x1, z0], V(0, 0, -1)], [[x1, z0], [x1, z1], V(1, 0, 0)], [[x1, z1], [x0, z1], V(0, 0, 1)], [[x0, z1], [x0, z0], V(-1, 0, 0)]];
-  for (const [[xa, za], [xb, zb], n] of e) {
-    const a = q(xa, za, y - h), b = q(xb, zb, y - h), c = q(xb, zb, y + h), d = q(xa, za, y + h);
-    B.tri(a, b, c, n); B.tri(a, c, d, n);
-  }
 }
 
 /** Re-sign the along coordinate of the vertices emitted since `from` (engine bells: y from the mount). */

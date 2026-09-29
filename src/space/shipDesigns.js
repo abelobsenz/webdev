@@ -53,7 +53,7 @@ export function buildHauler(seed = 1) {
   for (let k = 0; k < 4; k++) {
     const a = (k / 4) * TAU + Math.PI / 4;
     B.at(Math.cos(a) * 10, Math.sin(a) * 10, -30);
-    tank(B, 3.2, 14, CK.HULL, CK.BRONZE, 14);
+    tank(B, 3.2, 14, DK.TANK, CK.BRONZE, 24);
     B.pop();
   }
   // ---- spine truss and cargo bays
@@ -127,12 +127,12 @@ export function buildTanker(seed = 1) {
   B.tube([V(0, 0, -14), V(0, 0, z1 + 8)], 2.2, 12, CK.DARK);
   catwalk(B, V(0, 2.25, -10), V(0, 2.25, z1 + 4), V(0, 1, 0), 1.4, 1.1);
   // the tank string, each lug on bronze saddles, manifold pipes running alongside
-  const tk = r.pick([DK.FOIL, DK.LIVERY, CK.HULL, DK.FOIL]);
+  const tk = r.pick([DK.FOIL, DK.TANK, DK.LIVERY, DK.TANK, CK.HULL]);
   for (let i = 0; i < n; i++) {
     const zc = z0 + pitch * (i + 0.5);
     for (const s of [-1, 1]) {
       B.at(s * (R + 2.6), 0, zc);
-      if (spheres) sphereTank(B, R, tk, 20); else tank(B, R, pitch - 2.5, tk, CK.BRONZE, 18);
+      if (spheres) sphereTank(B, R, tk, 32); else tank(B, R, pitch - 2.5, tk, CK.BRONZE, 28);
       B.pop();
       B.box(s * 2.6, 0, zc, 2.2, 1.4, pitch * 0.35, CK.BRONZE);                    // saddle
       B.tube([V(s * 2.6, 1.2, zc - pitch / 2 + 0.5), V(s * 2.6, 1.2, zc + pitch / 2 - 0.5)], 0.35, 6, CK.CONDUIT);   // manifold
