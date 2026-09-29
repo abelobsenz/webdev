@@ -182,9 +182,20 @@ void main() {
     alb += vec3(0.1, 0.09, 0.08) * max(gridLine(f.x, 3.0, 0.05, fw.x), gridLine(f.y, 2.0, 0.05, fw.y)) * det;
     rough = 0.5 - 0.15 * plate; metal = 0.5;
   } else if (k < 11.5) {
-    alb = vec3(0.1, 0.09, 0.085); rough = 0.7;
-    float ch = mix(0.17, gridLine(f.y, 24.0, 2.0, fw.y), 1.0 - smoothstep(4.0, 9.0, fw.y));
-    em = vec3(1.0, 0.36, 0.12) * (0.1 + 0.4 * ch);
+    // radiator: white high-emissivity coating over fluid channels every 1.6 m (ribs a shade
+    // darker), panels 12 m square with dark hinge and manifold gaps, each panel's coating
+    // weathered its own shade; the working panels glow a dull red by night where the loop
+    // runs hot (brighter along the manifolds), unresolved detail settling to its mean
+    float resR = 1.0 - smoothstep(0.25, 0.9, px);
+    float rib = mix(0.2, gridLine(f.y, 1.6, 0.18, fw.y), 1.0 - smoothstep(0.15, 0.5, fw.y));
+    float gap = mix(0.1, max(gridLine(f.x, 12.0, 0.35, fw.x), gridLine(f.y, 12.0, 0.35, fw.y)), resR);
+    float ph = hash12(floor(f / 12.0) + 61.0);
+    alb = vec3(0.56, 0.57, 0.58) * (0.86 + 0.18 * mix(0.5, ph, resR)) * (1.0 - 0.22 * rib);
+    alb = mix(alb, vec3(0.07, 0.07, 0.075), gap * 0.85);
+    rough = mix(0.55, 0.35, rib); metal = mix(0.0, 0.6, gap);
+    float hot = step(0.3, ph) * mix(0.7, 1.0, resR);
+    float man = mix(0.17, gridLine(f.y, 24.0, 2.0, fw.y), 1.0 - smoothstep(4.0, 9.0, fw.y));
+    em = vec3(1.0, 0.34, 0.1) * (0.015 + 0.09 * man + 0.05 * hot * (1.0 - gap)) * (0.25 + 0.75 * night);
   } else if (k < 12.5) {
     // glazed roof over parkland and lit lanes
     float g = vnoise(f * 0.011) * 0.55 + vnoise(f * 0.09) * 0.45;

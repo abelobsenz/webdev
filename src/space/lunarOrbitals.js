@@ -378,6 +378,20 @@ export function buildDepot() {
   B.box(hx + 40.5, 0, 28, 0.8, 40, 4, LK.SIGN);
   B.box(hx, 32.3, 0, 70, 0.6, 20, LK.LANTERN);
   B.box(hx, -32.3, 0, 70, 0.6, 20, LK.ROOF);
+  // the hangar's frames: ribs round the hall every 10 m (so it reads as a built hall, not a
+  // white box), a hazard-banded door surround, a window band along its flanks
+  for (let x = hx - 35; x <= hx + 35; x += 10) {
+    B.box(x, 0, 32.9, 2.4, 66, 1.8, LK.DARK); B.box(x, 0, -32.9, 2.4, 66, 1.8, LK.DARK);
+    B.box(x, 32.9, 0, 2.4, 1.8, 66, LK.DARK); B.box(x, -32.9, 0, 2.4, 1.8, 66, LK.DARK);
+  }
+  for (const s of [-1, 1]) {
+    B.box(hx + 40.8, s * 27, 0, 1, 4, 58, LK.HAZARD);
+    B.box(hx + 40.8, 0, s * 27, 1, 58, 4, LK.HAZARD);
+    B.box(hx - 4, 18, s * 32.4, 60, 5, 0.6, LK.GLASS);
+  }
+  // the service module behind the hall on the spine: life support, a radiator pair of its own
+  B.box(hx - 56, 0, 0, 32, 30, 30, LK.PANEL);
+  for (const s of [-1, 1]) B.box(hx - 56, s * 42, 0, 26, 50, 0.6, LK.RADIATOR);
   for (const z of [-32, 32]) {
     B.at(hx - 10, 0, z + Math.sign(z) * 2, z > 0 ? 0 : Math.PI, 0, 0);
     B.lathe([[8, 0, LK.DARK], [9, 3, LK.BRONZE], [9, 7, LK.BRONZE], [6, 9, LK.HAZARD], [5, 9, LK.DARK]], 20);
@@ -392,6 +406,13 @@ export function buildDepot() {
     B.box(x, s * 14, 0, 4, 12, 4, LK.HULL);
     B.box(x, s * 80, 0, 200, 110, 0.7, LK.RADIATOR);
     B.box(x, s * 80, 0.5, 200, 3, 0.4, LK.CONDUIT);
+    // the panel's frame and its supply and return headers along both long edges
+    for (const e of [-1, 1]) {
+      B.box(x, s * 80 + e * 55.6, 0, 202, 1.4, 1.4, LK.DARK);
+      B.box(x + e * 100.6, s * 80, 0, 1.4, 112, 1.4, LK.DARK);
+      B.box(x, s * 80 + e * 54, 1.1, 196, 1.2, 1.2, LK.CONDUIT);
+    }
+    B.box(x, s * 20, 0, 3, 4, 3, LK.BRONZE);                                       // the hinge
   }
   // the robot arm's base on the spine beside the berth
   const armBase = V(-420, 0, 8);
