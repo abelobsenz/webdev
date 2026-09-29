@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { catalogStars } from './skyCatalog.js';
-import { planetSky, magWeight, SKY_PLANETS } from './ephemeris.js';
+import { planetSky, magWeight, SKY_PLANETS, cometSky, cometGain } from './ephemeris.js';
 
 // The named stars as point sprites over the procedural sky: a diffraction-limited core whose
 // drawn energy follows the magnitude (so a star never pops as it crosses a pixel), a faint
@@ -24,7 +24,8 @@ void main() {
   vE = E;
   vCol = aColor;
   // big enough to hold the halo and spikes of the bright ones
-  float s = clamp(7.0 + 9.0 * sqrt(max(E, 0.0)), 7.0, 72.0) * uPxScale;
+  // (held under the 64 px every WebGL2 implementation can draw)
+  float s = min(clamp(7.0 + 9.0 * sqrt(max(E, 0.0)), 7.0, 72.0) * uPxScale, 64.0);
   vSize = s;
   gl_PointSize = s;
 }
@@ -108,13 +109,14 @@ export class SkyLife {
   constructor(space, skyUniforms) {
     this.u = skyUniforms;
     this.rows = [];
+    this.comet = { pos: new THREE.Vector3(), vel: new THREE.Vector3() };
     this.lastT = -Infinity;
     this.update(space ? space.sim : null);
   }
 
   update(sim) {
     const t = sim ? sim.t : 0;
-    if (Math.abs(t - this.lastT) < 600) return;          // planets move a pixel in hours
+    if (Math.abs(t - this.lastT) < 60) return;           // planets move a pixel in hours, the comet in minutes
     this.lastT = t;
     planetSky(t, this.rows);
     const P = this.u.uPlanets.value, C = this.u.uPlanetCol.value;
@@ -123,6 +125,13 @@ export class SkyLife {
       P[i].set(r.dir.x, r.dir.y, r.dir.z, magWeight(r.mag));
       const c = SKY_PLANETS[i].col;
       C[i].set(c[0], c[1], c[2]);
+    }
+    // the comet runs on along its orbit (its tails turning to stay away from the Sun)
+    if (sim && sim.sunPos) {
+      cometSky(t, sim.sunPos, this.comet);
+      this.u.uCometPos.value.copy(this.comet.pos);
+      this.u.uCometVel.value.copy(this.comet.vel);
+      this.u.uCometK.value.x = cometGain(this.comet.mag);
     }
   }
 }

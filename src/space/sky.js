@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import { SPACE_SKY_GLSL } from './glsl.js';
 import { U } from '../core/uniforms.js';
-import { planetSky, magWeight, SKY_PLANETS } from './ephemeris.js';
+import { planetSky, magWeight, SKY_PLANETS, cometSky, cometGain, COMET, AU_KM } from './ephemeris.js';
+import { SUN_DIR, SUN_DIST } from './sim.js';
 import { precessionMatrix, starPalette } from './skyCatalog.js';
 import { StarPoints } from './skyStars.js';
 
@@ -27,6 +28,7 @@ void main() {
   float px = max(length(fwidth(d)), 1e-5);
   vec3 col = sk_background(d, px);
   col += sk_swarm(cameraPosition, d, px) * uSunE * 0.06 * uSwarmFar;
+  col += sk_comet(cameraPosition, d, px) * uSkyStars;
   col += sk_sun(cameraPosition, d, px, uSunE) * uShowSun;
   // alpha 0: the backdrop is not an occluder (alpha marks solid geometry for the glare mask)
   gl_FragColor = vec4(col, 0.0);
@@ -57,6 +59,7 @@ function initialPlanets() {
   };
 }
 const PL0 = initialPlanets();
+const CM0 = cometSky(0, SUN_DIR.clone().multiplyScalar(SUN_DIST), { pos: new THREE.Vector3(), vel: new THREE.Vector3() });
 // equatorial of date -> J2000 (the galaxy, the Clouds and Andromeda are placed in J2000)
 const PREC = precessionMatrix().transpose();
 
@@ -65,6 +68,9 @@ export const SKY_UNIFORMS = {
   uPlanetCol: { value: PL0.cols },
   uSkyPrec: { value: PREC },
   uStarPal: { value: starPalette() },
+  uCometPos: { value: CM0.pos.clone() },
+  uCometVel: { value: CM0.vel.clone() },
+  uCometK: { value: new THREE.Vector4(cometGain(CM0.mag), COMET.ionAU * AU_KM, COMET.dustAU * AU_KM, COMET.comaKm) },
   uSkySunDir: { value: new THREE.Vector3(1, 0, 0) },
   uSkySunPos: { value: new THREE.Vector3(1.496e8, 0, 0) },
   uSkyStars: { value: 1.0 },

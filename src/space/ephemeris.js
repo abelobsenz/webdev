@@ -124,3 +124,50 @@ export function planetSky(seconds, rows) {
   }
   return rows;
 }
+
+// ---- the great comet of 5021 ------------------------------------------------------------------
+// A long-period comet on a (near-)parabolic orbit, a few weeks past perihelion, placed in the
+// ecliptic frame of date (the sim's Sun at longitude 90). Elements: perihelion distance q (AU),
+// inclination, node, argument of perihelion (deg), days past perihelion at the epoch.
+export const COMET = { q: 0.42, i: 64, node: 228, peri: 336, days: 16, ionAU: 0.16, dustAU: 0.11, comaKm: 90000 };
+export const AU_KM = 1.496e8;
+const GAUSS_K = 0.01720209895;
+const _cq = new THREE.Vector3(), _cw = new THREE.Vector3();
+function eclToSim(ex, ey, ez, out) {
+  return out.set(0, 0, 0).addScaledVector(E1, ex).addScaledVector(E2, ey).addScaledVector(EN, ez);
+}
+/** Heliocentric position (AU, sim inertial axes) and unit velocity of the comet, days after perihelion. */
+export function cometHelio(days, pos, vel, c = COMET) {
+  // Barker's equation: tan(v/2) + tan^3(v/2) / 3 = k (t - T) / sqrt(2 q^3)
+  const M = GAUSS_K * days / Math.sqrt(2 * c.q * c.q * c.q);
+  const Y = Math.cbrt(1.5 * M + Math.sqrt(2.25 * M * M + 1));
+  const sHalf = Y - 1 / Y;
+  const nu = 2 * Math.atan(sHalf);
+  const r = c.q * (1 + sHalf * sHalf);
+  // in the orbit plane, then to the ecliptic of date and the sim's axes
+  const w = c.peri * D2R, O = c.node * D2R, I = c.i * D2R;
+  const cw = Math.cos(w), sw = Math.sin(w), cO = Math.cos(O), sO = Math.sin(O), cI = Math.cos(I), sI = Math.sin(I);
+  const toSim = (x, y, out) => {
+    const x1 = cw * x - sw * y, y1 = sw * x + cw * y;
+    return eclToSim(cO * x1 - sO * cI * y1, sO * x1 + cO * cI * y1, sI * y1, out);
+  };
+  toSim(r * Math.cos(nu), r * Math.sin(nu), pos);
+  // a parabola's velocity runs along (-sin v, 1 + cos v)
+  toSim(-Math.sin(nu), 1 + Math.cos(nu), vel).normalize();
+  return r;
+}
+/** The comet seen from the Earth: position (km, Earth-centred inertial), velocity direction, elongation (deg), r and delta (AU), magnitude. */
+export function cometSky(seconds, sunPosKm, out) {
+  const r = cometHelio(COMET.days + seconds / 86400, _cq, _cw);
+  out.vel.copy(_cw);
+  out.pos.copy(_cq).multiplyScalar(AU_KM).add(sunPosKm);
+  out.r = r;
+  out.delta = out.pos.length() / AU_KM;
+  out.elong = Math.acos(THREE.MathUtils.clamp(out.pos.dot(sunPosKm) / (out.pos.length() * sunPosKm.length()), -1, 1)) / D2R;
+  // total magnitude (a bright comet: absolute magnitude 5.5, activity index n = 4)
+  out.mag = 5.5 + 5 * Math.log10(out.delta) + 10 * Math.log10(r);
+  return out;
+}
+
+/** Shader brightness of the comet from its magnitude (1.5 at magnitude 2). */
+export function cometGain(mag) { return Math.min(3, Math.max(0.3, 1.5 * Math.pow(10, -0.2 * (mag - 2)))); }

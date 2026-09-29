@@ -53,6 +53,52 @@ ok(maxVen < 48 && maxVen > 44, `Venus max elongation ${maxVen.toFixed(1)}`);
   ok(rows[1].elong > 30, 'Venus stands clear of the Sun at the epoch');
 }
 
+// ---- the comet -----------------------------------------------------------------------------------
+{
+  const sunKm = new SpaceSim().sunPos;
+  const c = E.cometSky(0, sunKm, { pos: new THREE.Vector3(), vel: new THREE.Vector3() });
+  ok(c.elong > 30 && c.elong < 150, `comet elongation ${c.elong.toFixed(1)}`);
+  ok(c.delta > 0.3 && c.delta < 1.5 && c.r >= E.COMET.q - 1e-9, `comet distances r ${c.r.toFixed(2)} delta ${c.delta.toFixed(2)}`);
+  ok(c.mag > -3 && c.mag < 5, `comet magnitude ${c.mag.toFixed(1)}`);
+  // Barker's equation satisfied, and the orbit's energy is parabolic (v^2 r = 2 GM)
+  const p1 = new THREE.Vector3(), p2 = new THREE.Vector3(), vv = new THREE.Vector3();
+  for (const days of [-30, 0, 5, 40, 200]) {
+    const r1 = E.cometHelio(days, p1, vv), r2 = E.cometHelio(days + 0.01, p2, vv);
+    const v = p2.distanceTo(p1) / 0.01;                         // AU/day
+    const k = 0.01720209895;
+    ok(Math.abs(v * v * (r1 + r2) / 2 / (2 * k * k) - 1) < 2e-3, `comet parabolic energy at ${days} d`);
+    ok(Math.abs(p2.clone().sub(p1).normalize().dot(vv) - 1) < 1e-3, 'comet velocity direction');
+  }
+  // the shader's ray-to-segment distance against brute force
+  const segAng = (ro, rd, a, b) => {
+    const v = b.clone().sub(a), w0 = ro.clone().sub(a);
+    const L = Math.max(v.length(), 1e-3), u = v.clone().divideScalar(L);
+    const B = rd.dot(u), D = rd.dot(w0), Ee = u.dot(w0);
+    const s01 = THREE.MathUtils.clamp((Ee - B * D) / Math.max(1 - B * B, 1e-6) / L, 0, 1);
+    const q = a.clone().addScaledVector(v, s01);
+    const range = Math.max(q.clone().sub(ro).dot(rd), 1);
+    return ro.clone().addScaledVector(rd, range).sub(q).length() / range;
+  };
+  const rr = (() => { let s = 7; return () => { s = (s * 16807) % 2147483647; return s / 2147483647; }; })();
+  let worstRel = 0;
+  for (let n = 0; n < 200; n++) {
+    const ro = new THREE.Vector3(rr() - 0.5, rr() - 0.5, rr() - 0.5).multiplyScalar(2e4);
+    const a = c.pos.clone().add(new THREE.Vector3(rr() - 0.5, rr() - 0.5, rr() - 0.5).multiplyScalar(3e6));
+    const b = a.clone().add(new THREE.Vector3(rr() - 0.5, rr() - 0.5, rr() - 0.5).multiplyScalar(3e7));
+    const rd = a.clone().lerp(b, rr()).sub(ro).add(new THREE.Vector3(rr() - 0.5, rr() - 0.5, rr() - 0.5).multiplyScalar(4e6)).normalize();
+    let best = Infinity;
+    for (let i = 0; i <= 4000; i++) {
+      const q = a.clone().lerp(b, i / 4000);
+      const t = q.clone().sub(ro).dot(rd);
+      if (t <= 0) continue;
+      best = Math.min(best, Math.acos(Math.min(1, q.clone().sub(ro).normalize().dot(rd))));
+    }
+    const got = segAng(ro, rd, a, b);
+    if (best < 0.5) worstRel = Math.max(worstRel, Math.abs(got - best) / Math.max(best, 1e-4));
+  }
+  ok(worstRel < 0.05, `ray-segment angle vs brute force (worst ${(worstRel * 100).toFixed(2)}%)`);
+}
+
 // ---- star catalogue and precession ------------------------------------------------------------
 {
   const P = C.precessionMatrix();
@@ -262,6 +308,13 @@ lint('aurora-arcs', aurora.arcMat);
 lint('aurora-oval', aurora.ovalMat);
 lint('earth', earth.material);
 lint('meteors', metMat);
+{
+  // the Hearth's lens composite includes the whole sky GLSL on bent rays
+  const { Hearth } = await import('../src/space/hearth.js');
+  const hs = { scene: new THREE.Scene(), earthFixed: new THREE.Group(), bodies: [], camera: space.camera, size: new THREE.Vector2(1280, 720), sim, addBody: space.addBody };
+  const hearth = new Hearth(hs, { bhSteps: 110, bhScale: 0.6 });
+  lint('hearth-composite', hearth.compMat);
+}
 {
   const { EarthBake } = await import('../src/space/earthBake.js');
   const tb = performance.now();

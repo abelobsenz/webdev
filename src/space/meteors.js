@@ -105,7 +105,7 @@ export class Meteors {
     const len = (H_START - hEnd) / Math.sin(ent);
     s.dur = len / s.v;
     s.fire = r() < 0.04;
-    s.peak = s.fire ? 12 + 20 * r() : 0.6 + 2.4 * r() * r();
+    s.peak = s.fire ? 4 + 6 * r() : 0.6 + 2.4 * r() * r();
     s.trail = Math.min(len, 6 + s.v * 0.35);
     // fast: green-white; slow: yellow-orange
     const fast = THREE.MathUtils.smoothstep(s.v, 30, 55);

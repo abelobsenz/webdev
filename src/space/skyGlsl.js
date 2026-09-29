@@ -22,6 +22,9 @@ uniform vec4 uPlanets[7];     // planet directions (inertial, from the ephemeris
 uniform vec3 uPlanetCol[7];
 uniform mat3 uSkyPrec;        // equatorial of date -> J2000 (three millennia of precession)
 uniform vec3 uStarPal[8];     // blackbody colours at 2800 ... 20000 K (skyCatalog.js)
+uniform vec3 uCometPos;       // the comet's nucleus (km, inertial, Earth at the origin)
+uniform vec3 uCometVel;       // its direction of motion (unit)
+uniform vec4 uCometK;         // x brightness, y ion tail length (km), z dust tail length (km), w coma radius (km)
 
 // galactic frame (equatorial): north galactic pole, galactic centre, l = 90 deg
 const vec3 SK_GN = vec3(-0.8676, -0.1981, 0.4560);
@@ -251,6 +254,62 @@ vec3 sk_swarm(vec3 ro, vec3 rd, float px) {
     acc += line * (body + spark) * face * vec3(1.0, 0.86, 0.62);
   }
   return acc;
+}
+
+// Angular distance (radians) from the ray (ro, rd) to the segment a-b, the point's parameter along
+// the segment (0..1) and the range to it.
+float sk_segAng(vec3 ro, vec3 rd, vec3 a, vec3 b, out float s01, out float range) {
+  vec3 v = b - a, w0 = ro - a;
+  float L = max(length(v), 1e-3);
+  vec3 u = v / L;
+  float B = dot(rd, u), D = dot(rd, w0), E = dot(u, w0);
+  // (with |rd| = |u| = 1 the closest approach falls (E - B D) / (1 - B^2) along the segment)
+  s01 = clamp((E - B * D) / max(1.0 - B * B, 1e-6) / L, 0.0, 1.0);
+  vec3 q = a + v * s01;
+  range = max(dot(q - ro, rd), 1.0);
+  return length(ro + rd * range - q) / range;
+}
+
+// A great comet, sunward of the Earth's night sky in 5021: the coma round its nucleus, the
+// straight blue ion tail streaming directly away from the Sun, and the broad, curved,
+// yellow-white dust tail lagging behind along the orbit. Drawn in 3D (ray to tail), so it has
+// the right shape from anywhere in cislunar space.
+vec3 sk_comet(vec3 ro, vec3 rd, float px) {
+  if (uCometK.x <= 0.0) return vec3(0.0);
+  vec3 H = uCometPos;
+  vec3 toH = H - ro;
+  float dH = length(toH);
+  vec3 A = normalize(H - uSkySunPos);                  // anti-sunward
+  vec3 V = uCometVel;
+  vec3 col = vec3(0.0);
+  // coma: a soft head a few arcminutes across, and the star-like nucleus region
+  float ca = acos(clamp(dot(rd, toH / dH), -1.0, 1.0));
+  float cr = uCometK.w / dH;
+  col += vec3(0.8, 0.95, 0.9) * exp(-ca / max(cr, px)) * min(1.0, cr / max(px, 1e-6)) * 0.35;
+  float sg = max(px * 0.6, 0.00008);
+  col += vec3(1.0, 0.97, 0.9) * exp(-ca * ca / (2.0 * sg * sg)) * (px * px) / (sg * sg) * 1.3 * 0.7;
+  // ion tail: straight, narrow, blue, with knots moving outward
+  float s01, rg;
+  float Li = uCometK.y;
+  float ai = sk_segAng(ro, rd, H, H + A * Li, s01, rg);
+  float wi = (40000.0 + 0.012 * Li * s01) / rg;
+  float wiP = max(wi, px * 0.7);
+  float knots = 0.75 + 0.25 * sin(s01 * 40.0 - uSkyTime * 0.05);
+  col += vec3(0.42, 0.62, 1.0) * exp(-ai * ai / (wiP * wiP)) * (wi / wiP) * exp(-s01 * 2.5) * knots * 0.22;
+  // dust tail: a curved fan in the orbit plane, bending back against the motion
+  float Ld = uCometK.z;
+  vec3 M = H + A * (Ld * 0.5) - V * (Ld * 0.12);
+  vec3 Et = H + A * Ld - V * (Ld * 0.42);
+  float s1, r1, s2, r2;
+  float a1 = sk_segAng(ro, rd, H, M, s1, r1);
+  float a2 = sk_segAng(ro, rd, M, Et, s2, r2);
+  float sAl = a1 < a2 ? s1 * 0.5 : 0.5 + s2 * 0.5;
+  float ad = min(a1, a2);
+  float rd2 = a1 < a2 ? r1 : r2;
+  float wd = (60000.0 + 0.09 * Ld * sAl) / rd2;
+  float wdP = max(wd, px * 0.7);
+  col += vec3(1.0, 0.9, 0.74) * exp(-ad * ad / (wdP * wdP)) * (wd / wdP) * exp(-sAl * 2.2) * 0.3;
+  return col * uCometK.x;
 }
 
 // the bright planets: points of steady light on the ecliptic with a soft optical halo
