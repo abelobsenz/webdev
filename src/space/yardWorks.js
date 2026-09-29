@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { CB, CK } from '../craft/craftGeometry.js';
 import { LAMP } from './lamps.js';
 import { addLamps, placeLamps, placeMerge } from './craftMesh.js';
+import { personGeo } from './terraceLife.js';
 import { YARD, sectionPoint } from './geoRoads.js';
 import {
   TAU, V, smooth, lerp, rng, hash1, schedule, instancedPart, fillInstances, DynLamps, weldGain,
@@ -121,6 +122,42 @@ export function dronePos(dr, t, outP, outSite) {
 const _o = V(0, 0, 0);
 
 /** Crew pod on its lane: runs from the house to the front, stopping at each frame's hatch. */
+// ---- hanging stages: painters' and fitters' cradles along the finished hull's flanks, each
+//      slung on two cables from the frame vertices either side of its bay, creeping along it
+export const STAGES = { n: 32, off: 9, len: 30, margin: 55, zMax: 170 };
+/** Stage k: its bay, the flank angle and its slow travel. */
+export function stageDef(k) {
+  const bays = [];
+  for (let i = 0; i < YARD.frames.length - 1; i++) {
+    const z0 = YARD.frames[i], z1 = YARD.frames[i + 1];
+    if (z0 < -1100 || z1 > 300 + 1) continue;
+    bays.push([Math.max(z0, -1100), Math.min(z1, STAGES.zMax + STAGES.margin)]);
+  }
+  const [z0, z1] = bays[k % bays.length];
+  const side = k % 2 ? 0 : Math.PI;
+  const t = side + (hash1(k * 5.1) * 2 - 1) * 0.55 * (k % 4 < 2 ? 1 : -1);
+  return { z0: z0 + STAGES.margin, z1: z1 - STAGES.margin, t, T: 300 + 200 * hash1(k * 1.7), ph: hash1(k * 9.3), zf0: z0, zf1: z1 };
+}
+export function stagePos(d, time, outP, outN) {
+  const u = ((time / d.T + d.ph) % 1 + 1) % 1;
+  const z = lerp(d.z0, d.z1, 0.5 - 0.5 * Math.cos(u * TAU));
+  const q = sectionPoint(z, d.t), o = sectionOut(z, d.t, outN);
+  return outP.set(q.x + o.x * STAGES.off, q.y + o.y * STAGES.off, z);
+}
+function stageGeo() {
+  const B = new CB();
+  // deck in the local x-z plane (x across, z along the hull), its outer face +y
+  B.box(0, 0, 0, 4, 0.4, STAGES.len, CK.DECK);
+  for (const x of [-2, 2]) {
+    for (let z = -STAGES.len / 2; z <= STAGES.len / 2; z += 3) B.tube([V(x, 0.2, z), V(x, 1.3, z)], 0.05, 4, CK.HULL);
+    B.tube([V(x, 1.3, -STAGES.len / 2), V(x, 1.3, STAGES.len / 2)], 0.06, 4, CK.BRONZE);
+  }
+  for (const z of [-STAGES.len / 2, STAGES.len / 2]) { B.box(0, 1.5, z, 4.4, 3, 0.5, CK.DARK); B.box(0, 3.2, z, 1.2, 0.8, 0.8, CK.BRONZE); }
+  B.box(1, 0.6, 4, 1.2, 0.8, 1.6, CK.BRONZE);                       // tool chest
+  B.box(-1, 0.9, -6, 1.4, 1.4, 1.4, CK.HULL);                       // welding set
+  return B.geometry();
+}
+
 let _stops = null;
 /** The pods' stops: abeam of each working frame's hatch (the hatch box meets the frame tube). */
 export function podStops() { return (_stops ||= YARD.frames.slice(1).map((z) => z - 12)); }
@@ -352,6 +389,14 @@ export class YardWorks {
     for (let i = 0; i < nC; i++) dl.push({ p: V(), r: 3, color: LAMP.AMBER, i: 2.4, breathe: 0.6, phase: i / nC });
     this.iCraneArc = dl.length;
     for (let i = 0; i < nC * 2; i++) dl.push({ p: V(), r: 2.4, color: [0.8, 0.9, 1.0], i: 6 });
+    // hanging stages with their crews and work lamps
+    this.stageDefs = Array.from({ length: STAGES.n }, (_, k) => stageDef(k));
+    this.stages = instancedPart(yardMesh, stageGeo(), STAGES.n);
+    this.stageCrew = instancedPart(yardMesh, personGeo(CK.LANTERN), STAGES.n * 2);
+    this.stageCables = instancedPart(yardMesh, cableGeo(0.25, 4), STAGES.n * 2);
+    this.root.add(this.stages, this.stageCrew, this.stageCables);
+    this.iStage = dl.length;
+    for (let i = 0; i < STAGES.n; i++) dl.push({ p: V(), r: 1.4, color: i % 3 ? LAMP.WHITE : [0.78, 0.9, 1.0], i: i % 3 ? 2.0 : 4.5 });
     this.iFront = dl.length;
     const R = rng(77);
     this.front = pl.welds.filter(() => R() < 0.5).slice(0, 40);
@@ -425,6 +470,34 @@ export class YardWorks {
       d.set(this.iPod + k, p.x, p.y + 3, p.z + f.z * 5);
     }
     this.pods.instanceMatrix.needsUpdate = true;
+    // hanging stages creep along their bays; the crews face the hull
+    const n = this._s, up = this._a, st = this._b;
+    for (let k = 0; k < this.stageDefs.length; k++) {
+      const sd = this.stageDefs[k];
+      stagePos(sd, t, p, n);
+      // basis: x across the flank, y out from the hull, z along it
+      up.set(0, 0, 1);
+      m.makeBasis(f.crossVectors(n, up).normalize(), n, up).setPosition(p);
+      this.stages.setMatrixAt(k, m);
+      for (const e of [0, 1]) {
+        const zz = e ? 5 : -8;
+        st.set(p.x + up.x * zz + n.x * 0.2, p.y + n.y * 0.2, p.z + zz);
+        m.makeBasis(f.crossVectors(n, up).normalize(), n, up).setPosition(st);
+        // a quarter turn about the deck normal on the second, so the pair do not stand in step
+        if (e) m.multiply(this._rq || (this._rq = new THREE.Matrix4().makeRotationY(Math.PI / 2)));
+        this.stageCrew.setMatrixAt(k * 2 + e, m);
+        // cables from the deck's ends up to the frame vertices either side of the bay
+        const vy = Math.sign(p.y || 1) * 103.5, vx = Math.sign(p.x) * 250;
+        this._c.v = this._c.v || V();
+        this._c.v.set(vx, vy, e ? sd.zf1 : sd.zf0);
+        st.set(p.x + n.x * 3.4, p.y + n.y * 3.4, p.z + (e ? 1 : -1) * STAGES.len / 2);
+        spanMatrix(m, st, this._c.v);
+        this.stageCables.setMatrixAt(k * 2 + e, m);
+      }
+      d.set(this.iStage + k, p.x + n.x * 4, p.y + n.y * 4, p.z);
+      if (k % 3 === 0) d.gain(this.iStage + k, weldGain(t, 500 + k));
+    }
+    for (const im of [this.stages, this.stageCrew, this.stageCables]) im.instanceMatrix.needsUpdate = true;
     // the plating front
     for (let i = 0; i < this.front.length; i++) d.gain(this.iFront + i, weldGain(t, 300 + i));
     d.commit();

@@ -10,7 +10,7 @@ import { buildConcordYard, buildWaterStore, YARD, STORE, sectionPoint, movementP
 import { approachVoyage, voyage } from '../src/space/fleet.js';
 import { WATER, waterRunPose } from '../src/space/waterRun.js';
 import { YARD_POS, STORE_POS } from '../src/space/geoRoads.js';
-import { YardWorks, WORKS, craneBay, cranePlate, droneSites, dronePos, crewPodPos, podStops } from '../src/space/yardWorks.js';
+import { YardWorks, WORKS, craneBay, cranePlate, droneSites, dronePos, crewPodPos, podStops, STAGES, stageDef, stagePos } from '../src/space/yardWorks.js';
 import { StoreWorks, PLUMB, storeDronePos } from '../src/space/storeWorks.js';
 import { TL, cartZ, rimWalker, apronWalker } from '../src/space/terraceLife.js';
 import { craftMesh, placeMerge } from '../src/space/craftMesh.js';
@@ -297,6 +297,35 @@ let yPodGap = Infinity;
 for (let t = 0; t < 2000; t += 2.1) for (let k = 0; k < 4; k++) { crewPodPos(k, t, P, V()); yPodGap = Math.min(yPodGap, yc.dist(P, 60) - 5); }
 results.yardCrewPodClearM = +yPodGap.toFixed(1);
 assert.ok(yPodGap > 10, `crew pods clear the dock by ${yPodGap} m`);
+// hanging stages: off the hull and its clamps, inside the frames, away from the drones' bays
+const hullOnly = new Collider([{ geo: yd.hullGeo }], 40);
+let cableGap = Infinity;
+{
+  let g = Infinity;
+  const N = V();
+  for (let k = 0; k < STAGES.n; k++) {
+    const sd = stageDef(k);
+    assert.ok(sd.z0 >= sd.zf0 + 40 && sd.z1 <= sd.zf1 - 40, 'stages keep off the frames and their clamps');
+    assert.ok(sd.z1 + STAGES.len / 2 < 205 - 10, 'stages keep aft of the drones\' first bay');
+    for (let t = 0; t < 700; t += 7) {
+      stagePos(sd, t, P, N);
+      for (const dz of [-STAGES.len / 2, 0, STAGES.len / 2]) for (const h of [0.5, 2.5]) {
+        const q = P.clone().addScaledVector(N, h); q.z += dz;
+        g = Math.min(g, yc.dist(q, 30) - 2.2);
+      }
+      assert.ok(Math.hypot(P.x, P.y) < YARD.frameR - 20, 'stages hang inside the frames');
+      // their cables run free from the deck's ends to the frame vertices (the hull is only met by the deck)
+      for (const e of [0, 1]) {
+        const a = P.clone().addScaledVector(N, 3.4); a.z += (e ? 1 : -1) * STAGES.len / 2;
+        const b = V(Math.sign(P.x) * 250, Math.sign(P.y || 1) * 103.5, e ? sd.zf1 : sd.zf0);
+        for (let j = 1; j < 10; j++) cableGap = Math.min(cableGap, hullOnly.dist(a.clone().lerp(b, j / 10), 30) - 0.25);
+      }
+    }
+  }
+  results.yardStageClearM = +g.toFixed(2); results.yardStageCableClearM = +cableGap.toFixed(2);
+  assert.ok(cableGap > 0.5, `stage cables run clear of the hull (${cableGap} m)`);
+  assert.ok(g > 0.5, `hanging stages clear the hull, dock and platforms by ${g} m`);
+}
 // hatches meet their frames; walkway brackets end inside the frame tubes
 const dock = new Collider([{ geo: yd.dockGeo }], 40);
 for (const z of podStops()) for (const sx of [-1, 1]) {
