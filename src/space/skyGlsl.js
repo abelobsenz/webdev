@@ -18,8 +18,10 @@ uniform float uSkyStars;      // star brightness multiplier
 uniform vec4 uSwarmN[4];      // swarm ring plane normals (xyz) + radius (w, km)
 uniform float uSwarmT;        // swarm animation phase
 uniform float uSkyTime;
-uniform vec4 uPlanets[5];     // planet directions (inertial) + brightness
-uniform vec3 uPlanetCol[5];
+uniform vec4 uPlanets[7];     // planet directions (inertial, from the ephemeris) + brightness
+uniform vec3 uPlanetCol[7];
+uniform mat3 uSkyPrec;        // equatorial of date -> J2000 (three millennia of precession)
+uniform vec3 uStarPal[8];     // blackbody colours at 2800 ... 20000 K (skyCatalog.js)
 
 // galactic frame (equatorial): north galactic pole, galactic centre, l = 90 deg
 const vec3 SK_GN = vec3(-0.8676, -0.1981, 0.4560);
@@ -37,19 +39,21 @@ float sk_fbm(vec3 p, int oct) {
   return s / n;
 }
 
-// Star colour from a spectral draw: the bright stars are a mix of hot blue-white giants and
-// cool orange ones; the faint crowd is mostly yellow-white dwarfs.
+// Star colour from a spectral draw through the blackbody palette. The bright stars we see are
+// mostly luminous: hot blue-white B and A stars seen from far off, and orange K and M giants;
+// the faint crowd is mostly yellow-white F, G and K dwarfs.
+vec3 sk_pal(float x) {
+  x = clamp(x, 0.0, 6.999);
+  int i = int(floor(x));
+  return mix(uStarPal[i], uStarPal[i + 1], fract(x));
+}
 vec3 sk_starColor(float t, float bright) {
-  // t in 0..1 -> temperature class, spread wider for the bright stars
-  float s = mix(0.35, 1.0, bright);
-  float u = 0.5 + (t - 0.5) * s;
-  vec3 c = u < 0.18 ? vec3(0.62, 0.72, 1.0)          // B
-         : u < 0.36 ? vec3(0.8, 0.86, 1.0)           // A
-         : u < 0.58 ? vec3(1.0, 0.98, 0.95)          // F
-         : u < 0.78 ? vec3(1.0, 0.9, 0.76)           // G
-         : u < 0.92 ? vec3(1.0, 0.78, 0.55)          // K
-         : vec3(1.0, 0.64, 0.42);                    // M
-  return c;
+  // bright: a two-humped draw (giants cool, main-sequence hot); faint: centred on G
+  float hot = 5.2 + 1.8 * t;
+  float giant = 0.6 + 1.9 * t;
+  float xb = t < 0.55 ? mix(hot, 7.0, t * 0.3) : giant + (t - 0.55) * 2.0;
+  float xf = 2.2 + (t - 0.5) * 3.4;
+  return sk_pal(mix(xf, xb, bright));
 }
 
 vec3 sk_starLayer(vec3 d, float scale, float density, float bright, float px, float crowd) {
@@ -245,7 +249,7 @@ vec3 sk_swarm(vec3 ro, vec3 rd, float px) {
 vec3 sk_planets(vec3 d, float px) {
   vec3 acc = vec3(0.0);
   float sigma = max(px * 0.6, 0.00008);
-  for (int i = 0; i < 5; i++) {
+  for (int i = 0; i < 7; i++) {
     float c = dot(d, uPlanets[i].xyz);
     if (c < 0.9995) continue;
     float a2 = 2.0 * (1.0 - c);
@@ -257,7 +261,9 @@ vec3 sk_planets(vec3 d, float px) {
 }
 
 vec3 sk_background(vec3 d, float px) {
-  vec3 c = vec3(d.z, d.x, d.y);
+  // J2000 equatorial: the catalogues' frame (the pole of 5021 lies ~42 degrees round the ecliptic
+  // pole from Polaris)
+  vec3 c = uSkyPrec * vec3(d.z, d.x, d.y);
   // galactic latitude: the faint stars crowd toward the plane and the bulge
   float gz = dot(c, SK_GN);
   float gcos = dot(c, SK_GC);

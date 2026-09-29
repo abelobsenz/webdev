@@ -10,6 +10,8 @@ import { SpaceSim, R_EARTH, R_MOON, GEO_ALT, COUNTERWEIGHT_ALT, MERIDIAN_LON, bo
 import { EarthBake, maskReady } from './earthBake.js';
 import { Earth, R_TOP } from './earth.js';
 import { createSpaceSky, SKY_UNIFORMS } from './sky.js';
+import { SkyLife } from './skyStars.js';
+import { Aurora } from './aurora.js';
 import { OrbitRig } from './controls.js';
 import { spaceQuality } from './quality.js';
 import { SpaceHud } from './hud.js';
@@ -256,6 +258,11 @@ export class SpaceMode {
     // the Lodestar, flown by the visitor (V): built on first boarding
     this.ship = new ShipPilot(this);
     this.modules.push(this.ship);
+    // the planets moving on their orbits; the aurorae over the night side
+    this.skyLife = new SkyLife(this, SKY_UNIFORMS);
+    this.modules.push(this.skyLife);
+    this.aurora = new Aurora(this, q);
+    this.modules.push(this.aurora);
     for (const b of this.bodies) if (!b.local) b.remote = true;
     // post: crossfade helper
     this.fadeRT = new THREE.WebGLRenderTarget(1, 1, { type: THREE.UnsignedByteType, depthBuffer: false });
