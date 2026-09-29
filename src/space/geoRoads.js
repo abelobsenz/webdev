@@ -270,8 +270,18 @@ export function buildConcordYard() {
     B.tube([d.clone().multiplyScalar(30).setZ(zw + 185), v], 5, 8, CK.HULL);
   }
   // the wheel: a glazed habitat ring with a bronze belt, spokes to a transfer collar round the hub
+  // (a habitat section, not a glass tube: livery floor plate outward, ported walls, glazed
+  // shoulders, the lit concourse roof toward the hub, eight pressure bulkheads)
+  {
+    const R = YARD.wheelR;
+    W.lathe([[R + 35, zw - 38, DK.LIVERY], [R + 35, zw + 38, DK.LIVERY], [R + 10, zw + 38, DK.PORTS], [R - 35, zw + 22, CK.GLASS], [R - 35, zw - 22, DK.CONCOURSE], [R + 10, zw - 38, CK.GLASS], [R + 35, zw - 38, DK.PORTS]], 96, 0, { closedProfile: true });
+    for (let k = 0; k < 8; k++) {
+      W.push(new THREE.Matrix4().makeTranslation(0, 0, zw).multiply(new THREE.Matrix4().makeRotationZ(((k + 0.5) / 8) * TAU)));
+      W.box(R, 0, 0, 74, 9, 82, DK.GRIME);
+      W.pop();
+    }
+  }
   W.push(new THREE.Matrix4().makeTranslation(0, 0, zw));
-  W.torus(YARD.wheelR, 38, 96, 14, CK.GLASS);
   W.torus(YARD.wheelR + 36, 6, 96, 6, CK.BRONZE);
   W.pop();
   W.lathe([[84, zw - 40, CK.BRONZE], [100, zw - 34, CK.HULL], [100, zw + 34, CK.HULL], [84, zw + 40, CK.BRONZE]], 32, 0, { closedProfile: true });
