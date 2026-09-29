@@ -332,7 +332,8 @@ export class Fleet {
       const tc = this.movers[this.movers.length - 1].c;
       this.seleneLaneData = seleneLanes(tc);
       this.seleneLanes = new THREE.Group();
-      this.seleneLanes.add(createLamps(this.seleneLaneData, { minPx: 1.3 }));
+      this.seleneLaneLamps = createLamps(this.seleneLaneData, { minPx: 1.3 });
+      this.seleneLanes.add(this.seleneLaneLamps);
       space.scene.add(this.seleneLanes);
       const _c = new THREE.Vector3();
       space.addBody('seleneLanes', [this.seleneLanes], () => this.seleneLanes.localToWorld(_c.set(0, 600, 0)), 700);
@@ -473,6 +474,10 @@ export class Fleet {
       this.refinery.updateMatrixWorld(true);
       this.seleneLanes.position.copy(this.refinery.position);
       this.seleneLanes.quaternion.copy(this.refinery.quaternion);
+      // the corridor beacons are for the tankers: full on the run, faded out from across the sky
+      const lg = 1 - smooth(900, 2600, space.camera.position.distanceTo(this.refinery.position));
+      this.seleneLaneLamps.material.uniforms.uGain.value = lg;
+      this.seleneLaneLamps.visible = lg > 0.002;
       this.wheel.rotation.y = realTime * 0.04;
     }
     // the working lanes: outer roads, holding stacks, Selene's ore run, patrol and convoys

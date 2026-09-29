@@ -350,6 +350,22 @@ void craftRefine(float k, vec2 f, vec2 fw, float px, inout vec3 alb, inout float
     float heat = 0.6 + 0.4 * sin(f.x * 0.003 + 1.3);
     em = vec3(1.0, 0.3, 0.09) * (0.015 + 0.22 * ch) * heat;
     cav *= 1.0 - 0.3 * rib;
+  } else if (k > 4.5 && k < 7.5) {
+    // photovoltaic wings: modules strung in 42 m strings with dark gaps between them, each
+    // string laid a shade apart (still read from far off, mean kept), cells a little violet at
+    // grazing angles where their coating reflects
+    float gap = max(cLine(f.x, 42.0, 0.7, fw.x), cLine(f.y, 28.0, 0.5, fw.y));
+    float st = hash12(floor(f / vec2(42.0, 28.0)) + 7.0);
+    alb *= mix(1.0, 0.86 + 0.28 * st, famOn) * (1.0 - 0.45 * gap);
+    alb = mix(alb, alb * vec3(1.25, 0.9, 1.3), 0.25 * (1.0 - smoothstep(0.1, 0.5, px)));
+    cav *= 1.0 - 0.3 * gap;
+  } else if (k > 7.5 && k < 8.5) {
+    // bronze fittings: a warm satin alloy rather than a mirror (a pure metal in black space
+    // reads as a brown shadow), handled edges brighter, collars banded every 6 m
+    float band = mix(0.08, gridLine(f.y, 6.0, 0.12, fw.y), det);
+    alb = mix(alb, vec3(0.82, 0.62, 0.38), 0.25) * (1.0 - 0.3 * band);
+    metal = 0.72; rough = clamp(rough + 0.12, 0.2, 0.6);
+    cav *= 1.0 - 0.25 * band;
   } else if (k > 8.5 && k < 9.5) {
     // decks: worn walking lanes and scuffed plates
     float wear = smoothstep(0.55, 0.85, vnoise(f * vec2(0.05, 0.012) + 2.0));
