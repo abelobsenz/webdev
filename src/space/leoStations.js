@@ -241,7 +241,7 @@ export function buildFarmFrame() {
     const z = s * (L + 56);
     truss(B, V(-sep - 30, 0, z), V(sep + 30, 0, z), 16, 24, 0.7, CK.DARK);
     for (const x of [-sep, sep]) {
-      latheAt(B, tr(x, 0, z - s * 10), [[11, -8, CK.BRONZE], [26, -8, CK.BRONZE], [28, -4, CK.HULL], [28, 8, CK.HULL], [26, 12, CK.DARK], [11, 12, CK.DARK]], 36, true);
+      latheAt(B, tr(x, 0, z - s * 10), [[11, -6, CK.BRONZE], [26, -6, CK.BRONZE], [28, -3, CK.HULL], [28, 3, CK.HULL], [26, 6, CK.DARK], [11, 6, CK.DARK]], 36, true);
       lamps.push({ p: V(x, 30, z), r: 1.6, color: LAMP.AMBER, i: 2.2, breathe: 0.3 });
     }
     lamps.push({ p: V(sep + 32, 0, z), r: 1.8, color: LAMP.GREEN, i: 3 }, { p: V(-sep - 32, 0, z), r: 1.8, color: LAMP.RED, i: 3 });
@@ -311,7 +311,7 @@ export function buildPolar() {
   // radiators on the spine (along track)
   for (const s of [-1, 1]) radiatorWing(B, V(0, 120, s * 5), V(0, 0, s), V(1, 0, 0), 110, 40, lamps, s > 0 ? LAMP.GREEN : LAMP.RED);
   // bearing collar of the centrifuge on the spine
-  latheAt(B, tr(0, POLAR.ringY, 0).multiply(toY), [[7.5, -6, CK.BRONZE], [13, -6, CK.BRONZE], [13, 6, CK.DARK], [7.5, 6, CK.DARK]], 32, true);
+  latheAt(B, tr(0, POLAR.ringY, 0).multiply(toY), [[7.5, -6, CK.BRONZE], [12, -6, CK.BRONZE], [12, 6, CK.DARK], [7.5, 6, CK.DARK]], 32, true);
   // zenith: comms mast and dock
   const tip = mast(B, V(0, 262, 0), V(0, 1, 0), 40, 0.5);
   lamps.push({ p: tip, r: 2, color: LAMP.RED, i: 3.6, breathe: 0.7 });

@@ -11,6 +11,7 @@ import {
   buildPower, POWER, buildSkyhookHub, buildGrapple, SKYHOOK, buildSweeper, buildDebrisChunk, buildSatellites,
 } from './leoStations.js';
 import { Constellations } from './constellations.js';
+import { droneGeo, DynLamps } from './lifeKit.js';
 
 // The low and middle shell: Meridian's orbital neighbourhood above the Halo. Everything here
 // flies a real orbit from the sim clock (src/space/kepler.js), in the inertial frame:
@@ -304,6 +305,15 @@ export class LowOrbit {
       s.meshes = [s.fixed];
       this.stations.push(s);
     });
+    // ---- work drones on their inspection circuits round the big stations
+    const dg = droneGeo(7);
+    const lanes = {
+      aurelia: { axis: 'z', c: new THREE.Vector3(0, 0, 0), r0: 292, r1: 345, h0: -45, h1: 45, n: 10 },
+      demeter: { axis: 'z', c: new THREE.Vector3(0, 0, 0), r0: 60, r1: 130, h0: 475, h1: 540, n: 8 },
+      boreal: { axis: 'y', c: new THREE.Vector3(0, 0, 0), r0: 55, r1: 95, h0: 152, h1: 170, n: 6 },
+      dawnline: { axis: 'z', c: new THREE.Vector3(0, 0, 0), r0: 110, r1: 420, h0: 40, h1: 80, n: 10 },
+    };
+    for (const s of this.stations) if (lanes[s.name]) this._addDrones(s, dg, lanes[s.name]);
     // ---- Anansi skyhook
     this.skyhook = this._buildSkyhook();
     for (const s of this.stations) this.group.add(s.root);
@@ -394,6 +404,48 @@ void main() {
       return p;
     };
     return s;
+  }
+
+  /** Work drones (instanced, in the station's own metres) flying circuits in a lane clear of its structure. */
+  _addDrones(s, geo, lane) {
+    const n = lane.n;
+    const im = new THREE.InstancedMesh(geo, s.mat, n);
+    im.count = n; im.frustumCulled = false; im.renderOrder = 3;
+    im.onBeforeRender = s.fixed.onBeforeRender;
+    im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    s.fixed.add(im);
+    const lamps = new DynLamps(Array.from({ length: n * 2 }, (_, i) => ({ p: new THREE.Vector3(), r: i % 2 ? 0.7 : 1.1, color: i % 2 ? LAMP.RED : (i % 4 ? LAMP.WHITE : LAMP.AMBER), i: i % 2 ? 2.2 : 3.0, breathe: i % 2 ? 0.6 : 0 })), { minPx: 1.0 });
+    s.fixed.add(lamps.mesh);
+    const params = [];
+    for (let i = 0; i < n; i++) {
+      const h = (k) => { const v = Math.sin(i * 12.9898 + k * 78.233 + s.name.length * 3.7) * 43758.5453; return v - Math.floor(v); };
+      params.push({ r: lane.r0 + (lane.r1 - lane.r0) * h(1), h: lane.h0 + (lane.h1 - lane.h0) * (0.25 + 0.5 * h(2)), bob: (lane.h1 - lane.h0) * 0.25 * h(3),
+        w: (h(4) < 0.5 ? -1 : 1) * (4 + 5 * h(5)) / (lane.r0 + (lane.r1 - lane.r0) * h(1)), ph: h(6) * TAU, bw: 0.1 + 0.2 * h(7) });
+    }
+    s.drones = { im, lamps, n, lane, params };
+  }
+
+  _animateDrones(s, rt) {
+    const { im, lamps, n, lane, params } = s.drones;
+    const zAxis = lane.axis === 'z';
+    for (let i = 0; i < n; i++) {
+      const P = params[i];
+      const a = P.ph + P.w * rt, ca = Math.cos(a), sa = Math.sin(a);
+      const hh = P.h + P.bob * Math.sin(rt * P.bw + P.ph);
+      const dh = P.bob * P.bw * Math.cos(rt * P.bw + P.ph);
+      // position on the circuit and the direction of travel (tangent plus the bob)
+      if (zAxis) { _p.set(ca * P.r, sa * P.r, hh); _c.set(-sa * P.r * P.w, ca * P.r * P.w, dh); _a.set(ca, sa, 0); }
+      else { _p.set(ca * P.r, hh, sa * P.r); _c.set(-sa * P.r * P.w, dh, ca * P.r * P.w); _a.set(0, 1, 0); }
+      _p.add(lane.c);
+      basisQ(_c, _a, _q);
+      _m.compose(_p, _q, _s.set(1, 1, 1));
+      im.setMatrixAt(i, _m);
+      _c.normalize();
+      lamps.set(i * 2, _p.x + _c.x * 3.4, _p.y + _c.y * 3.4, _p.z + _c.z * 3.4);
+      lamps.set(i * 2 + 1, _p.x - _c.x * 3, _p.y - _c.y * 3, _p.z - _c.z * 3);
+    }
+    im.instanceMatrix.needsUpdate = true;
+    lamps.commit();
   }
 
   /** Relative swing angle psi(t): tip A points straight down (at the Earth) when psi = pi mod 2 pi. */
@@ -496,8 +548,10 @@ void main() {
     out.copy(_w).applyQuaternion(_q).multiplyScalar(r0 + (r1 - r0) * su + Math.sin(Math.PI * u) * 60);
     // blends into the ends' real tracks
     const bA = 1 - smooth(0, 0.1, u), bB = smooth(0.9, 1, u);
-    if (bA > 0) { this._node(leg.from, leg.port, t, _y, null, null, sim); out.lerp(_y, bA); }
-    if (bB > 0) { this._node(leg.to, leg.port, t, _y, null, null, sim); out.lerp(_y, bB); }
+    // (blended along the sphere: a straight lerp between two points 1,000 km apart cuts a chord
+    // tens of km below both, down through the Halo's altitude)
+    if (bA > 0) { this._node(leg.from, leg.port, t, _y, null, null, sim); const r = out.length() + (_y.length() - out.length()) * bA; out.lerp(_y, bA).setLength(r); }
+    if (bB > 0) { this._node(leg.to, leg.port, t, _y, null, null, sim); const r = out.length() + (_y.length() - out.length()) * bB; out.lerp(_y, bB).setLength(r); }
     return out;
   }
 
@@ -547,6 +601,7 @@ void main() {
       const vis = s.px > 0.8;
       s.fixed.visible = vis;
       if (vis || s.px > 0.25) { s.root.updateMatrixWorld(); if (s.animate) s.animate(realTime); }
+      if (s.drones) { const on = s.px > 12; s.drones.im.visible = on; s.drones.lamps.mesh.visible = on; if (on) this._animateDrones(s, realTime); }
       gl.set(gi++, s.root.position, s.glintSize, 1, s.lit, 1);
     }
     // skyhook
@@ -641,10 +696,10 @@ void main() {
       hp.engine.material.uniforms.uGain.value = thr;
       const px = cam ? pixelRadius(cam, root.position, 0.03, H) : 100;
       hp.mesh.visible = px > 0.6;
-      hp.root.visible = true;
+      hp.active = true;
       this.glints.set(gi0 + used - 1, root.position, 60, 0.4, sunlitFraction(root.position, this.sun), 1);
     }
-    for (let j = used; j < this.hoppers.length; j++) { this.hoppers[j].root.visible = false; this.glints.set(gi0 + j, _p.set(0, 0, 0), 0, 0, 0, 0); }
+    for (let j = used; j < this.hoppers.length; j++) { const h = this.hoppers[j]; h.active = false; h.mesh.visible = false; h.engine.material.uniforms.uGain.value = 0; this.glints.set(gi0 + j, _p.set(0, 0, 0), 0, 0, 0, 0); }
   }
 
   setSize(w, h) {
