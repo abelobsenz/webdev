@@ -344,6 +344,7 @@ export function buildHillCountry(scene, { onComponent = null } = {}) {
   };
   let roadLen = 0;
   const roadDraws=[];let crossingSurface=null;
+  const endPosts=[];
   const lamps = [];
   const road = (pts, hw, lift = 0, options = {}) => {
     let n = pts.length;
@@ -427,11 +428,10 @@ export function buildHillCountry(scene, { onComponent = null } = {}) {
       activeRoute=prior;
     });
     // lamp posts at the ends, just off the kerb
+    // (placed once every road exists: where trunks meet, one end's post stood on another's carriageway)
     if (hw > 2 && options.lamps!==false) for (const k of [0, n - 1]) {
-      const s = S[k], px = s.x + s.sx * (hw + 0.9), pz = s.z + s.sz * (hw + 0.9), g = renderedHeight(px, pz);
-      chunk(px, pz).arch.box(px, pz, 1, 0, 0.14, 0.14, g - 0.4, g + 4.2, 10, g);
-      chunk(px, pz).arch.box(px, pz, 1, 0, 0.3, 0.3, g + 4.2, g + 4.7, 2, g);
-      lamps.push([px, g + 4.45, pz]);
+      const s = S[k];
+      endPosts.push({ x: s.x + s.sx * (hw + 0.9), z: s.z + s.sz * (hw + 0.9), route: record });
     }
     activeRoute=previousRoute;return sourceS;
   };
@@ -1066,6 +1066,18 @@ export function buildHillCountry(scene, { onComponent = null } = {}) {
     }else for(const p of r.points)p.y=padHeight(p);
   }
   for(const draw of roadDraws)draw();
+  // the end lamp posts, clear of every carriageway (crossingCells indexes all road segments)
+  for(const lp of endPosts){
+    let clear=true;const i0=Math.floor((lp.x-4)/cellSize),i1=Math.floor((lp.x+4)/cellSize),j0=Math.floor((lp.z-4)/cellSize),j1=Math.floor((lp.z+4)/cellSize);
+    for(let i=i0;i<=i1&&clear;i++)for(let j=j0;j<=j1&&clear;j++)for(const id of crossingCells.get(`${i},${j}`)||[]){const {a,b,r}=crossingSegments[id],dx=b.x-a.x,dz=b.z-a.z,t=Math.max(0,Math.min(1,((lp.x-a.x)*dx+(lp.z-a.z)*dz)/(dx*dx+dz*dz||1)));if(Math.hypot(lp.x-a.x-dx*t,lp.z-a.z-dz*t)<r.halfWidth+.5){clear=false;break;}}
+    if(!clear)continue;
+    const prior=activeRoute;activeRoute=lp.route;
+    const g=renderedHeight(lp.x,lp.z);
+    chunk(lp.x,lp.z).arch.box(lp.x,lp.z,1,0,0.14,0.14,g-0.4,g+4.2,10,g);
+    chunk(lp.x,lp.z).arch.box(lp.x,lp.z,1,0,0.3,0.3,g+4.2,g+4.7,2,g);
+    lamps.push([lp.x,g+4.45,lp.z]);
+    activeRoute=prior;
+  }
   const lod = [];
   let tris = 0, detailTris = 0;
   for (const C of chunks.values()) {
