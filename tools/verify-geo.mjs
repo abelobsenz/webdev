@@ -6,7 +6,8 @@ import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import { HarbourStation, HS } from '../src/space/harbour.js';
 import { LIFE, cranePose, podR, PODS_PER_LINE, dronePose, armFrame, ROAD, roadPose } from '../src/space/harbourLife.js';
-import { buildConcordYard, buildWaterStore, YARD, STORE, sectionPoint } from '../src/space/geoRoads.js';
+import { buildConcordYard, buildWaterStore, YARD, STORE, sectionPoint, movementPlan, movementPose, MOVEMENTS, routeAround } from '../src/space/geoRoads.js';
+import { approachVoyage, voyage } from '../src/space/fleet.js';
 import { YardWorks, WORKS, craneBay, cranePlate, droneSites, dronePos, crewPodPos, podStops } from '../src/space/yardWorks.js';
 import { StoreWorks, PLUMB, storeDronePos } from '../src/space/storeWorks.js';
 import { TL, cartZ, rimWalker, apronWalker } from '../src/space/terraceLife.js';
@@ -183,6 +184,22 @@ assert.ok(boxGap > 1, `berth boxes clear the ships and fingers by ${boxGap} m`);
   assert.ok(g > 200, `ring road clears the Harbour and its ships (${g} m; Infinity: nothing within 500 m)`);
   assert.ok(ringGap > 400, `ring road clears the turning rims by ${ringGap} m`);
   assert.ok(sep > 150, `ring road craft keep ${sep} m apart`);
+  // the Harbour's other traffic (freighter movements, the arriving liner) never comes near the lanes (km)
+  const laneDist = (p) => Math.min(...ROAD.lanes.map((l) => Math.hypot(Math.hypot(p.x, p.z) - ROAD.R * 1e-3, p.y - l.y * 1e-3)));
+  let other = Infinity;
+  const plans = MOVEMENTS.map((mv) => {
+    const c = movementPlan(h.arms, mv.arm, mv);
+    c.departure = [c.stage.clone(), c.stage.clone().addScaledVector(c.dock.d, 1.6), ...routeAround(c.stage, c.gateD, 16.5, 2.5), c.gateD.clone().addScaledVector(c.dD, -3), c.gateD.clone()];
+    c.approach = [c.gateA.clone(), c.gateA.clone().addScaledVector(c.dA, -3), ...routeAround(c.gateA, c.stage, 17, 1.5), c.stage.clone().addScaledVector(c.dock.d, 2.2), c.stage.clone()];
+    return c;
+  });
+  const lv = approachVoyage();
+  for (let u = 0; u < 1; u += 0.0005) {
+    for (const c of plans) { movementPose(u, c, Q, F); other = Math.min(other, laneDist(Q) - 0.3 * c.scale - 0.1); }
+    voyage(u, lv, Q, F); other = Math.min(other, laneDist(Q) - 1.3);
+  }
+  results.roadOtherTrafficClearKm = +other.toFixed(2);
+  assert.ok(other > 0.3, `freighter movements and the arriving liner keep ${other} km off the Ring Road`);
   const armLow = Math.min(...h.arms.map((a) => Math.abs(a.y))) - (230 + 440) * HS;      // gallery town's lowest mast
   assert.ok(armLow - Math.max(...ROAD.lanes.map((l) => Math.abs(l.y))) - 18 > 400, 'ring road passes well below the arms and their towns');
 }
