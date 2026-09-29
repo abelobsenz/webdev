@@ -9,7 +9,7 @@ import { helianthCircuits, circuitPose } from '../src/space/helianthTraffic.js';
 import {
   HelianthDistrict, buildPetalFittings, buildCrawler, buildBerths, petalMatrix, petalTop, spineY, DECK_TOP, CATWALK, CREW_LANE, crawlerZ, crewOnCatwalk,
   flotillaLayout, courierRoute, courierPose, COURIER, FLOTILLA, PETAL, buildConcentrator, buildRelayPlatform, BERTH,
-  petalBottom, SPOKE, spokeTop, spokeCarR, buildSpokeCar,
+  petalBottom, SPOKE, spokeTop, spokeCarR, buildSpokeCar, buildHubWorks, GALLERY, FIN,
 } from '../src/space/helianthDistrict.js';
 import { FoundryYard, buildWheelCar, wheelCar, WHEEL, buildCraneWorks, cranePose, cartPose, droneOrbits, dronePos, crewPos, COURT, CRANE, CART, QUEUE } from '../src/space/foundryYard.js';
 import { buildTender } from '../src/craft/craftGeometry.js';
@@ -86,6 +86,31 @@ const stT = tree(tris(sc.geo));
     const d = dist(stT, V(x, petalBottom(x, z), z));
     assert.ok(d < 2.5, `petal underside survey matches the loft at z ${z} (${d.toFixed(2)} m)`);
   }
+  // facet seams lie on the skin
+  let seamGap = 0;
+  for (let z = 2200; z < 14000; z += 400) for (const x of [-420, 180, 660]) if (Math.abs(x) < 100 + 1450 * Math.pow(Math.sin(Math.PI * (z - 1550) / 12950), 0.8) - 60) seamGap = Math.max(seamGap, dist(stT, V(x, petalTop(x, z), z)));
+  assert.ok(seamGap < 1.5, `facet seams meet the skin (${seamGap.toFixed(2)} m)`);
+  // hub works: galleries seated in the wheel's hull and clear of the fin struts; risers on the fins
+  {
+    const h = buildHubWorks();
+    closed('hubWorks', h.geo);
+    const hv = verts(h.geo, I, 2);
+    const onWheel = hv.filter((p) => Math.abs(Math.hypot(p.x, p.z) - GALLERY.R) < GALLERY.tube + GALLERY.proud + 5 && Math.abs(p.y - GALLERY.y) < 200);
+    let deepest = 0, strutClear = Infinity;
+    for (const p of onWheel) {
+      const rr = Math.hypot(p.x, p.z), tubeD = Math.hypot(rr - GALLERY.R, p.y - GALLERY.y);
+      deepest = Math.max(deepest, GALLERY.tube - tubeD);
+      for (let k = 0; k < 6; k++) { const a = (k / 6) * Math.PI * 2, d = V(Math.cos(a), 0, Math.sin(a)); strutClear = Math.min(strutClear, segDist(p, d.clone().multiplyScalar(4100).setY(2200), d.clone().multiplyScalar(7600).setY(3800)) - 80); }
+    }
+    assert.ok(deepest > 5 && deepest < GALLERY.seat + 5, `galleries seated ${deepest.toFixed(1)} m into the wheel's hull`);
+    assert.ok(strutClear > 40, `galleries clear the fin struts by ${strutClear.toFixed(0)} m`);
+    results.galleryStrutClearanceMetres = +strutClear.toFixed(0);
+    // riser boxes (10 m thick at t/2 + 4) bite one metre into each face
+    assert.ok(Math.abs(FIN.t / 2 + 4 - 5 - (FIN.t / 2 - 1)) < 1e-9, 'fin risers seated a metre into the fin faces');
+    let riserGap = 0;
+    for (let k = 0; k < 6; k++) { const a = (k / 6) * Math.PI * 2, c = V(Math.cos(a) * FIN.r, FIN.y, Math.sin(a) * FIN.r), n = V(-Math.sin(a), 0, Math.cos(a)); riserGap = Math.max(riserGap, dist(stT, c.clone().addScaledVector(n, FIN.t / 2 - 1).addScaledVector(V(Math.cos(a), 0, Math.sin(a)), -1500 + 100 + 140 * 3))); }
+    assert.ok(riserGap < 2, `fin faces under the risers (${riserGap.toFixed(2)} m)`);
+  }
   // lift cars on the wheel spokes: wheels on the spoke crown, the car clear of hub, wheel and hoops
   {
     const cg = buildSpokeCar(), cb = new THREE.Box3().setFromBufferAttribute(cg.attributes.position);
@@ -101,7 +126,7 @@ const stT = tree(tris(sc.geo));
     results.spokeCarClearanceMetres = +carClear.toFixed(0);
   }
   // tugs keep clear of all twelve petals' fittings and the berths
-  const fitT = tree([...Array.from({ length: PETAL.count }, (_, k) => tris(f.geo, petalMatrix(k), 1, 2)).flat(), ...tris(buildBerths().geo)]);
+  const fitT = tree([...Array.from({ length: PETAL.count }, (_, k) => tris(f.geo, petalMatrix(k), 1, 2)).flat(), ...tris(buildBerths().geo), ...tris(buildHubWorks().geo)]);
   const circuits = helianthCircuits(), P = V(), F = V();
   let clear = Infinity;
   for (let t = 0; t < 460; t += 1) for (const c of circuits) { circuitPose(c, t, P, F); clear = Math.min(clear, dist(fitT, P, clear + 230) - 230); }

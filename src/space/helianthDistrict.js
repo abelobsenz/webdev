@@ -8,12 +8,15 @@ import { createLamps, LAMP } from './lamps.js';
 // THE HELIANTH DISTRICT (metres, the collector's frame: +Y away from the Sun, the twelve petals
 // near y = 0 reaching 14.5 km out, the hub and its crown above them).
 //
-//   petals    every petal carries a crawler catwalk along its spine (deck, railings and stanchions
+//   petals    every petal's mirror is laid in bronze-seamed facets and held by a back truss; it
+//             carries a crawler catwalk along its spine (deck, railings and stanchions
 //             every 50 m), two coolant lines on its mirror skin, six thermal receiver cassettes
 //             glowing with the heat they drink, a tip mast, and lamp strings down both edges.
 //             Built once and instanced twelve times (one InstancedMesh per piece)
 //   crawlers  two maintenance crawlers per petal run the catwalk, pausing at the receivers; the
 //             suited crews walk the decks with helmet lamps (moving lamps, no allocation)
+//   hub       coolant risers and headers on the six radiator fins, a glazed promenade gallery in
+//             every bay of the habitat wheel
 //   berths    six docking arms off the hub below the habitat wheel, a shuttle seated on each
 //             cradle (seated by its surveyed lowest point)
 //   flotilla  the Helianth's own neighbourhood of the swarm (km): forty-eight concentrator
@@ -111,6 +114,23 @@ export function buildPetalFittings() {
     receivers.push({ x, z, top: y0 + 35, base: y0 });
     lamps.push({ p: V(x, y0 + 38, z), r: 6, color: LAMP.AMBER, i: 1.4, breathe: 0.5, phase: t + (sd > 0 ? 0.5 : 0) });
   }
+  // the mirror's facets: bronze seam strips on the skin (240 m across, 400 m along), each strip a
+  // chord of the curved skin seated most of a metre into it; the spine line is left clear
+  for (let z = 1800; z < 14300; z += 400) {
+    const z1 = Math.min(z + 400, 14350);
+    for (let x = 180; x < 1500; x += 240) for (const sd of [-1, 1]) {
+      const xs = sd * x, zm = (z + z1) / 2;
+      if (x > petalW(z) - 40 || x > petalW(z1) - 40) continue;
+      const y0 = petalTop(xs, z), y1 = petalTop(xs, z1), len = Math.hypot(z1 - z, y1 - y0);
+      B.at(xs, (y0 + y1) / 2 + 0.6 - 0.9, zm, -Math.atan2(y1 - y0, z1 - z)); B.box(0, 0, 0, 3, 1.2, len + 1.5, CK.BRONZE); B.pop();
+    }
+    // the transverse seam at z: chords across the section
+    const w = petalW(z) - 40;
+    for (let x = 60; x < w; x += 240) for (const sd of [-1, 1]) {
+      const xa = sd * x, xb = sd * Math.min(x + 240, w), ya = petalTop(xa, z), yb = petalTop(xb, z), len = Math.hypot(xb - xa, yb - ya);
+      B.at((xa + xb) / 2, (ya + yb) / 2 + 0.6 - 0.9, z, 0, 0, Math.atan2(yb - ya, xb - xa)); B.box(0, 0, 0, len + 1.5, 1.2, 3, CK.BRONZE); B.pop();
+    }
+  }
   // the back structure: a Warren truss under each half of the petal, its two chords hanging
   // 60 m below the skin, the diagonals anchored two metres into the underside (the mirror's
   // figure is held by this truss, not by the thin skin)
@@ -192,6 +212,50 @@ export function buildSpokeCar() {
   B.box(0, 22.5, 0, 30, 3, 54, CK.BRONZE);
   for (const sd of [-1, 1]) B.box(0, 12, sd * 29.4, 12, 10, 1, CK.LANTERN);
   return B.geometry();
+}
+
+// --------------------------------------------------------------- hub works ----
+// The radiator fins (radial plates 3000 x 1500 x 45 m at 6.4-9.4 km, centred at y 3800, every
+// 60 degrees) carry glowing coolant risers on both faces between header pipes; the habitat wheel
+// (a torus of 4100 m, tube 380 m, at y 2200) carries a glazed promenade gallery in every bay
+// between its hoops, on the outer equator, seated into the pressure hull.
+export const FIN = { r: 7900, y: 3800, len: 3000, h: 1500, t: 45 };
+export const GALLERY = { R: 4100, tube: 380, y: 2200, count: 24, half: 330, proud: 60, seat: 25 };
+export function buildHubWorks() {
+  const B = new CB(), lamps = [];
+  for (let k = 0; k < 6; k++) {
+    const a = (k / 6) * TAU;
+    B.at(Math.cos(a) * FIN.r, FIN.y, Math.sin(a) * FIN.r, 0, -a, 0);
+    for (const sd of [-1, 1]) {
+      const zf = sd * (FIN.t / 2 + 4);
+      for (let x = -FIN.len / 2 + 100; x <= FIN.len / 2 - 100; x += 140) B.box(x, 0, zf, 12, FIN.h - 80, 10, CK.CONDUIT);
+      for (const y of [-(FIN.h / 2 - 40), FIN.h / 2 - 40]) B.tube([V(-FIN.len / 2 + 40, y, sd * (FIN.t / 2 + 12)), V(FIN.len / 2 - 40, y, sd * (FIN.t / 2 + 12))], 14, 8, CK.BRONZE);
+    }
+    // the fin's root manifold, where the coolant comes in from the strut
+    B.box(-FIN.len / 2 + 60, 0, 0, 120, FIN.h * 0.6, FIN.t + 60, CK.HULL);
+    B.pop();
+    lamps.push({ p: V(Math.cos(a) * (FIN.r + FIN.len / 2 + 20), FIN.y + FIN.h / 2, Math.sin(a) * (FIN.r + FIN.len / 2 + 20)), r: 14, color: LAMP.RED, i: 2.6, breathe: 0.5, phase: k / 6 });
+  }
+  const sec = [[-GALLERY.seat, -95], [30, -84], [52, -46], [GALLERY.proud, 0], [52, 46], [30, 84], [-GALLERY.seat, 95]];
+  for (let k = 0; k < GALLERY.count; k++) {
+    const a = ((k + 0.5) / GALLERY.count) * TAU, d = V(Math.cos(a), 0, Math.sin(a)), t = V(-d.z, 0, d.x);
+    const outer = GALLERY.R + GALLERY.tube;
+    // gallery frame: +x outward (radial), +y up, +z along the wheel
+    B.push(new THREE.Matrix4().makeBasis(d, V(0, 1, 0), t.clone().negate()).setPosition(d.clone().multiplyScalar(outer).setY(GALLERY.y)));
+    const rings = [];
+    for (let j = 0; j <= 10; j++) {
+      const u = j / 10, z = -GALLERY.half + 2 * GALLERY.half * u, taper = Math.min(1, Math.sin(Math.PI * u) * 3);
+      rings.push({ z, pts: sec.map(([x, y]) => [x < 0 ? x : x * (0.35 + 0.65 * taper), y * (0.55 + 0.45 * taper)]) });
+    }
+    B.loft(rings, (i) => (i === 0 || i === sec.length - 1 ? CK.HULL : CK.GLASS), { capStart: CK.HULL, capEnd: CK.HULL });
+    for (let z = -GALLERY.half + 40; z <= GALLERY.half - 40; z += 36) {
+      const u = (z + GALLERY.half) / (2 * GALLERY.half), taper = Math.min(1, Math.sin(Math.PI * u) * 3);
+      B.box(GALLERY.proud * (0.35 + 0.65 * taper) - 4, 0, z, 10, 150 * (0.55 + 0.45 * taper), 3, CK.BRONZE);
+    }
+    B.pop();
+    lamps.push({ p: d.clone().multiplyScalar(outer + GALLERY.proud + 6).setY(GALLERY.y), r: 8, color: [1.0, 0.8, 0.55], i: 1.6 });
+  }
+  return { geo: B.geometry(), lamps };
 }
 
 // ------------------------------------------------------------------ berths ----
@@ -438,11 +502,11 @@ export class HelianthDistrict {
         this.near.add(this.crew.mesh);
       },
       () => {
-        const b = buildBerths();
+        const b = buildBerths(), h = buildHubWorks();
         this.berthData = b;
-        const m = craftMesh(b.geo, opt);
+        const m = craftMesh(placeMerge([{ geo: b.geo, m: new THREE.Matrix4() }, { geo: h.geo, m: new THREE.Matrix4() }]), opt);
         m.userData.sunDir = sd;
-        addLamps(m, b.lamps, { minPx: 1.2 });
+        addLamps(m, [...b.lamps, ...h.lamps], { minPx: 1.2 });
         this.near.add(m);
       },
       () => {
