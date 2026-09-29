@@ -106,7 +106,7 @@ function spine(B, M, lamps, S, withStation) {
     M.box(0, yT - 7, z, 30, 2, 18, CK.DARK);
   }
   for (const x of [-17.6, 17.6]) M.box(x, yT + 0.65, 0, 0.3, 1.3, TILE_L, CK.BRONZE);
-  for (let i = 0; i < TILE_L / 100; i++) lamps.push({ p: V3(i % 2 ? 18 : -18, yT + 6, -TILE_L / 2 + 50 + i * 100), r: 1.6, color: LAMP.WHITE, i: 1.2 });
+  for (let i = 0; i < TILE_L / 100; i++) lamps.push({ p: V3(i % 2 ? 18 : -18, yT + 6, -TILE_L / 2 + 50 + i * 100), r: 1.6, color: [1.0, 0.82, 0.6], i: 1.2 });
   if (withStation) {
     // station hall: platforms either side, a glass vault over them, stair towers down
     for (const x of [-26, 26]) B.box(x, yT - 1, 0, 14, 4, 380, CK.DECK);
@@ -317,7 +317,7 @@ function* buildDistrictSteps(C, bay, variant) {
     F.box(sg * (S.outer + 44), 1050, 0, 4, 1500, TILE_L - 40, CK.RADIATOR);
     for (const zb of [-1000, 1000]) F.box(sg * (S.outer + bay.d / 2), bay.y, zb, bay.d, bay.h + 24, bay.w + 24, CK.LANTERN);
   }
-  spine(B, M, lamps, S, true);
+  spine(B, M, C.flamps, S, true);        // (its platform and viaduct lamps are street lamps: near only)
   outerWall(B, M, lamps, S, bay);
   rotors(B, M, lamps, S);
   underDeck(B, M, lamps, S);
