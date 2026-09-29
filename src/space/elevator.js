@@ -7,6 +7,7 @@ import { stationFrame, buildPortStation, buildCounterworks } from './stations.js
 import { craftMesh, craftPart, addLamps } from './craftMesh.js';
 import { ClimberCars } from './climbers.js';
 import { buildCounterweightRock } from './counterweightRock.js';
+import { CounterLife } from './counterLife.js';
 
 // Meridian's space elevator: the tether (surface -> Halo -> Geostationary
 // Harbour -> counterweight), its climbers, and the stations along it.
@@ -165,6 +166,8 @@ export class Elevator {
     this.counterWorks = craftMesh(cw.geo, { accent: [1.0, 0.7, 0.4], lit: 0.6 });
     addLamps(this.counterWorks, cw.lamps, { minPx: 1.3 });
     this.counter.add(this.counterWorks);
+    // the town on the rock, Twinwheel round the stem, ore capsules and tugs (counterLife.js)
+    this.counterLife = new CounterLife(this.counter, cw, rock.surfaceRadius);
     for (const o of [this.junction, this.counter]) o.traverse((c) => { c.frustumCulled = false; });
   }
 
@@ -182,5 +185,6 @@ export class Elevator {
     // the Harbour's rings turn at their real 1 g rate in real time; its wings track the Sun
     if (space) this.station.update(sim, realTime, space);
     if (space) this.cars.update(sim, realTime, dt, space);
+    this.counterLife.update(realTime);
   }
 }

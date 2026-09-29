@@ -25,3 +25,10 @@ space.camera.updateMatrixWorld(true);
 const ut = [];
 for (const t of [0, 100, 2000, 5000, 9000]) { const s = performance.now(); rings.update(sim, t, 0.016, space); ut.push(performance.now() - s); space.scene.updateMatrixWorld(true); }
 console.log('update ms', ut.map((x) => x.toFixed(3)).join(','), 'anchor', D.anchor.visible, 'trains', D.trains.count, 'trams', D.trams.count, 'pods', D.pods.count, 'ships', D.ships.map((s) => s.count).join('/'), 'gantries', D.gantries.map((g) => g.visible).join('/'));
+// ---- counterweight town
+import { Elevator } from '../src/space/elevator.js';
+t0 = performance.now();
+const el = new Elevator(space, { climbers: 60 });
+console.log('elevator ctor ms', (performance.now() - t0).toFixed(0), 'counterLife ms', el.counterLife.buildMs.toFixed(0));
+const CL = el.counterLife;
+console.log('sites', CL.settle.sites.length, CL.settle.sites.map((s) => s.kind).join(','), 'tris', CL.settle.geo.index.count / 3, 'wheel', CL.wheelGeo.index.count / 3, 'caps', CL.capsules.count);
