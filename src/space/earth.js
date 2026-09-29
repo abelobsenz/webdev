@@ -204,13 +204,17 @@ vec2 cirrusCloud(vec3 b, float fp, bool fine) {
 }
 float cloudR(float tau) { return tau / (tau + 13.0); }
 
-vec3 integrateAtmo(vec3 ro, vec3 rd, float t0, float t1, bool ground, vec3 sun, out vec3 T) {
+// jitK: how much of the per-pixel jitter to use (0 = the midpoint rule). The jitter hides the
+// banding of a few long steps through a grazing path; a steep path through the air is smooth
+// and the midpoint rule is exact enough, where a jitter would only lay its fixed dither
+// pattern (fine stripes) over the whole disc at the low step counts.
+vec3 integrateAtmo(vec3 ro, vec3 rd, float t0, float t1, bool ground, vec3 sun, float jitK, out vec3 T) {
   vec3 L = vec3(0.0);
   T = vec3(1.0);
   float tMid = ground ? t1 : clamp(-dot(ro, rd), t0, t1);
   float cosT = dot(rd, sun);
   float pR = phaseRayleigh(cosT), pM = phaseMie(cosT);
-  float jit = ign(gl_FragCoord.xy);
+  float jit = mix(0.5, ign(gl_FragCoord.xy), jitK);
   for (int seg = 0; seg < 2; seg++) {
     float a = seg == 0 ? t0 : tMid;
     float b = seg == 0 ? tMid : t1;
@@ -758,7 +762,8 @@ void main() {
   // atmosphere
   vec3 T;
   float tEnd = hitG ? tG.x : tA.y;
-  vec3 L = integrateAtmo(ro, rd, t0, tEnd, hitG, sun, T);
+  float jitK = hitG ? 1.0 - smoothstep(0.12, 0.4, dot(n, -rd)) : 1.0;
+  vec3 L = integrateAtmo(ro, rd, t0, tEnd, hitG, sun, jitK, T);
   // artistic: thin the blue veil over the disc a little, keep the limb at full strength
   L *= mix(1.0, uAtmoGain, smoothstep(0.08, 0.6, dot(n, -rd)) * (hitG ? 1.0 : 0.0));
   // the limb's glow: grazing rays through the lowest air, whiter haze beneath, blue above
