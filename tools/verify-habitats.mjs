@@ -71,10 +71,10 @@ ok(tri < 1.4e6, `halcyon ${Math.round(tri)} triangles (< 1.4M)`);
   ok(edges >= HAB_COLLECTOR.petals * 2, `halcyon collector parted into petals (${edges / 2} film runs round mid-span, >= ${HAB_COLLECTOR.petals})`);
   // terraces: the rim tier stands further out than the crown tier, all within the frame edge
   const glass = extent(hab.wheel, [0], (x, y, z) => Math.abs(z) > HAB.halfW - 20);
-  ok(glass.n > 0 && Math.abs(glass.zMax) < HAB.halfW + 7 * 2.5 + 4, `halcyon terraces reach |z| ${glass.zMax.toFixed(1)} m (< frame edge ${HAB.halfW + 21.5} m)`);
+  ok(glass.n > 0 && Math.abs(glass.zMax) <= HAB.halfW + 3, `halcyon terraces reach |z| ${glass.zMax.toFixed(1)} m (on the floor, whose edge is ${HAB.halfW + 3} m)`);
   const vault = extent(hab.wheel, [12, 13], (x, y, z) => Math.abs(z) < 30);
   const r0 = HAB.R - HAB.depth;
-  ok(vault.rMin > r0 - 20 && vault.rMin < r0 - 10, `halcyon park vault crown at ${vault.rMin.toFixed(1)} m (roof line ${r0} m, rises 14 m)`);
+  ok(vault.rMin > r0 - 20 && vault.rMin < r0 - 10, `halcyon park vault crown at ${vault.rMin.toFixed(1)} m (roof line ${r0} m, the vault rises 12 m)`);
   const hub = extent(hab.fixed, null, (x, y, z) => Math.abs(z) < 75);
   ok(hub.n > 0 && hub.rMax < HAB.hubR - 5, `halcyon despun axle and bearings within the hub bore (${hub.rMax.toFixed(1)} m < ${HAB.hubR - 5})`);
   ok(hab.lamps.every((l) => Number.isFinite(l.p.x + l.p.y + l.p.z)) && hab.wheelLamps.every((l) => Number.isFinite(l.p.x + l.p.y + l.p.z)), 'halcyon lamps finite');

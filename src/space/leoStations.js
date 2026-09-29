@@ -248,7 +248,7 @@ export function buildHabitat() {
   // edge-on to the Sun; side walls stepped back in four terraces of glazed apartments, each
   // tier's roof a planted balcony; a vaulted glass roof over the park, on bronze arch ribs.
   const TIERS = 4, tierH = depth / TIERS, step = 7;
-  const vault = [[-(hw - 4), 0], [-(hw - 18), 8], [-(hw - 38), 14], [hw - 38, 14], [hw - 18, 8], [hw - 4, 0]];
+  const vault = [[-(hw - 22), 0], [-(hw - 30), 6], [-(hw - 44), 12], [hw - 44, 12], [hw - 30, 6], [hw - 22, 0]];
   for (let k = 0; k < segs; k++) {
     const a = (k / segs) * TAU;
     W.push(rotZ(a));
@@ -264,14 +264,14 @@ export function buildHabitat() {
     for (const s of [-1, 1]) {
       // terraces: the lowest tier (at the rim, full gravity) stands furthest out
       for (let t = 0; t < TIERS; t++) {
-        const y = R - tierH * (t + 0.5), z = s * (hw + step * (TIERS - 1 - t) - step * 1.5);
+        const y = R - tierH * (t + 0.5), z = s * (hw - step * t);   // tier 0 on the floor edge, each one above set back 7 m
         W.box(0, y, z, arcM * (1 - t * 0.02), tierH - 2.4, 2, CK.GLASS);             // glazed apartments
         W.box(0, y - tierH / 2 + 0.2, z - s * 3.6, arcM, 1.6, 7.2, t === TIERS - 1 ? CK.BRONZE : CK.DECK);   // floor slab / balcony
         if (t < TIERS - 1 && k % 2 === 0) W.box(0, y - tierH / 2 - 1.2, z - s * 5.0, arcM * 0.86, 1.4, 3.4, CK.CONSERVATORY);   // planters on the terrace above
         if (k % 3 === 0) W.box(0, y, z + s * 0.9, 1.2, tierH - 2.4, 1.4, CK.BRONZE);  // mullion piers
       }
-      W.box(0, R - depth / 2, s * (hw - 12), arcM, depth, 3, CK.HULL);              // pressure wall behind the terraces
-      W.box(0, r0 - 2, s * (hw - 3), arcI, 4, 6, CK.BRONZE);                        // roof edge beam
+      W.box(0, R - depth / 2, s * (hw - 25), arcM, depth, 3, CK.HULL);              // pressure wall behind the terraces
+      W.box(0, r0 - 2, s * (hw - 22), arcI, 4, 6, CK.BRONZE);                       // roof edge beam, over the top tier
     }
     // the park roof: a five-facet glass vault, bronze arch ribs every sixth bay
     for (let v = 0; v < vault.length - 1; v++) {
@@ -282,15 +282,15 @@ export function buildHabitat() {
       if (k % 6 === 0) W.box(0, -1.2, 0, 2.4, 2.4, len + 1.2, CK.BRONZE);
       W.pop();
     }
-    if (k % 2 === 1) W.box(0, r0 - 18, 0, arcI * 0.22, 1, 2 * hw - 90, CK.DARK);    // chevron louvre on the crown
+    if (k % 2 === 1) W.box(0, r0 - 14.6, 0, arcI * 0.22, 1, 2 * hw - 90, CK.DARK);  // chevron louvre, just over the crown glass
     if (k % 6 === 0) {
-      W.box(arcM / 2, R - depth / 2, 0, 3, depth + 10, 2 * hw + 8, CK.BRONZE);      // frame
-      for (const s of [-1, 1]) W.box(arcM / 2, R - depth / 2, s * (hw + step * 2.5 + 2), 4, depth + 6, 4, CK.BRONZE);   // terrace frame edge
+      W.box(arcM / 2, R - depth / 2, 0, 3, depth + 10, 2 * (hw - 23), CK.BRONZE);   // bulkhead frame, inside the terraces
+      for (const s of [-1, 1]) for (let t = 0; t < TIERS; t++) W.box(arcM / 2, R - tierH * (t + 0.5), s * (hw - step * t + 1.4), 3, tierH, 2.8, CK.BRONZE);   // terrace frame, stepped with the tiers
     }
     W.pop();
     const c = Math.cos(a), sn = Math.sin(a);
-    if (k % 6 === 0) for (const s of [-1, 1]) wheelLamps.push({ p: V(-sn * (R + 7), c * (R + 7), s * (hw + step * 2.5 + 3)), r: 2.2, color: LAMP.AMBER, i: 1.6, breathe: 0.12, phase: k / segs });   // on the frames only
-    if (k % 4 === 1) wheelLamps.push({ p: V(-sn * (r0 - 17), c * (r0 - 17), 0), r: 2.6, color: WARM, i: 1.7 });
+    if (k % 6 === 0) for (const s of [-1, 1]) wheelLamps.push({ p: V(-sn * (R + 7), c * (R + 7), s * (hw + 3.2)), r: 2.2, color: LAMP.AMBER, i: 1.6, breathe: 0.12, phase: k / segs });   // on the frames only
+    if (k % 4 === 1) wheelLamps.push({ p: V(-sn * (r0 - 16), c * (r0 - 16), 0), r: 2.6, color: WARM, i: 1.7 });
     if (k % 8 === 4) for (const s of [-1, 1]) wheelLamps.push({ p: V(-sn * (R + 47), c * (R + 47), s * (hw - 30)), r: 1.8, color: LAMP.RED, i: 2.4, breathe: 0.5, phase: k / 40 });
   }
   for (let k = 0; k < HAB.spokes; k++) {
