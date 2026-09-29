@@ -323,8 +323,10 @@ function setbackTower(C, cx, cz, sx, sz, hmax, fk, dens = 0.6) {
   } else {
     // a raked top: the roof sloping across the tower, glazed, lit from within
     B.push(new THREE.Matrix4().makeTranslation(tx, y, tz));
-    const pts = [[-tw / 2, 0], [tw / 2, 0], [tw / 2, Math.min(36, tw * 0.45)]];
-    B.loft([{ z: -td / 2, pts }, { z: td / 2, pts }], glassy ? glassK : CK.LANTERN, { capStart: stoneK, capEnd: stoneK });
+    // inset 0.3 m so the roof sits on the tier instead of sharing its top face
+    const rw = tw / 2 - 0.3, rd = td / 2 - 0.3;
+    const pts = [[-rw, 0], [rw, 0], [rw, Math.min(36, tw * 0.45)]];
+    B.loft([{ z: -rd, pts }, { z: rd, pts }], glassy ? glassK : CK.LANTERN, { capStart: stoneK, capEnd: stoneK });
     B.pop();
   }
   // rooftop plant and a maintenance hoist
