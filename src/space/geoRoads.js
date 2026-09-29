@@ -301,10 +301,27 @@ export function buildWaterStore() {
   const side = (phi, y, r = ap) => V(Math.cos(phi) * r, y, Math.sin(phi) * r);
   const F = STORE.frames, yLo = F[0], yHi = F[F.length - 1];
   // the cage: octagonal frames, eight longerons, bronze nodes
+  // each ring frame a box truss 24 m deep (it was one 18 m pipe): pearl chords, dark lacing and
+  // ties; the inner chords keep the old pipe's inner face, so the ribbon's climbers and the
+  // drones inside see the same clear bore
+  const SA = ap - 6, SD = 24, SY = 6, SP = 8;
+  const sc = (k, a, y) => { const ang = Math.PI / 8 + (k % 8) * Math.PI / 4, r = a / Math.cos(Math.PI / 8); return V(Math.cos(ang) * r, y, Math.sin(ang) * r); };
   for (const y of F) {
-    const loop = []; for (let k = 0; k < 8; k++) loop.push(oct(k, y)); loop.push(loop[0].clone());
-    B.tube(loop, 9, 8, CK.HULL);
-    for (let k = 0; k < 8; k++) { const p = oct(k, y); B.box(p.x, p.y, p.z, 30, 30, 30, CK.BRONZE); }
+    for (const a of [SA, SA + SD]) for (const dy of [-SY, SY]) {
+      const loop = []; for (let k = 0; k < 8; k++) loop.push(sc(k, a, y + dy)); loop.push(loop[0].clone());
+      B.tube(loop, 3, 8, CK.HULL);
+    }
+    for (let k = 0; k < 8; k++) {
+      const at = (a, u, dy) => sc(k, a, y + dy).lerp(sc(k + 1, a, y + dy), u);
+      for (const dy of [-SY, SY]) for (let m = 0; m < SP; m++) {
+        const [a0, a1] = m % 2 ? [SA + SD, SA] : [SA, SA + SD];
+        B.tube([at(a0, m / SP + 0.005, dy), at(a1, (m + 1) / SP - 0.005, dy)], 1.3, 6, DK.GRIME);
+      }
+      for (let m = 1; m < SP; m++) for (const a of [SA, SA + SD]) B.tube([at(a, m / SP, -SY), at(a, m / SP, SY)], 1, 6, DK.GRIME);
+      const p = oct(k, y), q = sc(k, SA + SD, y);
+      B.box(p.x, p.y, p.z, 30, 30, 30, CK.BRONZE);
+      B.box(q.x, q.y, q.z, 16, 16, 16, CK.BRONZE);
+    }
   }
   for (let k = 0; k < 8; k++) B.tube([oct(k, yLo), oct(k, yHi)], 7, 8, CK.DARK);
   for (let i = 0; i < F.length - 1; i++) for (let k = 0; k < 8; k += 2) B.tube([oct(k, F[i]), oct(k + 1, F[i + 1])], 2.6, 6, CK.DARK);
