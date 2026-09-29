@@ -59,7 +59,8 @@ export function buildGateway() {
         B.pop();
         lamps.push(...dc.lamps);
         berths.push({ p: dc.face, dir: V(0, 0, s) });
-        for (let k = 1; k <= 4; k++) lamps.push({ p: p.clone().add(V(0, 0, s * k * 70)), r: 3.5, color: s > 0 ? LAMP.TEAL : LAMP.AMBER, i: 2.4, phase: k * 0.15, breathe: 0.8 });
+        // lead-in lights on the collar's face (not a string of lamps hanging in empty space)
+        for (const x of [-12, 12]) lamps.push({ p: p.clone().add(V(x * sn, -x * c, s * 6)), r: 2.2, color: s > 0 ? LAMP.TEAL : LAMP.AMBER, i: 2.6, phase: f, breathe: 0.8 });
       }
       lamps.push({ p: tip.clone().add(V(c * 18, sn * 18, 0)), r: 5, color: i % 2 ? LAMP.RED : LAMP.GREEN, i: 3.2, breathe: 0.3 });
     }
@@ -144,6 +145,20 @@ export function buildGatewayWheel(w) {
     B.tube([V(c * (GATE.SPINE_R + 58), s * (GATE.SPINE_R + 58), 0), V(c * (w.R - w.r + 4), s * (w.R - w.r + 4), 0)], 9, 8, CK.HULL);
     B.tube([V(c * (GATE.SPINE_R + 58), s * (GATE.SPINE_R + 58), 10), V(c * (w.R - w.r + 4), s * (w.R - w.r + 4), 10)], 2.5, 5, CK.CONDUIT);
   }
-  for (let i = 0; i < 24; i++) { const a = (i / 24) * TAU; lamps.push({ p: V(Math.cos(a) * (w.R + w.r + 3), Math.sin(a) * (w.R + w.r + 3), 0), r: 4, color: i % 6 ? LAMP.WHITE : LAMP.AMBER, i: 2.4, phase: i / 24, breathe: 0.4 }); }
+  // hoop frames round the rim's section every 7.5 degrees, heavier at each spoke, and the
+  // spokes' load-bearing trusses round their lift shafts: the wheel reads as built, not turned
+  for (let i = 0; i < 48; i++) {
+    const a = (i / 48) * TAU, heavy = i % 12 === 0;
+    B.push(new THREE.Matrix4().makeRotationZ(a).multiply(new THREE.Matrix4().makeTranslation(w.R, 0, 0)).multiply(new THREE.Matrix4().makeRotationX(Math.PI / 2)));
+    B.torus(w.r + (heavy ? 2.2 : 1.2), heavy ? 2.4 : 1.2, 18, 4, heavy ? CK.BRONZE : CK.DARK);
+    B.pop();
+  }
+  for (let i = 0; i < 4; i++) {
+    const a = (i / 4) * TAU, c = Math.cos(a), s = Math.sin(a);
+    truss(B, V(c * (GATE.SPINE_R + 64), s * (GATE.SPINE_R + 64), 0), V(c * (w.R - w.r - 8), s * (w.R - w.r - 8), 0), 32, 26, 0.6, CK.DARK);
+  }
+  // running lights on the heavy frames only, and a warm lamp at each spoke's rim portal
+  for (let i = 0; i < 8; i++) { const a = (i / 8) * TAU + TAU / 16; lamps.push({ p: V(Math.cos(a) * (w.R + w.r + 3), Math.sin(a) * (w.R + w.r + 3), 0), r: 4, color: i % 2 ? LAMP.WHITE : LAMP.AMBER, i: 2.4, phase: i / 8, breathe: 0.4 }); }
+  for (let i = 0; i < 4; i++) { const a = (i / 4) * TAU; lamps.push({ p: V(Math.cos(a) * (w.R - w.r - 3), Math.sin(a) * (w.R - w.r - 3), 14), r: 3, color: LAMP.AMBER, i: 2.0 }); }
   return { geo: B.geometry(), lamps };
 }
