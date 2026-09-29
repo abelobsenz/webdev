@@ -49,6 +49,8 @@ uniform float uPixAng;      // radians per pixel
 uniform float uCloudRot;    // cloud drift (rad about the axis)
 uniform float uCloudPh;     // 0..1 cross-fade phase
 uniform float uTime;
+uniform float uCubeN;       // bake cube face size (texels)
+uniform float uTexKm;       // one bake texel on the ground (km)
 uniform vec4 uTown[${ALL_TOWNS.length}];
 uniform vec4 uArcA[${ARCS.length}];
 uniform vec4 uArcB[${ARCS.length}];
@@ -65,6 +67,164 @@ vec3 rotYm(vec3 p, float a) { float c = cos(a), s = sin(a); return vec3(c * p.x 
 
 // site frame (x west, y up, z north) from the Moon frame
 vec3 toSite(vec3 m) { return vec3(m.z, m.x, m.y); }
+
+// ---- close-range ground: the bake is 2.7 km a texel, so below a few kilometres a pixel the
+// maps are read with a cubic B-spline (no bilinear diamonds in the relief) and a filtered
+// procedural layer carries the ground from kilometre hills down to ten-metre hummocks ----
+
+// cubic B-spline read of both bake maps at one direction: per face, four bilinear taps at
+// offset positions (a tap past the face edge lands on the neighbouring face, which is right)
+void cubeBSpline(vec3 d, out vec4 A, out vec4 Nm) {
+  vec3 a = abs(d);
+  float ma = max(a.x, max(a.y, a.z));
+  vec3 q = d / ma;
+  vec3 isMaj = step(vec3(ma), a);
+  // the two minor axes as texel coordinates (each axis on its own, the major one ignored)
+  vec3 x = (q * 0.5 + 0.5) * uCubeN - 0.5;
+  vec3 i = floor(x), f = x - i;
+  vec3 f2 = f * f, f3 = f2 * f;
+  vec3 w0 = (1.0 - 3.0 * f + 3.0 * f2 - f3) / 6.0;
+  vec3 w1 = (4.0 - 6.0 * f2 + 3.0 * f3) / 6.0;
+  vec3 w2 = (1.0 + 3.0 * f + 3.0 * f2 - 3.0 * f3) / 6.0;
+  vec3 w3 = f3 / 6.0;
+  vec3 g0 = w0 + w1, g1 = w2 + w3;
+  vec3 h0 = ((i - 1.0 + w1 / g0 + 0.5) / uCubeN) * 2.0 - 1.0;
+  vec3 h1 = ((i + 1.0 + w3 / g1 + 0.5) / uCubeN) * 2.0 - 1.0;
+  // pick the two minor axes (u, v) in a fixed order
+  vec3 ax = isMaj.x > 0.5 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+  vec3 ay = isMaj.z > 0.5 ? vec3(0.0, 1.0, 0.0) : vec3(0.0, 0.0, 1.0);
+  if (isMaj.y > 0.5) { ax = vec3(1.0, 0.0, 0.0); ay = vec3(0.0, 0.0, 1.0); }
+  vec3 major = q * isMaj;
+  float u0 = dot(h0, ax), u1 = dot(h1, ax), v0 = dot(h0, ay), v1 = dot(h1, ay);
+  float gu0 = dot(g0, ax), gu1 = dot(g1, ax), gv0 = dot(g0, ay), gv1 = dot(g1, ay);
+  vec3 d00 = major + ax * u0 + ay * v0, d10 = major + ax * u1 + ay * v0;
+  vec3 d01 = major + ax * u0 + ay * v1, d11 = major + ax * u1 + ay * v1;
+  A = (textureLod(uMoonA, d00, 0.0) * gu0 + textureLod(uMoonA, d10, 0.0) * gu1) * gv0
+    + (textureLod(uMoonA, d01, 0.0) * gu0 + textureLod(uMoonA, d11, 0.0) * gu1) * gv1;
+  Nm = (textureLod(uMoonN, d00, 0.0) * gu0 + textureLod(uMoonN, d10, 0.0) * gu1) * gv0
+     + (textureLod(uMoonN, d01, 0.0) * gu0 + textureLod(uMoonN, d11, 0.0) * gu1) * gv1;
+}
+
+// 3D simplex noise with its analytic gradient (x: value about -1..1, yzw: d/dp). Gradient noise
+// on a skewed simplex lattice: isotropic, so the relief it shades has no grid in it (the value
+// noise it replaces lit up as square "blocks" under a low Sun at orbital range)
+vec4 sdnoise(vec3 v) {
+  const vec2 C = vec2(1.0 / 6.0, 1.0 / 3.0);
+  vec3 i = floor(v + dot(v, C.yyy));
+  vec3 x0 = v - i + dot(i, C.xxx);
+  vec3 g = step(x0.yzx, x0.xyz);
+  vec3 l = 1.0 - g;
+  vec3 i1 = min(g.xyz, l.zxy);
+  vec3 i2 = max(g.xyz, l.zxy);
+  vec3 x1 = x0 - i1 + C.xxx;
+  vec3 x2 = x0 - i2 + C.yyy;
+  vec3 x3 = x0 - 0.5;
+  i = sn_mod289(i);
+  vec4 p = sn_permute(sn_permute(sn_permute(i.z + vec4(0.0, i1.z, i2.z, 1.0)) + i.y + vec4(0.0, i1.y, i2.y, 1.0)) + i.x + vec4(0.0, i1.x, i2.x, 1.0));
+  vec4 j = p - 49.0 * floor(p / 49.0);
+  vec4 x_ = floor(j / 7.0);
+  vec4 y_ = floor(j - 7.0 * x_);
+  vec4 x = (x_ * 2.0 + 0.5) / 7.0 - 1.0;
+  vec4 y = (y_ * 2.0 + 0.5) / 7.0 - 1.0;
+  vec4 h = 1.0 - abs(x) - abs(y);
+  vec4 b0 = vec4(x.xy, y.xy);
+  vec4 b1 = vec4(x.zw, y.zw);
+  vec4 s0 = floor(b0) * 2.0 + 1.0;
+  vec4 s1 = floor(b1) * 2.0 + 1.0;
+  vec4 sh = -step(h, vec4(0.0));
+  vec4 a0 = b0.xzyw + s0.xzyw * sh.xxyy;
+  vec4 a1 = b1.xzyw + s1.xzyw * sh.zzww;
+  vec3 g0 = vec3(a0.xy, h.x), g1 = vec3(a0.zw, h.y), g2 = vec3(a1.xy, h.z), g3 = vec3(a1.zw, h.w);
+  vec4 nrm = inversesqrt(vec4(dot(g0, g0), dot(g1, g1), dot(g2, g2), dot(g3, g3)));
+  g0 *= nrm.x; g1 *= nrm.y; g2 *= nrm.z; g3 *= nrm.w;
+  vec4 m = max(0.5 - vec4(dot(x0, x0), dot(x1, x1), dot(x2, x2), dot(x3, x3)), 0.0);
+  vec4 m2 = m * m;
+  vec4 m3 = m2 * m;
+  vec4 m4 = m2 * m2;
+  vec4 pdx = vec4(dot(g0, x0), dot(g1, x1), dot(g2, x2), dot(g3, x3));
+  vec3 gr = -8.0 * (m3.x * pdx.x * x0 + m3.y * pdx.y * x1 + m3.z * pdx.z * x2 + m3.w * pdx.w * x3)
+          + m4.x * g0 + m4.y * g1 + m4.z * g2 + m4.w * g3;
+  return vec4(dot(m4, pdx), gr) * 105.0;
+}
+
+const mat3 GROT = mat3(0.00, 0.80, 0.60, -0.80, 0.36, -0.48, -0.60, -0.48, 0.64);
+
+struct Ground {
+  vec3 grad;      // slope of the rolling relief (tangent plane): hummocks, swales, turf
+  vec3 rgrad;     // slope of the same relief ridged: crags, aretes and gullies for bare rock
+  float h;        // the procedural relief's height (km), for strata
+  float broad;    // hill-scale field (1.6 km .. 150 m), about -1..1, 0 where unresolved
+  float fine;     // hummock-scale field (70 m .. 7 m), about -1..1, 0 where unresolved
+  float dw;       // how much of the procedural layer is resolved at all (0 from orbit)
+};
+
+// eight octaves from 1.6 km down to 7 m on a domain-warped simplex lattice; each fades to its
+// mean (zero) as it shrinks below two pixels, so the ground never sparkles and never pops.
+// Erosion-like damping: an octave's amplitude falls where the octaves above it are already
+// steep, so slopes stay clean and the detail gathers in the hollows and on the flats.
+Ground groundField(vec3 up, float fp) {
+  Ground g;
+  g.grad = vec3(0.0); g.rgrad = vec3(0.0); g.h = 0.0; g.broad = 0.0; g.fine = 0.0;
+  float lam = 1.6;
+  g.dw = 1.0 - smoothstep(0.12 * lam, 0.45 * lam, fp);
+  if (g.dw <= 0.0) return g;
+  vec3 p = up * (RM / lam);
+  // the warp: a gentle low-frequency flow bends every octave's lattice into sweeping lines
+  vec4 wn = sdnoise(p * 0.31 + 23.0);
+  p += wn.yzw * 0.22;
+  float amp = 1.0;
+  vec3 acc = vec3(0.0);
+  mat3 back = mat3(1.0);          // d(p)/d(position), transposed: gradients map through it
+  for (int i = 0; i < 8; i++) {
+    float w = 1.0 - smoothstep(0.12 * lam, 0.45 * lam, fp);
+    if (w <= 0.0) break;
+    vec4 n = sdnoise(p);
+    vec3 gp = back * n.yzw;                       // this octave's gradient, Moon frame
+    acc += gp * (amp * 0.45);
+    float ero = 1.0 / (1.0 + 0.9 * dot(acc, acc));
+    float a = amp * w * (i < 2 ? 1.0 : ero);
+    g.grad += gp * (a * 0.45);
+    // ridged: 1 - |n|, a crest wherever the noise crosses zero
+    g.rgrad -= gp * (a * 0.55 * sign(n.x));
+    g.h += n.x * a * lam * 0.1;
+    if (i < 3) g.broad += n.x * a * 0.8; else if (i < 7) g.fine += n.x * a * 1.1;
+    p = GROT * p * 2.2;
+    back = back * transpose(GROT);
+    lam /= 2.2;
+    amp *= 0.55;
+  }
+  g.grad -= up * dot(g.grad, up);
+  g.rgrad -= up * dot(g.rgrad, up);
+  return g;
+}
+
+// tree crowns in woodland, ~cellKm apart: each a dome over a dark gap; returns the crowns'
+// slope for the lighting (xyz) and the fraction of ground in shade between them (w), falling
+// to the mean (no slope, the average gap) as the crowns shrink below a few pixels
+vec4 canopy(vec3 up, float cellKm, float fp, float seed) {
+  float res = 1.0 - smoothstep(0.12, 0.4, fp / cellKm);
+  if (res <= 0.0) return vec4(0.0, 0.0, 0.0, 0.3);
+  vec3 q = up * (RM / cellKm) + seed;
+  vec3 base = floor(q - 0.5);
+  vec3 sl = vec3(0.0);
+  float cover = 0.0;
+  for (int i = 0; i < 2; i++) for (int j = 0; j < 2; j++) for (int k = 0; k < 2; k++) {
+    vec3 cell = base + vec3(float(i), float(j), float(k));
+    vec3 h = hash33(cell + 5.3);
+    vec3 c = cell + 0.15 + 0.7 * hash33(cell + 19.1);
+    float rr = 0.42 + 0.3 * h.x;
+    vec3 dv = q - c;
+    dv -= up * dot(dv, up);
+    float x = length(dv) / rr;
+    if (x >= 1.0) continue;
+    float dome = sqrt(1.0 - x * x);
+    cover = max(cover, dome);
+    // a dome's slope, dz/dr = -x / sqrt(1 - x^2), capped at the crown's edge
+    sl -= dv / rr * min(1.0 / max(dome, 0.25), 4.0) * 0.5 * step(0.2, h.y);
+  }
+  float gap = 1.0 - smoothstep(0.0, 0.35, cover);
+  return vec4(sl * res, mix(0.3, gap, res));
+}
 
 float cloudAt(vec3 d, float lod, float fp) {
   vec3 q = rotYm(d, uCloudRot);
@@ -264,7 +424,7 @@ float shipLights(vec3 p, float fp, float t) {
 
 // fields, hedgerows and orchards around the Landing (site ortho coordinates, km): estates of
 // a few kilometres, each with its own field pattern and orientation, woods between them
-vec3 farmland(vec2 q, vec3 base, float fp) {
+vec3 farmland(vec2 q, vec3 base, float fp, float gap, out float woodF) {
   // estates: jittered cells ~2.6 km across
   vec2 eg = q / 2.6;
   vec2 ei = floor(eg);
@@ -299,10 +459,18 @@ vec3 farmland(vec2 q, vec3 base, float fp) {
   float hedge = max(1.0 - smoothstep(0.03, 0.03 + fwv.x, e2.x), 1.0 - smoothstep(0.03, 0.03 + fwv.y, e2.y)) * min(1.0, 0.03 / max(fwv.x, 0.03));
   vec3 c = mix(crop, vec3(0.022, 0.04, 0.018), hedge * 0.7);
   // woods where the estates meet, and whole wooded estates
-  float wood = smoothstep(0.55, 0.75, snoise(vec3(q * 0.9, 3.0)) * 0.5 + 0.5) + step(0.82, he);
-  c = mix(c, vec3(0.02, 0.038, 0.016), clamp(wood, 0.0, 1.0));
+  // (their margins frayed into spurs and clearings where they resolve, not smooth blobs)
+  float fray = snoise(vec3(q * 4.5, 7.0)) * 0.1 * (1.0 - smoothstep(0.05, 0.15, fp)) + snoise(vec3(q * 15.0, 1.0)) * 0.05 * (1.0 - smoothstep(0.015, 0.05, fp));
+  float wood = clamp(smoothstep(0.55, 0.75, snoise(vec3(q * 0.9, 3.0)) * 0.5 + 0.5 + fray) + step(0.82, he), 0.0, 1.0);
+  // the stands within a wood: darker conifer, brighter broadleaf and birch, and the crowns
+  float stand = snoise(vec3(q * 2.3, 9.0)) * 0.5 + 0.5;
+  vec3 woodC = mix(vec3(0.016, 0.032, 0.015), vec3(0.03, 0.05, 0.02), stand) * (1.0 - 0.5 * gap);
+  // the hedges are tree lines: their crowns show too
+  c = mix(c, c * (1.0 - 0.4 * gap), hedge * 0.6);
+  c = mix(c, woodC, wood);
+  woodF = max(wood, hedge * 0.6);
   float res = 1.0 - smoothstep(0.06, 0.2, fp);
-  vec3 mean = mix(vec3(0.065, 0.08, 0.036), vec3(0.02, 0.038, 0.016), clamp(wood, 0.0, 1.0) * 0.8);
+  vec3 mean = mix(vec3(0.065, 0.08, 0.036), vec3(0.02, 0.038, 0.016), wood * 0.8);
   return mix(mean, c, res);
 }
 
@@ -314,10 +482,12 @@ float horizonShadow(vec3 up, float h0, vec3 sun, float sinE) {
   float dist = 1.5;
   for (int i = 0; i < 8; i++) {
     vec3 q = normalize(up + ts * (dist / RM));
-    float lod = max(log2(dist / 2.7), 0.0);
+    // one level blurrier than the march step: the occluder is a smooth ridge, not texels
+    float lod = max(log2(dist / uTexKm), 0.0) + 0.7;
     float hq = max(decodeH(textureLod(uMoonA, q, lod).a), 0.0);
     float rise = hq - h0 - dist * dist / (2.0 * RM);
-    vis = min(vis, clamp((dist * tanE - rise) / (dist * 0.035) + 0.5, 0.0, 1.0));
+    // penumbra: the Sun's half-degree disc over the distance, and never sharper than 40 m
+    vis = min(vis, clamp((dist * tanE - rise) / (dist * 0.0093 + 0.04 + dist * 0.02) + 0.5, 0.0, 1.0));
     dist *= 1.85;
   }
   return vis;
@@ -347,12 +517,27 @@ void main() {
     float fp = max(tG * uPixAng, 1e-4);           // km per pixel
     vec4 A = texture(uMoonA, up);
     vec4 Nt = texture(uMoonN, up);
+    // magnified (a texel spans several pixels): the B-spline read instead of bilinear
+    float magK = 1.0 - smoothstep(0.25, 0.8, fp / uTexKm);
+    if (magK > 0.0) {
+      vec4 Ab, Nb;
+      cubeBSpline(up, Ab, Nb);
+      A = mix(A, Ab, magK);
+      Nt = mix(Nt, Nb, magK);
+    }
     float h = decodeH(A.a);
     vec3 alb = A.rgb * A.rgb;                       // land, or the sea bed under water
     vec3 nB = normalize(Nt.rgb * 2.0 - 1.0);
-    // coastline from the filtered water mask, a pixel wide wherever it is drawn
-    float aw = max(fwidth(Nt.a) * 0.75, 0.02);
-    float waterF = smoothstep(0.5 - aw, 0.5 + aw, Nt.a);
+    Ground gf = groundField(up, fp);
+    // tree crowns ~14 m apart wherever there are woods (resolved only close in)
+    vec4 crowns = canopy(up, 0.014, fp, 3.0);
+    float vegF = 0.0;
+    // coastline from the filtered water mask (which changes across about a texel), a pixel
+    // wide wherever it is drawn; close in, the hill-scale field frays it into coves and spits
+    // instead of the bake's smooth bilinear lobes
+    float aw = clamp(0.6 * fp / uTexKm, 0.02, 0.5);
+    float coastM = Nt.a + gf.broad * 0.16 * gf.dw * smoothstep(0.02, 0.2, Nt.a) * (1.0 - smoothstep(0.8, 0.98, Nt.a));
+    float waterF = smoothstep(0.5 - aw, 0.5 + aw, coastM);
     // near the Landing: the exact coast of the Bay and the farmland (site ortho coordinates)
     vec3 loc = uCamS + toSite(rd) * tG;
     float siteD = length(loc.xz);
@@ -366,8 +551,11 @@ void main() {
       float hs = bd > 0.0 ? -min(0.3, 0.0015 + bd * 0.03) : 0.012 + 0.004 * min(-bd, 8.0);
       h = mix(h, hs, nearSite);
       bed = mix(bed, mix(vec3(0.3, 0.27, 0.2), vec3(0.05, 0.06, 0.05), smoothstep(0.005, 0.12, -hs)), nearSite);
-      vec3 fa = farmland(loc.xz, alb, fp);
-      alb = mix(alb, fa, (1.0 - smoothstep(9.0, 18.0, siteD)) * smoothstep(2.6, 4.0, siteD));
+      float farmWood;
+      vec3 fa = farmland(loc.xz, alb, fp, crowns.w, farmWood);
+      float farmK = (1.0 - smoothstep(9.0, 18.0, siteD)) * smoothstep(2.6, 4.0, siteD);
+      alb = mix(alb, fa, farmK);
+      vegF = farmWood * farmK;
       // inside the farmland: the town's own parkland and commons, lawn and meadow round the
       // terraces and the domes (not the bare ground of the bake, a pale halo round the town)
       vec3 park = mix(vec3(0.05, 0.078, 0.03), vec3(0.075, 0.088, 0.042), snoise(vec3(loc.xz * 2.2, 5.0)) * 0.5 + 0.5);
@@ -393,6 +581,70 @@ void main() {
     }
     float depth = max(-h, 0.0015);
     float hl = max(h, 0.0);
+    // ---- slope-, altitude- and shore-aware ground at close range ----
+    // the bake's biome is read back from its colour (vegetation is the green excess over the
+    // grey of rock and sand); within it the procedural field lays woods and glades, scree on
+    // the steep, bare heights above the tree line, a beach and a wet margin along the coast
+    float roughK = 0.0;
+    float rockF = 0.0;
+    if (gf.dw > 0.0) {
+      float bright = dot(alb, vec3(0.3, 0.5, 0.2));
+      float gex = (alb.g - 0.5 * (alb.r + alb.b)) / max(bright, 1e-3);
+      float snowF = smoothstep(0.35, 0.5, bright);
+      float veg = smoothstep(0.16, 0.48, gex) * (1.0 - snowF);
+      float siteK = 1.0 - nearSite * (1.0 - wk);                 // the Landing's own ground stays as drawn
+      // tree line: woods thin above 2 km, the field pushing it up the valleys and down the spurs
+      veg *= 1.0 - smoothstep(1.9, 3.1, hl + 0.45 * gf.broad + 3.0 * gf.h);
+      // steepness: the bake's slope and the procedural relief together
+      float nuB = max(dot(nB, up), 0.2);
+      float slope0 = length(nB - up * nuB) / nuB;
+      float slope = slope0 + length(gf.grad) * mix(0.12, 0.26, 1.0 - veg);
+      float steep = smoothstep(0.26, 0.5, slope + 0.08 * gf.fine);
+      rockF = clamp(max(steep, 1.0 - veg - snowF - 0.2), 0.0, 1.0) * (1.0 - snowF);
+      roughK = mix(0.1, 0.34, rockF) * (1.0 - 0.5 * snowF);
+      vec3 g = alb;
+      // vegetation: woods where the field is low and in the hollows, glades and meadow on the
+      // rises; mean kept near the bake's own colour
+      float woods = smoothstep(-0.25, 0.25, -gf.broad - 0.35 * gf.fine + 0.6 * (0.045 - bright) / 0.03);
+      // close in, the woods are trees: crowns ~14 m apart catching the light, dark gaps between
+      vec3 turf = alb * vec3(1.22, 1.16, 1.02) + vec3(0.006, 0.004, 0.0);
+      turf *= 1.0 + 0.22 * gf.fine;
+      // meadow flowers and dry grass patches on the open rises, where they resolve
+      turf = mix(turf, turf * vec3(1.25, 1.12, 0.8), smoothstep(0.35, 0.8, gf.fine) * 0.5);
+      vec3 wood = alb * vec3(0.66, 0.74, 0.62) * (1.0 - 0.55 * crowns.w);
+      vec3 vegC = mix(turf, wood, woods);
+      g = mix(g, vegC, veg);
+      vegF = max(vegF, veg * woods);
+      // rock and regolith: grey anorthosite mottled by the field, dark boulder-strewn hollows,
+      // pale scree on the steep faces, and on the steepest the strata of the old lava flows
+      // (bands ~7 m thick in height, drawn where a band spans a few pixels on the slope)
+      vec3 rockC = vec3(0.2, 0.193, 0.18) * (0.84 + 0.2 * gf.broad) * (1.0 + 0.3 * gf.fine);
+      rockC = mix(rockC, vec3(0.27, 0.262, 0.245), steep * 0.5 * smoothstep(0.0, 0.6, gf.fine));
+      float bandPx = 0.007 / max(slope, 0.05) / fp;
+      float strataK = steep * smoothstep(2.0, 4.5, bandPx);
+      float layer = sin((hl + gf.h) * 6.2832 / 0.007);
+      float layerH = hash12(vec2(floor((hl + gf.h) / 0.007), 7.0));
+      rockC *= 1.0 + strataK * (0.12 * layer + 0.14 * (layerH - 0.5));
+      // hollows collect the finer, darker fines; crests are scoured pale
+      rockC *= 1.0 - 0.18 * smoothstep(0.1, 0.6, -gf.fine) * (1.0 - steep);
+      g = mix(g, mix(alb * (0.86 + 0.2 * gf.broad + 0.24 * gf.fine), rockC, steep), rockF * (1.0 - veg));
+      g = mix(g, rockC, steep * veg);                         // cliffs break through the woods
+      // snow: drifts in the hollows, scoured from the crests, wind-bared rock where it is steep
+      g = mix(g, g * (0.94 + 0.08 * gf.fine), snowF);
+      g = mix(g, rockC * 0.8, snowF * clamp(steep * 0.7 + smoothstep(0.3, 0.8, gf.fine) * 0.3, 0.0, 1.0));
+      // the shore: dry sand above the swash, a darker wet band at it, wrack along the tideline
+      float shoreF = smoothstep(0.1, 0.36, coastM + 0.05 * gf.fine) * (1.0 - waterF);
+      vec3 sand = vec3(0.34, 0.31, 0.24) * (0.9 + 0.12 * gf.fine);
+      sand = mix(sand, sand * vec3(0.72, 0.76, 0.8), steep);       // shingle and rock where it is steep
+      g = mix(g, sand, shoreF * (1.0 - snowF) * 0.9);
+      float wet = smoothstep(0.34, 0.48, coastM) * (1.0 - waterF);
+      g *= 1.0 - 0.38 * wet;
+      float wd = (coastM - 0.3) / max(0.02, aw);
+      float wrack = exp(-wd * wd) * smoothstep(0.3, 0.8, gf.fine + 0.3) * (1.0 - waterF);
+      g = mix(g, vec3(0.06, 0.07, 0.04), wrack * 0.4);
+      alb = mix(alb, g, gf.dw * siteK * (1.0 - nearSite * (1.0 - smoothstep(9.0, 16.0, siteD)) * (1.0 - wk)));
+      vegF *= gf.dw;
+    }
     float mu = dot(up, sun);
     // the settled Moon (lunarNetwork.js): towns with their street plans, highways and rail
     // corridors, harbours along the coasts; grey built-up ground and pale roads by day
@@ -434,6 +686,10 @@ void main() {
         vec3 gn = vec3(snoise(e), snoise(e + 5.2), snoise(e + 9.7)) * 0.08 * (1.0 - smoothstep(0.03, 0.1, fp / 0.35));
         grad += gn - up * dot(gn, up);
       }
+      // the procedural relief: rough on rock and scree, gentle under turf, none in the Landing
+      // (bare rock ridged into crags and gullies, turf rolling; the woods' crowns on top)
+      grad += mix(gf.grad, gf.rgrad, rockF * rockF) * roughK * gf.dw * quiet;
+      grad += crowns.xyz * 0.55 * vegF * quiet;
       grad *= 1.0 - nearSite * (1.0 - smoothstep(3.0, 9.0, siteD));
       vec3 n = normalize(up - grad * 1.5);
       float ndl = max(dot(n, sun), 0.0);
@@ -487,6 +743,11 @@ void main() {
       vec3 deep = vec3(0.003, 0.014, 0.026);
       vec3 shallowTint = vec3(0.4, 0.85, 0.8);
       vec3 body = mix(deep, bed * shallowTint, tr) / PI * (E * max(mu, 0.0) + sky + earth);
+      // surf: a broken white line just off the beach where the swell breaks, resolved close in
+      float surfW = max(0.03, aw);
+      float surfD = (coastM - 0.5 - surfW * 0.6) / surfW;
+      float surf = exp(-surfD * surfD) * (0.55 + 0.45 * sin(uTime * 0.7 + gf.fine * 3.0 + gf.broad * 5.0)) * gf.dw * (1.0 - nearSite);
+      body += vec3(0.6, 0.62, 0.62) / PI * (E * max(mu, 0.0) + sky) * surf * 0.35;
       vec3 skyR = uSunE * vec3(0.02, 0.04, 0.09) * smoothstep(-0.1, 0.3, mu);
       seaCol = body * (1.0 - Fv) + Fv * skyR + spec;
       // at night: ships riding in the roads off the towns, the harbour lights mirrored near the
@@ -576,6 +837,8 @@ export class MoonSurface {
       uPixAng: { value: 0.001 },
       uCloudRot: { value: 0 }, uCloudPh: { value: 0 },
       uTime: { value: 0 },
+      uCubeN: { value: size },
+      uTexKm: { value: (Math.PI / 2) / size * R_MOON },
       uTown: { value: townUniforms() },
       uArcA: { value: arcUniforms().A }, uArcB: { value: arcUniforms().B },
     };
