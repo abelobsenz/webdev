@@ -87,5 +87,20 @@ for (const src of [BH_FRAG, COMP_FRAG]) {
 for (const def of ['SWEEP_K', 'SWEEP_MIN', 'SWEEP_MAX']) assert.ok(new RegExp(`#define ${def} [0-9.]+`).test(BH_FRAG), def);
 assert.ok(/uniform vec2 uDiscRes;/.test(COMP_FRAG) && /discCR\(vUv\)/.test(COMP_FRAG), 'Catmull-Rom composite');
 const d2 = COMP_FRAG.slice(COMP_FRAG.indexOf('vec4 discCR')); assert.equal((d2.match(/textureLod\(tDisc/g) || []).length, 9);
+{
+  const m = COMP_FRAG.slice(COMP_FRAG.indexOf('void main()'));
+  assert.ok(m.indexOf('fwidth(') < m.indexOf('discard;'), 'composite derivatives taken before the discard');
+  assert.ok(!/texture2D\(|texture\(/.test(m), 'composite reads with explicit LOD');
+}
+out.meanStepsOldFixedSweep = (() => {   // the pre-wave-3 fixed 0.05 rad sweep, same camera, for comparison
+  const inc = 80 * Math.PI / 180, R = 110, cam = [R * Math.sin(inc), 0, R * Math.cos(inc)];
+  const f = cam.map((v) => -v / R), rt = nrm(cross(f, [0, 0, 1])), up = cross(rt, f);
+  let sum = 0, n = 0, lowOut = 0;
+  for (let i = -30; i <= 30; i += 2) for (let j = -30; j <= 30; j += 2) {
+    const d = nrm([0, 1, 2].map((k) => f[k] + (i / 30) * 0.18 * rt[k] + (j / 30) * 0.18 * up[k]));
+    const a = traceKerr(cam, d, { steps: 4000, dpsi: 0.05 }); sum += a.steps; n++; if (!a.captured && a.steps >= 70) lowOut++;
+  }
+  return { meanSteps: +(sum / n).toFixed(1), lowUnfinished: +(lowOut / n).toFixed(3) };
+})();
 console.log(JSON.stringify(out, null, 1));
 console.log('HEARTH_LENS_VERIFIED');

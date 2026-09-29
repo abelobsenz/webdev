@@ -440,13 +440,14 @@ vec4 discCR(vec2 uv) {
 }
 void main() {
   vec4 L = textureLod(tLens, vUv, 0.0);
-  if (L.w < 0.002) discard;
-  vec4 D = discCR(vUv);
   vec4 v = uInvProj * vec4(vUv * 2.0 - 1.0, 1.0, 1.0);
   vec3 dirW = normalize(uCamRot * (v.xyz / v.w));
-  // the sky along the bent ray, at full resolution: sharp round stars, lensed
+  // the sky along the bent ray, at full resolution: sharp round stars, lensed (its filter
+  // width taken before any fragment is discarded, so the derivative is well defined)
   vec3 dir = normalize(dirW + L.xyz);
   float px = max(length(fwidth(dir)), 1e-5);
+  if (L.w < 0.002) discard;
+  vec4 D = discCR(vUv);
   vec3 bg = D.a > 0.998 ? vec3(0.0) : background(dir, min(px, 0.02));
   gl_FragColor = vec4((D.rgb + (1.0 - D.a) * bg) * L.w, L.w);
 }
