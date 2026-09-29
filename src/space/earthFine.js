@@ -35,6 +35,8 @@ export const RIDGE_OCTAVES = [
   { wl: 5, amp: 0.26, q: 0 },
   { wl: 1.8, amp: 0.11, q: 1 },
 ];
+/** The terrain-shadow march for a low Sun: first step (km), growth per step, steps, height exaggeration. */
+export const TERRAIN_MARCH = { d0: 4, grow: 2.3, steps: 5, exag: 2.5 };
 /** The self-shadow march: first step (km, at least this many pixels), growth per step, steps. */
 export const SHADOW_MARCH = { d0: 1.2, px: 2.0, grow: 2.2, steps: 3, topKm: 3.2 };
 /** Height of cloud tops above the deck (km) for a cover c and optical depth tau. */
@@ -205,7 +207,49 @@ float ef_coast(vec3 b, float H, float fp) {
   return c * 0.05 * cw;
 }
 
+// Terrain shadows for a low Sun: the bake's height field (x TERRAIN_EXAG, as the relief shading
+// is exaggerated) marched toward the Sun in growing steps out to ~110 km, so along the terminator
+// the ranges throw long shadows across the plains and valleys. The caller runs it only on land,
+// for a low Sun; each read is an explicit LOD matched to its step.
+float ef_terrainShadow(vec3 b, vec3 sB, float mu, float fp, float h0) {
+  vec3 st = sB - b * mu;
+  float sl = length(st);
+  if (sl < 1e-4) return 1.0;
+  st /= sl;
+  float tanE = max(mu, 0.0) / sl;
+  float occ = 0.0;
+  float d = max(${f(TERRAIN_MARCH.d0)}, fp * 2.0);
+  for (int k = 0; k < ${TERRAIN_MARCH.steps}; k++) {
+    vec3 bk = normalize(b + st * (d / 6371.0));
+    float lod = max(log2(max(d * 0.3, fp) / uSurfTexel), 0.0);
+    float hk = max(textureLod(uSurfA, bk, lod).a * 2.0 - 1.0, 0.0) * 6.0 * ${f(TERRAIN_MARCH.exag)};
+    occ = max(occ, smoothstep(0.0, 0.5, hk - h0 - d * tanE));
+    d *= ${f(TERRAIN_MARCH.grow)};
+  }
+  return 1.0 - 0.85 * occ;
+}
+
 // ---- the sea ----------------------------------------------------------------------------------
+// Pack ice below the bake's texels: a ragged ice edge of floes and tongues where the pack thins,
+// dark leads (open cracks, ~8 km apart and a few hundred metres wide) through the close pack.
+// Returns the new ice share.
+float ef_seaIce(vec3 b, float fp, float ice) {
+  if (ice < 0.01) return ice;
+  vec3 p = b * 6371.0;
+  float edgeZ = clamp(ice * (1.0 - ice) * 4.0, 0.0, 1.0);
+  float w40 = ef_fade(40.0, fp), w10 = ef_fade(10.0, fp);
+  float n = (w40 > 0.0 ? w40 * snoise(p / 40.0 + 70.0) : 0.0) + (w10 > 0.0 ? 0.5 * w10 * snoise(p / 10.0 + 90.0) : 0.0);
+  float e = 0.03 + 0.25 * (1.0 - w10);
+  float iceE = mix(ice, smoothstep(0.5 - e, 0.5 + e, ice + 0.4 * n), edgeZ);
+  float w8 = ef_fade(8.0, fp);
+  if (w8 > 0.0 && ice > 0.5) {
+    float r = 1.0 - abs(snoise(p / 8.0 + vec3(0.0, 4.0, 0.0)));
+    float lead = smoothstep(0.9, 0.975, r) * w8 * smoothstep(0.5, 0.8, ice);
+    iceE *= 1.0 - 0.75 * lead;
+  }
+  return iceE;
+}
+
 // The water's own colour (linear albedo): phytoplankton blooms in the productive seas (the high
 // latitudes, the upwelling coasts, the shelves) drawn out into filaments by the eddies, milky
 // turquoise where coccolithophores bloom; brown sediment on the shelves off the coasts.

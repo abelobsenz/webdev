@@ -436,6 +436,16 @@ lint('meteors', metMat);
   // a 3 km top shades its neighbour a few km off at a low Sun, not at noon
   const occludes = (muSun, dKm) => SM.topKm - (0.3 + dKm * muSun / Math.sqrt(1 - muSun * muSun)) > 0;
   ok(occludes(0.1, 3) && !occludes(0.95, 3), 'self-shadows long at a low Sun, short at noon');
+  // terrain shadows toward the terminator: the march reaches ~100 km, a 3 km range (exaggerated as
+  // the shading is) shades a plain ~50 km off at a Sun 3 degrees up, nothing at a Sun 30 degrees up
+  const TM = F.TERRAIN_MARCH;
+  const tReach = TM.d0 * Math.pow(TM.grow, TM.steps - 1);
+  ok(tReach > 90 && tReach < 200 && TM.steps <= 6 && TM.exag >= 1 && TM.exag <= 3.5, `terrain shadow reach ${tReach.toFixed(0)} km`);
+  const tShade = (hRange, dKm, mu) => hRange * TM.exag - dKm * mu / Math.sqrt(1 - mu * mu) > 0;
+  ok(tShade(3, 50, Math.sin(3 * Math.PI / 180)) && !tShade(3, 50, Math.sin(30 * Math.PI / 180)), 'terrain shadows long only at a low Sun');
+  ok(/if \(seen && landF > 0\.01 && lowSun > 0\.0 && mu > -0\.02 && fp < 12\.0\)/.test(stripComments(earth.material.fragmentShader)), 'terrain march only on land for a low Sun');
+  // pack ice: never more ice than there was plus the edge's raggedness, leads darken only the close pack
+  ok(/float iceT = ef_seaIce\(b, fp, ice\);/.test(stripComments(earth.material.fragmentShader)), 'sea ice detail wired');
   // shader safety for code called inside non-uniform branches: explicit-LOD reads only, no
   // derivatives, constant loop bounds, non-negative pow bases
   const full = stripComments(F.EARTH_FINE_GLSL + F.EARTH_FINE_SHADOW_GLSL);

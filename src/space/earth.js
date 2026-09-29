@@ -7,7 +7,7 @@ import { R_EARTH, MERIDIAN_LON, bodyDir } from './sim.js';
 import { Aurora } from './aurora.js';
 import { EARTH_DETAIL_GLSL, buildLaneTexture, buildArcTexture, arcologyUniforms, shipClock, trainClock } from './earthDetail.js';
 import { buildArcs } from './earthBake.js';
-import { EARTH_FINE_GLSL, EARTH_FINE_SHADOW_GLSL, EARTH_FINE_RELIEF_GLSL } from './earthFine.js';
+import { EARTH_FINE_GLSL, EARTH_FINE_SHADOW_GLSL, EARTH_FINE_RELIEF_GLSL, TERRAIN_MARCH } from './earthFine.js';
 
 // The planet, rendered in one pass on a proxy sphere at the top of the
 // atmosphere. Each fragment ray-traces the ground and the cloud shell and
@@ -537,7 +537,14 @@ void main() {
     // (the deck's shadow edge softened by the Sun's disc over the ~8 km drop: ~70 m, so crisp)
     csh = (1.0 - 0.95 * cs.x * cloudR(cs.y)) * (1.0 - ci.x * cloudR(ci.y) * 1.5);
   }
-  float shadow = rsh * csh;
+  // the ranges' long shadows toward the terminator (on land, for a low Sun)
+  float tsh = 1.0;
+  float lowSun = 1.0 - smoothstep(0.25, 0.45, mu);
+  if (seen && landF > 0.01 && lowSun > 0.0 && mu > -0.02 && fp < 12.0) {
+    float h0 = max(H, 0.0) * 6.0 * ${TERRAIN_MARCH.exag.toFixed(1)};
+    tsh = mix(1.0, ef_terrainShadow(b, uToBody * sun, mu, fp, h0), lowSun * (1.0 - smoothstep(6.0, 12.0, fp)));
+  }
+  float shadow = rsh * csh * mix(1.0, tsh, landF);
   // skylight: blue by day, gold along the terminator, violet in twilight; the valleys see less sky
   vec3 skyAmb = uSunE * ef_skyAmbient(mu);
   float skyOcc = 1.0 - 0.35 * valley * landF;
@@ -556,6 +563,10 @@ void main() {
     float U10 = 6.0 + 12.0 * gale;
     // the water's own colour: blooms drawn into filaments by the eddies, sediment on the shelves
     seaAlb = mix(ef_seaColour(b, fp, B.a, H, seaAlb), seaAlb, ice);
+    // pack ice: the ragged edge and the leads, below the bake's texels
+    float iceT = ef_seaIce(b, fp, ice);
+    seaAlb = max(seaAlb + (iceT - ice) * vec3(0.55, 0.58, 0.62), vec3(0.008, 0.02, 0.03));
+    ice = iceT;
     float wcap = 3.84e-6 * pow(U10, 3.41);
     seaAlb += vec3(0.5 * wcap) * (1.0 - ice);
     // ships on the lane the bake found here (the id cube, nearest-filtered)
