@@ -114,6 +114,29 @@ function crewLander() {
   latheY(B, [[0.0, 0.0, LK.HULL], [0.7, 0.08, LK.HULL], [1.3, 0.34, LK.HULL], [1.3, 0.4, LK.HULL], [0.0, 0.1, LK.HULL]], 12);
   B.pop();
   B.box(-3.2, 11.2, 3.2, 0.6, 0.3, 0.3, LK.LIGHT);
+  // window mullions over the glazed band, a handrail round the porch, the docking target
+  for (let i = 0; i < 10; i++) { const a = i / 10 * TAU; B.at(Math.cos(a) * 4.86, 10.1, Math.sin(a) * 4.86, 0, -a, 0); B.box(0, 0, 0, 0.12, 1.9, 0.22, LK.BRONZE); B.pop(); }
+  for (const sx of [-1.5, 1.5]) B.tube([V(sx, 7.6, 4.7), V(sx, 8.6, 4.8), V(sx, 8.6, 6.2), V(sx, 7.6, 6.3)], 0.05, 4, LK.HAZARD);
+  B.tube([V(-1.5, 8.6, 6.2), V(1.5, 8.6, 6.2)], 0.05, 4, LK.HAZARD);
+  B.box(0, 14.9, 0, 0.9, 0.3, 0.9, LK.HAZARD);
+  // the aft equipment bay and its radiator, a second antenna, the engine's gimbal ring
+  B.box(0, 9.4, -5.2, 3.6, 3.2, 1.2, LK.HULL);
+  B.box(0, 9.4, -5.86, 3.2, 2.6, 0.1, LK.RADIATOR);
+  for (const y of [8.2, 9.4, 10.6]) B.box(0, y, -5.82, 3.4, 0.08, 0.14, LK.DARK);
+  B.tube([V(-2.6, 12.4, -2.6), V(-3.2, 15.2, -3.2)], 0.08, 5, LK.HULL);
+  B.box(-3.2, 15.4, -3.2, 0.5, 0.5, 0.12, LK.HULL);
+  B.push(new THREE.Matrix4().makeTranslation(0, 2.2, 0).multiply(new THREE.Matrix4().makeRotationX(Math.PI / 2)));
+  B.torus(1.45, 0.14, 16, 6, LK.BRONZE);
+  B.pop();
+  // blanket panels on the stage's faces, seams standing proud
+  for (let i = 0; i < 8; i++) {
+    const a = i / 8 * TAU;                                        // the octagon's face centres
+    B.at(Math.cos(a) * 6.53, 4.6, Math.sin(a) * 6.53, 0, -a + Math.PI / 2, 0);
+    B.box(0, 0, 0, 4.9, 2.9, 0.12, LK.BRONZE);
+    B.box(0, 0, 0.07, 0.1, 2.9, 0.06, LK.DARK);
+    B.box(0, 0.8, 0.07, 4.9, 0.06, 0.06, LK.DARK);
+    B.pop();
+  }
   return B.geometry();
 }
 

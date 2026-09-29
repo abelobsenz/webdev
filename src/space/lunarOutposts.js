@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { CB } from '../craft/craftGeometry.js';
 import { LK, lunarMesh, lunarInstanced, createLunarMaterial } from './lunarMaterial.js';
-import { LAMP } from './lamps.js';
+import { LAMP, createLamps } from './lamps.js';
 import { surfaceY } from './lunarSite.js';
 import { kit, seat, seatLocal, mulberry, KIT_R, TRACKER_AXLE } from './lunarKit.js';
 import { stationFrame } from './stations.js';
@@ -345,6 +345,11 @@ export class LunarOutposts {
     site.rovers.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     site.riders.forEach((r, i) => site.rovers.instanceColor.setXYZ(i, ...LIVERY[(i + idx) % LIVERY.length]));
     site.group.add(site.rovers);
+    // the rovers' head and tail lamps, carried with them
+    site.roverLamps = createLamps(site.riders.flatMap(() => [{ p: new THREE.Vector3(), r: 0.4, color: LAMP.WHITE, i: 1.2 }, { p: new THREE.Vector3(), r: 0.3, color: LAMP.RED, i: 0.8 }]), { minPx: 0.9 });
+    site.roverLamps.scale.setScalar(0.001);
+    site.roverLamps.frustumCulled = false;
+    site.group.add(site.roverLamps);
     // the field's shuttle, its plume, and suited crews round the parked craft
     site.crew = [];
     for (const [x, z] of d.parked) for (let i = 0; i < 5; i++) site.crew.push({ x, z, r: 22 + ((i * 37 + idx * 11) % 50) / 10, a0: i * 1.3 + idx, w: i % 2 ? 1 : -1.2 });
@@ -361,7 +366,8 @@ export class LunarOutposts {
       site.plume.scale.setScalar(0.001);
       site.group.add(site.shuttle, site.plume);
     }
-    site.live = [site.rovers, site.suits, site.shuttle].filter(Boolean);
+    site.live = [site.rovers, site.roverLamps, site.suits, site.shuttle].filter(Boolean);
+    this.moveRovers(site, 0);                               // (their lamps start on the roads)
     site.group.traverse((o) => { o.frustumCulled = false; });
     site.built = true;
     this.buildMs += performance.now() - t0;
@@ -429,7 +435,11 @@ export class LunarOutposts {
       _z.copy(_t).normalize(); _x.crossVectors(UP, _z).normalize(); _y.crossVectors(_z, _x);
       _m.makeBasis(_x, _y, _z).setPosition(_p);
       s.rovers.setMatrixAt(i, _m);
+      const L = s.roverLamps.geometry.attributes.iLamp.array, o = i * 8;
+      L[o] = _p.x + _z.x * 4.2 + _y.x * 2.2; L[o + 1] = _p.y + _z.y * 4.2 + _y.y * 2.2; L[o + 2] = _p.z + _z.z * 4.2 + _y.z * 2.2;
+      L[o + 4] = _p.x - _z.x * 4.3 + _y.x * 2.6; L[o + 5] = _p.y - _z.y * 4.3 + _y.y * 2.6; L[o + 6] = _p.z - _z.z * 4.3 + _y.z * 2.6;
     }
     s.rovers.instanceMatrix.needsUpdate = true;
+    s.roverLamps.geometry.attributes.iLamp.needsUpdate = true;
   }
 }
