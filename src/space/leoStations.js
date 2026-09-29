@@ -375,7 +375,7 @@ function mirrorSheet(sheet, M, w, L, y, nx = 4, nz = 16) {
 export const FARM = { R: 160, halfL: 320, sep: 290, mirrorLen: 520, tilt: THREE.MathUtils.degToRad(12), strips: 3 };
 export const farmOmega = () => Math.sqrt(9.81 / FARM.R);
 // the drums' end-cap profile beyond the hull's end [radius m, distance beyond the end m, kind]
-const FARM_CAP = [[163, 4, CK.HULL], [146, 16, CK.HULL], [118, 26, CK.GLASS], [82, 33, CK.HULL], [45, 37, 'crown'], [12, 38, CK.DARK]];
+const FARM_CAP = [[163, 4, CK.HULL], [146, 16, CK.HULL], [118, 26, CK.GLASS], [82, 33, CK.HULL], [45, 37, 'crown'], [9.9, 38, CK.DARK]];   // (the last point: the axle stub, inside the bearing bore)
 
 /** One drum (axis z): alternating land and glazed strips, hoops and mullion ribs, louvre-mirrors. */
 export function buildFarmDrum() {
@@ -407,7 +407,7 @@ export function buildFarmDrum() {
     latheAt(B, tr(0, 0, 0), [[R, s * L, CK.BRONZE], [R + 3, s * (L - 2), CK.BRONZE], ...cap, [10, s * (L + 44), CK.BRONZE], [0.02, s * (L + 44), CK.DARK]], 72);
     for (let k = 0; k < 12; k++) {
       const a = (k / 12) * TAU, c = Math.cos(a), sn = Math.sin(a);
-      B.tube(FARM_CAP.slice(0, -1).map(([r, dz]) => V(c * (r + 1.1), sn * (r + 1.1), s * (L + dz + 1.1))), 0.9, 4, CK.BRONZE);
+      B.tube(FARM_CAP.slice(0, -2).map(([r, dz]) => V(c * (r + 1.1), sn * (r + 1.1), s * (L + dz + 1.1))), 0.9, 4, CK.BRONZE);   // (they stop at the crown, clear of the bearing)
     }
     for (let k = 0; k < 16; k++) {
       const a = (k / 16) * TAU, r = FARM_CAP[2][0] - 2;
