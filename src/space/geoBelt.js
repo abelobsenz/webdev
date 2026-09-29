@@ -130,15 +130,17 @@ export function berthRoute(dock, bow, { far = 26, gate = 2.2, lat = 2.4, stay = 
 }
 
 /** Courier timing between two sites: [angle fraction 0..1, drive 0..1] at cycle fraction u of one leg. */
-export function courierLeg(u) {
+export function courierLeg(u, out = [0, 0]) {
   // accelerate (0 - 0.18), coast, flip, brake (0.82 - 1): constant-thrust ends, distance continuous
   const a = 0.18, vmax = 1 / (1 - a);                 // area under the speed curve = 1
   let s, thr;
   if (u < a) { s = 0.5 * vmax * u * u / a; thr = 1; }
   else if (u < 1 - a) { s = 0.5 * vmax * a + vmax * (u - a); thr = 0; }
   else { const w = 1 - u; s = 1 - 0.5 * vmax * w * w / a; thr = 1; }
-  return [s, thr];
+  out[0] = s; out[1] = thr;
+  return out;
 }
+const _leg = [0, 0];
 
 const _w = new THREE.Vector3(), _q = new THREE.Quaternion(), _q2 = new THREE.Quaternion(), _s = new THREE.Vector3();
 const _Z = V(0, 0, 1);
@@ -380,7 +382,8 @@ export class GeoBelt {
       else if (tau < c.legT + c.wait) { moving = false; u = 1; }
       else if (tau < 2 * c.legT + c.wait) { dir = -1; u = (tau - c.legT - c.wait) / c.legT; }
       else { moving = false; u = 0; dir = -1; }
-      const [s, thr] = moving ? courierLeg(u) : [dir > 0 ? 1 : 1, 0];
+      if (moving) courierLeg(u, _leg); else { _leg[0] = 1; _leg[1] = 0; }
+      const s = _leg[0], thr = _leg[1];
       const f = dir > 0 ? s : 1 - s;
       const lon = c.a.lon + c.dl * (moving ? f : dir > 0 ? 1 : 0);
       // eastward legs run a little inside the belt, westward ones outside (the phasing sense)

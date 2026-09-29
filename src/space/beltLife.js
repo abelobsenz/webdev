@@ -57,7 +57,7 @@ function sharedDrone() {
 }
 
 const _p = new THREE.Vector3(), _f = new THREE.Vector3(), _u = new THREE.Vector3(), _m = new THREE.Matrix4();
-const UP = V(0, 1, 0);
+const UP = V(0, 1, 0), XA = V(1, 0, 0);
 const CHAIN = 10;
 export const PILOT_SIDE = 30;     // m off the berth axis
 
@@ -146,7 +146,7 @@ export class BeltLife {
       const s = this.pilotAt(pd, t);
       _p.copy(pd.dock.p).addScaledVector(pd.dock.d, s).add(pd.dock.side);
       _f.copy(pd.dock.d).negate();
-      _u.copy(Math.abs(pd.dock.d.y) > 0.9 ? V(1, 0, 0) : UP);
+      _u.copy(Math.abs(pd.dock.d.y) > 0.9 ? XA : UP);
       this.drones.setMatrixAt(j, poseMatrix(_m, _p, _f, _u));
       L.set(this.drone0 + j, _p.x, _p.y + 3, _p.z);
       j++;
