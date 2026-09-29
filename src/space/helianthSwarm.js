@@ -481,7 +481,8 @@ export class HelianthSwarm {
     if (space?.addBody) {
       this.body = space.addBody('helianthSwarm', [this.group], (v) => (v || V()).copy(station.position), SWARM.farR, { interval: () => this.interval() });
       this.beamBody = space.addBody('helianthBeams', [this.beamGroup], (v) => (v || V()).copy(station.position), 60000, { interval: () => [Math.max(0.05, (this.dist - 60) * 0.9), this.dist + 60000 * 1.02] });
-      this.body.visible = false; this.beamBody.visible = false;
+      if (this.body) this.body.visible = false;
+      if (this.beamBody) this.beamBody.visible = false;
     }
   }
 
@@ -627,7 +628,8 @@ export class HelianthSwarm {
     if (on && !this.built) this.build();
     this.on = on && this.built;
     this.group.visible = this.beamGroup.visible = this.on;
-    if (this.body) this.body.visible = this.beamBody.visible = this.on;
+    if (this.body) this.body.visible = this.on;
+    if (this.beamBody) this.beamBody.visible = this.on;
     if (!this.on) return;
     // camera in the station frame (km)
     const cam = this._cam.copy(camWorld).sub(this._w).applyQuaternion(this._iq.copy(this.station.quaternion).invert());

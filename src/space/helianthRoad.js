@@ -76,7 +76,7 @@ export class HelianthRoad {
       this.body = space.addBody('helianthRoad', [this.group], (v) => (v || V()).copy(station.position), ROAD.z0 + ROAD.len + 10, {
         interval: () => [Math.max(0.05, (this.dist - ROAD.z0 - ROAD.len - 10) * 0.9, this._gap * 0.9), this.dist + ROAD.z0 + ROAD.len + 10],
       });
-      this.body.visible = false;
+      if (this.body) this.body.visible = false;
     }
     this._gap = 1;
   }
