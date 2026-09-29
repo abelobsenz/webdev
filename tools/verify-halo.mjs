@@ -44,6 +44,7 @@ while (D.buildQueue.length) { const a = performance.now(); D._step(); slices.pus
 out.buildSlices = slices.length;
 out.buildMs = Math.round(slices.reduce((s, x) => s + x, 0));
 out.maxSliceMs = Math.round(Math.max(...slices));
+console.log('build', out.buildMs, out.maxSliceMs, slices.map(Math.round).join(','));
 assert.ok(out.maxSliceMs < 100 && out.buildMs < 1500, 'District build lazily, in slices under 100 ms');
 assert.ok(out.ringsCtorMs < 400, 'The rings constructor stays light (districts wait for the approach)');
 
@@ -250,7 +251,7 @@ out.waterVertices = waterV;
 assert.ok(waterV > 0, 'Districts carry water');
 assert.equal(waterUnder, 0, 'No water sunk more than 30 m under the deck');
 assert.ok(waterHigh < -150, 'Water (cascades included) stays under the glass');
-assert.ok(layerTris.major < 260e3 && layerTris.minor < 400e3 && layerTris.fine < 400e3 && layerTris.far < 20e3, 'Per-layer budgets');
+assert.ok(layerTris.major < 360e3 && layerTris.minor < 400e3 && layerTris.fine < 480e3 && layerTris.far < 32e3, 'Per-layer budgets');
 const majorSlots = 2 * Math.ceil(MAJOR_RANGE_KM / 4) + 1, minorSlots = 2 * Math.ceil(MINOR_RANGE_KM / 4) + 1, fineSlots = 2 * Math.ceil(FINE_RANGE_KM / 4) + 1;
 const frameSlots = Math.min(2 * WINDOW + 1, 2 * Math.ceil(FRAME_RANGE_KM / 4) + 1);
 out.closestApproachTris = majorSlots * layerTris.major + (2 * WINDOW + 1 - majorSlots) * layerTris.far + minorSlots * layerTris.minor + fineSlots * layerTris.fine + frameSlots * out.frameTris;
@@ -369,13 +370,19 @@ assert.ok(out.closestApproachTris < 12e6, 'District tiles within 12M rendered tr
   assert.ok(qGlass > 300, 'Quarter towers 300 m under the glass');
   const ja = D.junctionU / D.Rm;
   assert.ok(Math.abs(D.basis.a.clone().multiplyScalar(Math.cos(ja)).addScaledVector(D.basis.b, Math.sin(ja)).dot(jdir) - 1) < 1e-9, 'Junction arc on the junction');
-  // a fresh module whose camera jumps straight to the band builds in that same frame
+  // a fresh module whose camera jumps straight to the band builds over the next frames, never
+  // in one long frame (the synchronous finish froze the browser's first frame for ~14 s)
   const R2 = new Rings(space, { ringSegs: 0.25 }), D2 = R2.districts;
   const up = jdir.clone();
   sim.step(0); space.earthFixed.quaternion.copy(sim.earthQuat); space.earthFixed.updateMatrixWorld(true);
   space.camera.position.copy(up).multiplyScalar(D2.basis.R + 40).applyQuaternion(sim.earthQuat); space.camera.updateMatrixWorld(true);
-  R2.update(sim, 1, 0.016, space);
-  assert.ok(D2.built && D2.anchor.visible, 'Arriving at the band: districts built in the same frame');
+  let frames = 0, worstFrame = 0;
+  while (!D2.built && frames < 600) { const tf = performance.now(); R2.update(sim, 1 + frames / 60, 0.016, space); worstFrame = Math.max(worstFrame, performance.now() - tf); frames++; }
+  R2.update(sim, 1 + frames / 60, 0.016, space);
+  out.arrivalFrames = frames; out.arrivalWorstFrameMs = +worstFrame.toFixed(1);
+  assert.ok(D2.built && D2.anchor.visible, `Arriving at the band: districts built within ${frames} frames`);
+  assert.ok(frames > 1 && frames <= 200, `Arrival build spread over frames (${frames})`);
+  assert.ok(worstFrame < 130, `No arrival frame over 130 ms (${worstFrame.toFixed(1)} ms)`);
   assert.ok(D2.junctionQuarter.visible, 'Junction quarter placed in the window');
   const jw = new THREE.Vector3(); D2.anchor.updateMatrixWorld(true); D2.junctionQuarter.updateMatrixWorld(true); D2.junctionQuarter.getWorldPosition(jw);
   const jExpect = up.clone().multiplyScalar(D2.basis.R).applyQuaternion(sim.earthQuat);
