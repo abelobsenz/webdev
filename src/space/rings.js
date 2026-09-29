@@ -399,7 +399,7 @@ void main() {
   float bead = aaLamp(vkm + 0.25, 0.5, 0.014);
   vec3 warm = vec3(1.0, 0.72, 0.42);
   frameC += uHabitatColor * (0.02 + 0.06 * nightSide) * rib;
-  vec3 ribLight = warm * rib * ribFade * (bead * 3.0 + 0.03) * (0.25 + 0.9 * nightSide);
+  vec3 ribLight = warm * rib * ribFade * (bead * 3.0 + 0.03) * (0.06 + nightSide);          // (lost in daylight)
   // panes a shade apart in tint (the mean kept), a faint bloom where the towns below shine up
   float glassA = 0.05 + 0.5 * Fg + 0.03 * (hash12(pc + 3.3) - 0.5) * dPane;
   // premultiplied: frame opaque, glass a thin tint that reflects the sky and the Sun
