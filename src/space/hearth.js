@@ -248,7 +248,6 @@ export class Hearth {
   update(sim, realTime, dt, space) {
     for(const rotor of this.refugeRotors)rotor.rotation.y=(realTime*rotor.userData.omega*rotor.userData.dir)%(Math.PI*2);
     if (this.works) this.works.update(sim, realTime);
-    if (this.district) this.district.update(realTime);
     this.group.position.copy(sim.hearthPos);
     this.group.quaternion.copy(this.quat);
     this.group.updateMatrixWorld(true);
@@ -256,6 +255,7 @@ export class Hearth {
     const rel = this._rel.copy(cam.position).sub(sim.hearthPos);
     const d = rel.length();
     this.distance = d;
+    if (this.district) this.district.update(realTime, d);
     // near zone: the lensed image fills the screen and replaces the backdrop
     this.mode = d < 2500 * RS ? 'near' : 'far';
     const lensR = this.mode === 'near' ? 0 : 320 * RS;           // km

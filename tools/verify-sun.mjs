@@ -511,6 +511,13 @@ const stT = tree(tris(sc.geo));
   for (let i = 0; i < s.queue.length; i++) for (let j = i + 1; j < s.queue.length; j++) qsep = Math.min(qsep, s.queue[i].distanceTo(s.queue[j]));
   for (let t = 0; t < TANKER.T; t += 4) for (const c of s.queue.slice(1)) qsep = Math.min(qsep, tankerPose(t).distanceTo(c));
   assert.ok(qsep > TANKER.scale * 1.1 + 1, `tankers keep ${qsep.toFixed(1)} km apart`);
+  // distance LOD: hidden far out (no animation work), shown again on return
+  d.update(10, 1e6);
+  assert.ok(!d.trams.visible && !d.patrol[0].visible && !d.hamlets.visible, 'Hearth district hidden far out');
+  const [, tHid] = time(() => { for (let i = 0; i < 200; i++) d.update(i, 1e6); });
+  assert.ok(tHid / 200 < 0.01, 'hidden district costs nothing per frame');
+  d.update(10, 100);
+  assert.ok(d.trams.visible && d.patrol[0].visible && d.gantries.visible, 'Hearth district shown close in');
   // frame cost and finiteness
   const [, ta] = time(() => { for (let i = 0; i < 200; i++) d.update(i * 0.37); });
   results.hearthDistrictFrameMs = +(ta / 200).toFixed(3);

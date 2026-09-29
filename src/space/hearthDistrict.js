@@ -38,6 +38,8 @@ const V = (x, y, z) => new THREE.Vector3(x, y, z), TAU = Math.PI * 2;
 const smooth = (a, b, x) => { const t = Math.min(Math.max((x - a) / (b - a), 0), 1); return t * t * (3 - 2 * t); };
 const X_AXIS = new THREE.Matrix4().makeRotationY(Math.PI / 2);       // lathe axis (local z) onto +x
 
+/** Beyond this camera distance (km) the district is hidden: the collectors themselves carry the view. */
+export const HEARTH_LOD = { far: 25000 };
 export const RING = { R: 30 * RS, count: 14, rail: 0.85, delta: 0.02 };
 export const MODULE = { x0: -4.9, x1: -8.3, r: 0.72, node: -8.9, nodeR: 0.62, mast: -12.5 };
 
@@ -401,18 +403,32 @@ export class HearthDistrict {
       return { mesh: m, engines };
     });
     // ---- the refuge wheels' rim and garden lights, riding the wheels
+    this.rotorLamps = [];
     hearth.refugeRotors.forEach((rotor, w) => {
       const R = [];
       for (let k = 0; k < 64; k++) { const a = (k / 64) * TAU; R.push({ p: V(Math.cos(a) * 13.3, (k % 2 ? 0.5 : -0.5), Math.sin(a) * 13.3), r: 0.05, color: k % 8 ? LAMP.WHITE : LAMP.AMBER, i: k % 8 ? 1.2 : 2.4, breathe: k % 8 ? 0 : 0.4, phase: k / 64 }); }
       for (let k = 0; k < 6; k++) { const a = (k / 6) * TAU; R.push({ p: V(Math.cos(a) * 6.8, 0.85, Math.sin(a) * 6.8), r: 0.18, color: [1.0, 0.78, 0.5], i: 1.4, breathe: 0.2, phase: (k + w) / 6 }); }
-      rotor.add(createLamps(R, { minPx: 1.1, mask }));
+      const rl = createLamps(R, { minPx: 1.1, mask });
+      this.rotorLamps.push(rl);
+      rotor.add(rl);
     });
-    for (const o of [...this.patrol, this.gantries, this.fittings, this.trusses, this.drones, this.hamlets, this.wheels, this.platforms, this.trams, this.coils, ...this.tankers.map((t) => t.mesh)]) { o.frustumCulled = false; o.renderOrder = 3; }
+    // everything this district adds, for its distance LOD (its lamps ride these or the wheels)
+    this.objects = [...this.patrol, this.gantries, this.fittings, this.trusses, this.drones, this.hamlets, this.wheels, this.platforms, this.trams, this.coils, ...this.tankers.map((t) => t.mesh)];
+    for (const o of this.objects) { o.frustumCulled = false; o.renderOrder = 3; }
     this._m = new THREE.Matrix4(); this._q = new THREE.Quaternion(); this._p = V(0, 0, 0); this._s = V(1, 1, 1); this._t = V(0, 0, 0); this._y = V(0, 1, 0); this._z = V(0, 0, 0);
+    this.shown = true;
     this.update(0);
   }
 
-  update(t) {
+  /** t: real time (s); camDist: the camera's distance from the Hearth (km), beyond LOD.far all of it is hidden. */
+  update(t, camDist = 0) {
+    const show = camDist < HEARTH_LOD.far;
+    if (show !== this.shown) {
+      this.shown = show;
+      for (const o of this.objects) o.visible = show;
+      for (const o of [this.tramLamps, this.droneLamps, this.wheelLamps, this.gantryLamps, ...this.rotorLamps]) o.visible = show;
+    }
+    if (!show) return;
     const P = this._p, m = this._m, a = this.tramAttr.array;
     for (let i = 0; i < RING.count; i++) {
       const th = tramAngle(i, t), c = Math.cos(th), s = Math.sin(th);
