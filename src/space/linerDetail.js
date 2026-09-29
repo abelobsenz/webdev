@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { CB, CK, TAU, V, lerp, rng, here, atAim, tank, rcsQuad, catwalk, dish, mast, flood } from './shipKit.js';
 import { LAMP } from './lamps.js';
+import { DK } from './craftMesh.js';
 
 // THE CONCORD-CLASS LINER, CLOSE TO: the fittings a 2.4 km passenger liner carries on her
 // skin, drawn as one overlay geometry that rides the hull (src/craft/craftGeometry.js
@@ -119,7 +120,7 @@ export function buildLinerDetail(seed = 2400) {
       B.box(base.x - N.x * 1.6, base.y - N.y * 1.6, z - 4, 1.2, 1.2, 1.2, CK.BRONZE);
       B.box(base.x - N.x * 1.6, base.y - N.y * 1.6, z + 4, 1.2, 1.2, 1.2, CK.BRONZE);
       B.at(base.x, base.y, z);
-      tank(B, 2.4, 12, CK.HULL, CK.BRONZE, 10);
+      tank(B, 2.4, 12, DK.FOIL, CK.BRONZE, 10);
       B.pop();
       // the capsule's hatch facing out and its station lamp
       const h = base.clone().addScaledVector(N, 2.45);
@@ -172,9 +173,9 @@ export function buildLinerDetail(seed = 2400) {
     const zc = -760, f = linerF(zc), yb = -LB * f * 0.8 + 3;
     const w = 44, h = 16, l = 110, yf = yb - h - 3;
     B.box(0, yb - 2.2, zc, w, 1.2, l, CK.LANTERN);                                   // lit ceiling
-    for (const s of [-1, 1]) B.box(s * w / 2, yb - h / 2 - 1.5, zc, 1.6, h + 3, l, CK.HULL);   // side walls
-    B.box(0, yb - h / 2 - 1.5, zc + l / 2, w, h + 3, 1.6, CK.HULL);                  // forward bulkhead
-    B.box(0, yf, zc, w + 1.6, 1.4, l, CK.HULL);                                      // floor (outside)
+    for (const s of [-1, 1]) B.box(s * w / 2, yb - h / 2 - 1.5, zc, 1.6, h + 3, l, DK.LIVERY);   // side walls
+    B.box(0, yb - h / 2 - 1.5, zc + l / 2, w, h + 3, 1.6, DK.LIVERY);                  // forward bulkhead
+    B.box(0, yf, zc, w + 1.6, 1.4, l, DK.GRIME);                                      // floor (outside)
     B.box(0, yf + 0.9, zc, w - 3, 0.4, l - 4, CK.DECK);                              // deck (inside)
     // bronze frame round the open mouth and the two door leaves swung wide
     B.box(0, yf, zc - l / 2, w + 3, 2, 2, CK.BRONZE);

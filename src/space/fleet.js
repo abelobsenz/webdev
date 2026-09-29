@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { buildLiner, buildTender, buildRefinery, CB, CK } from '../craft/craftGeometry.js';
 import { buildShuttle, buildTug, buildCourier, buildFreighter, lathe } from '../craft/craftClasses.js';
 import { createGlowMesh } from '../craft/craftMaterial.js';
-import { craftMesh, craftPart, addEngines, addLamps, placeMerge, placeLamps, KM } from './craftMesh.js';
+import { craftMesh, craftPart, addEngines, addLamps, placeMerge, placeLamps, KM, dressedMesh } from './craftMesh.js';
 import { LAMP, createLamps } from './lamps.js';
 import { R_EARTH, R_MOON, MERIDIAN_LON, bodyDir } from './sim.js';
 import { stationFrame, CORRIDORS } from './stations.js';
@@ -187,7 +187,7 @@ export class Fleet {
     const liner = buildLiner(2400);
     this.linerGeo = liner;
     {
-      const m = craftMesh(liner.geo, { accent: [0.55, 0.85, 1.0], lit: 0.62 });
+      const m = dressedMesh(liner.geo, { accent: [0.55, 0.85, 1.0], lit: 0.62, livery: [0.58, 0.2, 0.12], livery2: [0.88, 0.84, 0.74] });
       station.linerBerth(m.position, m.quaternion);
       addLamps(m, liner.lamps, { minPx: 1.3 });
       el.harbour.add(m);
