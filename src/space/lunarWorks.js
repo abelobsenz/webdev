@@ -543,8 +543,10 @@ export function buildMediiWorks(landingPlan = [], driver = null, PADS = null) {
       towers.push([tx, tz]);
       lamps.push({ p: new THREE.Vector3(tx, gy(tx, tz) + 1.2 + 23.6, tz), r: 1.1, color: LAMP.RED, i: 1.6, breathe: 0.4 });
     }
-    // container stacks on each pad, and a propellant farm of three spheres behind each field
+    // container stacks on each pad, and a propellant farm of three spheres behind each field;
+    // round each pad's rim a chase of white approach strobes, one lap every 5.5 s
     PADS.forEach(([pu, pv], k) => {
+      for (let i = 0; i < 24; i++) { const a = i / 24 * Math.PI * 2; lamp(pu + Math.cos(a) * 240, pv + Math.sin(a) * 240, 1.5, LAMP.WHITE, 1.3, 0.9, { breathe: 1.0, phase: (1 - i / 24 + k * 0.3) % 1 }); }
       const [su, sv] = PAD_STACKS[k];
       for (let i = 0; i < 6; i++) {
         const u = pu + su + (i % 3 - 1) * 3.2, v = pv + sv + (i < 3 ? -7 : 7);

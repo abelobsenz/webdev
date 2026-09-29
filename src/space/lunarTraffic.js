@@ -6,6 +6,7 @@ import { buildMediiWorks, TRACK_X, LANDER_SLOTS, slotFrame, YARD } from './lunar
 import { shoreV } from './lunarLanding.js';
 import { surfaceY } from './lunarSite.js';
 import { addLamps } from './craftMesh.js';
+import { createLamps } from './lamps.js';
 import { R_MOON } from './sim.js';
 
 // Life at Medii Landing: everything that moves, and the furniture it moves among.
@@ -440,6 +441,30 @@ export class LunarTraffic {
     }
 
     this.vehicles = [this.tugs, this.rovers, this.haulers, this.wheels, this.drones, this.boats, this.gantries, this.trolleys];
+
+    // --- running lights: every moving thing's lamps, riding its instance (so the traffic reads
+    // at night and from afar as moving points: headlamps white, tail lamps red, beacons amber) ---
+    {
+      const W = LAMP.WHITE, RD = LAMP.RED, AM = LAMP.AMBER;
+      this.moverSpecs = [
+        { mesh: this.trams, pts: [[0, 1.3, 12.2, 0.5, W, 1.3], [0, 1.3, -12.2, 0.4, RD, 0.9]] },
+        { mesh: this.rovers, pts: [[0, 2.2, 4.2, 0.4, W, 1.2], [0, 2.6, -4.3, 0.3, RD, 0.8], [-1.1, 5.7, -3.2, 0.25, AM, 1.0]] },
+        { mesh: this.haulers, pts: [[0, 2.2, 6.4, 0.45, W, 1.2], [0, 5.6, 5.0, 0.3, AM, 1.1]] },
+        { mesh: this.tugs, pts: [[0, 3.2, 2.4, 0.3, AM, 1.2], [0, 1.3, 3.9, 0.3, W, 0.9]] },
+        { mesh: this.cartMesh, pts: [[0, 0.8, 1.5, 0.22, W, 0.8]] },
+        { mesh: this.boats, pts: [[0, 4.8, -2.0, 0.3, W, 1.1], [0, 1.6, 6.1, 0.25, LAMP.GREEN, 0.9]] },
+        { mesh: this.drones, pts: [[0, -0.2, 0.2, 0.15, LAMP.GREEN, 1.0]] },
+        { mesh: this.sled, pts: [[0, 18.0, 0, 0.8, LAMP.TEAL, 1.6], [0, 11.4, 20.5, 0.6, W, 1.4]] },
+      ];
+      const list = [];
+      for (const sp of this.moverSpecs) { sp.base = list.length; for (let i = 0; i < sp.mesh.count; i++) for (const [, , , r, col, it] of sp.pts) list.push({ p: new THREE.Vector3(), r, color: col, i: it }); }
+      this.moverLamps = createLamps(list, { minPx: 0.9 });
+      this.moverLamps.scale.setScalar(0.001);
+      this.moverLamps.name = 'Running lights';
+      this.moverLamps.frustumCulled = false;
+      this.group.add(this.moverLamps);
+      this.moverArr = this.moverLamps.geometry.getAttribute('iLamp');
+    }
     this.group.traverse((o) => { o.frustumCulled = false; });
     this._cam = new THREE.Vector3();
     this._inv = new THREE.Matrix4();
@@ -551,6 +576,28 @@ export class LunarTraffic {
     this.cartMesh.visible = dTown < 9000;
     this.lampposts.visible = this.kiosks.visible = dTown < 12000;
     if (this.cartMesh.visible) this.updateCarts(t);
+    this.updateRunningLights();
+  }
+
+  /** Each moving instance's lamps, carried by its matrix (hidden with their mesh). */
+  updateRunningLights() {
+    const L = this.moverArr.array;
+    for (let k = 0; k < this.moverSpecs.length; k++) {
+      const sp = this.moverSpecs[k], M = sp.mesh.instanceMatrix.array, n = sp.mesh.count, np = sp.pts.length;
+      const on = sp.mesh.visible && this.group.visible;
+      for (let i = 0; i < n; i++) {
+        const e = i * 16;
+        for (let j = 0; j < np; j++) {
+          const q = sp.pts[j], o = (sp.base + i * np + j) * 4;
+          const x = q[0], y = q[1], z = q[2];
+          L[o] = M[e] * x + M[e + 4] * y + M[e + 8] * z + M[e + 12];
+          L[o + 1] = M[e + 1] * x + M[e + 5] * y + M[e + 9] * z + M[e + 13];
+          L[o + 2] = M[e + 2] * x + M[e + 6] * y + M[e + 10] * z + M[e + 14];
+          L[o + 3] = on ? q[3] : 0;
+        }
+      }
+    }
+    this.moverArr.needsUpdate = true;
   }
 
   updateCarts(t) {

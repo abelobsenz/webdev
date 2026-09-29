@@ -264,6 +264,13 @@ report.landingTris = tris(L.geo); report.worksTris = tris(W.geo);
   const stops = life.railStops;
   for (const s of stops) { let hit = false; for (let t = 0; t < life.railCycle; t += 2) if (Math.abs(life.trainAt(t).s - s) < 0.01) { hit = true; break; } ok(hit, `trains call at ${s.toFixed(0)}`); }
   report.railCycleMin = +(life.railCycle / 60).toFixed(1);
+  ok(life.moverArr.array.every(Number.isFinite), 'running lights finite');
+  {
+    // a tram's headlamp rides 12.2 m ahead of its car's centre
+    life.trams.getMatrixAt(0, m); p.setFromMatrixPosition(m);
+    const L = life.moverArr.array, o = life.moverSpecs[0].base * 4;
+    ok(Math.abs(Math.hypot(L[o] - p.x, L[o + 1] - p.y, L[o + 2] - p.z) - Math.hypot(1.3, 12.2)) < 1e-3, 'running lights ride their vehicles');
+  }
   // every instance matrix finite
   life.group.traverse((o) => { if (o.isInstancedMesh) ok(o.instanceMatrix.array.every(Number.isFinite), `${o.name} matrices finite`); });
 }
