@@ -5,6 +5,7 @@ import { CORRIDORS, stationFrame } from './stations.js';
 import { createCraftMaterial, updateCraftMaterial } from '../craft/craftMaterial.js';
 import { buildCourier, buildShuttle, buildTug } from '../craft/craftClasses.js';
 import { CRAFT_FRAME } from './craftMesh.js';
+import { design } from './shipDesigns.js';
 
 // Orbital traffic as designed corridors, positioned on the GPU from the simulation clock
 // (so time warp drives it consistently) and drawn as short motion streaks.
@@ -190,6 +191,18 @@ const endFade = (ph, a, b) => ss(0, a, ph) * (1 - ss(1 - b, 1, ph));
 
 function rnd(seed) { let s = seed >>> 0; return () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; }; }
 
+/**
+ * Hull design for streak ship i of path type t: 0 courier, 1 shuttle, 2 tug, 3 packet,
+ * 4 lighter, 5 hauler, 6 tanker (the order of Traffic.hullSets).
+ */
+export function hullClassOf(t, i) {
+  if (t < 0.5) return [0, 3, 4][i % 3];         // ring lanes: couriers, packets, lighters
+  if (t < 1.5) return 3;                         // transfers between the rings: packets
+  if (t < 2.5) return 1;                         // the port columns: shuttles
+  if (t < 3.5) return i % 2 ? 5 : 6;             // the Earth-Moon run: haulers and tankers
+  return i % 3 === 0 ? 5 : 2;                    // the Harbour's corridors: haulers and tugs
+}
+
 export const TCOL = {
   WARM: [1.0, 0.7, 0.42],
   COOL: [0.52, 0.78, 1.0],
@@ -304,15 +317,18 @@ export class Traffic {
   }
 
   // ---- hull LOD: the streaks fade out inside ~6 km, so the nearest ships become real closed
-  // hulls there (couriers on the ring lanes, shuttles on the port columns, transfers and the
-  // Moon run, tugs in the Harbour corridors), placed from shipPosJS, the CPU mirror of the
+  // hulls there (couriers, packets and lighters on the ring lanes, packets on the transfers,
+  // shuttles on the port columns, haulers and tankers on the Moon run, haulers and tugs in the
+  // Harbour corridors: hullClassOf), placed from shipPosJS, the CPU mirror of the
   // shader paths. One instanced mesh per class, instance matrices relative to a local origin
   // at the nearest hull so they stay exact in float32; nothing is drawn when none are near.
   buildHulls(space) {
     this.hullGroup = new THREE.Group();
     this.hullGroup.userData.world = new THREE.Vector3();
-    const classes = [buildCourier(44), buildShuttle(110), buildTug(80)];
-    const accents = [[0.55, 0.85, 1.0], [0.55, 0.9, 1.0], [1.0, 0.72, 0.42]];
+    // the working fleet's designs join the three classic hulls: packets and lighters on the
+    // ring lanes, haulers and tankers on the Moon run and in the Harbour's corridors
+    const classes = [buildCourier(44), buildShuttle(110), buildTug(80), design('packet', 4), design('lighter', 1), design('hauler', 3), design('tanker', 5)];
+    const accents = [[0.55, 0.85, 1.0], [0.55, 0.9, 1.0], [1.0, 0.72, 0.42], [0.55, 0.88, 1.0], [0.5, 1.0, 0.8], [1.0, 0.72, 0.45], [1.0, 0.62, 0.35]];
     this.hullSets = classes.map((c, i) => {
       const mat = createCraftMaterial({ accent: accents[i], lit: 0.5 });
       const im = new THREE.InstancedMesh(c.geo, mat, HULL_MAX);
@@ -328,10 +344,7 @@ export class Traffic {
     });
     // hull class per ship, from its path type (and a Harbour tug for every corridor ship)
     this.hullClass = new Uint8Array(this.count);
-    for (let i = 0; i < this.count; i++) {
-      const t = this.iA[i * 4];
-      this.hullClass[i] = t < 0.5 ? 0 : t < 3.5 ? 1 : 2;
-    }
+    for (let i = 0; i < this.count; i++) this.hullClass[i] = hullClassOf(this.iA[i * 4], i);
     space.scene.add(this.hullGroup);
     // placed while the slices are planned, from the camera as it will render this frame (the
     // rig moves after the modules update: a stale camera missed ships under time warp)

@@ -7,6 +7,16 @@ import { LAMP, createLamps } from './lamps.js';
 import { R_EARTH, R_MOON, MERIDIAN_LON, bodyDir } from './sim.js';
 import { stationFrame, CORRIDORS } from './stations.js';
 import { HS } from './harbour.js';
+import { FleetTraffic } from './fleetTraffic.js';
+import { buildLinerDetail, buildFreighterDetail, buildTenderDetail, buildEvaWorker, evaPose, evaLines, EVA_PARTIES } from './linerDetail.js';
+import { buildWheelDetail, buildLiftCar, buildRingCrane, liftPose, craneAngle, RING } from './seleneDetail.js';
+
+/** km: the liners' near fittings are drawn inside this range (a 2.4 km hull spans ~60 px at 60 km). */
+export const LINER_DETAIL_RANGE = 60;
+/** km: Selene's wheel walks, lifts and cranes are drawn inside this range. */
+export const SELENE_DETAIL_RANGE = 45;
+/** km: the tenders' deck fittings are drawn inside this range. */
+export const TENDER_DETAIL_RANGE = 25;
 
 // MERIDIAN's ships in the orbital view (km units; the craft are built in metres).
 //
@@ -18,6 +28,17 @@ import { HS } from './harbour.js';
 //              down the other; three reclamation tenders nearby, one carrying a relic
 //  Moon        Selene Works above the near side, tankers berthed at its docking ring and
 //              one on the Earth run
+//
+//  Working lanes  (src/space/fleetTraffic.js, designs in src/space/shipDesigns.js) seventy
+//              more ships: two outer roads round the Harbour (tail-first braking arrivals, a
+//              flip and hold at the outer gate, a wide swing round the tether, departures
+//              under power; convoys with tug escorts, a packet train, spin-ring clippers),
+//              holding stacks off the arrival side, Selene's ore barges, patrol and convoys,
+//              and two crews of work drones over the tenders; instanced hulls, nav lamps,
+//              drive plumes and RCS puffs from each design's real nozzles
+//  Close to     built on first approach, hidden beyond range: the Concord liners' fittings
+//              (src/space/linerDetail.js), Selene's wheel walks, spoke lifts and ring cranes
+//              (src/space/seleneDetail.js), the tankers' and the tenders' deck fittings
 //
 // Everything decorative moves in real time (warped sim time made ships strobe). Each ship
 // that can wander far from its station is its own depth-sliced body; targets read the
@@ -232,6 +253,7 @@ export class Fleet {
     });
     // ---- reclamation tenders above the Halo near the Nauru port
     const tender = buildTender(620);
+    this.tenderData = tender;
     const relic = buildRelic();
     this.tenders = [];
     this.tenderGroup = new THREE.Group();
@@ -289,6 +311,7 @@ export class Fleet {
       berthed.push({ geo: tanker.geo, m: M });
     }
     rm.add(craftPart(rm, placeMerge(berthed)));
+    this.tankerBerths = berthed.map((b) => b.m);
     this.refinery.add(rm);
     this.refineryMesh = rm;
     this.crafts.push(rm);
@@ -313,6 +336,8 @@ export class Fleet {
     // a second tanker on the same run, half a day behind: in from the Harbour down the amber
     // lane and holding off the docking ring for a berth (the same corridors, the same beacons)
     this._addVoyager('tankerInbound', tanker, this.refinery, { ...this.movers[this.movers.length - 1].c, offset: SELENE_RUN.offsets[1] });
+    // ---- the working lanes round the Harbour and Selene (src/space/fleetTraffic.js)
+    this.traffic = new FleetTraffic(space, this);
   }
 
   /** A ship on a voyage cycle: a top-level group (its own depth-sliced body) placed from a station frame. */
@@ -445,6 +470,121 @@ export class Fleet {
       this.seleneLanes.position.copy(this.refinery.position);
       this.seleneLanes.quaternion.copy(this.refinery.quaternion);
       this.wheel.rotation.y = realTime * 0.04;
+    }
+    // the working lanes: outer roads, holding stacks, Selene's ore run, patrol and convoys
+    this.traffic.update(sim, realTime, dt, space);
+    // the Concord liners' fittings, built the first time a camera comes near either of them
+    this._linerDetail(space.camera, false, realTime);
+    // Selene's wheel walks, spoke lifts and ring cranes, likewise
+    this._seleneDetail(space.camera, realTime);
+    // and the tenders' deck fittings
+    this._tenderDetail(space.camera);
+  }
+
+  /** The tenders' deck fittings (catwalks, floods, RCS, masts), seated on their hulls; lazy. */
+  _tenderDetail(cam, force = false) {
+    if (!cam && !force) return;
+    let near = force;
+    if (!near) { this.tenderGroup.getWorldPosition(_v); near = _v.distanceTo(cam.position) < TENDER_DETAIL_RANGE; }
+    if (near && !this.tenderDetail) {
+      const d = buildTenderDetail(this.tenderData.geo);
+      const parts = this.tenders.map((t) => {
+        const p = craftPart(t.mesh, d.geo);
+        addLamps(p, d.lamps, { minPx: 1.0 });
+        t.mesh.add(p);
+        return p;
+      });
+      this.tenderDetail = { data: d, parts };
+    }
+    if (this.tenderDetail) for (const p of this.tenderDetail.parts) p.visible = near;
+  }
+
+  /** Selene Works' near detail (src/space/seleneDetail.js): built on first approach, animated only while near. */
+  _seleneDetail(cam, t, force = false) {
+    if (!cam && !force) return;
+    let near = force;
+    if (!near) { this.refinery.getWorldPosition(_v); near = _v.distanceTo(cam.position) < SELENE_DETAIL_RANGE; }
+    if (near && !this.seleneDetail) {
+      const rm = this.refineryMesh, wd = buildWheelDetail(), car = buildLiftCar(), crane = buildRingCrane();
+      const wheelPart = craftPart(rm, wd.geo);
+      addLamps(wheelPart, wd.lamps, { minPx: 1.1 });
+      this.wheel.add(wheelPart);
+      const cars = [];
+      for (let k = 0; k < 6; k++) for (let j = 0; j < 1; j++) {   // one car to a spoke: they share its rail
+        const m = craftPart(rm, car.geo);
+        addLamps(m, car.lamps, { minPx: 1.0 });
+        this.wheel.add(m);
+        cars.push({ mesh: m, k, j });
+      }
+      const cranes = [];
+      for (let k = 0; k < 3; k++) {
+        const pivot = new THREE.Group();
+        const m = craftPart(rm, crane.geo);
+        m.position.set(RING.R, RING.y + RING.tube, 0);
+        addLamps(m, crane.lamps, { minPx: 1.0 });
+        pivot.add(m);
+        rm.add(pivot);
+        cranes.push({ pivot, mesh: m, k });
+      }
+      // the tankers' fittings: on the three berthed at the ring and the two on the Earth run
+      const tf = buildFreighterDetail(560);
+      const berthFit = craftPart(rm, placeMerge(this.tankerBerths.map((m) => ({ geo: tf.geo, m }))));
+      addLamps(berthFit, this.tankerBerths.flatMap((m) => placeLamps(tf.lamps, m)), { minPx: 1.0 });
+      rm.add(berthFit);
+      const runFits = this.movers.filter((m) => m.frameObj === this.refinery).map((mv) => {
+        const f = craftPart(mv.mesh, tf.geo);
+        addLamps(f, tf.lamps, { minPx: 1.0 });
+        mv.mesh.add(f);
+        return f;
+      });
+      this.seleneDetail = { wheelPart, cars, cranes, berthFit, runFits, parts: [wheelPart, berthFit, ...runFits, ...cars.map((c) => c.mesh), ...cranes.map((c) => c.pivot)], data: { wd, car, crane, tf } };
+    }
+    const D = this.seleneDetail;
+    if (!D) return;
+    for (const p of D.parts) p.visible = near;
+    if (!near) return;
+    for (const c of D.cars) { const a = liftPose(c.k, c.j, t, c.mesh.position); c.mesh.rotation.y = -a; }
+    for (const c of D.cranes) c.pivot.rotation.y = -craneAngle(c.k, t);
+  }
+
+  /** Near detail for the berthed and the visiting liner (src/space/linerDetail.js): lazy, hidden beyond range. */
+  _linerDetail(cam, force = false, t = 0) {
+    if (!cam && !force) return;
+    const hulls = (this._linerHulls ||= [this.docked, this.movers.find((m) => m.name === 'approach')?.mesh].filter(Boolean));   // (cached: no per-frame allocation)
+    let near = force;
+    for (const h of hulls) {
+      h.getWorldPosition(_v);
+      h.userData.detailNear = force || (cam && _v.distanceTo(cam.position) < LINER_DETAIL_RANGE);
+      near ||= h.userData.detailNear;
+    }
+    if (near && !this.linerDetail) {
+      this.linerDetail = buildLinerDetail();
+      for (const h of hulls) {
+        const part = craftPart(h, this.linerDetail.geo);
+        addLamps(part, this.linerDetail.lamps, { minPx: 1.1 });
+        h.add(part);
+        h.userData.detail = part;
+      }
+      // the EVA work parties on the berthed liner's port flank, on their safety lines
+      const dp = this.docked.userData.detail, wk = buildEvaWorker();
+      dp.add(craftPart(this.docked, evaLines()));
+      this.eva = [];
+      for (let k = 0; k < EVA_PARTIES.length; k++) for (let j = 0; j < 3; j++) {
+        const m = craftPart(this.docked, wk.geo);
+        addLamps(m, wk.lamps, { minPx: 0.9 });
+        dp.add(m);
+        this.eva.push({ mesh: m, k, j, pose: { pos: new THREE.Vector3(), up: new THREE.Vector3(), fwd: new THREE.Vector3() } });
+      }
+    }
+    if (this.linerDetail) for (const h of hulls) h.userData.detail.visible = !!h.userData.detailNear;
+    if (this.eva && this.docked.userData.detailNear) {
+      for (const w of this.eva) {
+        const P = evaPose(w.k, w.j, t, w.pose);
+        _v.crossVectors(P.up, P.fwd).normalize();
+        _m.makeBasis(_v, P.up, _v2.crossVectors(_v, P.up)).setPosition(P.pos);
+        w.mesh.position.copy(P.pos);
+        w.mesh.quaternion.setFromRotationMatrix(_m);
+      }
     }
   }
 }

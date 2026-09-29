@@ -6,6 +6,7 @@ import { HALO_PORTS } from './earthData.js';
 import { CB, CK } from '../craft/craftGeometry.js';
 import { lathe } from '../craft/craftClasses.js';
 import { craftMesh, placeMerge, KM } from './craftMesh.js';
+import { harbourRoad, harbourStack } from './fleetTraffic.js';
 
 // Lane guidance: soft beacons that make the traffic corridors read as designed ways.
 //   Harbour   runway pairs along the arrival (amber) and departure (blue) corridors, a
@@ -81,6 +82,14 @@ export class Lanes {
     this.buoys = craftMesh(placeMerge(this.buoyData.map((b) => ({ geo: buoy.geo, m: b.m }))), { accent: [1.0, 0.72, 0.45], lit: 0.4 });
     this.harbourFrame.add(this.buoys);
     space.earthFixed.add(this.harbourFrame);
+    // the working lanes' outer roads and holding stacks (src/space/fleetTraffic.js): their own
+    // buoys and gate rings, amber in and blue out like the corridors, teal on the stacks
+    const outer = outerRoadBuoys();
+    this.outerBuoyData = outer;
+    this.outerBuoys = craftMesh(placeMerge(outer.map((b) => ({ geo: buoy.geo, m: new THREE.Matrix4().compose(b.p.clone().multiplyScalar(1000), new THREE.Quaternion(), new THREE.Vector3(b.size, b.size, b.size)) }))), { accent: [0.55, 0.9, 1.0], lit: 0.4 });
+    this.harbourFrame.add(this.outerBuoys);
+    this.outerLamps = createLamps(outer.map((b) => ({ ...b.lamp, p: b.p.clone().add(new THREE.Vector3(0, (BUOY_TOP + 3) * b.size * KM, 0)), r: 0.011 * b.size })), { minPx: 1.3 });
+    this.harbourFrame.add(this.outerLamps);
     space.addBody('lanesGeo', [this.harbourFrame], () => this.harbourFrame.getWorldPosition(_v), 1500);
     // port columns (body frame, km)
     const pl = [];
@@ -146,6 +155,43 @@ export function portColumnBuoys(size = 8) {
     const lamp = new THREE.Vector3(x, h * 1000, 0);
     const base = lamp.clone().add(new THREE.Vector3(0, -(BUOY_TOP + 3) * size, 0));
     out.push({ lamp, base, size, column: upc, m: new THREE.Matrix4().compose(base, new THREE.Quaternion(), new THREE.Vector3(size, size, size)) });
+  }
+  return out;
+}
+
+/**
+ * Buoys for the working lanes (Harbour frame, km): on each outer road a gate ring round the outer
+ * gate and runway pairs out along the arrival and departure legs (closer together near the gate,
+ * growing with distance), a slow wave running inward on arrival and outward on departure; and
+ * marker beacons at the ends and the heart of each holding stack's racetrack.
+ * Returns [{ p, size, lamp: { color, i, breathe, phase } }].
+ */
+export function outerRoadBuoys() {
+  const out = [];
+  const up = new THREE.Vector3(0, 1, 0);
+  const lane = (from, to, color, inward) => {
+    const d = to.clone().sub(from).normalize();
+    const e1 = new THREE.Vector3().crossVectors(d, up).normalize();
+    const e2 = new THREE.Vector3().crossVectors(e1, d);
+    for (let i = 0; i < 10; i++) {
+      const s = 8 + i * i * 6.5;
+      for (const sd of [-1, 1]) out.push({ p: from.clone().addScaledVector(d, s).addScaledVector(e1, sd * (2.2 + i * 0.2)), size: 1 + i * 0.7, lamp: { color, i: 3.0, breathe: 0.4, phase: (((inward ? i : 10 - i) / 10) * 1.4) % 1 } });
+    }
+    for (let k = 0; k < 8; k++) {
+      const a = (k / 8) * Math.PI * 2;
+      out.push({ p: from.clone().addScaledVector(e1, Math.cos(a) * 3.4).addScaledVector(e2, Math.sin(a) * 3.4), size: 1.3, lamp: { color, i: 2.8, breathe: 0.3, phase: k / 8 } });
+    }
+  };
+  for (const side of [1, -1]) {
+    const R = harbourRoad(side);
+    const arr = R.legs[0], dep = R.legs[3];
+    lane(arr.p[3], arr.p[0], LAMP.AMBER, true);
+    lane(dep.p[0], dep.p[3], LAMP.BLUE, false);
+  }
+  for (const level of [0, 1]) {
+    const leg = harbourStack(level).legs[0];
+    for (const e of [-1, 1]) out.push({ p: leg.c.clone().addScaledVector(leg.a, e * (leg.L + leg.r + 2.5)), size: 2.2, lamp: { color: LAMP.TEAL, i: 3.0, breathe: 0.5, phase: e > 0 ? 0 : 0.5 } });
+    out.push({ p: leg.c.clone(), size: 2.6, lamp: { color: LAMP.WHITE, i: 2.6, breathe: 0.35, phase: level * 0.5 } });
   }
   return out;
 }
