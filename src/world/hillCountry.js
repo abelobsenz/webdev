@@ -775,7 +775,7 @@ export function buildHillCountry(scene, { onComponent = null } = {}) {
       }
       options.sort((a,b)=>a.score-b.score);
       const e=options[0];if(!e){s.accessFailure='no clear founded threshold';continue;}
-      stairs(s,e);doorLinks.push({s,e});
+      doorLinks.push({s,e});   // (its stairs are built once the lanes exist: see below)
       let n=e.node;while(prev[n]>=0){addEdge(n,prev[n]);n=prev[n];}roots.add(n);
       routes.push({site:s.id,settlement:group,root:{...anchor.get(n)},nodes:[e.node],reachesRoad:true});
     }
@@ -795,6 +795,21 @@ export function buildHillCountry(scene, { onComponent = null } = {}) {
       road(p,main?1.18:hw,0,{heights:h,kerbs:false,kind:main?'village-lane':'local-lane',lamps:false});};
     for(const [n,nb]of used){if(nb.size===2&&!junctionNodes.has(n))continue;for(const m of nb){if(done.has(edgeKey(n,m)))continue;const path=[n];let a=n,b=m;for(;;){path.push(b);done.add(edgeKey(a,b));const next=used.get(b);if(next.size!==2||junctionNodes.has(b))break;const c=[...next].find(q=>q!==a);if(done.has(edgeKey(b,c)))break;a=b;b=c;}draw(path);}}
     for(const n of roots){const p=anchor.get(n);if(p&&Math.hypot(X(n)-p.x,Z(n)-p.z)>.05)road([[p.x,p.z],[X(n),Z(n)]],hw,0,{heights:[p.y,height[n]],kerbs:false,kind:'road-junction',lamps:false});}
+    // An entrance's foot meets whatever lane of this settlement passes within reach of it at that
+    // lane's own surface (the lanes are drawn now); founding it on the terrain beside a lane on
+    // an embankment left the walk's last metre under the lane's paving. Then the stairs.
+    const laneRecords=allRoads.filter(r=>r.settlement===group&&(r.kind==='local-lane'||r.kind==='village-lane'||r.kind==='road-junction'));
+    const laneNear=(e)=>{let best=null;
+      for(const r of laneRecords)for(let k=1;k<r.points.length;k++){const a=r.points[k-1],b=r.points[k],dx=b.x-a.x,dz=b.z-a.z,L2=dx*dx+dz*dz||1;
+        for(const q of [e.foot,e.approach]){const t=Math.max(0,Math.min(1,((q.x-a.x)*dx+(q.z-a.z)*dz)/L2)),d=Math.hypot(q.x-a.x-dx*t,q.z-a.z-dz*t);
+          if(d<r.halfWidth+hw+.35&&(!best||d<best.d))best={d,y:a.y+(b.y-a.y)*t};}}
+      return best;};
+    for(const {s,e}of doorLinks){
+      const best=laneNear(e);
+      // (only ever raised: a lane above the walk is what buries its end; lowering would add treads to a fixed run)
+      if(best&&best.y>e.bottom+.12&&best.y<e.top-.02){e.bottom=best.y;e.steps=Math.max(1,Math.ceil((e.top-e.bottom)/.19));}
+      stairs(s,e);
+    }
     for(const {s,e}of doorLinks){const node={x:X(e.node),z:Z(e.node)},dx=e.approach.x-node.x,dz=e.approach.z-node.z,len=Math.hypot(dx,dz),landing=Math.min(2.3,len*.46),first=[node.x+dx/(len||1)*landing,node.z+dz/(len||1)*landing],middle=resample([first,[e.approach.x,e.approach.z]],1),walk=[[node.x,node.z],...middle,[e.foot.x,e.foot.z]],heights=[height[e.node],...middle.map((p,k)=>Math.max(height[e.node]+(e.bottom-height[e.node])*k/(middle.length-1),joiningHeight(...p,hw))),e.bottom];heights[1]=height[e.node];heights[heights.length-2]=e.bottom;const n0=[-dz/(len||1),dx/(len||1)],n1=[e.dz,-e.dx],den=1+n0[0]*n1[0]+n0[1]*n1[1],miter=[(n0[0]+n1[0])/den,(n0[1]+n1[1])/den],normals=walk.map((p,k)=>{if(k===walk.length-1)return n1;const u=Math.min(1,Math.hypot(p[0]-node.x,p[1]-node.z)/(len||1));return n0.map((v,j)=>v+(miter[j]-v)*u);});road(walk,hw,0,{heights,normals,kerbs:false,kind:'door-walk',lamps:false});
       if(s.gate){const d=s.door;road([[e.face.x,e.face.z],[s.x+s.gate.dx*19,s.z+s.gate.dz*19],[d.x,d.z]],1.1,0,{heights:[s.base+.04,s.base+.04,s.base+.04],kerbs:false,kind:'summit-court',lamps:false});}
     }
