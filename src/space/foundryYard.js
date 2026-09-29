@@ -18,8 +18,9 @@ import { craftInstances, MovingLamps } from './helianthDistrict.js';
 //   drones    inspection drones circle the garden wheel and the courts on fixed, clear orbits
 //   wheel     lift cars ride the tops of the garden wheel's six spokes between hub and rim
 //   crews     suited crews walk the stack roofs under the spine pipe, helmet lamps lit
-//   queue     three ore tenders hold station in the approach lane south of the halls,
-//             waiting their turn at the unloading bays
+//   queue     ore tenders work the two outer halls: each runs in along its hall's axis from a
+//             holding point in the approach lane, lies in the hall while it is unloaded, and backs
+//             out again; a third holds its place in the lane behind them
 //
 // The verifier (tools/verify-sun.mjs) checks every crane pose against the courts, the carts
 // against the columns and stacks, the drones' orbits and the halls' reserved volumes.
@@ -169,6 +170,18 @@ export function crewPos(j, t, out = V(0, 0, 0)) {
 
 /** Tender queue in the approach lane (foundry metres). */
 export const QUEUE = [V(-4200, -200, -9200), V(4200, -200, -9800), V(-4200, -350, -12800)];
+export const VISIT = { y: -300, z: -1000, T: 420, bays: 2 };
+/** Tender i's pose on its visit (i < 2: the outer halls), foundry metres; returns the throttle. */
+export function tenderVisit(i, t, out = V(0, 0, 0)) {
+  const h = QUEUE[i];
+  if (i >= VISIT.bays) { out.copy(h); return 0.04; }
+  const u = (((t / VISIT.T) + i * 0.5) % 1 + 1) % 1;
+  // hold .0-.15, in .15-.4, unloading .4-.7, back out .7-.95, hold
+  const k = u < 0.15 ? 0 : u < 0.4 ? smooth(0.15, 0.4, u) : u < 0.7 ? 1 : u < 0.95 ? 1 - smooth(0.7, 0.95, u) : 0;
+  out.set(h.x, h.y + (VISIT.y - h.y) * k, h.z + (VISIT.z - h.z) * k);
+  const moving = (u > 0.15 && u < 0.4) || (u > 0.7 && u < 0.95);
+  return moving ? 0.3 : 0.04;
+}
 
 /** Furnace and process lamps. */
 export function furnaceLamps(data) {
@@ -224,7 +237,7 @@ export class FoundryYard {
       const eng = addEngines(m, te.glows, { scale: 0.7, length: 6, throttle: 0.04 });
       addLamps(m, [{ p: V(0, 20, 0), r: 5, color: i % 2 ? LAMP.AMBER : LAMP.WHITE, i: 2.4, breathe: 0.4, phase: i / 3 }], { minPx: 1.2 });
       this.root.add(m);
-      return { mesh: m, eng };
+      return { mesh: m, eng, i };
     });
     this.moving = [this.bridges, this.trolleys, this.cassettes, this.cables, this.carts, this.drones, this.wheelCars];
     this.built = true;
@@ -272,6 +285,10 @@ export class FoundryYard {
       this.wheelCars.setMatrixAt(k, m);
     }
     for (const im of this.moving) im.instanceMatrix.needsUpdate = true;
+    for (const q of this.queue) {
+      const thr = tenderVisit(q.i, t, q.mesh.position);
+      for (const e of q.eng) e.setThrottle(thr);
+    }
     this.droneLamps.commit(); this.cartLamps.commit(); this.crew.commit();
   }
 }

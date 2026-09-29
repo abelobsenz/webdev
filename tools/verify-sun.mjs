@@ -11,15 +11,16 @@ import {
   flotillaLayout, courierRoute, courierPose, COURIER, FLOTILLA, PETAL, buildConcentrator, buildRelayPlatform, BERTH,
   petalBottom, SPOKE, spokeTop, spokeCarR, buildSpokeCar, buildHubWorks, GALLERY, FIN, buildSwarmTender, tenderLocal, tenderStatites, crownCrew,
 } from '../src/space/helianthDistrict.js';
-import { FoundryYard, buildWheelCar, wheelCar, WHEEL, buildCraneWorks, cranePose, cartPose, droneOrbits, dronePos, crewPos, COURT, CRANE, CART, QUEUE } from '../src/space/foundryYard.js';
+import { FoundryYard, tenderVisit, VISIT, buildWheelCar, wheelCar, WHEEL, buildCraneWorks, cranePose, cartPose, droneOrbits, dronePos, crewPos, COURT, CRANE, CART, QUEUE } from '../src/space/foundryYard.js';
 import { buildTender } from '../src/craft/craftGeometry.js';
 import { Hearth, buildCollector } from '../src/space/hearth.js';
-import { HAMLET, hamletMatrix, hamletAngle, buildHamletFixed, buildHamletWheel, buildStationFittings, dishDrone, dishSag, DISH, buildDishDrone, tramArc, tramAngle, RING, TRAM, tankerSlots, tankerPose, TANKER, MODULE, HearthDistrict } from '../src/space/hearthDistrict.js';
+import { buildDishTruss, backX, BACK, HAMLET, hamletMatrix, hamletAngle, buildHamletFixed, buildHamletWheel, buildStationFittings, dishDrone, dishSag, DISH, buildDishDrone, tramArc, tramAngle, RING, TRAM, tankerSlots, tankerPose, TANKER, MODULE, HearthDistrict } from '../src/space/hearthDistrict.js';
 import { buildFeeder } from '../src/space/hearthWorks.js';
 import { SunSwarm } from '../src/space/sun.js';
 import { SpaceSim } from '../src/space/sim.js';
 
 const V = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z), results = {}, I = new THREE.Matrix4();
+const placeMergeT = (te) => { const g = [te.geo, ...te.arms.map((a) => a.geo)].map((x) => x.index ? x.toNonIndexed() : x); const pos = g.flatMap((x) => Array.from(x.attributes.position.array)); const out = new THREE.BufferGeometry(); out.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); return out; };
 function tris(g, m = I, s = 1, step = 1) {
   const out = [], p = g.attributes.position, ix = g.index;
   const M = new THREE.Matrix4().makeScale(s, s, s).premultiply(m);
@@ -325,6 +326,21 @@ const stT = tree(tris(sc.geo));
   let qClear = Infinity;
   for (const q of QUEUE) for (const p of verts(te.geo, new THREE.Matrix4().makeTranslation(q.x, q.y, q.z), 7)) qClear = Math.min(qClear, dist(foT, p, qClear + 1));
   assert.ok(qClear > 3000, `queued tenders hold ${qClear.toFixed(0)} m off the works`);
+  // visiting tenders: along their halls' axes, inside the reserved volume once in, clear of the works
+  const tv = verts(placeMergeT(te), I, 5);
+  let vClear = Infinity;
+  for (let t = 0; t < VISIT.T; t += 3) for (let i = 0; i < 3; i++) {
+    tenderVisit(i, t, P);
+    const bay = fo.bays.find((b) => Math.abs((b.min.x + b.max.x) / 2 - P.x) < 1);
+    if (i < VISIT.bays) assert.ok(bay && bay !== fo.bays[1], 'visits use the outer halls only');
+    for (const p of tv) {
+      const w = p.clone().add(P);
+      if (bay && w.z > bay.min.z) assert.ok(w.x > bay.min.x && w.x < bay.max.x && w.y > bay.min.y && w.y < bay.max.y, 'a visiting tender stays inside its hall volume');
+      vClear = Math.min(vClear, dist(foT, w, vClear + 1));
+    }
+  }
+  assert.ok(vClear > 40, `visiting tenders clear the halls by ${vClear.toFixed(0)} m`);
+  results.tenderVisitClearanceMetres = +vClear.toFixed(0);
   results.tenderQueueClearanceMetres = +qClear.toFixed(0);
   // build and frame
   const g = new THREE.Group(), y = new FoundryYard(g, fo);
@@ -369,6 +385,23 @@ const stT = tree(tris(sc.geo));
   assert.ok(Math.abs(zmin - 1.07) < 1e-6, `ferry seated on its port (${((zmin - 1.07) * 1000).toFixed(2)} m)`);
   const portD = Math.min(...fv2.map((p) => p.distanceTo(V(MODULE.node, 0, 1.07))));
   assert.ok(portD < 0.12, `ferry hull over the port (${(portD * 1000).toFixed(0)} m)`);
+  // dish trusses: seated on the back shell, outside the bearing drum, clear of the supports
+  {
+    const tg = buildDishTruss();
+    closed('dishTruss', tg);
+    const colT = tree(tris(buildCollector()));
+    let seat = 0, sup = Infinity;
+    const tv = verts(tg, I, 7);
+    for (const p of tv) {
+      const r = Math.hypot(p.y, p.z);
+      assert.ok(r > 2.3 + BACK.tube, 'truss clear of the gold bearing drum');
+      seat = Math.max(seat, dist(colT, p) - 0.16);
+    }
+    assert.ok(seat < 0.02, `dish truss rides on the back shell (worst ${(seat * 1000).toFixed(0)} m beyond its reach)`);
+    for (const [i, m] of hearth.collectorMounts.entries()) for (const p of tv.filter((_, k) => k % 6 === i % 6)) sup = Math.min(sup, segDist(p.clone().applyMatrix4(m.collector.matrix), m.root, m.mount) - 0.55);
+    assert.ok(sup > 0.3, `dish trusses clear the supports by ${sup.toFixed(2)} km`);
+    results.dishTrussSupportClearanceKm = +sup.toFixed(2);
+  }
   // dish drones: standing off every mirror and the spokes and struts that cross in front of it
   {
     const colT = tree(tris(buildCollector()));
@@ -449,7 +482,7 @@ const stT = tree(tris(sc.geo));
   assert.ok(ta / 200 < 0.3, 'Hearth district frame under 0.3 ms');
   assert.ok(d.trams.instanceMatrix.array.every(Number.isFinite) && d.tramAttr.array.every(Number.isFinite), 'finite trams');
   let tri = 0;
-  for (const m of [d.fittings, d.drones, d.hamlets, d.wheels, d.platforms, d.trams, d.coils, ...d.tankers.map((x) => x.mesh)]) tri += triCount(m.geometry) * (m.isInstancedMesh ? m.count : 1);
+  for (const m of [d.fittings, d.trusses, d.drones, d.hamlets, d.wheels, d.platforms, d.trams, d.coils, ...d.tankers.map((x) => x.mesh)]) tri += triCount(m.geometry) * (m.isInstancedMesh ? m.count : 1);
   results.hearthDistrictRenderedTris = tri;
 }
 

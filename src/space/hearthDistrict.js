@@ -18,6 +18,8 @@ import { RS } from './hearthLens.js';
 //             stand off the ring short of each station's supports and dish, dwelling at each
 //   feeder    the injector's accelerator collars and funnel coils; three matter tankers hold in
 //             a queue astern of the feeder and a fourth works the transfer berth above it
+//   dishes    every dish is stiffened behind by a lattice of hoops and radial ribs seated on its
+//             back shell, outside the hub's bearing drum
 //   drones    three cleaning drones sweep circles in front of every dish, standing off its
 //             mirror, between the spokes that cross it and the receiver's struts
 //   hamlets   a crew hamlet hangs under the ring midway along every arc: a spindle on a hanger
@@ -91,6 +93,29 @@ export function stationFittingsKm() {
   const hull = toHullKinds(f.geo, null, 1), ferry = toHullKinds(f.ferry.geo, f.ferry.m);
   const lamps = [...f.lamps, ...placeLamps(f.ferry.lamps || [], f.ferry.m).map((l) => ({ ...l, p: l.p.clone().multiplyScalar(0.001), r: l.r * 0.001 * 3 }))];
   return { geo: merge([hull, ferry]), parts: { hull, ferry }, lamps };
+}
+
+// ------------------------------------------------------------- dish trusses ----
+// The dish's back shell (buildCollector): r = 12.992 sin a, x = 12.736 - 12.992 cos a (km), a to 0.72.
+export const BACK = { R: 40.6 * 0.32, x0: 39.8 * 0.32, rIn: 2.6, rOut: 8.2, tube: 0.05, seat: 0.03 };
+export const backX = (r) => BACK.x0 - BACK.R * Math.cos(Math.asin(Math.min(r / BACK.R, 1)));
+export function buildDishTruss() {
+  const B = new CB(), X = (r) => backX(r) - BACK.seat;
+  // hoops
+  for (const r of [2.6, 3.7, 4.8, 5.9, 7.0, 8.1]) {
+    const pts = [];
+    for (let i = 0; i <= 96; i++) { const a = (i / 96) * TAU; pts.push(V(X(r), Math.cos(a) * r, Math.sin(a) * r)); }
+    pts[96] = pts[0].clone();
+    B.tube(pts, BACK.tube, 6, CK.DARK);
+  }
+  // radial ribs between the spokes, and a node block at every crossing
+  for (let k = 0; k < 24; k++) {
+    const a = ((k + 0.5) / 24) * TAU, c = Math.cos(a), sn = Math.sin(a), pts = [];
+    for (let j = 0; j <= 14; j++) { const r = BACK.rIn - 0.1 + (BACK.rOut - BACK.rIn + 0.2) * (j / 14); pts.push(V(X(r), c * r, sn * r)); }
+    B.tube(pts, BACK.tube * 0.8, 6, CK.HULL);
+    if (k % 2 === 0) for (const r of [3.7, 5.9, 8.1]) { B.at(X(r) - 0.02, c * r, sn * r); B.box(0, 0, 0, 0.1, 0.16, 0.16, CK.BRONZE); B.pop(); }
+  }
+  return toHullKinds(B.geometry(), null, 1);
 }
 
 // ------------------------------------------------------------------ drones ----
@@ -255,6 +280,10 @@ export class HearthDistrict {
     for (const m of mats) L.push(...placeLamps(sf.lamps, m));
     this.fittings.add(createLamps(L, { minPx: 1.1, mask }));
     hearth.stations.add(this.fittings);
+    // ---- the dish trusses
+    this.trusses = new THREE.InstancedMesh(buildDishTruss(), mat, mats.length);
+    mats.forEach((m, i) => this.trusses.setMatrixAt(i, m));
+    hearth.stations.add(this.trusses);
     // ---- the dish drones: instanced on the collectors' frames, lamps riding with them
     this.collectorMats = mats;
     this.drones = new THREE.InstancedMesh(buildDishDrone(), mat, mats.length * DISH.radii.length);
@@ -319,7 +348,7 @@ export class HearthDistrict {
       for (let k = 0; k < 6; k++) { const a = (k / 6) * TAU; R.push({ p: V(Math.cos(a) * 6.8, 0.85, Math.sin(a) * 6.8), r: 0.18, color: [1.0, 0.78, 0.5], i: 1.4, breathe: 0.2, phase: (k + w) / 6 }); }
       rotor.add(createLamps(R, { minPx: 1.1, mask }));
     });
-    for (const o of [this.fittings, this.drones, this.hamlets, this.wheels, this.platforms, this.trams, this.coils, ...this.tankers.map((t) => t.mesh)]) { o.frustumCulled = false; o.renderOrder = 3; }
+    for (const o of [this.fittings, this.trusses, this.drones, this.hamlets, this.wheels, this.platforms, this.trams, this.coils, ...this.tankers.map((t) => t.mesh)]) { o.frustumCulled = false; o.renderOrder = 3; }
     this._m = new THREE.Matrix4(); this._q = new THREE.Quaternion(); this._p = V(0, 0, 0); this._s = V(1, 1, 1); this._t = V(0, 0, 0); this._y = V(0, 1, 0); this._z = V(0, 0, 0);
     this.update(0);
   }
