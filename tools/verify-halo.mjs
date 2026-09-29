@@ -313,7 +313,12 @@ assert.ok(out.closestApproachTris < 12e6, 'District tiles within 12M rendered tr
   const P = D.plan;
   assert.ok(P.cells.image.width === CELLS_X && P.cells.image.height === CELLS_Z * (HARBOUR_V + 1), 'Cell texture: every variant');
   assert.ok(P.tiles.image.width * P.tiles.image.height >= D.nTiles, 'Tile texture: every tile');
-  for (let k = 0; k < D.nTiles; k++) assert.equal(P.tiles.image.data[k * 4], D.tileVariant[k] + 1, 'tile variant texel');
+  for (let k = 0; k < D.nTiles; k++) {
+    assert.equal(P.tiles.image.data[k * 4], D.tileVariant[k] + 1, 'tile variant texel');
+    assert.equal(P.tiles.image.data[k * 4 + 1] > 0, D.tileVariant[k] < 0, 'every undressed tile has a painted ground, no dressed one does');
+  }
+  out.undressedTiles = { ports: D.tileGround.filter((g) => g === 1).length, foundry: D.tileGround.filter((g) => g === 2).length };
+  assert.ok(out.undressedTiles.ports >= 7 * 5 && out.undressedTiles.foundry >= 6, 'Ports and the foundry keep their ground');
   D.variants.forEach((v, vi) => {
     const codes = cellKinds(vi), counts = {};
     for (const c of codes) if (c) counts[CELL_NAMES[c]] = (counts[CELL_NAMES[c]] || 0) + 1;

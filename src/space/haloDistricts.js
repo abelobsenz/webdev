@@ -390,10 +390,11 @@ export function cellKinds(variant) {
 }
 /**
  * The plan as textures for the deck shader: cells (CELLS_X x CELLS_Z rows per variant, code in
- * red) and the variant of every tile (+1, 0 = undressed) laid out PLAN_W wide.
+ * red) and the variant of every tile (+1, 0 = undressed; green: an undressed tile's ground)
+ * laid out PLAN_W wide.
  */
 export const PLAN_W = 256;
-export function cellPlanTextures(tileVariant) {
+export function cellPlanTextures(tileVariant, tileGround = null) {
   const nV = VARIANTS.length + 1, cd = new Uint8Array(CELLS_X * CELLS_Z * nV * 4);
   for (let v = 0; v < nV; v++) {
     const c = cellKinds(v);
@@ -401,7 +402,7 @@ export function cellPlanTextures(tileVariant) {
   }
   const cells = new THREE.DataTexture(cd, CELLS_X, CELLS_Z * nV);
   const H = Math.ceil(tileVariant.length / PLAN_W), td = new Uint8Array(PLAN_W * H * 4);
-  for (let k = 0; k < tileVariant.length; k++) td[k * 4] = tileVariant[k] + 1;
+  for (let k = 0; k < tileVariant.length; k++) { td[k * 4] = tileVariant[k] + 1; td[k * 4 + 1] = tileGround ? tileGround[k] : 0; }
   const tiles = new THREE.DataTexture(td, PLAN_W, H);
   for (const t of [cells, tiles]) { t.magFilter = t.minFilter = THREE.NearestFilter; t.generateMipmaps = false; t.needsUpdate = true; }
   return { cells, tiles, rows: H };
@@ -550,12 +551,14 @@ export class HaloDistricts {
     const exclude = [...HALO_PORTS.map((p) => [bodyDir(0, THREE.MathUtils.degToRad(p.lon)), 10.5]), [bodyDir(0, THREE.MathUtils.degToRad(166.9) + 0.009), 14]];
     const { a, b } = this.basis;
     this.tileVariant = new Int8Array(this.nTiles);
+    this.tileGround = new Uint8Array(this.nTiles);          // undressed: 1 round a port, 2 the foundry
     const dir = new THREE.Vector3();
     for (let k = 0; k < this.nTiles; k++) {
       const th = this.tileAngle(k);
       dir.copy(a).multiplyScalar(Math.cos(th)).addScaledVector(b, Math.sin(th));
-      const bad = exclude.some(([d, km]) => Math.acos(THREE.MathUtils.clamp(dir.dot(d), -1, 1)) * this.basis.R < km + TILE_L / 2000);
-      this.tileVariant[k] = bad ? -1 : Math.floor(hash2(k, 11) * VARIANTS.length);
+      const hit = exclude.findIndex(([d, km]) => Math.acos(THREE.MathUtils.clamp(dir.dot(d), -1, 1)) * this.basis.R < km + TILE_L / 2000);
+      this.tileVariant[k] = hit >= 0 ? -1 : Math.floor(hash2(k, 11) * VARIANTS.length);
+      this.tileGround[k] = hit < 0 ? 0 : hit < HALO_PORTS.length ? 1 : 2;
     }
     // hub tiles carrying an arch (arches sit at hub*(j+0.5), the centre of tile 35j+17)
     this.hubTiles = new Map();
@@ -579,7 +582,7 @@ export class HaloDistricts {
     // Meridian's junction on the ring (arc, m): its terminal quarter rides the district anchor
     const jd = bodyDir(0, MERIDIAN_LON);
     this.junctionU = ((Math.atan2(jd.dot(b), jd.dot(a)) + TAU) % TAU) * this.Rm;
-    this.plan = cellPlanTextures(this.tileVariant);
+    this.plan = cellPlanTextures(this.tileVariant, this.tileGround);
     this.anchor = new THREE.Group();
     this.anchor.scale.setScalar(0.001);
     this.anchor.visible = false;

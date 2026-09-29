@@ -160,19 +160,24 @@ vec3 planBlock(vec2 q, vec2 bs, float h, float tv, float aa, out float bld) {
  * The plan at (u along, x across in the tile frame; km) for a pixel aa km wide: 1 where the
  * tile is dressed, with its albedo, water cover and night light.
  */
-/** District variant of the tile at arc u (km; -1 undressed), its index k and the position zl along it. */
-float planTile(float u, out float k, out float zl) {
+/**
+ * District variant of the tile at arc u (km; -1 undressed), its index k, the position zl along
+ * it, and what an undressed tile's ground is (0 none, 1 a port's green belt, 2 foundry works).
+ */
+float planTile(float u, out float k, out float zl, out float ground) {
   float seam0 = uPlan.x * 4.0;
   if (u < seam0) { k = floor(u / 4.0); zl = u - (k + 0.5) * 4.0; }
   else { float j = min(floor((u - seam0) / uPlan.y), 7.0); k = uPlan.x + j; zl = (u - seam0 - (j + 0.5) * uPlan.y) * 4.0 / uPlan.y; }
   k = clamp(k, 0.0, uPlan.z - 1.0);
-  return floor(texelFetch(uPlanTiles, ivec2(int(mod(k, 256.0)), int(floor(k / 256.0))), 0).r * 255.0 + 0.5) - 1.0;
+  vec4 t = texelFetch(uPlanTiles, ivec2(int(mod(k, 256.0)), int(floor(k / 256.0))), 0);
+  ground = floor(t.g * 255.0 + 0.5);
+  return floor(t.r * 255.0 + 0.5) - 1.0;
 }
 float haloPlan(float u, float x, float aa, float night, out vec3 alb, out float water, out vec3 em) {
   alb = vec3(0.0); water = 0.0; em = vec3(0.0);
-  float k, zl;
-  float tv = planTile(u, k, zl);
-  if (tv < 0.0) return 0.0;
+  float k, zl, ground;
+  float tv = planTile(u, k, zl, ground);
+  if (tv < 0.0 && ground < 0.5) return 0.0;
   float ax = abs(x);
   float dBlk = 1.0 - smoothstep(0.25 / 9.0, 0.25 / 3.0, aa);   // blocks resolved
   float lampN = 0.04 + 0.5 * night;
@@ -188,6 +193,12 @@ float haloPlan(float u, float x, float aa, float night, out vec3 alb, out float 
     em = P_WARM * (conc * 0.06 + spine * 0.8 + fPulse(ax, 0.036, 0.013, 0.016, aa) * step(15.48, ax) * 0.25) * lampN;
     return 1.0;
   }
+  if (tv < 0.0 && ground < 1.5 && ax < 0.62) {
+    // a port's esplanade under its concourse wings: paving in courses, lamp lines both sides
+    alb = P_PAVE * (0.92 + 0.12 * fPulse(zl, 0.05, 0.0, 0.025, aa));
+    em = P_WARM * (pBox(abs(ax - 0.56), -0.003, 0.003, aa) * 1.5 + 0.05) * lampN;
+    return 1.0;
+  }
   float ix = clamp(floor(x + 15.0), 0.0, 29.0), iz = clamp(floor(zl + 2.0), 0.0, 3.0);
   float lx = x + 15.0 - ix, lz = zl + 2.0 - iz;
   float mLo = (ix == 15.0 || ix == 8.0 || ix == 22.0) ? 0.09 : 0.03;
@@ -199,7 +210,9 @@ float haloPlan(float u, float x, float aa, float night, out vec3 alb, out float 
   gut = mix(gut, vec3(0.32, 0.31, 0.3), spineV);
   gut = mix(gut, P_LAWN, boul * 0.8);
   vec3 gutEm = P_WARM * (0.25 + 1.2 * spineV + 0.4 * boul) * lampN;
-  float code = floor(texelFetch(uPlanCells, ivec2(int(ix), int(tv * 4.0 + iz)), 0).r * 255.0 + 0.5);
+  // (round a port the stations own the deck: a green belt of parkland round their quarters, and
+  // works round the foundry)
+  float code = tv < 0.0 ? (ground > 1.5 ? 7.0 : 2.0) : floor(texelFetch(uPlanCells, ivec2(int(ix), int(tv * 4.0 + iz)), 0).r * 255.0 + 0.5);
   float cx = lx - mLo, sx = 1.0 - mLo - mHi, cz = lz - 0.03, sz = 0.94;   // inside the cell (km)
   vec2 cc = vec2(lx - 0.5 * (mLo + 1.0 - mHi), lz - 0.5);                // from the cell centre
   float hc = hash12(vec2(ix, k * 4.0 + iz) + 0.37);
@@ -579,8 +592,8 @@ void main() {
     float hb = hash12(vec2(bay, 7.0) + uSeed);
     vec3 clad = hb < 0.25 ? vec3(0.62, 0.56, 0.46) : hb < 0.45 ? vec3(0.60, 0.41, 0.29) : hb < 0.7 ? vec3(0.70, 0.71, 0.70) : hb < 0.85 ? vec3(0.44, 0.35, 0.25) : vec3(0.50, 0.60, 0.52);
 #ifdef HALO_CELLS
-    float tk, tz;
-    float tvw = planTile(u, tk, tz);
+    float tk, tz, tg;
+    float tvw = planTile(u, tk, tz, tg);
     if (tvw >= 0.0) clad = mix(clad, planStone(tvw), 0.7);
 #endif
     float bayRes = 1.0 - smoothstep(0.25, 0.9, fu);
