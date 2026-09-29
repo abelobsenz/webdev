@@ -9,7 +9,7 @@ import { helianthCircuits, circuitPose } from '../src/space/helianthTraffic.js';
 import {
   HelianthDistrict, buildPetalFittings, buildCrawler, buildBerths, petalMatrix, petalTop, spineY, DECK_TOP, CATWALK, CREW_LANE, crawlerZ, crewOnCatwalk,
   flotillaLayout, courierRoute, courierPose, COURIER, FLOTILLA, PETAL, buildConcentrator, buildRelayPlatform, BERTH,
-  petalBottom, SPOKE, spokeTop, spokeCarR, buildSpokeCar, buildHubWorks, GALLERY, FIN, buildSwarmTender, tenderLocal, tenderStatites, crownCrew,
+  petalBottom, SPOKE, spokeTop, spokeCarR, buildSpokeCar, buildHubWorks, GALLERY, FIN, buildSwarmTender, tenderLocal, tenderStatites, crownCrew, buildGate, gateFrame, GATE,
 } from '../src/space/helianthDistrict.js';
 import { FoundryYard, tenderVisit, VISIT, buildWheelCar, wheelCar, WHEEL, buildCraneWorks, cranePose, cartPose, droneOrbits, dronePos, crewPos, COURT, CRANE, CART, QUEUE } from '../src/space/foundryYard.js';
 import { buildTender } from '../src/craft/craftGeometry.js';
@@ -197,6 +197,19 @@ const stT = tree(tris(sc.geo));
     for (let i = 0; i < Q.length; i++) for (let j = i + 1; j < Q.length; j++) apart = Math.min(apart, Q[i].distanceTo(Q[j]));
   }
   assert.ok(holdClear > 2000, `courier holds clear the crown by ${holdClear.toFixed(0)} m`);
+  // each run threads its gate: the path through the ring's centre, the hull well inside the ring
+  const gate = buildGate();
+  closed('gate', gate.geo);
+  for (const r of routes) {
+    const gT = tree(tris(gate.geo, gateFrame(r)));
+    let gc = Infinity;
+    for (let t = 0; t < COURIER.T; t += 0.5) { courierPose(r, t, P, F); gc = Math.min(gc, dist(gT, P, gc + 1)); }
+    assert.ok(gc > GATE.R - GATE.tube - COURIER.len * 0.6 - 150, `courier threads its gate ${gc.toFixed(0)} m from the ring`);
+    assert.ok(Math.abs(gateFrame(r).determinant() - 1) < 1e-9, 'gate frame proper');
+    results.gateClearanceMetres = Math.min(results.gateClearanceMetres ?? Infinity, +gc.toFixed(0));
+    // other couriers' paths keep off this gate
+    for (const o of routes) if (o !== r) for (let t = 0; t < COURIER.T; t += 2) { courierPose(o, t, P, F); assert.ok(dist(gT, P) > 300, 'other runs keep off a gate'); }
+  }
   assert.ok(pathClear > 1000, `couriers pass other statites by ${pathClear.toFixed(0)} m`);
   assert.ok(apart > 150, `couriers keep ${apart.toFixed(0)} m apart`);
   results.courierStatiteClearanceKm = +(pathClear / 1000).toFixed(1); results.courierSeparationMetres = +apart.toFixed(0);

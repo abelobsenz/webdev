@@ -190,6 +190,8 @@ export function furnaceLamps(data) {
     for (let k = 0; k < 16; k++) { const a = (k / 16) * TAU; out.push({ p: V(x + Math.cos(a) * 640, 880, 2550 + Math.sin(a) * 640), r: 30, color: [1.0, 0.42, 0.14], i: 2.2, breathe: 0.8, phase: (k * 0.37) % 1 }); }
     out.push({ p: V(x, 1650, 2550), r: 60, color: [1.0, 0.55, 0.2], i: 1.6, breathe: 0.6 });
   }
+  // the garden wheel's windows: a warm band round its outer equator (torus 2000 m, tube 280 m)
+  for (let k = 0; k < 48; k++) { const a = (k / 48) * TAU; out.push({ p: V(Math.cos(a) * 2290, 500 + (k % 2 ? 40 : -40), 6200 + Math.sin(a) * 2290), r: 16, color: k % 6 ? [1.0, 0.8, 0.55] : LAMP.WHITE, i: 1.5 }); }
   for (const p of data.processPods || []) out.push({ p: p.center.clone().add(V(0, 460, 0)), r: 22, color: [0.7, 0.85, 1.0], i: 2.6, breathe: 0.9, phase: (p.center.x * 0.001) % 1 });
   return out;
 }

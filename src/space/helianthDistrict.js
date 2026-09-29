@@ -23,6 +23,7 @@ import { createLamps, LAMP } from './lamps.js';
 //             statites and relay platforms hovering 60-400 km round the station, every one
 //             turned to the Sun and slewing slowly, and couriers working between them; swarm
 //             tenders hold at some of them, a spare facet on their booms, replacing mirrors
+//   gates     each courier run leaves the working field through a lit gate ring
 //   crown     suited crews walk the service crown's EVA lanes under its floodlights
 //
 // Heavy geometry is built lazily on first approach (build()), spread across frames; beyond
@@ -419,7 +420,11 @@ export function crownCrew(j, t, lanes, out) {
 export const COURIER = { count: 6, holdR: 2600, holdY: 8200, exitR: 24000, exitY: 6500, T: 520, dwell: 0.14, len: 90 };
 /** Courier c's run (station metres): hold over the crown, out through the exit gate, to its statite's berth. */
 export function courierRoute(c, layout) {
-  const target = layout[(c * 7 + 3) % layout.length];
+  // one run per sector of the sky: the concentrator nearest the sector's bearing, inside 260 km
+  const want = (c / COURIER.count) * TAU + 0.4, gap = (a) => Math.abs(Math.atan2(Math.sin(a - want), Math.cos(a - want)));
+  let target = null;
+  const clearRun = (s) => { const a = s.p.clone().setY(0).normalize().multiplyScalar(COURIER.exitR).setY(COURIER.exitY), ab = s.p.clone().sub(a), L2 = ab.lengthSq(); return layout.every((o) => { if (o === s) return true; const t = Math.min(Math.max(o.p.clone().sub(a).dot(ab) / L2, 0), 1); return a.clone().addScaledVector(ab, t).distanceTo(o.p) > 2600 * o.size + 3000; }); };
+  for (const s of layout) if (s.kind === 0 && Math.hypot(s.p.x, s.p.z) < 260000 && clearRun(s) && (!target || gap(Math.atan2(s.p.z, s.p.x)) < gap(Math.atan2(target.p.z, target.p.x)))) target = s;
   const az = Math.atan2(target.p.z, target.p.x);
   const hold = V(Math.cos(az) * COURIER.holdR, COURIER.holdY + c * 180, Math.sin(az) * COURIER.holdR);
   const exit = V(Math.cos(az) * COURIER.exitR, COURIER.exitY + c * 180, Math.sin(az) * COURIER.exitR);
@@ -442,6 +447,23 @@ export function courierPose(r, t, outPos, outFwd) {
   outFwd.copy(b).sub(a).normalize().multiplyScalar(fwdSign);
   const sp = Math.abs(Math.sin(Math.PI * smooth(0, 1, (u < 0.5 ? (u - D) : (u - 2 * D - run)) / run)));
   return 0.15 + 0.6 * sp;
+}
+
+// ------------------------------------------------------------------ gates ----
+// Every courier run leaves the station's working field through a lit gate: a ring on three stays
+// round the exit point, square to the outbound leg, its lamps chasing outward.
+export const GATE = { R: 420, tube: 16, lamps: 12 };
+export function gateFrame(r, out = new THREE.Matrix4()) {
+  const f = r.berth.clone().sub(r.exit).normalize(), x = V(0, 1, 0).cross(f).normalize(), y = f.clone().cross(x);
+  return out.makeBasis(x, y, f).setPosition(r.exit);
+}
+export function buildGate() {
+  const B = new CB(), lamps = [];
+  B.torus(GATE.R, GATE.tube, 64, 8, CK.HULL);
+  B.torus(GATE.R + GATE.tube * 0.8, 5, 64, 6, CK.CONDUIT);
+  for (let k = 0; k < 3; k++) { const a = (k / 3) * TAU + Math.PI / 2; B.tube([V(Math.cos(a) * (GATE.R + 10), Math.sin(a) * (GATE.R + 10), 0), V(Math.cos(a) * (GATE.R + 160), Math.sin(a) * (GATE.R + 160), -60)], 7, 6, CK.DARK); B.at(Math.cos(a) * (GATE.R + 170), Math.sin(a) * (GATE.R + 170), -64); B.box(0, 0, 0, 40, 40, 30, CK.BRONZE); B.pop(); }
+  for (let k = 0; k < GATE.lamps; k++) { const a = (k / GATE.lamps) * TAU; lamps.push({ p: V(Math.cos(a) * (GATE.R + 26), Math.sin(a) * (GATE.R + 26), 0), r: 10, color: k % 3 ? LAMP.AMBER : LAMP.WHITE, i: 2.4, breathe: 0.8, phase: k / GATE.lamps }); }
+  return { geo: B.geometry(), lamps };
 }
 
 // ------------------------------------------------------------- instancing ----
@@ -560,6 +582,12 @@ export class HelianthDistrict {
         });
       },
       () => {
+        const gate = buildGate(), gm = this.routes.map((r) => gateFrame(r));
+        const gi = mk(gate.geo, gm);
+        const GL = [];
+        for (const m of gm) GL.push(...placeLamps(gate.lamps, m));
+        addLamps(gi, GL, { minPx: 1.2 });
+        this.flotilla.add(gi);
         const tug = buildTug(COURIER.len);
         const opt2 = { ...opt, lit: 0.6 };
         const mat = createCraftMaterial(opt2);
