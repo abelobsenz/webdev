@@ -255,6 +255,9 @@ vec3 integrateAtmo(vec3 ro, vec3 rd, float t0, float t1, bool ground, vec3 sun, 
         vec3 ub = uToBody * up;
         float rip = 0.72 + 0.28 * sin(dot(ub, vec3(0.62, 0.21, 0.76)) * 400.0 + 2.2 * snoise(ub * 30.0));
         S += vec3(0.25, 1.0, 0.45) * 2.2e-5 * exp(-pow(abs(h - 94.0) / 5.0, 2.0)) * agN * rip;
+        // the sodium layer just beneath it, a thin orange-yellow band (589 nm) near 89 km
+        float zNa = (h - 89.0) / 3.5;
+        S += vec3(1.0, 0.62, 0.18) * 4.0e-6 * exp(-zNa * zNa) * agN;
       }
       vec3 sT = exp(-ext * dt);
       L += T * (S - S * sT) / max(ext, vec3(1e-7));

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { R_EARTH } from './sim.js';
+import { precessionMatrix, raDecToVector, equatorialToInertial } from './skyCatalog.js';
 
 // Meteors burning up over the night side, seen from above as short streaks far below: grains of
 // comet dust meeting the air at 20 - 70 km/s, lighting at ~115 km and gone by 75 - 95 km, most
@@ -11,6 +12,10 @@ import { R_EARTH } from './sim.js';
 export const MET_SLOTS = 96;
 export const H_START = 115;         // km
 export const H_END_MIN = 72;        // km
+// The June Bootids: a slow shower (18 km/s) from a radiant in Bootes (J2000 RA 14h 56m, Dec +48);
+// its meteors run parallel, away from the radiant, wherever it stands above the local horizon.
+export const SHOWER = { raH: 14.93, decD: 48.0, v: 18, share: 0.35 };
+export const SHOWER_DIR = equatorialToInertial(raDecToVector(SHOWER.raH, SHOWER.decD).applyMatrix3(precessionMatrix())).normalize();
 
 const VERT = /* glsl */ `
 attribute float aI;
@@ -43,7 +48,7 @@ export class Meteors {
     this.rate = opts.rate ?? 7;     // per second over the camera's night horizon at LEO heights
     this.slots = [];
     for (let i = 0; i < MET_SLOTS; i++) {
-      this.slots.push({ live: false, t: 0, dur: 1, p0: new THREE.Vector3(), dir: new THREE.Vector3(), v: 40, trail: 12, peak: 1, fire: false, col: new THREE.Color() });
+      this.slots.push({ live: false, shower: false, t: 0, dur: 1, p0: new THREE.Vector3(), dir: new THREE.Vector3(), v: 40, trail: 12, peak: 1, fire: false, col: new THREE.Color() });
     }
     const pos = new Float32Array(MET_SLOTS * 2 * 3), inten = new Float32Array(MET_SLOTS * 2), col = new Float32Array(MET_SLOTS * 2 * 3);
     const g = new THREE.BufferGeometry();
@@ -93,14 +98,24 @@ export class Meteors {
     if (_p.dot(sunDir) > -0.12) return false;
     s.p0.copy(_p).multiplyScalar(R0);
     // entry: 15 - 65 degrees below the local horizontal, any heading
-    const ent = (15 + 50 * r()) * Math.PI / 180, hd = r() * Math.PI * 2;
-    _e.set(0, 1, 0).cross(_p);
-    if (_e.lengthSq() < 1e-8) _e.set(1, 0, 0);
-    _e.normalize();
-    _n.crossVectors(_p, _e);
-    _c.copy(_e).multiplyScalar(Math.cos(hd)).addScaledVector(_n, Math.sin(hd));
-    s.dir.copy(_c).multiplyScalar(Math.cos(ent)).addScaledVector(_p, -Math.sin(ent)).normalize();
-    s.v = 20 + 50 * r() * r();
+    let ent = (15 + 50 * r()) * Math.PI / 180;
+    const hd = r() * Math.PI * 2;
+    const radUp = SHOWER_DIR.dot(_p);
+    s.shower = radUp > 0.26 && r() < SHOWER.share;
+    if (s.shower) {
+      // a shower member: straight away from the radiant, entering at the radiant's elevation
+      s.dir.copy(SHOWER_DIR).negate();
+      ent = Math.asin(radUp);
+      s.v = SHOWER.v * (0.95 + 0.1 * r());
+    } else {
+      _e.set(0, 1, 0).cross(_p);
+      if (_e.lengthSq() < 1e-8) _e.set(1, 0, 0);
+      _e.normalize();
+      _n.crossVectors(_p, _e);
+      _c.copy(_e).multiplyScalar(Math.cos(hd)).addScaledVector(_n, Math.sin(hd));
+      s.dir.copy(_c).multiplyScalar(Math.cos(ent)).addScaledVector(_p, -Math.sin(ent)).normalize();
+      s.v = 20 + 50 * r() * r();
+    }
     const hEnd = H_END_MIN + 23 * r();
     const len = (H_START - hEnd) / Math.sin(ent);
     s.dur = len / s.v;

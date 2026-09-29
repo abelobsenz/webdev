@@ -238,7 +238,26 @@ let metMat = null;
   }
   ok(bad === 0, `meteor paths within 72-115 km on the night side (${bad} bad)`);
   ok(met.spawned > 300, `meteors spawned ${met.spawned}`);
-  ok(maxLive < MET_SLOTS, 'meteor slots never exhausted');
+  // shower members run parallel, straight away from the radiant, which stands above their horizon
+  const { SHOWER_DIR } = await import('../src/space/meteors.js');
+  let members = 0;
+  for (const s of met.slots) if (s.live && s.shower) {
+    members++;
+    ok(s.dir.dot(SHOWER_DIR) < -0.9999, 'shower meteor parallel to the radiant');
+    ok(SHOWER_DIR.dot(s.p0.clone().normalize()) > 0.25, 'radiant above the shower meteor\'s horizon');
+  }
+  ok(Math.abs(SHOWER_DIR.length() - 1) < 1e-9, 'radiant unit');
+  // at the stress rate the pool fills and spawns are simply dropped; at the running rate it never fills
+  const met2 = new Meteors({ camera: space.camera }, {});
+  let maxLive2 = 0;
+  for (let f = 0; f < 3600; f++) {
+    met2.update(sim, f / 60, 1 / 60, { camera: space.camera });
+    let l = 0;
+    for (const q of met2.slots) if (q.live) l++;
+    maxLive2 = Math.max(maxLive2, l);
+  }
+  ok(maxLive2 < MET_SLOTS * 0.75, `meteor slots at the running rate: peak ${maxLive2} of ${MET_SLOTS}`);
+  ok(maxLive <= MET_SLOTS, 'meteor pool bounded');
   ok(worst < 1.0, `meteor update worst ${worst.toFixed(3)} ms`);
   space.camera.position.set(0, 0, 20000);
 }
