@@ -88,9 +88,9 @@ function samples(base, bounds) {
 /** The skin: returns the geometry. */
 function skin() {
   const R = regions();
-  const tb = []; for (let k = 0; k <= 150; k++) tb.push(0.5 - 0.5 * Math.cos((Math.PI * k) / 150));
+  const tb = []; for (let k = 0; k <= 190; k++) tb.push(0.5 - 0.5 * Math.cos((Math.PI * k) / 190));
   const ts = samples(tb, R.filter((r) => r.t0 > 0).map((r) => [r.t0, r.t1]));
-  const ab = []; const NA = 216; for (let i = 0; i < NA; i++) ab.push(Math.PI / 2 + (i / NA) * TAU);
+  const ab = []; const NA = 264; for (let i = 0; i < NA; i++) ab.push(Math.PI / 2 + (i / NA) * TAU);
   const as = samples(ab, R.filter((r) => r.a0 >= 0 && r.a1 < 50).map((r) => [r.a0, r.a1]));
   const inR = (s, lo, hi) => s.v + s.e * 1e-7 > lo && s.v + s.e * 1e-7 < hi;
   const rings = [], kinds = [];
@@ -299,9 +299,9 @@ export function buildHull() {
 
   // ---- the spine: a glowing conduit aft of the flight deck, in collars
   {
-    const pts = []; for (let t = 0.66; t <= 0.955; t += 0.03) pts.push(hullPt(t, Math.PI / 2, 0.15));
+    const pts = []; for (let t = 0.88; t <= 0.965; t += 0.017) pts.push(hullPt(t, Math.PI / 2, 0.15));
     base.push(tube(pts, 0.14, CK.CONDUIT, 10, 3));
-    for (let t = 0.68; t < 0.95; t += 0.045) detail.push(onHull(revolve([[0.19, -0.08, CK.BRONZE], [0.21, -0.05, CK.BRONZE], [0.21, 0.05, CK.BRONZE], [0.19, 0.08, CK.BRONZE]], 14, { closed: true }).rotateX(0), t, Math.PI / 2, 0.15 - 0.0));
+    for (let t = 0.895; t < 0.96; t += 0.02) detail.push(onHull(revolve([[0.19, -0.08, CK.BRONZE], [0.21, -0.05, CK.BRONZE], [0.21, 0.05, CK.BRONZE], [0.19, 0.08, CK.BRONZE]], 14, { closed: true }).rotateX(0), t, Math.PI / 2, 0.15 - 0.0));
   }
 
   // ---- radiator wings from the chines (swept, slight anhedral), ribbed, with coolant manifolds
@@ -407,6 +407,22 @@ export function buildHull() {
         for (let k = 1; k < 4; k++) detail.push(onHull(box(0.12, 0.06, 0.05, CK.DARK), t + (k / 4) * (L / SHIP.L), a, 0.06));
       }
       placed++;
+    }
+  }
+
+  // ---- sensors: a probe on the nose, a chin turret, and blisters on the flanks
+  {
+    const tip = hullPt(0.0, 0);
+    base.push(revolve([[0.0, -1.35, CK.DARK], [0.03, -1.3, CK.BRONZE], [0.035, -0.6, CK.BRONZE], [0.07, -0.55, CK.DARK], [0.09, -0.2, CK.HULL], [0.14, 0.15, CK.HULL], [0.0, 0.3, CK.HULL]], 12).translate(tip.x, tip.y + 0.02, tip.z + 0.1));
+    for (const sx of [1, -1]) detail.push(rod(V3(tip.x + sx * 0.05, tip.y + 0.02, tip.z - 0.9), V3(tip.x + sx * 0.2, tip.y + 0.02, tip.z - 0.95), 0.012, CK.DARK, 5));
+    const ch = hullPt(0.1, -Math.PI / 2, 0.02);
+    base.push(stock(new THREE.CylinderGeometry(0.26, 0.3, 0.12, 20), CK.DARK).translate(ch.x, ch.y - 0.04, ch.z));
+    base.push(stock(new THREE.SphereGeometry(0.24, 20, 12, 0, TAU, Math.PI / 2, Math.PI / 2), CK.HULL).translate(ch.x, ch.y - 0.1, ch.z));
+    base.push(revolve([[0.0, 0.0, CK.GLASS], [0.09, 0.0, CK.GLASS], [0.09, 0.0, CK.DARK], [0.11, -0.04, CK.DARK], [0.11, -0.1, CK.DARK]], 14).translate(ch.x, ch.y - 0.22, ch.z - 0.12).applyMatrix4(new THREE.Matrix4()));
+    for (const side of [1, -1]) {
+      const a = side > 0 ? -0.35 + TAU : Math.PI + 0.35;
+      detail.push(onHull(stock(new THREE.SphereGeometry(0.35, 16, 8, 0, TAU, 0, Math.PI / 2), CK.HULL).scale(1, 0.45, 1.8), 0.27, a, 0.0));
+      detail.push(onHull(box(0.3, 0.05, 0.12, CK.GLASS, V3(0, 0.14, -0.2)), 0.27, a, 0.0));
     }
   }
 

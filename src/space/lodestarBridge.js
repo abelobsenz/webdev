@@ -184,7 +184,24 @@ export function buildBridge() {
     }
     // whip antennas and a star tracker aft on the roof
     for (const [x, z, h] of [[0.6, 2.2, 1.2], [-0.6, 2.4, 0.9]]) { const p = podPt(z, Math.PI / 2); detail.push(stock(new THREE.CylinderGeometry(0.012, 0.03, h, 6), CK.DARK).translate(x * podSec(z).W / 2, p.y + h / 2 - 0.05, z)); }
-    const st = podPt(2.9, Math.PI / 2);
+    // the comms dish on a gimballed mast over the pod's tail: a yoke, the reflector with its ribs,
+    // a feed on three struts
+    {
+      const b = podPt(2.5, Math.PI / 2), top = V3(0, b.y + 0.95, b.z);
+      base.push(stock(new THREE.CylinderGeometry(0.09, 0.14, 1.0, 12), CK.DARK).translate(0, b.y + 0.45, b.z));
+      base.push(stock(new THREE.CylinderGeometry(0.2, 0.2, 0.12, 16), CK.BRONZE).translate(0, b.y + 0.9, b.z));
+      for (const sx of [1, -1]) base.push(box(0.06, 0.5, 0.12, CK.DARK, V3(sx * 0.62, top.y + 0.2, top.z)));
+      base.push(box(1.3, 0.08, 0.14, CK.DARK, V3(0, top.y, top.z)));
+      const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(-Math.PI / 2 + 0.75, 0.4, 0));
+      const at = top.clone().add(V3(0, 0.4, 0));
+      const M = new THREE.Matrix4().compose(at, q, V3(1, 1, 1));
+      base.push(revolve([[0.0, 0.0, CK.HULL], [0.3, 0.02, CK.HULL], [0.62, 0.1, CK.HULL], [0.9, 0.24, CK.HULL], [0.95, 0.27, CK.BRONZE], [0.9, 0.3, CK.DARK], [0.45, 0.14, CK.DARK], [0.0, 0.1, CK.DARK]], 36).applyMatrix4(M));
+      for (let k = 0; k < 8; k++) { const a = (k / 8) * TAU; base.push(rod(V3(Math.cos(a) * 0.12, Math.sin(a) * 0.12, 0.08), V3(Math.cos(a) * 0.88, Math.sin(a) * 0.88, 0.28), 0.018, CK.DARK, 5).applyMatrix4(M)); }
+      const feed = V3(0, 0, 0.75);
+      for (let k = 0; k < 3; k++) { const a = (k / 3) * TAU; base.push(rod(V3(Math.cos(a) * 0.8, Math.sin(a) * 0.8, 0.26), feed, 0.015, CK.DARK, 5).applyMatrix4(M)); }
+      base.push(revolve([[0.0, 0.6, CK.DARK], [0.08, 0.62, CK.BRONZE], [0.07, 0.8, CK.BRONZE], [0.0, 0.82, CK.DARK]], 12).applyMatrix4(M));
+    }
+    const st = podPt(3.7, Math.PI / 2);
     base.push(bbox(0.34, 0.26, 0.34, 0.05, CK.DARK, V3(0, st.y + 0.12, st.z)));
     base.push(revolve([[0.08, 0.0, CK.DARK], [0.1, 0.12, CK.BRONZE], [0.12, 0.26, CK.BRONZE], [0.0, 0.26, CK.DARK]], 12).rotateX(-Math.PI / 2 + 0.5).translate(0, st.y + 0.25, st.z));
   }
