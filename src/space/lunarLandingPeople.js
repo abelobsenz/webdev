@@ -129,7 +129,7 @@ export function landingPeople(S, walkMat, trees, mat = null) {
   }
   // the plaza round the Lift: between its ring beam and the pools, and beyond the pools
   for (let i = 0; i < 260; i++) {
-    const a = r() * Math.PI * 2, rad = r() < 0.45 ? 166 + 24 * r() : 262 + 90 * r();
+    const a = r() * Math.PI * 2, rad = r() < 0.45 ? 166 + 19 * r() : 262 + 90 * r();
     const [x, z] = [Math.cos(a) * rad, Math.sin(a) * rad];
     const u = (x + z) * Math.SQRT1_2, v = (z - x) * Math.SQRT1_2;
     // the pools stand on the axes at 225 m: keep off them

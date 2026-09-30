@@ -28,6 +28,7 @@ import { landingPeople } from './lunarLandingPeople.js';
 function rng(seed) { let a = seed >>> 0; return () => { a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
 const V = (x, y, z) => new THREE.Vector3(x, y, z);
 const ROT = new THREE.Matrix4().makeRotationX(-Math.PI / 2);
+const BLOOMS = [[0.8, 0.16, 0.2], [0.9, 0.66, 0.16], [0.56, 0.3, 0.7], [0.92, 0.9, 0.86], [0.92, 0.46, 0.56], [0.3, 0.4, 0.8]];
 function lathe(B, prof, seg) { B.push(ROT); B.lathe(prof, seg); B.pop(); }
 
 // ------------------------------------------------------------------ prototypes --
@@ -75,6 +76,41 @@ function protoKerb() {
   const B = new CB();
   B.box(0, -0.05, 0, 1, 0.4, 0.3, LK.KERB);
   B.box(0, -0.12, 0.3, 1, 0.26, 0.3, LK.KERB);
+  return B.geometry();
+}
+
+/** 10 m of promenade railing along x: cast-iron posts every 2 m, a top rail and two bars. */
+function protoRailing() {
+  const B = new CB();
+  for (let i = 0; i <= 5; i++) {
+    const x = -5 + i * 2;
+    B.box(x, 0.55, 0, 0.07, 1.1, 0.07, LK.IRON);
+    B.box(x, 0.05, 0, 0.16, 0.1, 0.16, LK.IRON);
+    B.box(x, 1.14, 0, 0.1, 0.08, 0.1, LK.IRON);
+  }
+  B.tube([V(-5, 1.08, 0), V(5, 1.08, 0)], 0.035, 6, LK.IRON);
+  for (const y of [0.4, 0.75]) B.tube([V(-5, y, 0), V(5, y, 0)], 0.015, 4, LK.IRON);
+  for (let i = 0; i < 5; i++) {
+    // a ring of scrollwork in each panel
+    const c = V(-4 + i * 2, 0.575, 0), pts = [];
+    for (let j = 0; j <= 10; j++) { const a = (j / 10) * Math.PI * 2; pts.push(V(c.x + Math.cos(a) * 0.16, c.y + Math.sin(a) * 0.16, 0)); }
+    B.tube(pts, 0.012, 3, LK.IRON);
+  }
+  return B.geometry();
+}
+
+/** A stone planter, 3 x 1.2 m, with a clipped shrub mound in it. */
+function protoPlanter() {
+  const B = new CB();
+  B.box(0, 0.35, 0, 3.0, 0.7, 1.2, LK.MOULD);
+  B.box(0, 0.74, 0, 3.1, 0.08, 1.3, LK.MOULD);
+  B.box(0, 0.73, 0, 2.7, 0.06, 0.9, LK.HEDGE);
+  for (let i = 0; i < 3; i++) {
+    B.at(-0.9 + i * 0.9, 0.75, 0);
+    lathe(B, [[0, 0, LK.HEDGE], [0.45, 0.05, LK.HEDGE], [0.5, 0.35, LK.HEDGE], [0.3, 0.65, LK.HEDGE], [0, 0.72, LK.HEDGE]], 8);
+    B.pop();
+  }
+  for (let i = 0; i < 6; i++) { B.at(-1.2 + i * 0.48, 0.78, 0.45); lathe(B, [[0, 0, LK.BLOOM], [0.14, 0.05, LK.BLOOM], [0.1, 0.18, LK.BLOOM], [0, 0.2, LK.BLOOM]], 5); B.pop(); }
   return B.geometry();
 }
 
@@ -277,15 +313,38 @@ export class LandingDetail {
     // --- bollards on the sea wall; stairs down to the water every 240 m ---
     const moor = new CellLod('Mooring bollards', [protoMooringBollard()], [900], mat, { cell: 200 });
     const stair = new CellLod('Quay stairs', [protoQuayStair()], [1500], mat, { cell: 240 });
+    // inside the harbour the quay's edge is for mooring (bollards); outside it the promenade's
+    // edge is railed, the railing broken at each flight of stairs
+    const rail = new CellLod('Promenade railings', [protoRailing()], [900], mat, { cell: 200 });
     for (const q of S.props.quay) {
+      if (!q.free) continue;
       const [x, z] = S.UV(q.u, q.v + 0.5);
-      if (q.free) moor.add(x, g(x, z) + S.T.STRAND, z, q.ry);
-      if (q.free && Math.abs(((q.u + 120) % 240 + 240) % 240) < 0.1) {
+      const stairs = Math.abs(((q.u + 120) % 240 + 240) % 240) < 0.1;
+      if (Math.abs(q.u) < 590) moor.add(x, g(x, z) + S.T.STRAND, z, q.ry);
+      else if (!stairs && Math.abs(((q.u + 120) % 240 + 240) % 240 - 10) > 0.1) {
+        const [rx, rz] = S.UV(q.u + 5, S.shoreV(q.u + 5) - 0.9);
+        rail.add(rx, g(rx, rz) + S.T.STRAND, rz, q.ry);
+      }
+      if (stairs) {
         const [sx, sz] = S.UV(q.u, q.v + 1.2);
         stair.add(sx, g(sx, sz) + S.T.STRAND, sz, q.ry);
       }
     }
-    add(moor); add(stair);
+    add(moor); add(stair); add(rail);
+
+    // --- stone planters round the Lift's pools ---
+    const planter = new CellLod('Plaza planters', [protoPlanter()], [900], mat, { tint: true, cell: 160 });
+    for (let q = 0; q < 4; q++) {
+      const a = q * Math.PI / 2 + Math.PI / 4;
+      for (const side of [-1, 1]) for (let i = -2; i <= 2; i++) {
+        // along each pool's long sides, 4 m out from its kerb, in the pool's own frame
+        const lx = side * 35, lz = i * 24;
+        const x = Math.cos(a) * 225 + Math.cos(a) * lx - Math.sin(a) * lz, z = Math.sin(a) * 225 + Math.sin(a) * lx + Math.cos(a) * lz;
+        const [bx, bz] = S.UV(0, 0);
+        const px = bx + x, pz = bz + z;
+        planter.add(px, g(px, pz) + S.T.LIFT, pz, -a + Math.PI / 2, 1, 1, 1, BLOOMS[Math.floor(r() * BLOOMS.length)]);
+      }
+    }
 
     // --- granite kerbs down both sides of the Boulevard's carriageway, and round its median ---
     const kerb = new CellLod('Kerbs', [protoKerb()], [900], mat, { cell: 200 });
@@ -340,7 +399,6 @@ export class LandingDetail {
       return false;
     };
     const GREEN = () => { const l = 0.8 + 0.4 * r(); return [l * (0.95 + 0.1 * r()), l, l * (0.9 + 0.1 * r())]; };
-    const BLOOMS = [[0.8, 0.16, 0.2], [0.9, 0.66, 0.16], [0.56, 0.3, 0.7], [0.92, 0.9, 0.86], [0.92, 0.46, 0.56], [0.3, 0.4, 0.8]];
     const at = (u, v, top) => { const [x, z] = S.UV(u, v); return [x, g(x, z) + top, z]; };
     for (const c of S.courts) {
       if (c.hu < 6 || c.hv < 6) continue;
@@ -395,7 +453,7 @@ export class LandingDetail {
       }
       for (const v of [v0 + 3, v1 - 3]) { const [x, y, z] = at(0, v, h + 0.5); bed.add(x, y, z, S.ROT_UV, 2.2, 1, 1.3, BLOOMS[Math.floor(r() * BLOOMS.length)]); }
     }
-    add(hedge); add(shrub); add(bed); add(tuft); add(bench);
+    add(hedge); add(shrub); add(bed); add(tuft); add(bench); add(planter);
 
     // --- the landing fields: edge lights, approach lights down the road, parked bowsers ---
     const edge = new CellLod('Pad edge lights', [protoEdgeLight()], [2500], mat, { cell: 300 });
