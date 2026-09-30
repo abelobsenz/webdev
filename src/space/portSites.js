@@ -68,6 +68,12 @@ export const HARBOUR_DOCKS = [
 /** The Water Store (store group, km): a collar on the cage's free -z face, level with the tanker collars. */
 export const STORE_DOCK = { key: 'cageDock', label: 'Water Store - cage dock', p: V(0, 0.64, -0.34 - 0.0034), n: V(0, 0, -1), fwd: V(1, 0, 0) };
 
+/**
+ * Nauru Works (foundry group, km; the Halo's local axes): a painted, edge-lit pad on the commons
+ * pier's deck (x +-0.45, top y -1.48, z 16.2-18.0), sunward of the berthed tug at z 17.5.
+ */
+export const FOUNDRY_PAD = { key: 'commonsPier', label: 'Nauru Works - commons pier pad', p: V(0.25, -1.48, 16.4), n: V(0, 1, 0), fwd: V(0, 0, 1), r: 22 };
+
 /** The counterweight (counter group, km; +Y out along the tether): a collar on the pole mast's tip. */
 export const COUNTER_DOCK = { key: 'poleDock', label: 'Counterweight - pole mast dock', p: V(0, 16.8 + 0.0034, 0), n: V(0, 1, 0), fwd: V(0, 0, 1) };
 

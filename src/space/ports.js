@@ -10,7 +10,7 @@ import { stationFrame } from './stations.js';
 import { HOP_FIELD } from './lunarWorks.js';
 import {
   ANANSI_DOCKS, HEVELIUS_DOCK, EXCHANGE_DOCKS, COURT_PAD, SELENE_DOCK, TENDER_DOCK, REFUGE_DOCK, HELIANTH_DOCK, LAGRANGE_DOCK, FULCRUM_DOCKS,
-  PIER_DOCKS, HARBOUR_DOCKS, STORE_DOCK, COUNTER_DOCK,
+  PIER_DOCKS, HARBOUR_DOCKS, STORE_DOCK, COUNTER_DOCK, FOUNDRY_PAD,
 } from './portSites.js';
 
 // Docking ports and landing pads: the exact places the Lodestar's autopilot takes it to at each
@@ -346,8 +346,8 @@ earthFixed('releaseYard', COUNTER_DOCK.key, `${COUNTER_DOCK.label} (the release 
 framePort({ target: 'harbourTerrace', key: 'courierPad', label: 'Embarkation Terrace - courier pad', kind: 'pad', clear: 0.02, approach: 0.4,
   p: X(0.323, 0.0114, 0.120), n: X(0, 1, 0), fwd: X(0, 0, 1) });
 // Nauru Works: the commons pier's deck, sunward of the berthed tug (foundryCommons.js)
-framePort({ target: 'foundry', key: 'commonsPier', label: 'Nauru Works - commons pier', kind: 'pad', clear: 0.04, approach: 0.25,
-  p: X(0.25, -1.48, 16.4), n: X(0, 1, 0), fwd: X(0, 0, 1) });
+framePort({ target: 'foundry', key: FOUNDRY_PAD.key, label: FOUNDRY_PAD.label, kind: 'pad', clear: 0.02, approach: 0.25,
+  p: FOUNDRY_PAD.p, n: FOUNDRY_PAD.n, fwd: FOUNDRY_PAD.fwd });
 // Concord Yard: the yard house's hub tip on the hull axis, astern of the crew wheel
 framePort({ target: 'concordYard', key: 'hubTip', label: 'Concord Yard - yard house hub dock (hull axis)', clear: 0.04, approach: 2.0,
   p: X(1.81, 0, 0), n: X(1, 0, 0), fwd: X(0, 1, 0) });

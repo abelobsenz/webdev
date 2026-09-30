@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { DockHardware } from './dockKit.js';
-import { HELIANTH_DOCK } from './portSites.js';
+import { HELIANTH_DOCK, FOUNDRY_PAD } from './portSites.js';
 import { CB, CK, sectionEllipse } from '../craft/craftGeometry.js';
 import { buildTug } from '../craft/craftClasses.js';
 import { LAMP } from './lamps.js';
@@ -379,6 +379,8 @@ export class WorkingStations {
     stationFrame(up,this.foundry.quaternion);
     const f=craftMesh(this.foundryData.geo,{accent:[.5,1,.8],lit:.58});
     addLamps(f,this.foundryData.lamps,{minPx:1.2});this.foundry.add(f);
+    // the visitors' pad on the commons pier (src/space/portSites.js)
+    this.foundryPad=new DockHardware(this.foundry,1000).pad(FOUNDRY_PAD.p,FOUNDRY_PAD.n,FOUNDRY_PAD.fwd,FOUNDRY_PAD.r).build();
     // a tender unloading its relic in the middle hall (src/space/foundryUnload.js)
     this.unload=addFoundryUnload(this.foundry);
     space.earthFixed.add(this.foundry);
