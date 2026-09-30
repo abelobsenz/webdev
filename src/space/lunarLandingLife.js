@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { LK } from './lunarMaterial.js';
+import { TREE_SINK, speciesOf } from './lunarTrees.js';
 import { LAMP } from './lamps.js';
 
 // Medii Landing, lived in (metres, site frame: x west, y up, z north; u along the shore, v
@@ -24,46 +25,16 @@ const UP = new THREE.Vector3(0, 1, 0), DOWN = new THREE.Vector3(0, -1, 0);
  * its own canopy kind (lunarMaterial.js LK.CANOPY + species) - leaf clumps, darker hollows and
  * undersides, light through the leaves when the Sun is behind.
  */
-const lobeProfile = (cy, rx, ry, k, j) => Array.from({ length: 6 }, (_, i) => {
-  const t = -Math.PI / 2 + (Math.PI * i) / 5, w = 1 + 0.14 * Math.sin(i * 2.1 + j * 1.7);
-  return [i === 0 || i === 5 ? 0 : Math.cos(t) * rx * w, cy + Math.sin(t) * ry, k];
-});
 export function tree(B, x, y, z, H, r, phase = 0) {
-  const sp = Math.floor(((phase * 0.6180339 % 1) + 1) % 1 * 100);
-  const kind = sp < 58 ? 0 : sp < 76 ? 1 : sp < 90 ? 2 : 3;          // broadleaf, cypress, stone pine, flowering
-  const ck = LK.CANOPY + kind;
-  const tw = Math.max(0.3, r * 0.1);
+  // the town's trees are instanced in detail (lunarTrees.js): while the town is built, record them
+  if (TREE_SINK.list) { TREE_SINK.list.push({ x, y, z, H, r, phase }); return; }
+  const kind = speciesOf(phase), ck = LK.CANOPY + kind, tw = Math.max(0.3, r * 0.1);
   B.at(x, y, z, 0, phase, 0);
-  const lathe = (prof, seg) => { B.push(new THREE.Matrix4().makeRotationX(-Math.PI / 2)); B.lathe(prof, seg, phase); B.pop(); };
-  const lobeAt = (lx, ly, lz, rx, ry, j) => { B.at(lx, 0, lz); lathe(lobeProfile(ly, rx, ry, ck, j), 7); B.pop(); };
-  if (kind === 1) {
-    // cypress: a slim column of three stacked lobes from near the ground
-    lathe([[tw, -0.5, LK.DARK], [tw * 0.8, H * 0.2, LK.DARK], [0.02, H * 0.25, LK.DARK]], 5);
-    const cr = r * 0.55;
-    lobeAt(0, H * 0.38, 0, cr, H * 0.2, 1);
-    lobeAt(0, H * 0.62, 0, cr * 0.82, H * 0.2, 2);
-    lobeAt(0, H * 0.84, 0, cr * 0.5, H * 0.16, 3);
-  } else if (kind === 2) {
-    // stone pine: a bare leaning trunk and a broad flat umbrella
-    const th = H * 0.66;
-    lathe([[tw * 1.2, -0.5, LK.DARK], [tw * 0.9, th * 0.6, LK.DARK], [tw * 0.6, th, LK.DARK], [0.02, th + 0.4, LK.DARK]], 6);
-    lobeAt(0, th + H * 0.1, 0, r * 1.15, H * 0.13, 1);
-    for (let j = 0; j < 3; j++) { const a = phase + (j * Math.PI * 2) / 3; lobeAt(Math.cos(a) * r * 0.6, th + H * 0.05, Math.sin(a) * r * 0.6, r * 0.62, H * 0.11, j + 2); }
-  } else {
-    // broadleaf (and the flowering kind): a trunk forking at 40% into limbs under a dome of lobes
-    const th = H * 0.4;
-    lathe([[tw * 1.25, -0.5, LK.DARK], [tw, th * 0.7, LK.DARK], [tw * 0.7, th, LK.DARK], [0.02, th + 0.6, LK.DARK]], 6);
-    const c = H - th;
-    lobeAt(0, th + c * 0.62, 0, r * 0.74, c * 0.36, 1);
-    for (let j = 0; j < 4; j++) {
-      const a = phase * 1.7 + (j * Math.PI) / 2 + 0.3 * Math.sin(j * 3.1 + phase);
-      const d = r * (0.5 + 0.12 * Math.sin(j * 1.9 + phase));
-      const lx = Math.cos(a) * d, lz = Math.sin(a) * d, ly = th + c * (0.36 + 0.1 * Math.cos(j * 2.3));
-      B.tube([new THREE.Vector3(0, th * 0.9, 0), new THREE.Vector3(lx * 0.7, ly - c * 0.05, lz * 0.7)], tw * 0.45, 4, LK.DARK);
-      lobeAt(lx, ly, lz, r * (0.5 + 0.08 * Math.cos(j + phase)), c * 0.3, j + 2);
-    }
-  }
-  B.pop();
+  B.box(0, H * 0.2, 0, tw, H * 0.4 + 0.5, tw, LK.DARK);
+  B.push(new THREE.Matrix4().makeRotationX(-Math.PI / 2));
+  const th = H * 0.42, c = H - th;
+  B.lathe([[0, th - 0.3, ck], [r * 0.72, th + c * 0.12, ck], [r, th + c * 0.42, ck], [r * 0.78, th + c * 0.76, ck], [r * 0.3, th + c * 0.96, ck], [0, H, ck]], 7, phase);
+  B.pop(); B.pop();
 }
 
 /**

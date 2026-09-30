@@ -4,6 +4,7 @@ import { LK } from './lunarMaterial.js';
 import { LAMP } from './lamps.js';
 import { BAY, surfaceY, surfaceUp } from './lunarSite.js';
 import { buildLandingLife, marketHall } from './lunarLandingLife.js';
+import { TREE_SINK } from './lunarTrees.js';
 
 // Medii Landing: the Moon's surface port beneath the Tranquillity Exchange. Metres, site
 // frame (x west, y up, z north), origin at the foot of the Lift.
@@ -614,11 +615,13 @@ export function buildMediiLanding() {
   }
 
   // trees, the colonnade, roads and hamlets, the ferry (lunarLandingLife.js)
+  TREE_SINK.list = [];
   const life = buildLandingLife(S);
+  const treeInstances = TREE_SINK.list; TREE_SINK.list = null;
 
   const geo = B.geometry();
   // the mass driver's line, for the sleds that run on it (lunarTraffic.js)
   const [dx0, dz0] = UV(2300, -800);
   const driver = { P0: new THREE.Vector3(dx0, gy(dx0, dz0) + 16, dz0), dir: new THREE.Vector3(1, 0.0105, 0.25).normalize(), L: 36000, coilFrom: 1500 };
-  return { geo, lamps, liftTop, radius: 38, gateKm: 36, plan, trees: life.trees, driver, S };
+  return { geo, lamps, liftTop, radius: 38, gateKm: 36, plan, trees: life.trees, treeInstances, driver, S };
 }

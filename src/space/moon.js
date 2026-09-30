@@ -10,6 +10,7 @@ import { addLamps, pixelRadius } from './craftMesh.js';
 import { buildLunarServiceCourt } from './interfaces.js';
 import { MoonSurface } from './moonSurface.js';
 import { buildMediiLanding } from './lunarLanding.js';
+import { LandingTrees } from './lunarTrees.js';
 import { lunarMesh, LUNAR_FRAME, LK, createLunarMaterial } from './lunarMaterial.js';
 import { CB } from '../craft/craftGeometry.js';
 import { LunarTraffic } from './lunarTraffic.js';
@@ -497,6 +498,9 @@ export class Moon {
     this.landingMesh.name = 'Medii Landing town, harbour, landing fields and mass driver';
     this.landingLamps = addLamps(this.landingMesh, this.landingData.lamps, { minPx: 1.0 });
     this.landing.add(this.landingMesh);
+    // the town's trees, instanced in detail (lunarTrees.js)
+    this.landingTrees = new LandingTrees(this.landingData.treeInstances || [], this.landingMesh.material);
+    this.landing.add(this.landingTrees.group);
     {
       const top = this.landingData.liftTop.clone().multiplyScalar(0.001);
       const end = 380 - 0.9;
@@ -602,6 +606,7 @@ export class Moon {
       const cam = this.space.camera;
       this.landing.getWorldPosition(_lp);
       this.landingMesh.visible = pixelRadius(cam, _lp, this.landingData.radius, this.space.size.y) > 1.5;
+      if (this.landingTrees) { this.landingTrees.group.visible = this.landingMesh.visible; this.landingTrees.update(_lp.distanceTo(cam.position)); }
       // the lift cars climb at ~0.4 km/s, a quarter of an hour from the Crown to the Exchange
       const [y0, y1] = this.carSpan;
       for (let i = 0; i < this.cars.length; i++) {
