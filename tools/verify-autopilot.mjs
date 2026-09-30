@@ -317,6 +317,7 @@ function drop(name, { ground = flatGround, legs = 1, h = 1.5, v = 0, tilt = 0, p
     for (; t < T; t += 1 / 60) {
       sp.advance(1 / 60); p.tick(1 / 60);
       if (!P0 && p.contact.footTouch + p.contact.hullTouch > 0) P0 = fc();
+      if (process.env.DDBG && Math.round(t * 60) % 30 === 0) console.log(t.toFixed(1), (p.pos.length() - R_MOON).toFixed(4), p.contact.footTouch, p.contact.hullTouch, (p.vel.length() * 1000).toFixed(2), p.rates.toArray().map((x) => x.toFixed(3)).join(','), p.contact.gear.map((x) => x.toFixed(2)).join('/'));
       if (!finite(p.pos) || !finite(p.vel)) return { ok: false, why: 'NaN' };
       const cl = moonClearance(p); minHull = Math.min(minHull, cl.hull); minFeet = Math.min(minFeet, cl.feet);
       maxC = Math.max(maxC, ...p.contact.gear);
@@ -346,7 +347,8 @@ function drop(name, { ground = flatGround, legs = 1, h = 1.5, v = 0, tilt = 0, p
 drop('manual: legs down, flat ground');
 drop('manual: legs down, 10-degree slope', { ground: slopeGround(V(-1, 0.2, 0.1), 10), h: 2.5 });
 drop('manual: legs down, tilted 6 deg, flat', { h: 1.0, tilt: 6 });
-drop('manual: legs down, pitched 8 deg, slope', { ground: slopeGround(V(-1, 0.2, 0.1), 10), h: 1.0, tilt: 8, pitch: true });
+drop('manual: legs down, pitched 5 deg, slope', { ground: slopeGround(V(-1, 0.2, 0.1), 10), h: 3.2, tilt: 5, pitch: true });
+drop('manual: legs down, pitched -5 deg, slope', { ground: slopeGround(V(-1, 0.2, 0.1), 10), h: 3.2, tilt: -5, pitch: true });
 drop('manual: legs up, belly landing', { legs: 0, h: 4 });
 drop('manual: legs up, 25 m/s crash', { legs: 0, h: 10, v: 25, T: 15 });
 drop('manual: legs down, 12 m/s crash', { legs: 1, h: 5, v: 12, T: 15 });

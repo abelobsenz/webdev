@@ -140,6 +140,7 @@ export class Autopilot {
     const s = this._s; this._sc = s; this._s += h;               // poses at the start of this step (the ship's state's time)
     const tr = this.track, pose = tr.at(s, this._pose), port = this.port, pad = port.kind === 'pad';
     const n = pose.n;
+    if (pad) this._heading(pose);
     const Qt = matedQuat(port.kind, n, pose.fwd, this._Qt || (this._Qt = new THREE.Quaternion()));
     const ref = pad ? FEET_CENTRE : DOCK_POS;
     const refT = V().copy(ref).applyQuaternion(Qt);
@@ -158,6 +159,11 @@ export class Autopilot {
       const d = rel.length();
       boostOK = d > 20 || vrel.length() > 0.5;
       const vd = this._route(gate, VG, d, boostOK, V(), AG);
+      // pursuit lock: circling the goal faster than the ship can turn onto its thrust line; stop
+      // relative to the goal first (a fixed thrust direction the ship can turn to), then go again
+      if (this._coarse && (this.attErr || 0) > 0.4) this._lockT = (this._lockT || 0) + h; else this._lockT = 0;
+      if (this._lockT > 4 && !this._recover) { this._recover = this.t + 25; }
+      if (this._recover) { vd.copy(VG); if (vrel.length() < 0.03 || this.t > this._recover) this._recover = 0; }
       T.copy(AG).sub(g).addScaledVector(vd.sub(p.vel), boostOK ? 2.0 : 1.4);
       allowCoarse = true;
       att = d < 4 ? Qt : null;
@@ -235,6 +241,22 @@ export class Autopilot {
     else { i.pitch = i.yaw = i.roll = 0; }
   }
 
+  /**
+   * A pad tilted from the local vertical (a sloping site): turn the heading onto the fall line (up
+   * or down it, whichever is nearer the pad's own heading). The Lodestar's tripod is long fore and
+   * aft but only 4.8 m across its main feet, so across a slope it would tip well before along it.
+   */
+  _heading(pose) {
+    const p = this.pilot;
+    if (p.frame !== 'moon') return;
+    const vert = _u.copy(pose.pos).normalize(), tilt = Math.acos(clamp(vert.dot(pose.n), -1, 1));
+    if (tilt < 3 * Math.PI / 180) return;
+    const fall = _t.copy(vert).addScaledVector(pose.n, -vert.dot(pose.n)).normalize();     // uphill, in the pad's plane
+    // chosen once per port (a pad squarely across the slope would otherwise flip between the two)
+    if (this._fallFor !== this.port) { this._fallFor = this.port; this._fallSign = fall.dot(pose.fwd) < 0 ? -1 : 1; }
+    pose.fwd.copy(fall.multiplyScalar(this._fallSign));
+  }
+
   /** The acceleration of the structure's point at P (orbit and spin). */
   _accAt(P, out) {
     const tr = this.track, r = _u.copy(P).sub(tr.pos);
@@ -287,7 +309,7 @@ export class Autopilot {
       return out;
     }
     this._routing = '';
-    const vd = Math.min(30, Math.sqrt(2 * ab * d), (boostOK ? 1.2 : 0.8) * d);
+    const vd = Math.min(30, Math.sqrt(2 * ab * d), 0.5 * d);
     return out.copy(G).sub(P).multiplyScalar(d > 1e-9 ? vd / d : 0).add(VG);
   }
 
