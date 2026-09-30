@@ -521,11 +521,11 @@ function layerMaterial(transform, place, uniforms, { flower = false } = {}) {
 const LT_STEP = 4, LT_SNAP = 64, LT_RMIN = 19000;
 const LAYERS = [
   // grass: dense multi-blade tufts close by, simpler blades further out
-  { kind: 'grass', layer: 0, cell: 0.22, rIn: 0, rOut: 38, blades: 3, segs: 4, width: 0.016 },
-  { kind: 'grass', layer: 0, cell: 0.7, rIn: 34, rOut: 105, blades: 3, segs: 2, width: 0.034 },
-  { kind: 'grass', layer: 0, cell: 1.6, rIn: 98, rOut: 220, blades: 2, segs: 1, width: 0.075 },
-  { kind: 'flower', layer: 1, cell: 1 / 3, rIn: 0, rOut: 42 },
-  { kind: 'clump', layer: 2, cell: 0.6, rIn: 0, rOut: 40 },
+  { kind: 'grass', layer: 0, cell: 0.22, rIn: 0, rOut: 48, blades: 3, segs: 4, width: 0.016 },
+  { kind: 'grass', layer: 0, cell: 0.7, rIn: 44, rOut: 135, blades: 3, segs: 2, width: 0.034 },
+  { kind: 'grass', layer: 0, cell: 1.6, rIn: 128, rOut: 300, blades: 2, segs: 1, width: 0.075 },
+  { kind: 'flower', layer: 1, cell: 1 / 3, rIn: 0, rOut: 60 },
+  { kind: 'clump', layer: 2, cell: 0.6, rIn: 0, rOut: 56 },
 ];
 
 export class GroundCover {

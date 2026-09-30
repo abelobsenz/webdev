@@ -375,7 +375,7 @@ export class TreeField {
     const caps = SPECIES.map(() => 0);
     for (const t of trees) caps[t.sp]++;
     const meshes = this.species.map((s, i) => {
-      const cap = Math.max(16, Math.min(caps[i], 6000));
+      const cap = Math.max(16, Math.min(caps[i], 16000));   // (the near radius reaches 900-1400 m on the top presets)
       const g = s.geo.clone();
       const bl = new THREE.InstancedBufferAttribute(new Float32Array(cap * 4), 4);
       bl.setUsage(THREE.DynamicDrawUsage);

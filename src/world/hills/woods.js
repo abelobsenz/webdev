@@ -26,7 +26,7 @@ import { SHAPE_OF, widthScale, midPrototypes, farPrototypes, crownMaterial } fro
 
 const CELL = 8, TILE = 16, TS = CELL * TILE;
 const FAR_FRAC = 0.2;
-export const WOODS = { MID_R: 820, MID_BAND: 100, FAR_MAX: 14000, CAST_R: 380 };
+export const WOODS = { MID_R: 1300, MID_BAND: 130, FAR_MAX: 14000, CAST_R: 380 };
 const TAU = Math.PI * 2;
 const TRUNK_R = 1.6;
 
@@ -195,7 +195,8 @@ export function buildHillWoods(scene, trees, occ, planted = [], settings = {}) {
   const midProtos = midPrototypes(), midMat = crownMaterial('mid', U);
   // two sets: the crowns near the camera cast the woods' shadows (inside the near radius they
   // are the shadow proxies of the detailed trees, which do not cast); the rest do not
-  const MID_CAP = [[16000, 4000, 6000, 4000, 2000], [36000, 9000, 12000, 9000, 4500]];
+  // (the non-casting set scaled with the mid radius: 820 -> 1300 m is ~2.5x the area)
+  const MID_CAP = [[16000, 4000, 6000, 4000, 2000], [90000, 22500, 30000, 22500, 11250]];
   const midSet = (cast) => midProtos.map((g, shape) => {
     const m = new THREE.InstancedMesh(g, midMat, MID_CAP[cast ? 0 : 1][shape]);
     m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
@@ -209,7 +210,7 @@ export function buildHillWoods(scene, trees, occ, planted = [], settings = {}) {
     return m;
   });
   const mid = [midSet(true), midSet(false)];
-  const NEAR_CAP = 7000;
+  const NEAR_CAP = 16000;
   const near = trees.species.map((s, sp) => {
     const g = s.geo.clone();
     const bl = new THREE.InstancedBufferAttribute(new Float32Array(NEAR_CAP * 4), 4);

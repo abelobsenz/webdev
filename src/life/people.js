@@ -591,7 +591,7 @@ export class People {
 
     // ---- people
     const geoSets = [bodyGeometry(false), bodyGeometry(true)];
-    this.uniforms = { uPaths: { value: this.pathTex }, uCull: { value: 650 }, uNear: { value: 110 } };
+    this.uniforms = { uPaths: { value: this.pathTex }, uCull: { value: 400 }, uNear: { value: 80 } };
     const makeMat = (farSet) => patchedMaterial({ color: 0xffffff, roughness: 0.78, metalness: 0.0, envMapIntensity: 0.7 }, {
       key: farSet ? 'people3f' : 'people3',
       uniforms: { ...this.uniforms, uFarSet: { value: farSet ? 1 : 0 } },
@@ -720,7 +720,8 @@ export class People {
   applyQuality(s) {
     this.enabled = s.people;
     const frac = s.people ? (s.lowrise >= 1 ? 1 : 0.6) : 0;
-    this.uniforms.uCull.value = s.lowriseNear ? Math.min(900, 500 + s.lowriseNear * 0.2) : 600;
+    // (people drawn to ~60% of their old reach: the budget went to trees and ground cover)
+    this.uniforms.uCull.value = s.lowriseNear ? Math.min(560, 330 + s.lowriseNear * 0.1) : 400;
     for (const m of this.meshes) m.geometry.instanceCount = Math.floor(m.userData.count * frac);
   }
 
