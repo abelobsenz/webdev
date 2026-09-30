@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { SpaceCuller } from './spaceCull.js';
 import { U } from '../core/uniforms.js';
 import { Fleet, fleetTargets, NAURU_LON } from './fleet.js';
 import { CRAFT_FRAME } from './craftMesh.js';
@@ -40,6 +41,7 @@ const _v2 = new THREE.Vector3();
 const _v3 = new THREE.Vector3();
 const _v4 = new THREE.Vector3();
 const _fwd = new THREE.Vector3();
+const _dbs = new THREE.Vector2();
 const _qg = new THREE.Quaternion();
 const _q = new THREE.Quaternion();
 
@@ -518,15 +520,26 @@ export class SpaceMode {
     // full depth precision without a logarithmic buffer.
     const slices = this._planSlices(cam.position);
     this.lastSlices = slices.length;
+    // world matrices once for all the slices (three would redo the whole scene in every pass), then
+    // skip what is off screen or below a pixel, and per slice what lies outside its depth range
+    this.scene.updateMatrixWorld();
+    const autoMW = this.scene.matrixWorldAutoUpdate;
+    this.scene.matrixWorldAutoUpdate = false;
+    const cull = this.culler || (this.culler = new SpaceCuller(this.scene));
+    cull.apply(cam, r.getDrawingBufferSize(_dbs).y);
     for (const b of this.bodies) for (const o of b.objects) o.visible = false;
     for (let i = slices.length - 1; i >= 0; i--) {
       const sl = slices[i];
       for (const e of sl.set) for (const o of e.b.objects) o.visible = true;
       cam.near = sl.near; cam.far = sl.far; cam.updateProjectionMatrix();
+      cull.sliceBegin(sl.near, sl.far);
       r.clearDepth();
       r.render(this.scene, cam);
+      cull.sliceEnd();
       for (const e of sl.set) for (const o of e.b.objects) o.visible = false;
     }
+    cull.restore();
+    this.scene.matrixWorldAutoUpdate = autoMW;
     cam.near = slices.length ? slices[0].near : 1; cam.far = slices.length ? slices[slices.length - 1].far : 1e7;
     cam.updateProjectionMatrix();
     for (const m of this.modules) if (m.renderOverlay) m.renderOverlay(r, cam, this);
