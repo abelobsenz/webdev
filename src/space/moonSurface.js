@@ -7,6 +7,7 @@ import { MoonBake } from './moonBake.js';
 import { ALL_TOWNS, ARCS, arcUniforms, townUniforms } from './lunarNetwork.js';
 import { SITE_GLSL, SITE_UP } from './lunarSite.js';
 import { RELIEF_GLSL, GMASK_N, GMASK_BAKE_FRAG, setGroundMask } from './moonTerrain.js';
+import { SEA_GLSL, SEA_WAVES, seaPhases } from './moonWater.js';
 import { FullscreenPass, FS_VERT } from '../core/fullscreen.js';
 
 // The terraformed Moon's surface, ray-traced on a proxy sphere so the ground is the exact
@@ -59,6 +60,7 @@ uniform vec4 uArcB[${ARCS.length}];
 uniform float uPatchOn;
 varying vec3 vView;
 uniform vec3 uPC;           // the terrain patch's centre (unit, Moon frame)
+${SEA_GLSL}
 uniform float uPCos;        // cos of the patch's angular radius: the sphere steps aside inside it
 #ifdef PATCH
 varying vec3 vRel;          // the displaced ground point relative to the camera (km, Moon frame)
@@ -930,29 +932,29 @@ void main() {
       landCol += (city.land + city.rail) * 0.12 * nightC;
     }
     if (waterF > 0.001) {
-      // shallow seas: the sea bed seen through clear water, the sky and the Sun mirrored
-      // wind waves: four octaves from a 150 m swell to 4 m chop, each travelling at its deep-water
-      // speed under the Moon's gravity (c = sqrt(g L / 2 pi), 6 m/s for the swell) and fading out
-      // once its wavelength is under a few pixels; the chop runs across the swell
+      // shallow seas: the sea bed seen through clear water, the sky and the Sun mirrored.
+      // Waves: the swell and the wind sea as directional trains from a 220 m swell to 9 m ripples
+      // (moonWater.js: one field over the globe, each wave at its deep-water speed, dropping out
+      // under a pixel or two; the patch lifts the same waves into geometry near the camera), and
+      // two noise octaves of chop and cat's-paws that no sum of trains carries
       float wind = snoise(up * 40.0 + vec3(0.0, uCloudPh, 0.0)) * 0.5 + 0.5;
       vec3 nw = up;
       float crest = 0.0;
       {
         vec3 P = up * RM;
-        vec3 gsum = vec3(0.0);
-        float wl = 0.15, amp = 0.055 * (0.6 + 0.8 * wind);
-        for (int o = 0; o < 4; o++) {
+        vec4 sw = seaWaves(rd * tG, up, fp);
+        vec3 gsum = sw.xyz * (2.2 + 2.4 * wind);
+        float wl = 0.0075, amp = 0.05 * (0.6 + 0.8 * wind);
+        for (int o = 0; o < 2; o++) {
           float fade = 1.0 - smoothstep(wl * 0.12, wl * 0.5, fp);
           if (fade > 0.0) {
-            float c = sqrt(1.62e-3 * wl / 6.2831853);
-            vec3 dir = o % 2 == 0 ? vec3(0.8, 0.0, 0.6) : vec3(-0.45, 0.0, 0.89);
-            vec3 w = (P - dir * c * uTime) / wl;
-            vec3 gw = vec3(snoise(w), snoise(w + 3.3), snoise(w + 7.1));
-            gsum += gw * amp * fade;
-            if (o == 1) crest = snoise(w * 1.7 + 11.0) * fade;
+            vec3 w = (P - vec3(0.8, 0.0, 0.6) * 0.0012 * uTime) / wl;
+            gsum += vec3(snoise(w), snoise(w + 3.3), snoise(w + 7.1)) * amp * fade;
           }
-          wl *= 0.33; amp *= 0.72;
+          wl *= 0.4; amp *= 0.7;
         }
+        // crests: where the trains pile up the sea is highest and steepest, and there it breaks
+        crest = sw.w / 0.0007 + 0.3 * snoise(P / 0.02 + uTime * 0.05) * (1.0 - smoothstep(0.004, 0.02, fp));
         // wind slicks: calm lanes kilometres long where the chop dies and the water turns glassy
         // (they read from far off as the sea's moving texture)
         float slick = smoothstep(0.58, 0.82, snoise(vec3(P.x * 0.35, P.y * 0.35 + uTime * 0.0008, P.z * 1.3)) * 0.5 + 0.5);
@@ -971,15 +973,33 @@ void main() {
       float F = 0.02 + 0.98 * pow(1.0 - clamp(dot(V, Hh), 0.0, 1.0), 5.0);
       float Fv = 0.02 + 0.98 * pow(clamp(1.0 - nv, 0.0, 1.0), 5.0);
       vec3 spec = vec3(D * G * F / (4.0 * nv + 1e-4)) * E;
-      float tr = exp(-depth / 0.02);
-      vec3 deep = vec3(0.003, 0.014, 0.026);
-      vec3 shallowTint = vec3(0.4, 0.85, 0.8);
-      vec3 body = mix(deep, bed * shallowTint, tr) / PI * (E * max(mu, 0.0) + sky + earth);
-      // surf: a broken white line just off the beach where the swell breaks, resolved close in
-      float surfW = max(0.03, aw);
-      float surfD = (coastM - 0.5 - surfW * 0.6) / surfW;
-      float surf = exp(-surfD * surfD) * (0.55 + 0.45 * sin(uTime * 0.7 + gf.fine * 3.0 + gf.broad * 5.0)) * gf.dw * (1.0 - nearSite);
-      body += vec3(0.6, 0.62, 0.62) / PI * (E * max(mu, 0.0) + sky) * surf * 0.35;
+      // the water column: red is absorbed within metres, green within tens, blue last, so over
+      // pale sand the shallows glow turquoise, deepening through teal to the blue of open water;
+      // the light goes down to the bed and back up (the path lengthens at a grazing view), and
+      // the water itself scatters a blue-green glow that stands in for the bed where it is deep
+      float shoreKm = (coastM - 0.5) * uTexKm;                      // distance offshore, roughly
+      float dzM = max(depth * mix(0.25, 1.0, smoothstep(0.0, 1.2, shoreKm)), 0.0008) * 1000.0;
+      float pathM = dzM * (1.0 + 1.0 / max(nv, 0.25));
+      vec3 Tw = exp(-vec3(0.36, 0.064, 0.036) * pathM);
+      vec3 sandBed = mix(vec3(0.36, 0.33, 0.25), bed, 0.35) * (0.92 + 0.16 * gf.fine * gf.dw);
+      vec3 scatW = vec3(0.0035, 0.021, 0.03);
+      vec3 body = (sandBed * Tw + scatW * (1.0 - Tw.g)) / PI * (E * max(mu, 0.0) + sky + earth);
+      // subsurface: light through the backs of the waves, a green glow on the crests facing away
+      float sss = pow(clamp(dot(V, -sun) * 0.5 + 0.5, 0.0, 1.0), 4.0) * smoothstep(0.1, 0.8, crest);
+      body += vec3(0.01, 0.05, 0.04) / PI * E * sss * 0.6;
+      // surf: lines of breakers riding in toward the beach (sets of three, broken along their
+      // length), the swash foaming at the waterline, all where resolved; a pale band from afar
+      float surfK = gf.dw * (1.0 - nearSite);
+      if (surfK > 0.0) {
+        float zone = 1.0 - smoothstep(0.03, 0.16, shoreKm);
+        float ln = fract(shoreKm / 0.028 + uTime * 0.11 + 0.15 * gf.broad);
+        float brk = pow(clamp(1.0 - abs(ln - 0.5) * 2.0, 0.0, 1.0), 6.0) * zone;
+        float along = smoothstep(0.35, 0.75, snoise(vec3(up * RM / 0.05) + uTime * 0.02) * 0.5 + 0.5 + 0.25 * gf.fine);
+        float res = 1.0 - smoothstep(0.004, 0.02, fp);
+        float swash = exp(-shoreKm * shoreKm / 0.00012) * (0.6 + 0.4 * sin(uTime * 0.6 + gf.fine * 4.0));
+        float surf = mix(zone * 0.35, max(brk * along, swash), res) * surfK;
+        body += vec3(0.62, 0.64, 0.64) / PI * (E * max(mu, 0.0) + sky) * surf * 0.4;
+      }
       // the sky mirrored: pale toward the horizon, deepening to the zenith, as seen along the
       // reflected ray; whitecaps where the chop breaks on a windy sea
       vec3 Rr = reflect(-V, nw);
@@ -1078,7 +1098,7 @@ function _blankMask() {
 // Each octave drops out (smoothly) where the rings are too coarse for it, and the whole relief
 // eases to the sphere over the patch's outer fifth so the handover to the sphere is seamless.
 export const PATCH_R = 120.0;             // km
-export const PATCH_NA = 512;               // vertices round each ring
+export const PATCH_NA = 768;               // vertices round each ring
 const PATCH_R0 = 0.004;                    // the first ring (km); the centre is a vertex too
 const VERT_PATCH = /* glsl */ `
 #define RM ${R_MOON.toFixed(1)}
@@ -1093,6 +1113,7 @@ uniform float uPixAng;
 varying vec3 vView;
 varying vec3 vRel;
 ${RELIEF_GLSL}
+${SEA_GLSL}
 void main() {
   float a = position.x, r = position.y;                       // polar: angle, radius (km)
   vec3 E = uPE1 * cos(a) + uPE2 * sin(a);
@@ -1104,6 +1125,9 @@ void main() {
   float fade = max(max(r, ${PATCH_R0.toFixed(4)}) * uPSp * 1.3, length(base) * uPixAng * 2.0);
   float morph = 1.0 - smoothstep(uPR * 0.72, uPR * 0.95, r);
   float h = morph > 0.0 ? reliefH(up, fade) * morph : 0.0;
+  // the sea near the camera: its waves as geometry (under a metre: the ground contract holds)
+  float wk = (1.0 - smoothstep(1.5, 4.0, r)) * smoothstep(0.6, 0.95, gmask(up).b) * (1.0 - smoothstep(0.0, 0.002, h));
+  if (wk > 0.0) h += seaWaves(base, up, fade).w * wk;
   vec3 rel = base + up * h;
   vRel = rel;
   vView = uMToView * rel;
@@ -1168,6 +1192,7 @@ export class MoonSurface {
       uPC: { value: new THREE.Vector3(1, 0, 0) }, uPE1: { value: new THREE.Vector3(0, 0, 1) }, uPE2: { value: new THREE.Vector3(0, 1, 0) },
       uPCrel: { value: new THREE.Vector3() }, uPR: { value: PATCH_R }, uPCos: { value: 2 },
       uPSp: { value: 2 * Math.PI / PATCH_NA },
+      uSeaPh: { value: new Array(SEA_WAVES.length).fill(0) },
     };
     this.patchC = new THREE.Vector3(1, 0, 0);     // the patch centre (unit, Moon frame), doubles
     this.focus = null;                            // optional world point the patch centres on (the ship)
@@ -1211,6 +1236,7 @@ export class MoonSurface {
     u.uMToView.value.copy(u.uViewToM.value).transpose();
     // the patch centre on the sphere, camera-relative, from doubles
     u.uPCrel.value.copy(this.patchC).multiplyScalar(R_MOON).sub(camM);
+    seaPhases(camM, u.uTime.value, u.uSeaPh.value);
     u.uPixAng.value = 2 * Math.tan(THREE.MathUtils.degToRad(cam.fov) / 2) / Math.max(this.space.size.y, 1);
     this.material.side = Math.sqrt(d2) < PROXY + 1.5 ? THREE.BackSide : THREE.FrontSide;
   }

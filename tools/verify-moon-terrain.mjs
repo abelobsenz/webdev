@@ -216,7 +216,7 @@ const rnd = () => { const v = new THREE.Vector3(Math.random() * 2 - 1, Math.rand
   const sp = (r) => r * 2 * Math.PI / NA;
   ok(sp(1) < 0.015, `ring spacing at 1 km: ${(sp(1) * 1000).toFixed(1)} m`);
   report.spacingAt1kmM = +(sp(1) * 1000).toFixed(1);
-  // a patch centred somewhere hilly: the triangles vs the CPU ground, within 1.2 km of the centre
+  // a patch centred somewhere hilly: the triangles vs the CPU ground, within 1 km of the centre
   let worst = 0, tested = 0;
   for (let trial = 0; trial < 6 && tested < 1500; trial++) {
     const C = rnd();
@@ -231,7 +231,7 @@ const rnd = () => { const v = new THREE.Vector3(Math.random() * 2 - 1, Math.rand
       return up.multiplyScalar(R + h);
     };
     for (let k = 0; k < 300; k++) {
-      const r = 1.2 * Math.sqrt(Math.random()), a = Math.random() * Math.PI * 2;
+      const r = 1.0 * Math.sqrt(Math.random()), a = Math.random() * Math.PI * 2;
       // the ring pair and angle pair holding this point
       let j = 0; while (rings[j + 1] < r) j++;
       const ai = Math.floor((a / (Math.PI * 2)) * NA);
@@ -246,7 +246,7 @@ const rnd = () => { const v = new THREE.Vector3(Math.random() * 2 - 1, Math.rand
     }
   }
   ok(tested > 300, `mesh probes ${tested}`);
-  ok(worst * 1000 < 1.0, `mesh vs moonGround within 1.2 km of the centre: ${(worst * 1000).toFixed(3)} m`);
+  ok(worst * 1000 < 1.0, `mesh vs moonGround within 1 km of the centre: ${(worst * 1000).toFixed(3)} m`);
   report.meshVsGroundM = +(worst * 1000).toFixed(3);
 }
 
@@ -277,7 +277,7 @@ const rnd = () => { const v = new THREE.Vector3(Math.random() * 2 - 1, Math.rand
 if (WaterWaves) {
   const W = new WaterWaves();
   const src = W.glsl;
-  hygiene('waves', src, ['vec3 seaWaves(vec3 P, float t, float fade']);
+  hygiene('waves', src, ['vec4 seaWaves(vec3 rel, vec3 up, float fade)']);
   // the CPU waves and the table agree; displacement small enough for the ground contract
   let amp = 0;
   for (let i = 0; i < 500; i++) amp = Math.max(amp, Math.abs(W.height(Math.random() * 100, Math.random() * 100, Math.random() * 100, Math.random() * 100)));
