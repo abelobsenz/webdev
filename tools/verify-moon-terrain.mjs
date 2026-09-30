@@ -331,6 +331,7 @@ if (MoonForest) {
   }
   ok(worst * 1000 < 0.05, `trees seated on the ground (${(worst * 1000).toFixed(3)} m)`);
   report.trees = n;
+  report.treeCounts = F.counts;
   report.treeTris = F.meshes.reduce((t, m) => t + m.count * m.geometry.getAttribute('position').count / 3, 0);
   for (const [nm, src] of [['tree vertex', F.material.vertexShader], ['tree fragment', F.material.fragmentShader]]) {
     hygiene(nm, src, ['void main() {']);

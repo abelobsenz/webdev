@@ -72,7 +72,12 @@ export function treeSpecies() {
     tint(new THREE.CylinderGeometry(0.12, 0.22, 3, 5).translate(0, 1.5, 0), ...TRUNK),
     tint(lumpy(new THREE.IcosahedronGeometry(1.5, 2).scale(1, 3.6, 1).translate(0, 7.8, 0), 0.14, 2.7), 0.06, 0.1, 0.04, 0.5),
   ]);
-  return { broad, conifer, poplar };
+  // boulders and outcrop blocks: a squat, faceted lump half sunk into the ground
+  const rock = merge([
+    tint(lumpy(new THREE.IcosahedronGeometry(1.0, 1).scale(1.3, 0.75, 1.0).translate(0, 0.25, 0), 0.28, 5.3), 0.2, 0.19, 0.175),
+    tint(lumpy(new THREE.IcosahedronGeometry(0.55, 1).scale(1.0, 0.8, 1.2).translate(1.1, 0.1, 0.5), 0.3, 8.7), 0.17, 0.165, 0.15),
+  ]);
+  return { broad, conifer, poplar, rock };
 }
 
 const VERT = /* glsl */ `
@@ -125,7 +130,7 @@ export class MoonForest {
     };
     this.material = new THREE.ShaderMaterial({ vertexShader: VERT, fragmentShader: FRAG, uniforms: this.uniforms, vertexColors: true, side: THREE.DoubleSide });
     const sp = treeSpecies();
-    this.meshes = ['broad', 'conifer', 'poplar'].map((k) => {
+    this.meshes = ['broad', 'conifer', 'poplar', 'rock'].map((k) => {
       const m = new THREE.InstancedMesh(sp[k], this.material, CAP);
       m.count = 0;
       m.frustumCulled = false;
@@ -134,7 +139,7 @@ export class MoonForest {
       this.group.add(m);
       return m;
     });
-    this.capacity = CAP * 3;
+    this.capacity = CAP * 4;
     this.positions = [];           // body-frame positions of the last scatter (km), for checks
     this.centre = new THREE.Vector3(0, 0, 0);
   }
@@ -153,7 +158,7 @@ export class MoonForest {
     // cells on a fixed grid of the tangent plane at the direction snapped to ~1 km, so trees stay
     // put as the centre moves a little
     const n = Math.ceil(radius / CELL);
-    const cnt = [0, 0, 0];
+    const cnt = [0, 0, 0, 0];
     this.positions.length = 0;
     const seen = new Set();
     for (let j = -n; j <= n; j++) for (let i = -n; i <= n; i++) {
@@ -169,17 +174,22 @@ export class MoonForest {
       _p.set(gi * CELL + (h1 - 0.5) * CELL, gj * CELL + (h2 - 0.5) * CELL, gk * CELL + (h0 - 0.5) * CELL * 0.5).normalize();
       gmask(_p.x, _p.y, _p.z, _gm);
       const wood = _gm[3] * (_gm[2] < 0.3 ? 1 : 0);
-      if (h0 > wood * 0.95) continue;
+      // boulders on the open, high and bare ground (the highland share from the bake's height)
+      const rocky = _gm[0] > 0.9 && wood < 0.2 ? Math.max(0, (_gm[1] * 5 - 1.2) / 2.5) * 0.18 + 0.015 : 0;
+      const isRock = h0 > wood * 0.95;
+      if (isRock && h1 > rocky) continue;
       const info = {};
       const h = reliefH(_p.x, _p.y, _p.z, 0, info);
+      if (info.mask <= 0) continue;              // not on the Landing's levelled ground or the towns
       // conifers up the slopes and on the highlands, poplars along the valley floors
       const hs = hash(gi + 3, gj + 5, gk + 7);
-      const sp = hs < 0.15 + 0.7 * Math.min(1, info.hi * 1.2 + h * 1.5) ? 1 : (info.valley > 0.5 && hs > 0.8 ? 2 : 0);
+      const sp = isRock ? 3 : hs < 0.15 + 0.7 * Math.min(1, info.hi * 1.2 + h * 1.5) ? 1 : (info.valley > 0.5 && hs > 0.8 ? 2 : 0);
       const mesh = this.meshes[sp];
       if (cnt[sp] >= CAP) continue;
       const d = Math.hypot(x, y);
       const edge = 1 - Math.max(0, Math.min(1, (d - radius * 0.75) / (radius * 0.25)));
-      const s = (0.7 + 0.6 * hash(gk + 1, gj + 2, gi + 3)) * (0.35 + 0.65 * edge) * 0.001;
+      const hz = hash(gk + 1, gj + 2, gi + 3);
+      const s = (isRock ? 0.6 + 3.2 * hz * hz * hz : 0.7 + 0.6 * hz) * (0.35 + 0.65 * edge) * 0.001;
       const pos = _p.clone().multiplyScalar(R + h);
       this.positions.push(pos);
       _up.copy(_p);
@@ -189,11 +199,13 @@ export class MoonForest {
       _m.compose(_s.copy(pos).sub(this.group.position), _q, _p.set(s, s, s));
       mesh.setMatrixAt(cnt[sp], _m);
       const v = 0.8 + 0.4 * hash(gi - 1, gj - 2, gk - 3);
-      mesh.setColorAt(cnt[sp], _c.setRGB(v * (0.95 + 0.1 * h2), v, v * (0.9 + 0.2 * h1)));
+      if (isRock) mesh.setColorAt(cnt[sp], _c.setRGB(v * (0.97 + 0.08 * h2), v, v * 0.95));
+      else mesh.setColorAt(cnt[sp], _c.setRGB(v * (0.95 + 0.1 * h2), v, v * (0.9 + 0.2 * h1)));
       cnt[sp]++;
     }
     this.meshes.forEach((m, k) => { m.count = cnt[k]; m.instanceMatrix.needsUpdate = true; if (m.instanceColor) m.instanceColor.needsUpdate = true; });
-    return cnt[0] + cnt[1] + cnt[2];
+    this.counts = cnt.slice();
+    return cnt[0] + cnt[1] + cnt[2] + cnt[3];
   }
 
   /** Light: the Sun's direction in view space, and its height at the centre (Moon-frame sun, unit). */
