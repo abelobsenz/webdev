@@ -177,6 +177,15 @@ export class ShipContact {
    */
   step(h, lin, ang) {
     const p = this.pilot, q = p.quat, legs = p.legPos;
+    // clear of everything (the ship's whole reach is ~25 m from its origin)? then no per-point work:
+    // the ground under the origin is looked up at most every 0.1 s while far above it
+    if (this._clear(h)) {
+      this.footTouch = this.hullTouch = 0; this._still = 0; this.landed = false;
+      for (let i = 0; i < 3; i++) { this.feet[i].touch = false; this.feet[i].anchored = false; this.gear[i] *= Math.max(0, 1 - h * 10); }
+      this.surfV.set(0, 0, 0); this.surfPad = null;
+      this._s += h;
+      return false;
+    }
     // angular velocity in the frame (the ship's body rates: pitch x, yaw -y, roll -z)
     _w.set(p.rates.x, -p.rates.y, -p.rates.z).applyQuaternion(q);
     const up = V().set(0, 1, 0).applyQuaternion(q);
@@ -275,6 +284,24 @@ export class ShipContact {
     if (hard || v > 3 * KM) p._flash(v > 6 * KM ? `crash: ${ms} m/s` : `hard ${hard ? 'contact' : 'landing'} ${ms} m/s`);
     else if (v > 0.02 * KM) p._flash(`touchdown ${ms} m/s`);
     if (p.onTouch) p.onTouch(v, hard);
+  }
+
+  /** Is the ship far enough from every surface to skip the contact points this step? */
+  _clear(h) {
+    const p = this.pilot, REACH = 0.03;
+    for (const pd of this.pads) if (pd.tr.at(this._s, this._cp || (this._cp = {})).pos.distanceTo(p.pos) < pd.r + REACH + 0.02) return false;
+    if (p.frame !== 'moon') return true;
+    const L = p.pos.length();
+    if (L > R_MOON + 40) return true;
+    this._gT = (this._gT || 0) - h;
+    if (this._gT <= 0 || this._gAlt === undefined || this._gAlt < 0.3) {
+      const g = this.ground(_g.copy(p.pos).divideScalar(L), this._gnd);
+      this._gAlt = L - R_MOON - g.h; this._gL = L;
+      this._gT = 0.1;
+    }
+    // the altitude can only have changed by the radial motion since the last look (plus the relief
+    // under a sideways drift, allowed for by the margin)
+    return this._gAlt - Math.abs(L - this._gL) - 0.02 > REACH;
   }
 
   /** Landing aids: radar altitude of the lowest foot, the ground's slope and normal. */
