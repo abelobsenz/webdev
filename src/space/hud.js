@@ -45,7 +45,9 @@ export class SpaceHud {
       b.type = 'button';
       b.dataset.id = name;
       b.innerHTML = `<span class="k">${t.key}</span><span>${t.name}<span class="d">${t.district}</span></span>`;
-      b.addEventListener('click', () => this.space.focus(name));
+      // at the Lodestar's helm a click picks the destination for the autopilot (N) or the jump (J)
+      // instead of flying the camera there
+      b.addEventListener('click', () => { const sh = this.space.ship; if (sh && sh.active && sh.pickDestination) sh.pickDestination(name); else this.space.focus(name); });
       li.appendChild(b);
       list.appendChild(li);
     }

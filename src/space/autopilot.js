@@ -1,0 +1,403 @@
+import * as THREE from 'three';
+import { R_EARTH, R_MOON } from './sim.js';
+import { portsFor } from './ports.js';
+import { PortTrack, matedQuat, FEET_CENTRE, DOCK_POS } from './shipContact.js';
+
+// The Lodestar's autopilot: flies the ship to a port (ports.js) and docks or lands there, using
+// only the ship's own actuators. Every step it writes the pilot's input (fwd: main drive or reverse
+// engines; pitch / yaw / roll: RCS rate commands; lift, strafe, surge: RCS translation) and boost,
+// exactly as the stick would; gravity and the frames' fictitious forces keep acting on the ship.
+//
+// Phases
+//   jump      far away (a boosted burn would take over ~90 s, or the port lies in another body's
+//             sphere of influence): the jump drive carries the ship to a standoff on the port's
+//             approach side, clear of every body
+//   transfer  powered rendezvous with the port's gate (a point out along the approach axis; for a
+//             pad on the Moon, high above it): a braking-limited velocity profile, flown nose-first
+//             (main drive to accelerate, the bow's reverse engines to brake, boost when far) with the
+//             RCS trimming sideways. The route goes round, never through, the Earth (above
+//             R_EARTH + 95 km), the Moon (above its ground) and the station itself: blocked, the ship
+//             follows the sphere of safe radius round towards the goal until the way is clear
+//   approach  on RCS only, down the axis from the gate to the hold point `approach` km out, turning
+//             to the mated attitude and matching the port's motion (orbit, spin) as it goes
+//   final     the corridor: closing at v = min(vmax, k d + vmin) with the lateral error trimmed out
+//             by RCS translation, attitude locked to the port; a pad is hovered down against gravity
+//   touchdown the feet have touched: the thrusters let go and the ship settles on its legs
+// Capture (docks: the latches, see shipContact.js) or landing ends it with a message.
+
+const V = () => new THREE.Vector3();
+const clamp = (x, a, b) => Math.min(Math.max(x, a), b);
+const KM = 0.001;
+const _q = new THREE.Quaternion(), _q2 = new THREE.Quaternion(), _t = V(), _u = V();
+
+/** Rotation taking unit a to unit b (shortest arc). */
+function arc(a, b, out) { return out.setFromUnitVectors(a, b); }
+
+export class Autopilot {
+  constructor(pilot) {
+    this.pilot = pilot;
+    this.on = false;
+    this.port = null; this.track = null;
+    this.phase = ''; this.jumps = 0; this.t = 0;
+    this.info = { d: 0, vc: 0, eta: 0, label: '' };
+    this._s = 0; this._pose = {}; this._coarse = false; this._sgn = 1;
+    this.Tcmd = V();
+  }
+
+  /** The target's ports, best first (the nearest hold point to the ship). */
+  static portsOf(space, target, Pw) {
+    const list = portsFor(space, target).slice();
+    const d = (p) => { const w = p.pose(space, {}); return w.pos.addScaledVector(w.n, p.approach || 0).distanceTo(Pw); };
+    return list.map((p) => [p, d(p)]).sort((a, b) => a[1] - b[1]).map((x) => x[0]);
+  }
+
+  engage(port) {
+    const p = this.pilot;
+    if (!port) return false;
+    this.port = port; this.track = new PortTrack(port);
+    this.on = true; this.t = 0; this.jumps = 0; this._coarse = false;
+    // on the ground (or just off it): climb clear on the thrusters, level, before anything else
+    this.phase = p.contact && (p.contact.footTouch || p.contact.hullTouch || p.contact.agl < 0.12) ? 'liftoff' : 'transfer';
+    this._liftN = null;
+    this._lowFor = null; this._fallFor = null; this._recover = 0; this._lockT = 0;
+    this.info.label = port.label || port.id;
+    p.brake = false;
+    // docked (or clamped to a deck): let go and back straight out along the port's axis first
+    const from = p.dock ? p.dock.track.clone() : null;
+    if (p.dock) p.undock(true);
+    if (from) { this.phase = 'depart'; this._from = from; this._departT = 0; }
+    if (p.contact) { p.contact.landed = false; p.contact._still = 0; }
+    this._farChecked = false;
+    this._frameFlag = null;
+    p._flash(`autopilot: ${this.info.label}`);
+    return true;
+  }
+
+  disengage(msg) {
+    if (!this.on) return;
+    this.on = false; this.phase = '';
+    const i = this.pilot.input;
+    i.fwd = i.pitch = i.yaw = i.roll = i.lift = i.strafe = i.surge = 0;
+    this.pilot.boost = false;
+    if (msg) this.pilot._flash(msg);
+  }
+
+  // --------------------------------------------------------------- geometry --
+  /** Once per frame: follow the port, and decide whether to jump. */
+  sense(dt) {
+    const p = this.pilot;
+    if (!this.on) return;
+    this.t += dt;
+    if (p.jump) { this.phase = 'jump'; return; }
+    if (this.phase === 'jump') { this.phase = 'transfer'; this.track.ok = false; }
+    this.track.sense(p, dt);
+    if (this.phase === 'depart' && this._from) this._from.sense(p, dt);   // the port being left
+    this._s = -dt;                 // the ship integrates from the last frame up to this one: poses are extrapolated back by dt
+    if (this.phase === 'transfer' && !this._farChecked) this._checkFar();
+    if (this.phase === 'liftoff' || this.phase === 'depart') this._farChecked = false;
+  }
+
+  /** Is the gate out of reach of a burn (or in another body's sphere)? Then jump to a standoff. */
+  _checkFar() {
+    const p = this.pilot, sp = p.space, port = this.port;
+    const w = port.pose(sp, {}), Pw = p.worldPos(V());
+    const gateW = this._gateWorld(w);
+    const d = gateW.distanceTo(Pw);
+    const tBurn = 2 * Math.sqrt(d / p.caps.A_BOOST);
+    const other = p._frameFor(w.pos) !== p._frameFor(Pw);
+    this._farChecked = true;
+    if (this.jumps < 2 && (tBurn > 90 || other) && d > 50) {
+      this.jumps++;
+      const self = this;
+      p.jumpTo(this.info.label, (o) => self._gateWorld(port.pose(sp, {}), o).addScaledVector(port.pose(sp, {}).n, self._isBodyPad(port.pose(sp, {})) ? 0 : 3));
+      this.phase = 'jump';
+      this._farChecked = false;
+    }
+  }
+
+  _isBodyPad(w) { return this.port.kind === 'pad' && w.pos.distanceTo(this.pilot.space.sim.moonPos) < R_MOON + 60; }
+
+  /** The gate in world space: out along the approach axis, clear of the structure (a Moon pad: 15 km up). */
+  _gateWorld(w, out = V()) {
+    const port = this.port, app = port.approach || 0.2;
+    const C = this._centreW(V());
+    const depth = C ? V().copy(w.pos).sub(C).dot(w.n) : 0;
+    const Rk = this._keepR(w, C);
+    let D = app;
+    if (this._isBodyPad(w)) D = Math.max(app, this._lowGate(w) || 15);
+    else D = Math.max(app, Rk * 1.35 + 0.1 - depth, app);
+    return out.copy(w.pos).addScaledVector(w.n, D);
+  }
+
+  /**
+   * A Moon pad the ship is already near: a gate at the ship's own height over the pad (down to 1 km)
+   * when the straight line there clears the ground by 600 m all the way (sampled against
+   * moonGround); otherwise (0) the high gate, 15 km up. Decided once per engagement.
+   */
+  _lowGate(w) {
+    if (this._lowFor === this.port) return this._low;
+    const p = this.pilot, sim = p.space.sim;
+    if (p.jump || this.phase === 'jump') return 0;
+    this._lowFor = this.port; this._low = 0;
+    const qi = sim.moonQuat.clone().invert();
+    const body = (Pw) => Pw.clone().sub(sim.moonPos).applyQuaternion(qi);
+    const S = body(p.worldPos(V())), Pp = body(w.pos), nb = w.n.clone().applyQuaternion(qi);
+    const hS = S.clone().sub(Pp).dot(nb), horiz = S.clone().sub(Pp).addScaledVector(nb, -hS).length();
+    if (horiz > 40 || hS > 15 || hS < 0.3) return 0;
+    const D = Math.max(1, Math.min(hS, 15)), G = Pp.clone().addScaledVector(nb, D);
+    const ground = p.contact.ground, g = { normal: V() };
+    for (let k = 0; k <= 24; k++) {
+      const X = S.clone().lerp(G, k / 24), L = X.length();
+      if (L - R_MOON - ground(X.clone().divideScalar(L), g).h < 0.6) return 0;
+    }
+    this._low = D;
+    return D;
+  }
+
+  _centreW(out) {
+    const t = this.pilot.space.targets[this.port.target];
+    return t && t.position ? t.position(out) : null;
+  }
+
+  /** Keep-out radius round the port's structure (km). */
+  _keepR(w, C) {
+    if (!C || this._isBodyPad(w)) return 0;
+    const t = this.pilot.space.targets[this.port.target];
+    return Math.max(w.pos.distanceTo(C) + (this.port.clear || 0.02), (t && t.minDist) ? t.minDist : 0);
+  }
+
+  // ---------------------------------------------------------------- control --
+  /** One physics step: write the stick. */
+  control(h) {
+    const p = this.pilot, i = p.input, c = p.caps;
+    if (!this.on || p.jump || this.phase === 'jump') { if (this.on) { i.fwd = i.lift = i.strafe = i.surge = 0; } return; }
+    const s = this._s; this._sc = s; this._s += h;               // poses at the start of this step (the ship's state's time)
+    const tr = this.track, pose = tr.at(s, this._pose), port = this.port, pad = port.kind === 'pad';
+    const n = pose.n;
+    if (pad) this._heading(pose);
+    const Qt = matedQuat(port.kind, n, pose.fwd, this._Qt || (this._Qt = new THREE.Quaternion()));
+    const ref = pad ? FEET_CENTRE : DOCK_POS;
+    const refT = V().copy(ref).applyQuaternion(Qt);
+    const Pm = V().copy(pose.pos).sub(refT);                  // ship origin when mated
+    const H = V().copy(Pm).addScaledVector(n, port.approach || 0.2);
+    const g = p._gravity(p.pos, p.vel, V());
+    const w = { pos: p.toWorld(pose.pos, V()), n: p.dirToWorld(n, V()) };
+    const gate = p.toLocal(this._gateWorld(w, V()), V());
+    const T = this.Tcmd.set(0, 0, 0);
+    let att = null, wAtt = tr.omega, allowCoarse = false, boostOK = false;
+    const rel = V(), vrel = V();
+    if (pad && p.legs < 0.5 && (this.phase !== 'transfer' || p.pos.distanceTo(H) < 30)) p.legs = 1;
+    if (this.phase === 'depart') {
+      // straight back out along the old port's axis at 3 m/s on the RCS, turning with it, until
+      // 150 m clear (then the transfer's route takes over, round the structure if need be)
+      const ft = this._from;
+      const fp = ft.at(s, this._fp || (this._fp = {}));
+      const r = V().copy(p.pos).sub(fp.pos), out = r.dot(fp.n);
+      const vdes = ft.pointVel(p.pos, s, V()).addScaledVector(fp.n, 0.003);
+      const Ap = V().crossVectors(ft.omega, V().crossVectors(ft.omega, r)).add(ft.acc);
+      T.copy(Ap).sub(g).addScaledVector(vdes.sub(p.vel), 1.2);
+      att = p.quat.clone(); wAtt = ft.omega;
+      this._departT += h;
+      this.info.d = Math.max(0, 0.15 - out); this.info.vc = 3 * KM;
+      if (out > 0.15 || this._departT > 90) { this.phase = 'transfer'; this._farChecked = false; this.track.ok = false; }
+    } else if (this.phase === 'liftoff') {
+      // straight up the ground's normal at 12 m/s on the RCS, the ship level, the legs left down
+      // until clear; a moving deck's own velocity is matched first (its surface velocity)
+      const c = p.contact;
+      if (!this._liftN) { this._liftN = V().copy(c.agl < Infinity ? c.groundN : V().copy(p.pos).normalize()); this._liftV = V().copy(c.surfV); this._liftT = 0; }
+      this._liftT += h;
+      const up = this._liftN, vdes = V().copy(up).multiplyScalar(0.012).add(this._liftV);
+      T.copy(g).negate().addScaledVector(vdes.sub(p.vel), 1.2);
+      const f0 = V().set(0, 0, -1).applyQuaternion(p.quat); f0.addScaledVector(up, -f0.dot(up));
+      att = f0.lengthSq() > 1e-9 ? matedQuat('pad', up, f0.normalize(), new THREE.Quaternion()) : null;
+      this.info.d = Math.max(0, 0.15 - c.agl); this.info.vc = V().copy(p.vel).sub(this._liftV).dot(up);
+      if ((c.agl > 0.15 && c.agl < Infinity) || (c.agl === Infinity && this._liftT > 8) || this._liftT > 40) { this.phase = 'transfer'; this._farChecked = false; }
+    } else if (this.phase === 'transfer') {
+      const VG = tr.pointVel(gate, s, V()), AG = this._accAt(gate, V());
+      rel.copy(gate).sub(p.pos); vrel.copy(p.vel).sub(VG);
+      const d = rel.length();
+      boostOK = d > 20 || vrel.length() > 0.5;
+      const vd = this._route(gate, VG, d, boostOK, V(), AG);
+      // pursuit lock: circling the goal faster than the ship can turn onto its thrust line; stop
+      // relative to the goal first (a fixed thrust direction the ship can turn to), then go again
+      if (this._coarse && (this.attErr || 0) > 0.4) this._lockT = (this._lockT || 0) + h; else this._lockT = 0;
+      if (this._lockT > 4 && !this._recover) { this._recover = this.t + 25; }
+      if (this._recover) { vd.copy(VG); if (vrel.length() < 0.03 || this.t > this._recover) this._recover = 0; }
+      T.copy(AG).sub(g).addScaledVector(vd.sub(p.vel), boostOK ? 2.0 : 1.4);
+      allowCoarse = true;
+      att = d < 4 ? Qt : null;
+      this.info.d = d; this.info.vc = -vrel.dot(rel) / Math.max(d, 1e-9);
+      if (d < Math.max(0.03, (port.approach || 0.2) * 0.1) && vrel.length() < 0.004) this.phase = 'approach';
+    } else if (this.phase === 'approach') {
+      const VH = tr.pointVel(H, s, V()), AH = this._accAt(H, V());
+      rel.copy(H).sub(p.pos); vrel.copy(p.vel).sub(VH);
+      const d = rel.length(), ab = 0.35 * c.A_RCS;
+      const vd = Math.min(pad ? 0.25 : 0.05, Math.sqrt(2 * ab * d), 0.6 * d);
+      const vdes = V().copy(rel).multiplyScalar(d > 1e-9 ? vd / d : 0).add(VH);
+      T.copy(AH).sub(g).addScaledVector(vdes.sub(p.vel), 1.3);
+      att = Qt;
+      const aErr = p.quat.angleTo(Qt);
+      this.info.d = d + (port.approach || 0.2); this.info.vc = -vrel.dot(rel) / Math.max(d, 1e-9);
+      if (d > 2) allowCoarse = true;
+      if (d < 0.004 && vrel.length() < 0.0015 && aErr < 0.05) this.phase = 'final';
+    } else if (this.phase === 'final' || this.phase === 'touchdown') {
+      const R = V().copy(ref).applyQuaternion(p.quat).add(p.pos);
+      rel.copy(R).sub(pose.pos);
+      const ax = rel.dot(n), lat = V().copy(rel).addScaledVector(n, -ax), latL = lat.length();
+      const VpR = tr.pointVel(R, s, V());
+      const wF = V().set(p.rates.x, -p.rates.y, -p.rates.z).applyQuaternion(p.quat);
+      const VR = V().crossVectors(wF, V().copy(ref).applyQuaternion(p.quat)).add(p.vel);
+      vrel.copy(VR).sub(VpR);
+      const vmin = pad ? 0.5 * KM : 0.08 * KM, k = pad ? 0.15 : 0.1, vmax = pad ? 0.02 : 0.012;
+      const vnear = ax < 0.005 ? (pad ? 0.0009 : 0.00015) : 1;
+      const inCone = latL < 0.25 * KM + 0.08 * Math.max(ax, 0) && p.quat.angleTo(Qt) < 0.06;
+      const vax = inCone ? -Math.min(vmax, vnear, k * Math.max(ax, 0) + vmin) : clamp(-0.3 * (ax - Math.max(ax, 0.01)), -0.002, 0.002);
+      const vlat = V().copy(lat).multiplyScalar(-0.35);
+      if (vlat.length() > 0.0006) vlat.setLength(0.0006);
+      const vdes = V().copy(n).multiplyScalar(vax).add(vlat);
+      const AR = this._accAt(R, V());
+      T.copy(AR).sub(g).addScaledVector(vdes.sub(vrel), 1.6);
+      att = Qt;
+      this.info.d = Math.max(ax, 0); this.info.vc = -vrel.dot(n);
+      if (pad && p.contact.footTouch > 0) this.phase = 'touchdown';
+      if (this.phase === 'touchdown') {
+        // the feet are down: let the legs take the weight, the RCS only holds the attitude until
+        // two feet are planted
+        // in weightlessness (a pad on a station) the RCS presses the feet onto the deck gently
+        const aApp = V().copy(g).sub(AR).dot(n);
+        T.set(0, 0, 0);
+        if (aApp > -0.0008) T.copy(n).multiplyScalar(-(0.0008 + aApp));
+        if (p.contact.footTouch >= 2) att = null;
+        if (p.contact.footTouch === 0 && ax > 0.004) this.phase = 'final';
+      }
+    }
+    this.info.eta = this._eta();
+    // ---- allocate the thrust to the actuators
+    const f = V().set(0, 0, -1).applyQuaternion(p.quat), up = V().set(0, 1, 0).applyQuaternion(p.quat), rt = V().set(1, 0, 0).applyQuaternion(p.quat);
+    const TL = T.length();
+    if (allowCoarse && (this._coarse ? TL > 0.45 * c.A_RCS : TL > 0.95 * c.A_RCS)) this._coarse = true;
+    else this._coarse = false;
+    i.fwd = 0; i.surge = 0; p.boost = false;
+    let tf = T.dot(f);
+    if (this._coarse) {
+      if (Math.abs(tf) > 0.25 * TL) this._sgn = tf >= 0 ? 1 : -1;
+      const want = _t.copy(T).multiplyScalar(this._sgn / Math.max(TL, 1e-12));
+      att = arc(f, want, _q2).multiply(p.quat).normalize();
+      wAtt = null;
+      // the drives fire only once the nose is nearly on the line (off it, thrust would add new errors)
+      const cosA = Math.abs(tf) / Math.max(TL, 1e-12), gate = clamp((cosA - 0.85) / 0.12, 0, 1);
+      tf *= gate;
+      if (tf > 0) {
+        if (boostOK && tf > 0.9 * c.A_MAIN) { p.boost = true; i.fwd = Math.min(1, tf / c.A_BOOST); } else i.fwd = Math.min(1, tf / c.A_MAIN);
+      } else if (tf < 0) {
+        if (boostOK && -tf > 0.9 * c.A_RETRO) { p.boost = true; i.fwd = -Math.min(1, -tf / c.A_RETRO_BOOST); } else i.fwd = -Math.min(1, -tf / c.A_RETRO);
+      }
+      tf = 0;
+    } else {
+      if (!att) att = this.phase === 'touchdown' ? null : this._faceGoal(f, gate);
+      i.surge = clamp(tf / c.A_RCS, -1, 1);
+    }
+    i.lift = clamp(T.dot(up) / c.A_RCS, -1, 1);
+    i.strafe = clamp(T.dot(rt) / c.A_RCS, -1, 1);
+    if (att) this._attitude(att, wAtt);
+    else { i.pitch = i.yaw = i.roll = 0; }
+  }
+
+  /**
+   * A pad tilted from the local vertical (a sloping site): turn the heading onto the fall line (up
+   * or down it, whichever is nearer the pad's own heading). The Lodestar's tripod is long fore and
+   * aft but only 4.8 m across its main feet, so across a slope it would tip well before along it.
+   */
+  _heading(pose) {
+    const p = this.pilot;
+    if (p.frame !== 'moon') return;
+    const vert = _u.copy(pose.pos).normalize(), tilt = Math.acos(clamp(vert.dot(pose.n), -1, 1));
+    if (tilt < 3 * Math.PI / 180) return;
+    const fall = _t.copy(vert).addScaledVector(pose.n, -vert.dot(pose.n)).normalize();     // uphill, in the pad's plane
+    // chosen once per port (a pad squarely across the slope would otherwise flip between the two)
+    if (this._fallFor !== this.port) { this._fallFor = this.port; this._fallSign = fall.dot(pose.fwd) < 0 ? -1 : 1; }
+    pose.fwd.copy(fall.multiplyScalar(this._fallSign));
+  }
+
+  /** The acceleration of the structure's point at P (orbit and spin). */
+  _accAt(P, out) {
+    const tr = this.track, r = _u.copy(P).sub(tr.pos);
+    return out.crossVectors(tr.omega, _t.crossVectors(tr.omega, r)).add(tr.acc);
+  }
+
+  _faceGoal(f, G) {
+    const d = V().copy(G).sub(this.pilot.pos);
+    if (d.lengthSq() < 1e-10) return null;
+    return arc(f, d.normalize(), new THREE.Quaternion()).multiply(this.pilot.quat).normalize();
+  }
+
+  /**
+   * The velocity to fly toward goal G (moving at VG): a braking-limited profile along the direct
+   * line, or, where a body or the station blocks it, round the blocking sphere at its safe radius.
+   */
+  _route(G, VG, d, boostOK, out, AG) {
+    const p = this.pilot, c = p.caps, P = p.pos;
+    const ab = boostOK ? 0.3 * c.A_BOOST : 0.3 * c.A_MAIN;
+    // obstacles in the frame: the body, and the port's own structure
+    const obs = [];
+    if (p.frame === 'earth') obs.push({ C: V(), Rb: R_EARTH + 150, Rs: R_EARTH + 260, VC: V() });
+    else if (p.frame === 'moon') obs.push({ C: V(), Rb: R_MOON + 10, Rs: R_MOON + 30, VC: V() });
+    const Cw = this._centreW(V());
+    if (Cw) {
+      const w = this.port.pose(p.space, {}), Rk = this._keepR(w, Cw);
+      if (Rk > 0) { const C = p.toLocal(Cw, V()); obs.push({ C, Rb: Rk * 1.1, Rs: Rk * 1.35 + 0.05, VC: this.track.pointVel(C, this._sc, V()), station: true }); }
+    }
+    for (const o of obs) {
+      const a = V().copy(P).sub(o.C), b = V().copy(G).sub(o.C);
+      if (b.length() < o.Rb * 0.999) continue;                       // the goal itself sits inside: go direct
+      const ab2 = V().copy(b).sub(a), L2 = ab2.lengthSq();
+      const tt = L2 > 0 ? clamp(-a.dot(ab2) / L2, 0, 1) : 0;
+      const close = V().copy(a).addScaledVector(ab2, tt).length();
+      if (close >= o.Rb || tt <= 0 || tt >= 1) continue;
+      // blocked: follow the safe sphere round towards the goal
+      const r = a.length(), rh = V().copy(a).divideScalar(r);
+      const tang = V().copy(b).addScaledVector(rh, -b.dot(rh));
+      if (tang.lengthSq() < 1e-12) tang.set(0, 1, 0).addScaledVector(rh, -rh.y);
+      if (tang.lengthSq() < 1e-12) tang.set(1, 0, 0).addScaledVector(rh, -rh.x);
+      tang.normalize();
+      const ang = Math.acos(clamp(rh.dot(V().copy(b).normalize()), -1, 1));
+      const path = ang * o.Rs + Math.abs(b.length() - o.Rs);
+      const vc = Math.min(Math.sqrt(0.25 * (boostOK ? c.A_BOOST : c.A_MAIN) * o.Rs), Math.sqrt(2 * ab * path), 30);
+      const vr = clamp(0.25 * (o.Rs - r), -Math.max(vc, 0.05), Math.max(vc, 0.05));
+      out.copy(tang).multiplyScalar(vc).addScaledVector(rh, vr).add(o.VC);
+      // the turn round the sphere: its centripetal pull as feed-forward
+      AG.addScaledVector(rh, -(vc * vc) / Math.max(r, 1e-6));
+      this._routing = o.station ? 'station' : 'body';
+      return out;
+    }
+    this._routing = '';
+    const vd = Math.min(30, Math.sqrt(2 * ab * d), 0.5 * d);
+    return out.copy(G).sub(P).multiplyScalar(d > 1e-9 ? vd / d : 0).add(VG);
+  }
+
+  /** Turn toward attitude Qd, matching angular velocity wd (frame), within the RCS's rates. */
+  _attitude(Qd, wd) {
+    const p = this.pilot, i = p.input, c = p.caps;
+    const qe = _q.copy(p.quat).invert().multiply(Qd);
+    if (qe.w < 0) { qe.x = -qe.x; qe.y = -qe.y; qe.z = -qe.z; qe.w = -qe.w; }
+    const s = Math.sqrt(Math.max(0, 1 - qe.w * qe.w)), ang = 2 * Math.acos(Math.min(1, qe.w));
+    const e = s > 1e-9 ? V().set(qe.x, qe.y, qe.z).multiplyScalar(ang / s) : V();
+    const wb = wd ? V().copy(wd).applyQuaternion(_q.copy(p.quat).invert()) : V();
+    const prof = (x, m) => Math.sign(x) * Math.min(0.9 * m, Math.sqrt(2 * c.ANG_ACC * 0.5 * Math.abs(x)), 1.6 * Math.abs(x));
+    const wx = wb.x + prof(e.x, c.RATE.pitch), wy = wb.y + prof(e.y, c.RATE.yaw), wz = wb.z + prof(e.z, c.RATE.roll);
+    i.pitch = clamp(wx / c.RATE.pitch, -1, 1);
+    i.yaw = clamp(-wy / c.RATE.yaw, -1, 1);
+    i.roll = clamp(-wz / c.RATE.roll, -1, 1);
+    this.attErr = ang;
+  }
+
+  _eta() {
+    const d = this.info.d, v = this.info.vc;
+    if (this.phase === 'jump') return 10;
+    return v > 1e-6 ? d / v : Infinity;
+  }
+
+  phaseLabel() {
+    return { depart: 'departing', liftoff: 'lift-off', jump: 'jump', transfer: this._routing ? `transfer · round the ${this._routing === 'body' ? 'body' : 'station'}` : 'transfer', approach: 'approach', final: this.port && this.port.kind === 'pad' ? 'final · descent' : 'final · closing', touchdown: 'touchdown' }[this.phase] || this.phase;
+  }
+}
