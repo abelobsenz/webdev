@@ -45,6 +45,32 @@ export const EXCHANGE_DOCKS = [
  */
 export const COURT_PAD = { key: 'landingCourt', label: 'Lunar service court - landing court', p: V(382, 23.4, 15), n: V(0, 1, 0), fwd: V(0, 0, 1), r: 20 };
 
+/**
+ * The Halo's port stations (the junction's group and each HaloPorts group, km; x along the ring,
+ * y radial, z across): a collar under each pier (tube r 0.15 at y -3.4) midway between the
+ * shuttle hung at 9.0 km and the tug at 12.4 km, facing the Earth like the pier's other berths.
+ */
+export const PIER_DOCKS = [
+  { key: 'pierNorth', label: 'north pier dock', p: V(0, -3.55 - 0.0034, 10.7), n: V(0, -1, 0), fwd: V(0, 0, 1) },
+  { key: 'pierSouth', label: 'south pier dock', p: V(0, -3.55 - 0.0034, -10.7), n: V(0, -1, 0), fwd: V(0, 0, -1) },
+];
+
+/**
+ * The GEO Harbour (harbour group, km): the arm-head docking collars (geoRoads.js: face at
+ * d * tipR, clear out along d; the MOVEMENTS freighters use each head 40% of their cycle), the
+ * upper arm 0 and the lower arm 4. Existing hardware: nothing is added.
+ */
+export const HARBOUR_DOCKS = [
+  { key: 'arm1head', label: 'GEO Harbour - arm 1 head collar', p: V(5.634, 1.26, 8.500), n: V(0.553, 0, 0.833), fwd: V(0, 1, 0), existing: true },
+  { key: 'arm5head', label: 'GEO Harbour - arm 5 head collar', p: V(10.488, -1.26, 2.126), n: V(0.980, 0, 0.199), fwd: V(0, 1, 0), existing: true },
+];
+
+/** The Water Store (store group, km): a collar on the cage's free -z face, level with the tanker collars. */
+export const STORE_DOCK = { key: 'cageDock', label: 'Water Store - cage dock', p: V(0, 0.64, -0.34 - 0.0034), n: V(0, 0, -1), fwd: V(1, 0, 0) };
+
+/** The counterweight (counter group, km; +Y out along the tether): a collar on the pole mast's tip. */
+export const COUNTER_DOCK = { key: 'poleDock', label: 'Counterweight - pole mast dock', p: V(0, 16.8 + 0.0034, 0), n: V(0, 1, 0), fwd: V(0, 0, 1) };
+
 /** Selene (refinery group, km; +Y the spindle toward the Earth): a collar on the lantern spire's tip, metres. */
 export const SELENE_DOCK = { key: 'spireDock', label: 'Selene - spire dock (spindle axis)', p: V(0, 2803.4, 0), n: V(0, 1, 0), fwd: V(1, 0, 0) };
 
@@ -56,7 +82,7 @@ export const SELENE_DOCK = { key: 'spireDock', label: 'Selene - spire dock (spin
 export const TENDER_DOCK = { key: 'dorsalDock', label: 'Tender 2 - dorsal dock', p: V(0, 22.86 + 3.4, -82.7), n: V(0, 1, 0), fwd: V(0, 0, 1) };
 
 /** The Refuge (refuge group, km; +Y its spin axis): a collar on the gold top pole, metres. */
-export const REFUGE_DOCK = { key: 'poleDock', label: 'The Refuge - top pole dock (spin axis)', p: V(0, 16773.4, 0), n: V(0, 1, 0), fwd: V(0, 0, 1) };
+export const REFUGE_DOCK = { key: 'poleDock', label: 'The Refuge - top pole dock (spin axis)', p: V(0, 16774 + 3.4, 0), n: V(0, 1, 0), fwd: V(0, 0, 1) };
 
 /** Helianth (collector mesh, metres; +Y away from the Sun): a collar on the transfer core's tip. */
 export const HELIANTH_DOCK = { key: 'coreTip', label: 'Helianth - transfer core tip dock', p: V(0, 3939.4 + 3.4, 0), n: V(0, 1, 0), fwd: V(0, 0, 1) };

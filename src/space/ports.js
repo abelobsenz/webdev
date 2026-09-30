@@ -1,11 +1,15 @@
 import * as THREE from 'three';
-import { R_EARTH, R_MOON } from './sim.js';
+import { R_EARTH, R_MOON, GEO_ALT, COUNTERWEIGHT_ALT, MERIDIAN_LON, bodyDir } from './sim.js';
+import { NAURU_LON } from './fleet.js';
+import { STORE_POS } from './geoRoads.js';
+import { linerF } from './linerHull.js';
 import { PADS as LANDING_PADS } from './lunarLanding.js';
 import { surfaceY, surfaceUp } from './lunarSite.js';
 import { stationFrame } from './stations.js';
 import { HOP_FIELD } from './lunarWorks.js';
 import {
   ANANSI_DOCKS, HEVELIUS_DOCK, EXCHANGE_DOCKS, COURT_PAD, SELENE_DOCK, TENDER_DOCK, REFUGE_DOCK, HELIANTH_DOCK, LAGRANGE_DOCK, FULCRUM_DOCKS,
+  PIER_DOCKS, HARBOUR_DOCKS, STORE_DOCK, COUNTER_DOCK,
 } from './portSites.js';
 
 // Docking ports and landing pads: the exact places the Lodestar's autopilot takes it to at each
@@ -226,14 +230,14 @@ function leoPort(target, key, label, k, fwdLocal, { clear = 0.04, approach = 2.0
   });
 }
 const AX = X(0, 0, 1), UPY = X(0, 1, 0);
-for (const k of [0, 2, 4]) leoPort('halcyon', `drum${k + 1}`, `Halcyon - despun dock drum, port ${k + 1}`, k, AX);
+for (const k of [4, 5]) leoPort('halcyon', `drum${k + 1}`, `Halcyon - despun dock drum, port ${k + 1}`, k, AX);
 for (const k of [0, 2]) leoPort('aurelia', `drum${k + 1}`, `Aurelia - docking drum, port ${k + 1}`, k, AX);
 leoPort('demeter', 'axial', 'Demeter - sunward axial dock', 4, UPY);
 leoPort('demeter', 'radial1', 'Demeter - sunward dock, radial port 1', 0, AX);
 leoPort('boreal', 'ram', 'Boreal - node ram port', 0, UPY);
 leoPort('boreal', 'wake', 'Boreal - node wake port', 1, UPY);
-leoPort('dawnline', 'hubSouth', 'Dawnline - hub port (south)', 0, AX);
-leoPort('dawnline', 'hubNorth', 'Dawnline - hub port (north)', 1, AX);
+
+leoPort('dawnline', 'hubNorth', 'Dawnline - hub port (north)', 1, X(1, 0, 0));
 {
   const list = ANANSI_DOCKS.map((d) => ({ p: d.p, dir: d.n }));
   ANANSI_DOCKS.forEach((d, k) => leoPort('anansi', d.key, d.label, k, d.fwd, { list }));
@@ -242,9 +246,10 @@ leoPort('dawnline', 'hubNorth', 'Dawnline - hub port (north)', 1, AX);
 // ------------------------------------------------------------------ ships in the fleet --
 // the liner's free keel collars (craftGeometry.js buildLiner: five collars under the keel, the
 // port shuttles seated on the second and fourth): face centres in the liner's frame, km
-[[-0.420, -0.102], [0.080, -0.101], [0.580, -0.078]].forEach(([z, y], i) => framePort({
-  target: 'liner', key: `keel${[1, 3, 5][i]}`, label: `Concord liner - keel collar ${[1, 3, 5][i]}`, clear: 0.04, approach: 2.0,
-  p: X(0, y, z), n: X(0, -1, 0), fwd: X(0, 0, 1),
+// (linerHull.js: a collar at keel height -118 f(z) 0.8 + 4 m, its face 14 m below; liner metres = km x 1000)
+[-420, 80, 580].forEach((z, i) => framePort({
+  target: 'liner', key: `keel${[1, 3, 5][i]}`, label: `Concord liner - keel collar ${[1, 3, 5][i]}`, clear: 0.04, approach: 0.9,
+  p: X(0, -118 * linerF(z) * 0.8 + 4 - 14, z).multiplyScalar(KM), n: X(0, -1, 0), fwd: X(0, 0, 1),
 }));
 framePort({ target: 'selene', key: SELENE_DOCK.key, label: SELENE_DOCK.label, clear: 0.04, approach: 1.6,
   p: SELENE_DOCK.p.clone().multiplyScalar(KM), n: SELENE_DOCK.n, fwd: SELENE_DOCK.fwd });
@@ -252,7 +257,7 @@ framePort({ target: 'selene', key: SELENE_DOCK.key, label: SELENE_DOCK.label, cl
 {
   const L = basis(TENDER_DOCK.p, TENDER_DOCK.n, TENDER_DOCK.fwd);
   add({
-    id: `tenders:${TENDER_DOCK.key}`, target: 'tenders', label: TENDER_DOCK.label, kind: 'dock', clear: 0.03, approach: 1.2,
+    id: `tenders:${TENDER_DOCK.key}`, target: 'tenders', label: TENDER_DOCK.label, kind: 'dock', clear: 0.03, approach: 0.7,
     pose(space, out) {
       targetMatrix(space, 'tenders', _M);
       const t = space.fleet && space.fleet.tenders && space.fleet.tenders[1];
@@ -302,12 +307,56 @@ framePort({ target: 'solarService', key: HELIANTH_DOCK.key, label: `${HELIANTH_D
 for (const name of ['lagrangeL4', 'lagrangeL5']) {
   for (const s of [-1, 1]) {
     framePort({ target: name, key: s < 0 ? 'westSpindle' : 'eastSpindle', label: `${name === 'lagrangeL4' ? 'L4' : 'L5'} colony ${s < 0 ? 'west' : 'east'} cylinder - spindle dock`,
-      clear: 0.08, approach: 3.0, p: LAGRANGE_DOCK.p.clone().multiplyScalar(KM).add(X(s * 20, 0, 0)), n: LAGRANGE_DOCK.n, fwd: LAGRANGE_DOCK.fwd });
+      clear: 0.08, approach: 1.2, p: LAGRANGE_DOCK.p.clone().multiplyScalar(KM).add(X(s * 20, 0, 0)), n: LAGRANGE_DOCK.n, fwd: LAGRANGE_DOCK.fwd });
   }
 }
 for (const d of FULCRUM_DOCKS) {
-  framePort({ target: 'lagrangeL1', key: d.key, label: d.label, clear: 0.04, approach: 2.0, p: d.p.clone().multiplyScalar(KM), n: d.n, fwd: d.fwd });
+  framePort({ target: 'lagrangeL1', key: d.key, label: d.label, clear: 0.04, approach: 1.2, p: d.p.clone().multiplyScalar(KM), n: d.n, fwd: d.fwd });
 }
+
+// ------------------------------------------------------------ Earth-fixed structures --
+// (the Halo ports, the elevator's Harbour, junction and counterweight, the GEO roads and belt:
+// children of space.earthFixed, which turns with sim.earthQuat)
+function earthFixed(target, key, label, kind, efM, p, n, fwd, { clear = 0.05, approach = 2.0 } = {}) {
+  const L = new THREE.Matrix4().copy(efM).multiply(basis(p, n, fwd));
+  return add({
+    id: `${target}:${key}`, target, label, kind, clear, approach,
+    pose(space, out) { return readPose(_M.makeRotationFromQuaternion(space.sim.earthQuat).multiply(L), out); },
+  });
+}
+const MERID = bodyDir(0, MERIDIAN_LON), NAURU = bodyDir(0, NAURU_LON);
+const JUNCTION_M = new THREE.Matrix4().compose(MERID.clone().multiplyScalar(R_EARTH + 620), stationFrame(MERID), ONE);
+const HALO_M = new THREE.Matrix4().compose(NAURU.clone().multiplyScalar(R_EARTH + 620), stationFrame(NAURU), ONE);
+const HARBOUR_M = new THREE.Matrix4().compose(MERID.clone().multiplyScalar(R_EARTH + GEO_ALT), stationFrame(MERID), ONE);
+const COUNTER_M = new THREE.Matrix4().compose(MERID.clone().multiplyScalar(R_EARTH + COUNTERWEIGHT_ALT + 10), new THREE.Quaternion().setFromUnitVectors(X(0, 1, 0), MERID), ONE);
+for (const d of PIER_DOCKS) {
+  earthFixed('junction', d.key, `Halo junction - ${d.label}`, 'dock', JUNCTION_M, d.p, d.n, d.fwd);
+  earthFixed('halo', d.key, `Halo, Nauru port - ${d.label}`, 'dock', HALO_M, d.p, d.n, d.fwd);
+}
+// the Meridian itself lies under the atmosphere (the ship keeps R_EARTH + 95 km): it docks at the
+// Halo junction straight overhead, where the tether passes through the ring
+earthFixed('meridian', 'junctionPier', `Meridian - via the Halo junction overhead, ${PIER_DOCKS[0].label}`, 'dock', JUNCTION_M, PIER_DOCKS[0].p, PIER_DOCKS[0].n, PIER_DOCKS[0].fwd);
+for (const d of HARBOUR_DOCKS) earthFixed('geo', d.key, d.label, 'dock', HARBOUR_M, d.p, d.n, d.fwd, { clear: 0.06 });
+earthFixed('waterStore', STORE_DOCK.key, STORE_DOCK.label, 'dock', new THREE.Matrix4().copy(HARBOUR_M).multiply(new THREE.Matrix4().makeTranslation(STORE_POS.x, STORE_POS.y, STORE_POS.z)), STORE_DOCK.p, STORE_DOCK.n, STORE_DOCK.fwd, { clear: 0.04, approach: 0.65 });
+earthFixed('counter', COUNTER_DOCK.key, COUNTER_DOCK.label, 'dock', COUNTER_M, COUNTER_DOCK.p, COUNTER_DOCK.n, COUNTER_DOCK.fwd, { clear: 0.06 });
+earthFixed('releaseYard', COUNTER_DOCK.key, `${COUNTER_DOCK.label} (the release yard's station, 31 km west)`, 'dock', COUNTER_M, COUNTER_DOCK.p, COUNTER_DOCK.n, COUNTER_DOCK.fwd, { clear: 0.06 });
+// the Embarkation Terrace's courier pad (interfaces.js: 128 x 102 m, a courier parked mid-pad):
+// the free west end of the pad, in the terrace's own frame (the target's)
+framePort({ target: 'harbourTerrace', key: 'courierPad', label: 'Embarkation Terrace - courier pad', kind: 'pad', clear: 0.02, approach: 0.4,
+  p: X(0.323, 0.0114, 0.120), n: X(0, 1, 0), fwd: X(0, 0, 1) });
+// Nauru Works: the commons pier's deck, sunward of the berthed tug (foundryCommons.js)
+framePort({ target: 'foundry', key: 'commonsPier', label: 'Nauru Works - commons pier', kind: 'pad', clear: 0.04, approach: 1.5,
+  p: X(0.25, -1.48, 16.4), n: X(0, 1, 0), fwd: X(0, 0, 1) });
+// Concord Yard: the yard house's hub tip on the hull axis, astern of the crew wheel
+framePort({ target: 'concordYard', key: 'hubTip', label: 'Concord Yard - yard house hub dock (hull axis)', clear: 0.04, approach: 2.0,
+  p: X(1.81, 0, 0), n: X(1, 0, 0), fwd: X(0, 1, 0) });
+// the belt's stations (beltStations.js docks, their clear axes outward; the traffic uses the -z
+// pole and the -z diagonals of the Kalani Wheel, and both docks of the Slip and the Relay)
+framePort({ target: 'beltWheel', key: 'northPole', label: 'Kalani Wheel - north pole dock (spin axis)', clear: 0.03, approach: 2.0, p: X(0, 0, 0.2092), n: X(0, 0, 1), fwd: X(0, 1, 0) });
+framePort({ target: 'beltWheel', key: 'northDiagonal', label: 'Kalani Wheel - north hub dock', clear: 0.03, approach: 2.0, p: X(0.0298, 0.0298, 0.118), n: X(S2, S2, 0), fwd: X(0, 0, 1) });
+framePort({ target: 'beltYard', key: 'eastDock', label: 'Ironwood Slip - east dock', clear: 0.03, approach: 2.0, p: X(0.1013, 0, -0.0851), n: X(1, 0, 0), fwd: X(0, 0, 1) });
+framePort({ target: 'beltRelay', key: 'northDock', label: 'Helion Relay 4 - north dock', clear: 0.03, approach: 2.0, p: X(0, 0.010, 0.0583), n: X(0, 0, 1), fwd: X(0, 1, 0) });
+framePort({ target: 'beltRelay', key: 'southDock', label: 'Helion Relay 4 - south dock', clear: 0.03, approach: 2.0, p: X(0, 0.010, -0.0313), n: X(0, 0, -1), fwd: X(0, 1, 0) });
 
 export const PORT_SPECS = PORTS;
 

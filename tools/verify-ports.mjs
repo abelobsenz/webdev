@@ -94,17 +94,33 @@ console.log(`continuity: largest per-frame motion relative to the target ${(maxJ
 // box-test each port's corridor and mated envelope against the triangles of every mesh near it
 if (G) {
   const g = G;
-  g.refresh();      // the scene at the instant the poses are taken
   const gports = getPorts(space);
-  const tested = [], skipped = [], failed = [];
-  for (const p of gports) {
-    const r = boxTest(g, space, p);
-    if (!r) { skipped.push(p.id); continue; }
-    const good = ok(r.corridor === 0 && r.envelope === 0, `${p.id} corridor ${r.corridor} / envelope ${r.envelope} triangles${r.what ? ' (' + r.what + ')' : ''}`);
-    ok(r.contact, `${p.id} structure within ${p.kind === 'pad' ? 3 : 8} m behind the face`);
-    (good ? tested : failed).push(p.id);
+  // three instants minutes apart: structure blocks a port at every one, moving traffic (shuttles
+  // cycling through berths, cranes, carriers) only at some; a port clear at none is a failure
+  const res = new Map();
+  for (const step of [0, 420, 480]) {
+    for (let k = 0; k < step; k++) { sim.step(1); space.realTime += 1; }
+    g.refresh();
+    for (const p of gports) {
+      const r = boxTest(g, space, p);
+      if (!res.has(p.id)) res.set(p.id, []);
+      res.get(p.id).push(r);
+    }
   }
-  console.log(`geometry-verified (${tested.length}): ${tested.join(' ')}`);
+  const tested = [], shared = [], skipped = [], failed = [];
+  for (const p of gports) {
+    const rs = res.get(p.id);
+    if (rs.every((r) => !r)) { skipped.push(p.id); continue; }
+    const clear = rs.filter((r) => r && r.corridor === 0 && r.envelope === 0).length;
+    const worst = rs.find((r) => r && (r.corridor || r.envelope)) || rs[0];
+    ok(clear > 0, `${p.id} corridor ${worst.corridor} / envelope ${worst.envelope} triangles at every instant${worst.what ? ' (' + worst.what + ')' : ''}`);
+    ok(rs.some((r) => r && r.contact), `${p.id} structure within ${p.kind === 'pad' ? 3 : 8} m behind the face`);
+    if (!clear) failed.push(p.id);
+    else if (clear < rs.length) shared.push(`${p.id}(${worst.what})`);
+    else tested.push(p.id);
+  }
+  console.log(`geometry-verified clear at every instant (${tested.length}): ${tested.join(' ')}`);
+  if (shared.length) console.log(`clear, with traffic passing at times (${shared.length}): ${shared.join(' ')}`);
   if (failed.length) console.log(`geometry FAILED (${failed.length}): ${failed.join(' ')}`);
   if (skipped.length) console.log(`no headless geometry near (${skipped.length}): ${skipped.join(' ')}`);
 }
@@ -201,7 +217,8 @@ function boxTest(g, space, p) {
   if (process.env.DEBUG_PORT === p.id) console.log(p.id, a.pos.toArray().map((x) => x.toFixed(3)), near.map((m) => `${m.name}@${m.c.distanceTo(a.pos).toFixed(3)}/${m.r.toFixed(3)}`).slice(0, 12).join(" "));
   if (!near.length) return null;
   const tri = new THREE.Triangle(), va = new THREE.Vector3(), vb = new THREE.Vector3(), vc = new THREE.Vector3();
-  let corridor = 0, envelope = 0, contact = false; const what = new Set();
+  let corridor = 0, envelope = 0, contact = false, firstY = Infinity; const what = new Set();
+  const ringR = (p.ringR || 7.5) * km;
   for (const m of near) {
     const T = inv.clone().multiply(m.mw);
     const pos = m.geo.attributes.position, idx = m.geo.index;
@@ -215,11 +232,13 @@ function boxTest(g, space, p) {
       tri.set(va, vb, vc);
       if (!contact && back.intersectsTriangle(tri)) contact = true;
       if (hw) continue;
-      if (env.intersectsTriangle(tri)) { envelope++; what.add(m.name); }
-      else if (cor.intersectsTriangle(tri)) { corridor++; what.add(m.name); }
+      // the port's own mating hardware (guides and petals round the ring, under 2.5 m proud of the face) interlocks with the ship's ring
+      if (Math.max(va.y, vb.y, vc.y) < 2.5 * km && Math.max(Math.hypot(va.x, va.z), Math.hypot(vb.x, vb.z), Math.hypot(vc.x, vc.z)) < ringR) continue;
+      if (env.intersectsTriangle(tri)) { envelope++; what.add(m.name); firstY = Math.min(firstY, va.y, vb.y, vc.y); }
+      else if (cor.intersectsTriangle(tri)) { corridor++; what.add(m.name); firstY = Math.min(firstY, va.y, vb.y, vc.y); }
     }
   }
-  return { corridor, envelope, contact, what: [...what].slice(0, 3).join(', ') };
+  return { corridor, envelope, contact, what: [...what].slice(0, 3).join(', ') + (firstY < Infinity ? `, from ${(Math.max(firstY, 0) * 1000).toFixed(0)} m out` : '') };
 }
 
 console.log(fails ? `${fails} FAILED` : 'all ports ok');

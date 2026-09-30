@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import { DockHardware } from './dockKit.js';
+import { PIER_DOCKS, HARBOUR_DOCKS, COUNTER_DOCK } from './portSites.js';
 import { createRibbonMaterial, buildRibbonGeometry } from './lines.js';
 import { createHullMaterial, tag, merge, beam, KIND } from './hull.js';
 import { R_EARTH, GEO_ALT, COUNTERWEIGHT_ALT, MERIDIAN_LON, bodyDir } from './sim.js';
@@ -145,6 +147,10 @@ export class Elevator {
     this.harbour = this.station.group;
     this.harbour.position.copy(up).multiplyScalar(R_EARTH + GEO_ALT);
     this.harbour.quaternion.copy(stationFrame(up));
+    // collars on two empty berth fingers for visiting ships (src/space/portSites.js)
+    const hd = new DockHardware(this.harbour, 1000);
+    for (const d of HARBOUR_DOCKS) if (!d.existing) hd.collar(d.p, d.n, d.fwd);
+    this.harbourDocks = hd.build();
     this.group.add(this.harbour);
     // Halo junction: the port station where the main tether passes through the ring, its
     // climber terminal in the axis (src/space/stations.js)
@@ -161,12 +167,18 @@ export class Elevator {
     this.junction.position.copy(up).multiplyScalar(R_EARTH + 620);
     stationFrame(up, this.junction.quaternion);
     this.group.add(this.junction);
+    // ship docks under the junction's piers (src/space/portSites.js; the ports registry flies to them)
+    const jd = new DockHardware(this.junction, 1000);
+    for (const d of PIER_DOCKS) jd.collar(d.p, d.n, d.fwd);
+    this.junctionDocks = jd.build();
     // counterweight
     const rock = buildCounterweightRock();
     this.counter = new THREE.Mesh(rock.geo, mkMat({ pattern: 0.08, accent: [1.0, 0.6, 0.35] }));
     this.counter.position.copy(up).multiplyScalar(R_EARTH + COUNTERWEIGHT_ALT + 10);
     this.counter.quaternion.copy(qStation);
     this.group.add(this.counter);
+    // the counterweight's ship dock on its pole mast, on the tether's axis (src/space/portSites.js)
+    this.counterDock = new DockHardware(this.counter, 1000).collar(COUNTER_DOCK.p, COUNTER_DOCK.n, COUNTER_DOCK.fwd).build();
     // the works on the rock: arrival terminal, habitat ring, mining gantries, radiators
     const cw = buildCounterworks({ surfaceRadius: rock.surfaceRadius });
     this.counterData = cw;
