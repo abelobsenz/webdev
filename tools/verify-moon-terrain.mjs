@@ -314,7 +314,8 @@ if (WaterWaves) {
 if (MoonForest) {
   const F = new MoonForest();
   let c = rnd();
-  for (let k = 0; k < 500 && gmask(c.x, c.y, c.z, [0, 0, 0, 0])[3] < 0.7; k++) c = rnd();
+  const gmc = [0, 0, 0, 0];
+  for (let k = 0; k < 500 && (gmask(c.x, c.y, c.z, gmc)[3] < 0.7 || gmc[0] < 0.98); k++) c = rnd();
   const t0 = performance.now();
   const n = F.scatter(c, 0.45);
   report.forestScatterMs = +(performance.now() - t0).toFixed(1);
