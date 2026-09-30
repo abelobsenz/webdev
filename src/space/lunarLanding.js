@@ -381,6 +381,48 @@ export function buildMediiLanding() {
       B.push(new THREE.Matrix4().makeRotationX(-Math.PI / 2));
       B.lathe([[9, -0.5, LK.WALL], [8, 16, LK.WALL], [6.5, 26, LK.STONE], [7.5, 26.5, LK.BRONZE], [5, 27, LK.LANTERN], [5, 31, LK.LANTERN], [5.8, 31.5, LK.BRONZE], [0, 35, LK.BRONZE]], 20);
       B.pop(); B.pop();
+      // the lighthouse dressed: a gallery railing on its posts, the lantern's glazing bars and a
+      // ball finial, a door with its steps, windows climbing the stair, and the keeper's store
+      {
+        B.at(x, gy(x, z) + 3.2, z);
+        const V3 = (a, rr, y) => new THREE.Vector3(Math.cos(a) * rr, y, Math.sin(a) * rr);
+        B.push(new THREE.Matrix4().makeRotationX(-Math.PI / 2));
+        B.push(new THREE.Matrix4().makeTranslation(0, 0, 27.6));
+        B.torus(7.3, 0.06, 64, 4, LK.IRON);
+        B.pop();
+        B.push(new THREE.Matrix4().makeTranslation(0, 0, 27.05));
+        B.torus(7.3, 0.03, 64, 3, LK.IRON);
+        B.pop();
+        B.pop();
+        for (let i = 0; i < 24; i++) { const a = (i / 24) * Math.PI * 2; B.tube([V3(a, 7.3, 26.5), V3(a, 7.3, 27.6)], 0.04, 3, LK.IRON); }
+        for (let i = 0; i < 12; i++) { const a = (i / 12) * Math.PI * 2 + 0.13; B.tube([V3(a, 5.08, 27.0), V3(a, 5.08, 31.0)], 0.07, 3, LK.BRONZE); }
+        for (const y of [28.3, 29.7]) { B.push(new THREE.Matrix4().makeRotationX(-Math.PI / 2)); B.push(new THREE.Matrix4().makeTranslation(0, 0, y)); B.torus(5.08, 0.05, 40, 3, LK.BRONZE); B.pop(); B.pop(); }
+        B.push(new THREE.Matrix4().makeRotationX(-Math.PI / 2));
+        B.lathe([[0, 34.6, LK.BRONZE], [0.5, 34.8, LK.BRONZE], [0.7, 35.4, LK.BRONZE], [0.5, 36.0, LK.BRONZE], [0, 36.2, LK.BRONZE]], 10);
+        B.pop();
+        const dA = -Math.PI / 2 - ROT_UV;         // the door faces up the mole, toward the town
+        B.push(new THREE.Matrix4().makeRotationY(-dA - Math.PI / 2));
+        B.box(0, 1.4, 8.95, 1.6, 2.8, 0.3, LK.FRAME);
+        B.box(0, 2.95, 9.1, 2.2, 0.3, 0.6, LK.MOULD);
+        B.box(0, 0.12, 9.6, 2.6, 0.24, 1.2, LK.WALL);
+        B.pop();
+        for (let i = 0; i < 5; i++) {
+          const a = dA + 0.9 + i * 1.3, y = 5 + i * 4.2, rr = (y < 16 ? 9 - (y + 0.5) / 16.5 : 8 - 1.5 * (y - 16) / 10) - 0.03;
+          B.push(new THREE.Matrix4().makeRotationY(-a - Math.PI / 2));
+          B.box(0, y, rr, 0.8, 1.3, 0.2, LK.GLASS);
+          B.box(0, y - 0.72, rr + 0.08, 1.1, 0.14, 0.3, LK.MOULD);
+          B.pop();
+        }
+        B.pop();
+        // the keeper's store at its foot, on the mole's axis
+        const [kx, kz] = UV(sgn * 150, s1);
+        B.at(kx, gy(kx, kz) + 3.2, kz, 0, ROT_UV, 0);
+        B.box(0, 2.2, 0, 16, 4.4, 9, LK.WALL);
+        B.box(0, 4.6, 0, 16.6, 0.4, 9.6, LK.MOULD);
+        for (const s of [-1, 1]) for (const xx of [-5, 0, 5]) B.box(xx, 2.4, s * 4.52, 1.2, 1.6, 0.06, LK.GLASS);
+        B.box(7.2, 0.3, 0, 0.1, 0.6, 1, LK.WALL);
+        B.pop();
+      }
       lamps.push({ p: new THREE.Vector3(x, gy(x, z) + 3.2 + 29, z), r: 3.2, color: sgn < 0 ? LAMP.RED : LAMP.GREEN, i: 3.0, breathe: 0.35 });
       for (let v = s0 + 60; v < s1; v += 60) {
         lamp(sgn * 620, v, 3.2 + 5, LAMP.WHITE, 0.6, 1.0);
