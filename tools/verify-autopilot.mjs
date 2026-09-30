@@ -370,6 +370,7 @@ scenario('dock: wheel hub, then the low station', () => {
   if (!a.ok) return { ok: false, why: `hub: ${a.why}`, summary: a.summary, msgs: p.msgs };
   const r2 = flyTo(sp, p, L.port, { T: 1200 });
   const b = dockCheck(r2, p, `, ${r2.phases}`);
+  if (b.ok && !r2.phases.startsWith('depart')) return { ok: false, why: `no departure phase (${r2.phases})`, summary: b.summary };
   return { ok: b.ok, why: b.why, summary: `hub in ${r1.t.toFixed(0)} s; ${b.summary}`, msgs: p.msgs };
 });
 

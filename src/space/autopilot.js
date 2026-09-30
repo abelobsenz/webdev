@@ -62,7 +62,10 @@ export class Autopilot {
     this._lowFor = null; this._fallFor = null; this._recover = 0; this._lockT = 0;
     this.info.label = port.label || port.id;
     p.brake = false;
+    // docked (or clamped to a deck): let go and back straight out along the port's axis first
+    const from = p.dock ? p.dock.track.clone() : null;
     if (p.dock) p.undock(true);
+    if (from) { this.phase = 'depart'; this._from = from; this._departT = 0; }
     if (p.contact) { p.contact.landed = false; p.contact._still = 0; }
     this._farChecked = false;
     this._frameFlag = null;
@@ -88,9 +91,10 @@ export class Autopilot {
     if (p.jump) { this.phase = 'jump'; return; }
     if (this.phase === 'jump') { this.phase = 'transfer'; this.track.ok = false; }
     this.track.sense(p, dt);
+    if (this.phase === 'depart' && this._from) this._from.sense(p, dt);   // the port being left
     this._s = -dt;                 // the ship integrates from the last frame up to this one: poses are extrapolated back by dt
     if (this.phase === 'transfer' && !this._farChecked) this._checkFar();
-    if (this.phase === 'liftoff') this._farChecked = false;
+    if (this.phase === 'liftoff' || this.phase === 'depart') this._farChecked = false;
   }
 
   /** Is the gate out of reach of a burn (or in another body's sphere)? Then jump to a standoff. */
@@ -183,7 +187,20 @@ export class Autopilot {
     let att = null, wAtt = tr.omega, allowCoarse = false, boostOK = false;
     const rel = V(), vrel = V();
     if (pad && p.legs < 0.5 && (this.phase !== 'transfer' || p.pos.distanceTo(H) < 30)) p.legs = 1;
-    if (this.phase === 'liftoff') {
+    if (this.phase === 'depart') {
+      // straight back out along the old port's axis at 3 m/s on the RCS, turning with it, until
+      // 150 m clear (then the transfer's route takes over, round the structure if need be)
+      const ft = this._from;
+      const fp = ft.at(s, this._fp || (this._fp = {}));
+      const r = V().copy(p.pos).sub(fp.pos), out = r.dot(fp.n);
+      const vdes = ft.pointVel(p.pos, s, V()).addScaledVector(fp.n, 0.003);
+      const Ap = V().crossVectors(ft.omega, V().crossVectors(ft.omega, r)).add(ft.acc);
+      T.copy(Ap).sub(g).addScaledVector(vdes.sub(p.vel), 1.2);
+      att = p.quat.clone(); wAtt = ft.omega;
+      this._departT += h;
+      this.info.d = Math.max(0, 0.15 - out); this.info.vc = 3 * KM;
+      if (out > 0.15 || this._departT > 90) { this.phase = 'transfer'; this._farChecked = false; this.track.ok = false; }
+    } else if (this.phase === 'liftoff') {
       // straight up the ground's normal at 12 m/s on the RCS, the ship level, the legs left down
       // until clear; a moving deck's own velocity is matched first (its surface velocity)
       const c = p.contact;
@@ -381,6 +398,6 @@ export class Autopilot {
   }
 
   phaseLabel() {
-    return { liftoff: 'lift-off', jump: 'jump', transfer: this._routing ? `transfer · round the ${this._routing === 'body' ? 'body' : 'station'}` : 'transfer', approach: 'approach', final: this.port && this.port.kind === 'pad' ? 'final · descent' : 'final · closing', touchdown: 'touchdown' }[this.phase] || this.phase;
+    return { depart: 'departing', liftoff: 'lift-off', jump: 'jump', transfer: this._routing ? `transfer · round the ${this._routing === 'body' ? 'body' : 'station'}` : 'transfer', approach: 'approach', final: this.port && this.port.kind === 'pad' ? 'final · descent' : 'final · closing', touchdown: 'touchdown' }[this.phase] || this.phase;
   }
 }

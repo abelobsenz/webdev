@@ -88,6 +88,15 @@ export class PortTrack {
     this.frame = pilot.frame; this.ok = true;
     return this;
   }
+  /** An independent copy (its own history), for a second follower of the same port. */
+  clone() {
+    const t = new PortTrack(this.port);
+    for (const k of ['pos', 'n', 'fwd', 'vel', 'acc', 'omega', 'q']) t[k].copy(this[k]);
+    if (this._vm) t._vm = this._vm.clone();
+    t.frame = this.frame; t.ok = this.ok; t.age = this.age;
+    return t;
+  }
+
   /** The pose extrapolated s seconds past the last sample. */
   at(s, out) {
     out.pos = (out.pos || V()).copy(this.pos).addScaledVector(this.vel, s).addScaledVector(this.acc, 0.5 * s * s);
