@@ -76,7 +76,7 @@ void main() {
   vec3 R = reflect(-V, N);
   // the mirrored sky: black space, a faint blue limb glow from below (the Earth), a warm haze toward the Sun
   float up = dot(R, uUpView);
-  vec3 sky = vec3(0.004, 0.006, 0.01) + vec3(0.03, 0.05, 0.09) * smoothstep(0.2, -0.6, up);
+  vec3 sky = vec3(0.004, 0.006, 0.01) + vec3(0.03, 0.05, 0.09) * (1.0 - smoothstep(-0.6, 0.2, up));
   float sd = max(dot(R, uSunView), 0.0);
   vec3 glint = vec3(1.0, 0.96, 0.9) * (pow(sd, 900.0) * 60.0 + pow(sd, 40.0) * 0.25);
   vec3 col = (sky + glint) * uSunE * F + vec3(0.01, 0.014, 0.018) * uSunE * 0.02;
