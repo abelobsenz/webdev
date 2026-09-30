@@ -57,6 +57,7 @@ export class Autopilot {
     this.port = port; this.track = new PortTrack(port);
     this.on = true; this.t = 0; this.jumps = 0; this._coarse = false;
     this.phase = 'transfer';
+    this._lowFor = null; this._fallFor = null; this._recover = 0; this._lockT = 0;
     this.info.label = port.label || port.id;
     p.brake = false;
     if (p.dock) p.undock(true);
@@ -115,9 +116,34 @@ export class Autopilot {
     const depth = C ? V().copy(w.pos).sub(C).dot(w.n) : 0;
     const Rk = this._keepR(w, C);
     let D = app;
-    if (this._isBodyPad(w)) D = Math.max(app, 15);
+    if (this._isBodyPad(w)) D = Math.max(app, this._lowGate(w) || 15);
     else D = Math.max(app, Rk * 1.35 + 0.1 - depth, app);
     return out.copy(w.pos).addScaledVector(w.n, D);
+  }
+
+  /**
+   * A Moon pad the ship is already near: a gate at the ship's own height over the pad (down to 1 km)
+   * when the straight line there clears the ground by 600 m all the way (sampled against
+   * moonGround); otherwise (0) the high gate, 15 km up. Decided once per engagement.
+   */
+  _lowGate(w) {
+    if (this._lowFor === this.port) return this._low;
+    const p = this.pilot, sim = p.space.sim;
+    if (p.jump || this.phase === 'jump') return 0;
+    this._lowFor = this.port; this._low = 0;
+    const qi = sim.moonQuat.clone().invert();
+    const body = (Pw) => Pw.clone().sub(sim.moonPos).applyQuaternion(qi);
+    const S = body(p.worldPos(V())), Pp = body(w.pos), nb = w.n.clone().applyQuaternion(qi);
+    const hS = S.clone().sub(Pp).dot(nb), horiz = S.clone().sub(Pp).addScaledVector(nb, -hS).length();
+    if (horiz > 40 || hS > 15 || hS < 0.3) return 0;
+    const D = Math.max(1, Math.min(hS, 15)), G = Pp.clone().addScaledVector(nb, D);
+    const ground = p.contact.ground, g = { normal: V() };
+    for (let k = 0; k <= 24; k++) {
+      const X = S.clone().lerp(G, k / 24), L = X.length();
+      if (L - R_MOON - ground(X.clone().divideScalar(L), g).h < 0.6) return 0;
+    }
+    this._low = D;
+    return D;
   }
 
   _centreW(out) {

@@ -353,6 +353,32 @@ drop('manual: legs up, belly landing', { legs: 0, h: 4 });
 drop('manual: legs up, 25 m/s crash', { legs: 0, h: 10, v: 25, T: 15 });
 drop('manual: legs down, 12 m/s crash', { legs: 1, h: 5, v: 12, T: 15 });
 
+// ---- the page side: drive() with the HUD on a stand-in document (nothing may throw) -------------
+scenario('hud: drive() through an autopilot landing', () => {
+  const el = () => {
+    const e = { hidden: false, style: {}, dataset: {}, textContent: '', children: [], classList: { toggle() {}, add() {}, remove() {} }, addEventListener() {}, appendChild(c) { this.children.push(c); } };
+    let html = '';
+    Object.defineProperty(e, 'innerHTML', { get: () => html, set: (v) => { html = v; e._kids = [...v.matchAll(/data-k="([^"]+)"/g)].map((m) => { const k = el(); k.dataset.k = m[1]; return k; }); } });
+    e.querySelectorAll = () => e._kids || [];
+    return e;
+  };
+  globalThis.document = { createElement: el, body: el() };
+  const sp = makeSpace(); const p = makePilot(sp, flatGround);
+  addMoonPad(sp, 'landing', V(-1, 0.1, 0.05), 1.2 * KM, flatGround);
+  sp.advance(0);
+  const Pb = V(-1, 0.1, 0.05).normalize().multiplyScalar(R_MOON + 3);
+  place(p, Pb.clone().add(sp.sim.moonPos), shipQuat(Pb.clone(), V(0, 0, 1)));
+  p._hud(); p.active = true; p.space.hud.selected = 'landing';
+  const cam = new THREE.PerspectiveCamera(50, 1, 0.001, 1e9);
+  p.navKey();
+  let t = 0; const texts = new Set();
+  for (; t < 400 && !(p.contact.landed && !p.ap.on); t += 1 / 60) { sp.advance(1 / 60); p.drive(1 / 60, cam); texts.add(p._hk.apPhase.textContent); }
+  for (let k = 0; k < 120; k++) { sp.advance(1 / 60); p.drive(1 / 60, cam); }
+  const ok = p.contact.landed && !p._hk.land.hidden && /LANDED/.test(p._hk.gear.textContent);
+  delete globalThis.document;
+  return { ok, why: 'HUD did not show the landing', summary: `landed in ${t.toFixed(0)} s via drive(); panel ${[...texts].filter(Boolean).slice(0, 5).join(' / ')}; aids: ralt ${p._hk.ralt.textContent} ${p._hk.raltU.textContent}, ${p._hk.gear.textContent} (${p._hk.gearU.textContent})` };
+});
+
 const fails = results.filter((r) => !r.ok);
 console.log(`\n${results.length - fails.length}/${results.length} passed`);
 process.exit(fails.length ? 1 : 0);
