@@ -239,7 +239,7 @@ export function buildMediiLanding() {
       const h = v < V_LOW ? T_MID : T_LOW;
       for (const s of [-1, 1]) {
         const [x, z] = UV(s * 26, v);
-        props.lamps.push({ x, y: gy(x, z) + h, z, ry: ROT_UV + (s > 0 ? Math.PI : 0), kind: 'boulevard' });
+        props.lamps.push({ x, y: gy(x, z) + h, z, ry: ROT_UV + (s > 0 ? Math.PI : 0), kind: 'boulevard', h: 7.9 });
         lamp(s * 26, v, h + 7.9, LAMP.AMBER, 1.1, 1.3);
       }
     }
@@ -360,7 +360,7 @@ export function buildMediiLanding() {
   for (let u = -1680; u <= 1680; u += 40) {
     if (!quayFree(u)) continue;
     const [x, z] = UV(u, shoreV(u) - 8);
-    props.lamps.push({ x, y: gy(x, z) + T_STRAND, z, ry: ROT_UV + Math.PI, kind: 'quay' });
+    props.lamps.push({ x, y: gy(x, z) + T_STRAND, z, ry: ROT_UV + Math.PI, kind: 'quay', h: 6.5 });
   }
   // the sea wall's edge, for its bollards, rings and stairs down to the water
   for (let u = -1690; u <= 1690; u += 10) {
@@ -382,7 +382,11 @@ export function buildMediiLanding() {
       B.lathe([[9, -0.5, LK.WALL], [8, 16, LK.WALL], [6.5, 26, LK.STONE], [7.5, 26.5, LK.BRONZE], [5, 27, LK.LANTERN], [5, 31, LK.LANTERN], [5.8, 31.5, LK.BRONZE], [0, 35, LK.BRONZE]], 20);
       B.pop(); B.pop();
       lamps.push({ p: new THREE.Vector3(x, gy(x, z) + 3.2 + 29, z), r: 3.2, color: sgn < 0 ? LAMP.RED : LAMP.GREEN, i: 3.0, breathe: 0.35 });
-      for (let v = s0 + 60; v < s1; v += 60) lamp(sgn * 620, v, 3.2 + 5, LAMP.WHITE, 0.6, 1.0);
+      for (let v = s0 + 60; v < s1; v += 60) {
+        lamp(sgn * 620, v, 3.2 + 5, LAMP.WHITE, 0.6, 1.0);
+        const [lx, lz] = UV(sgn * 620, v);
+        props.lamps.push({ x: lx, y: gy(lx, lz) + 3.2, z: lz, ry: ROT_UV, kind: 'mole', h: 5 });
+      }
     }
     // finger piers
     for (const u of [-330, 0, 330]) {
@@ -392,7 +396,11 @@ export function buildMediiLanding() {
       B.box(0, (2.2 - 8) / 2, 0, 16, 2.2 + 8, v1 - v0, LK.DECK);
       B.pop();
       props.piers.push({ u, v0, v1, top: 2.2, w: 16 });
-      for (let v = v0 + 30; v < v1; v += 40) lamp(u, v, 2.2 + 4.5, LAMP.WHITE, 0.5, 0.9);
+      for (let v = v0 + 30; v < v1; v += 40) {
+        lamp(u, v, 2.2 + 4.5, LAMP.WHITE, 0.5, 0.9);
+        const [lx, lz] = UV(u, v);
+        props.lamps.push({ x: lx, y: gy(lx, lz) + 2.2, z: lz, ry: ROT_UV, kind: 'pier', h: 4.5 });
+      }
     }
     // boats moored along the piers (hulls sit in the water, decks above it)
     for (const [u, dv, L] of [[-330 + 22, 80, 34], [-330 - 20, 150, 26], [22, 60, 44], [-22, 170, 30], [330 + 20, 110, 38], [330 - 22, 60, 24]]) {
@@ -588,7 +596,11 @@ export function buildMediiLanding() {
     // road to the domes quarter (its top a little above the ground, its foot below)
     const vEnd = -1700 + 20;
     slabUV(B, u - 15, u + 15, v + 262, vEnd, 0.5, { bot: -2, step: 150 });
-    for (let vv = v + 300; vv < vEnd; vv += 50) for (const s of [-1, 1]) lamp(u + s * 17, vv, 0.5 + 5, LAMP.AMBER, 0.6, 1.0);
+    for (let vv = v + 300; vv < vEnd; vv += 50) for (const s of [-1, 1]) {
+      lamp(u + s * 17, vv, 0.5 + 5, LAMP.AMBER, 0.6, 1.0);
+      const [lx, lz] = UV(u + s * 17, vv);
+      props.lamps.push({ x: lx, y: gy(lx, lz) + 0.5, z: lz, ry: ROT_UV, kind: 'road', h: 5 });
+    }
     // ramp from the road up onto the pad plinth, and from the road up the quarter's wall
     const ramp = (vA, vB, hA, hB) => {
       const n = 8;

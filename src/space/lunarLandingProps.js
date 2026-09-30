@@ -288,7 +288,8 @@ export class LandingDetail {
 
     // --- lamp standards ---
     const lampS = new CellLod('Lamp standards', [protoLampStandard()], [1600], mat, { cell: 200 });
-    for (const p of S.props.lamps) lampS.add(p.x, p.y, p.z, p.ry, 1, p.kind === 'quay' ? 6.5 / 7.9 : 1, 1);
+    // (the standard's lantern is 7.9 m up: each lamp's post is scaled to its light's height)
+    for (const p of S.props.lamps) lampS.add(p.x, p.y, p.z, p.ry, 1, (p.h || 7.9) / 7.9, 1);
     add(lampS);
 
     // --- benches ---

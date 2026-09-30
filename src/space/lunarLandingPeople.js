@@ -155,7 +155,7 @@ export function landingPeople(S, walkMat, trees, mat = null) {
   }
   // the piers
   for (const p of S.props.piers) for (let dv = 20; dv < p.v1 - p.v0 - 20; dv += 14 + 14 * r()) {
-    beat(p.u + (r() - 0.5) * 8, p.v0 + dv, p.top, 0, 5 + 10 * r());
+    beat(p.u + (r() < 0.5 ? -1 : 1) * (2.5 + 1.5 * r()), p.v0 + dv, p.top, 0, 5 + 10 * r());
   }
   return [walkers, walkersB, standers, standersB];
 }
