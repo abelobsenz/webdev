@@ -5,6 +5,10 @@ import { R_EARTH, R_MOON } from './sim.js';
 import { RS } from './hearth.js';
 import { TARGET_INFO } from './targets.js';
 import { EngineVoice } from '../core/engineAudio.js';
+import { ShipContact, PortTrack, matedQuat, DOCK_POS, CAPTURE } from './shipContact.js';
+import { Autopilot } from './autopilot.js';
+import { getPorts } from './ports.js';
+import { LandingDust } from './landingDust.js';
 
 // Flying the Lodestar in the orbital view (km, seconds). Newtonian: the drive and thrusters push
 // with realistic accelerations, gravity pulls, and nothing slows the ship but its own thrust.
@@ -15,6 +19,17 @@ import { EngineVoice } from '../core/engineAudio.js';
 //   Z            flight assist on / off                  G           landing legs
 //   X            chase / bridge camera                   J           jump to the selected place
 //   drag, wheel  look around, camera distance            V           leave the helm
+//   N            autopilot to the selected place's port  M           next port of that place
+//   U            undock                                  L           landing lights
+//
+// Contact (shipContact.js). The three landing legs stand the ship on the Moon's real ground
+// (moonGround) and on landing pads on oleo struts; with the legs up the hull touches down hard.
+// Docking: bring the dorsal ring (LODESTAR_DOCK) to a dock port slowly and square and the latches
+// take it; the ship then rides the port (spin and orbit) until U pushes it off.
+// Autopilot (autopilot.js): N flies to the selected destination's port and docks or lands there with
+// the ship's own drives and thrusters; any flight key, or N again, hands the helm back.
+// The physics core (tick) runs without a page: the verification harness (tools/verify-autopilot.mjs)
+// drives it headlessly against a stand-in scene.
 //
 // Frames. Near the Earth the ship moves in the Earth's rotating frame (gravity GM/r^2 with the
 // centrifugal and Coriolis terms, so at geostationary altitude a ship at rest stays at rest over
@@ -38,7 +53,10 @@ const V = () => new THREE.Vector3();
 const clamp = (x, a, b) => Math.min(Math.max(x, a), b);
 const smooth = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
 const smoother = (t) => t * t * t * (t * (t * 6 - 15) + 10);
-const OWN = ['KeyW', 'KeyS', 'KeyA', 'KeyD', 'KeyQ', 'KeyE', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space', 'KeyC', 'ShiftLeft', 'ShiftRight', 'KeyG', 'KeyX', 'KeyJ', 'KeyB', 'KeyZ'];
+const OWN = ['KeyW', 'KeyS', 'KeyA', 'KeyD', 'KeyQ', 'KeyE', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space', 'KeyC', 'ShiftLeft', 'ShiftRight', 'KeyG', 'KeyX', 'KeyJ', 'KeyB', 'KeyZ', 'KeyN', 'KeyM', 'KeyU', 'KeyL'];
+const FLY = ['KeyW', 'KeyS', 'KeyA', 'KeyD', 'KeyQ', 'KeyE', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space', 'KeyC', 'KeyB'];
+export const CAPS = { A_MAIN, A_BOOST, A_RETRO, A_RETRO_BOOST, A_RCS, A_ASSIST, RATE, ANG_ACC, G0 };
+const HAS_DOM = typeof window !== 'undefined' && typeof document !== 'undefined';
 const _v = V(), _w = V(), _u = V(), _f = V(), _a = V(), _q = new THREE.Quaternion(), _q2 = new THREE.Quaternion(), _e = new THREE.Euler(), _m = new THREE.Matrix4();
 
 export class ShipPilot {
@@ -55,14 +73,22 @@ export class ShipPilot {
     this.burn = 0; this.accel = 0; this.assist = true; this.brake = false; this.legs = 0; this.boost = false;
     this.nearest = { name: '', d: 0 };
     this.jump = null; this._msg = ''; this._msgT = 0;
-    this.input = { roll: 0, pitch: 0, yaw: 0, lift: 0, fwd: 0 };
+    this.input = { roll: 0, pitch: 0, yaw: 0, lift: 0, fwd: 0, strafe: 0, surge: 0 };
     this.keys = new Set();
+    this.caps = CAPS;
+    this.time = 0;
+    this.legPos = 0;                        // the legs' actual deployment (the model animates the same way)
+    this.lights = false; this._lightsAuto = true;
+    this.dock = null;                       // { track, t, relP0, relQ0, relP1, relQ1, label }
+    this.contact = new ShipContact(this);
+    this.ap = new Autopilot(this);
+    this._docks = new Map(); this._dockT = 0;
+    this._inv = new THREE.Matrix4(); this._invQ = new THREE.Quaternion(); this._parQ = new THREE.Quaternion();
     this.cam = { yaw: 0, pitch: 0, dist: 0.4, held: false, idle: 9, bridge: false, q: new THREE.Quaternion(), fov: 50 };
     this._theta = null; this.omega = 0;
     this._moonPrev = null; this.moonVel = V();
     this._poiT = 0;
-    this._bind();
-    this._hud();
+    if (HAS_DOM) { this._bind(); this._hud(); }
   }
 
   owns(code) { return OWN.includes(code); }
@@ -78,6 +104,11 @@ export class ShipPilot {
       if (e.code === 'KeyZ') { this.assist = !this.assist; this._flash(this.assist ? 'flight assist on' : 'flight assist off: ballistic'); }
       if (e.code === 'KeyB') this.brake = true;
       if (e.code === 'KeyJ') this._jumpKey();
+      if (e.code === 'KeyN') this.navKey();
+      if (e.code === 'KeyM') this.navKey(true);
+      if (e.code === 'KeyU') this.undock();
+      if (e.code === 'KeyL') { this.lights = !this.lights; this._lightsAuto = false; this._flash(this.lights ? 'lights on' : 'lights off'); }
+      if (this.ap.on && FLY.includes(e.code)) this.ap.disengage('autopilot off: manual control');
     }, true);
     window.addEventListener('keyup', (e) => this.keys.delete(e.code));
     window.addEventListener('blur', () => this.keys.clear());
@@ -110,8 +141,43 @@ export class ShipPilot {
       if (lx || ly) { this.cam.yaw -= lx * 2.2 * dt; this.cam.pitch = clamp(this.cam.pitch + ly * 1.6 * dt, -1.2, 1.2); this.cam.idle = 0; }
     }
     for (const k of ['roll', 'pitch', 'yaw', 'lift', 'fwd']) i[k] = clamp(i[k], -1, 1);
+    i.strafe = i.surge = 0;
     if (i.fwd > 0 || Math.abs(i.lift) > 0) this.brake = false;
+    if (this.ap.on && p && (Math.abs(i.fwd) + Math.abs(i.roll) + Math.abs(i.pitch) + Math.abs(i.yaw) + Math.abs(i.lift)) > 0.3) this.ap.disengage('autopilot off: manual control');
   }
+
+  // ---------------------------------------------------------- autopilot --
+  /** N: fly to the selected destination's best port (again: stop). M: its next port. */
+  navKey(cycle = false) {
+    const sp = this.space, name = sp.hud && sp.hud.selected;
+    if (this.ap.on && !cycle) { this.ap.disengage('autopilot off'); return; }
+    if (!name || name === 'lodestar' || !sp.targets[name]) { this._flash('select a destination in the list, then N'); return; }
+    const list = Autopilot.portsOf(sp, name, this.worldPos(V()));
+    if (!list.length) { this._flash('no port or pad there'); return; }
+    let port = list[0];
+    if (cycle) {
+      const cur = this.ap.port && this.ap.port.target === name ? list.indexOf(this.ap.port) : -1;
+      port = list[(cur + 1) % list.length];
+      if (!this.ap.on) { this.ap.port = port; this._flash(`port: ${port.label || port.id} (N to go)`); this._navPick = port; return; }
+    } else if (this._navPick && this._navPick.target === name) port = this._navPick;
+    if (this.jump) this._endJump(true);
+    this.ap.engage(port);
+  }
+
+  /** Engage the autopilot on a given port (the harness, and the HUD button). */
+  navigate(port) { if (this.jump) this._endJump(true); return this.ap.engage(port); }
+
+  // ------------------------------------------------------------- frame maps --
+  _frameCache() {
+    const par = this._parent(this.frame);
+    this._inv.copy(par.matrixWorld).invert();
+    par.getWorldQuaternion(this._parQ);
+    this._invQ.copy(this._parQ).invert();
+  }
+  toLocal(Pw, out = V()) { return out.copy(Pw).applyMatrix4(this._inv); }
+  dirToLocal(dw, out = V()) { return out.copy(dw).applyQuaternion(this._invQ); }
+  toWorld(P, out = V()) { return out.copy(P).applyMatrix4(this._parent(this.frame).matrixWorld); }
+  dirToWorld(d, out = V()) { return out.copy(d).applyQuaternion(this._parQ); }
 
   // ------------------------------------------------------------ frames --
   _parent(name) { return name === 'earth' ? this.space.earthFixed : name === 'moon' ? this.moonAnchor : this.space.scene; }
@@ -128,6 +194,7 @@ export class ShipPilot {
     this._theta = th;
     if (this._moonPrev && dt > 0) this.moonVel.copy(sim.moonPos).sub(this._moonPrev).divideScalar(dt);
     (this._moonPrev ||= V()).copy(sim.moonPos);
+    this._frameCache();
   }
   worldPos(out = V()) { return out.copy(this.pos).applyMatrix4(this._parent(this.frame).matrixWorld); }
   worldQuat(out = new THREE.Quaternion()) { return this._parent(this.frame).getWorldQuaternion(out).multiply(this.quat); }
@@ -148,6 +215,7 @@ export class ShipPilot {
     else if (want === 'moon') this.vel.copy(Vw).sub(this.moonVel).applyQuaternion(qi);
     else this.vel.copy(Vw);
     to.attach(this.ship.root);
+    this._frameCache();
   }
   _frameFor(P) {
     const sim = this.space.sim;
@@ -247,23 +315,36 @@ export class ShipPilot {
     const legH = 0.0017 + 0.0047 * (this.ship ? this.ship.state.legs : 0);
     const out = (c, r) => { const d = V().copy(p).sub(c), L = d.length(); if (L < r) { const n = d.divideScalar(Math.max(L, 1e-9)); p.copy(c).addScaledVector(n, r); return n; } return null; };
     if (this.frame === 'earth') return out(V(), R_EARTH + 95);
-    if (this.frame === 'moon') return out(V(), R_MOON + legH);
+    if (this.frame === 'moon') { void legH; return out(V(), R_MOON - 12); }   // the ground itself is the contact model's (a deep guard only)
     return out(V().copy(sim.sunPos), 696000 * 1.08) || out(V().copy(sim.hearthPos), RS * 2.5);
   }
 
   step(h) {
-    const i = this.input, q = this.quat;
+    const i = this.input, q = this.quat, ap = this.ap.on;
+    if (ap) this.ap.control(h);
+    const C = this.contact;
+    const idle = !ap && Math.abs(i.fwd) + Math.abs(i.lift) + Math.abs(i.roll) + Math.abs(i.pitch) + Math.abs(i.yaw) < 1e-3 && !this.brake;
+    if (C.landed && idle) {
+      // parked on the ground: the drive idles, the ship rests on its legs and rides the Moon round
+      this.vel.set(0, 0, 0); this.rates.set(0, 0, 0);
+      this.burn *= Math.exp(-h * 3); this.accel = 0; this.assistA = 0;
+      this.cmdAng.multiplyScalar(Math.exp(-h * 30)); this.cmdLin.multiplyScalar(Math.exp(-h * 30));
+      this.reverseOn = this.reverseBoost = 0;
+      this.legPos += (this.legs - this.legPos) * (1 - Math.exp(-h * 1.2));
+      return;
+    }
+    if (C.landed && !idle) C.landed = false;
     // ---- attitude: RCS torques build the rates at a finite angular acceleration; with assist the
     // rates are driven back to zero when the stick is released, without it they persist
     const prev = V().copy(this.rates);
     const tgt = V().set(i.pitch * RATE.pitch, i.yaw * RATE.yaw, i.roll * RATE.roll);
+    const planted = C.footTouch >= 2 || C.hullTouch > 0;
     for (const k of ['x', 'y', 'z']) {
-      const want = tgt[k], cmd = Math.abs(want) > 1e-4 || this.assist ? want : this.rates[k];
+      const want = tgt[k], cmd = Math.abs(want) > 1e-4 || this.assist || ap ? want : this.rates[k];
+      if (planted && Math.abs(want) < 1e-4) continue;          // on the ground the legs, not the RCS, hold the attitude
       const d = cmd - this.rates[k], m = ANG_ACC * h;
       this.rates[k] += clamp(d, -m, m);
     }
-    _q.setFromEuler(_e.set(this.rates.x * h, -this.rates.y * h, -this.rates.z * h, 'XYZ'));
-    q.multiply(_q).normalize();
     // the angular acceleration the RCS delivered this step (ship frame, units of its capacity)
     const dw = V().copy(this.rates).sub(prev).divideScalar(h * ANG_ACC);
     // the stabilisers fire only while the ship is actually being turned (or its turn stopped): no
@@ -272,22 +353,24 @@ export class ShipPilot {
     if (dwv.length() < 0.03) dwv.set(0, 0, 0);
     this.cmdAng.lerp(dwv, 1 - Math.exp(-h * 30));
     // ---- forces
-    const f = V().set(0, 0, -1).applyQuaternion(q), up = V().set(0, 1, 0).applyQuaternion(q);
-    const burnWant = i.fwd > 0 ? (this.boost ? A_BOOST : A_MAIN) : 0;
+    const f = V().set(0, 0, -1).applyQuaternion(q), up = V().set(0, 1, 0).applyQuaternion(q), rt = V().set(1, 0, 0).applyQuaternion(q);
+    const burnWant = i.fwd > 0 ? i.fwd * (this.boost ? A_BOOST : A_MAIN) : 0;
     this.burn += (burnWant - this.burn) * (1 - Math.exp(-h * 3));        // the drive spools up and down
     const a = V().copy(f).multiplyScalar(this.burn);
-    if (i.fwd < 0) a.addScaledVector(f, -(this.boost ? A_RETRO_BOOST : A_RETRO));
-    a.addScaledVector(up, i.lift * A_RCS);
+    if (i.fwd < 0) a.addScaledVector(f, i.fwd * (this.boost ? A_RETRO_BOOST : A_RETRO));
+    a.addScaledVector(up, i.lift * A_RCS).addScaledVector(rt, (i.strafe || 0) * A_RCS).addScaledVector(f, (i.surge || 0) * A_RCS);
     const g = this._gravity(this.pos, this.vel, V());
     let assistA = 0;
-    if (this.assist || this.brake) {
-      // hold against gravity, kill sideslip (braking: all motion) - within the thrust budget
+    if ((this.assist || this.brake) && !ap) {
+      // hold against gravity, kill sideslip (braking: all motion) - within the thrust budget; with
+      // the feet planted the hold lets go and the legs take the weight
       const want = V().copy(g).negate();
+      if (planted && i.lift <= 0 && i.fwd <= 0) want.set(0, 0, 0);
       if (this.brake) want.addScaledVector(this.vel, -0.6);
       else {
         const lat = V().copy(this.vel).addScaledVector(f, -this.vel.dot(f));
-        if (Math.abs(i.lift) > 0.05) lat.addScaledVector(up, -lat.dot(up));
-        want.addScaledVector(lat, -0.5);
+        if (Math.abs(i.lift) > 0.05 || planted) lat.addScaledVector(up, -lat.dot(up));
+        want.addScaledVector(lat, planted ? 0 : -0.5);
       }
       const L = want.length();
       if (L > A_ASSIST) want.multiplyScalar(A_ASSIST / L);
@@ -296,13 +379,20 @@ export class ShipPilot {
       if (this.brake && this.vel.length() < 0.0004) { this.brake = false; this.vel.set(0, 0, 0); this._flash('at rest'); }
     }
     this.assistA = assistA;
-    // the thrusters' visible linear work is only what the pilot asks of them (lift); flight assist's
-    // hold against gravity is trimmed by the drives, and braking fires the reverse engines
-    this.cmdLin.lerp(V().set(0, i.lift, 0), 1 - Math.exp(-h * 30));
-    this.reverseOn = i.fwd < 0 ? 1 : 0;
+    // the thrusters' visible linear work is only what the pilot (or the autopilot) asks of them;
+    // flight assist's hold against gravity is trimmed by the drives, and braking fires the reverse engines
+    this.cmdLin.lerp(_a.set(i.strafe || 0, i.lift, -(i.surge || 0)), 1 - Math.exp(-h * 30));
+    this.reverseOn = i.fwd < 0 ? -i.fwd : 0;
     this.reverseBoost = i.fwd < 0 && this.boost ? 1 : 0;
     this.accel = a.length();                  // what the crew feels
-    this.vel.addScaledVector(a.add(g), h);
+    // ---- contact: legs, hull, pads
+    const cl = V(), ca = V();
+    this.legPos += (this.legs - this.legPos) * (1 - Math.exp(-h * 1.2));
+    C.step(h, cl, ca);
+    this.vel.addScaledVector(a.add(g).add(cl), h);
+    this.rates.x += ca.x * h; this.rates.y -= ca.y * h; this.rates.z -= ca.z * h;
+    _q.setFromEuler(_e.set(this.rates.x * h, -this.rates.y * h, -this.rates.z * h, 'XYZ'));
+    q.multiply(_q).normalize();
     this.pos.addScaledVector(this.vel, h);
     const n = this._keepOut(this.pos);
     if (n) {
@@ -311,6 +401,102 @@ export class ShipPilot {
       this.vel.multiplyScalar(Math.exp(-h * 3));           // resting on the ground: friction
     }
     this._reframe();
+  }
+
+  // ------------------------------------------------------------ docking --
+  /** Follow the dock ports near the ship and latch onto one when the ring meets it square and slow. */
+  _checkCapture(dt) {
+    if (this.dock || this.jump) return;
+    const sp = this.space;
+    if ((this._dockT -= dt) <= 0) {
+      this._dockT = 0.5;
+      const Pw = this.worldPos(V()), near = [];
+      for (const port of getPorts(sp)) if (port.kind === 'dock' && port.pose(sp, {}).pos.distanceTo(Pw) < 1.5) near.push(port);
+      for (const k of [...this._docks.keys()]) if (!near.includes(k)) this._docks.delete(k);
+      for (const port of near) if (!this._docks.has(port)) this._docks.set(port, new PortTrack(port));
+    }
+    for (const [port, tr] of this._docks) {
+      tr.sense(this, dt);
+      if (tr.age < 2) continue;
+      const pose = tr.at(0, this._cp || (this._cp = {}));
+      const st = ShipContact.ringState(this, pose, this._rs || (this._rs = {}));
+      if (st.d > CAPTURE.dist) continue;
+      const wF = V().set(this.rates.x, -this.rates.y, -this.rates.z).applyQuaternion(this.quat);
+      const vR = V().crossVectors(wF, V().copy(st.ring).sub(this.pos)).add(this.vel).sub(tr.pointVel(st.ring, 0, V()));
+      const ok = vR.length() < CAPTURE.speed && st.axisErr < CAPTURE.axis && st.rollErr < CAPTURE.roll;
+      if (!ok) { if (!this._capWarnT || this.time - this._capWarnT > 2) { this._capWarnT = this.time; this._flash(vR.length() >= CAPTURE.speed ? 'too fast to latch' : 'not square to the port'); } continue; }
+      this._capture(port, tr, pose, vR.length());
+      return;
+    }
+  }
+
+  _capture(port, tr, pose, v) {
+    const qi = pose.q.clone().invert();
+    const Qt = matedQuat('dock', pose.n, pose.fwd);
+    const Pt = V().copy(DOCK_POS).applyQuaternion(Qt).negate().add(pose.pos);
+    const st = ShipContact.ringState(this, pose);
+    this.dock = {
+      port, track: tr, t: 0, hard: false, label: port.label || port.id, v,
+      relQ0: qi.clone().multiply(this.quat), relP0: V().copy(this.pos).sub(pose.pos).applyQuaternion(qi),
+      relQ1: qi.clone().multiply(Qt), relP1: V().copy(Pt).sub(pose.pos).applyQuaternion(qi),
+    };
+    this.lastCapture = { v, axisErr: st.axisErr, rollErr: st.rollErr, d: st.d, t: this.time, label: this.dock.label };
+    this.burn = 0; this.rates.set(0, 0, 0);
+    this.brake = false;
+    this._flash(`soft capture ${(v * 1000).toFixed(2)} m/s`);
+    if (this.ap.on) this.ap.disengage();
+    if (this.onDocked) this.onDocked(this.dock);
+  }
+
+  /** Docked: the ship's pose is the port's (drawn in over the soft-capture second). */
+  _dockStep(dt) {
+    const d = this.dock, tr = d.track;
+    tr.sense(this, dt);
+    const pose = tr.at(0, this._dp || (this._dp = {}));
+    d.t += dt;
+    const k = smooth(0, 1.2, d.t);
+    const relQ = _q.slerpQuaternions(d.relQ0, d.relQ1, k), relP = V().lerpVectors(d.relP0, d.relP1, k);
+    this.quat.copy(pose.q).multiply(relQ);
+    this.pos.copy(relP).applyQuaternion(pose.q).add(pose.pos);
+    tr.pointVel(this.pos, 0, this.vel);
+    this.rates.set(0, 0, 0); this.burn = 0; this.accel = 0;
+    this.cmdAng.multiplyScalar(0.8); this.cmdLin.multiplyScalar(0.8);
+    this.input.fwd = 0; this.reverseOn = 0;
+    if (!d.hard && k >= 1) { d.hard = true; this._flash(`docked: ${d.label}`); }
+  }
+
+  /** U: release the latches and push off gently along the port's axis. */
+  undock(quiet = false) {
+    const d = this.dock;
+    if (!d) { if (!quiet) this._flash('not docked'); return; }
+    const pose = d.track.at(0, {});
+    this.dock = null;
+    d.track.pointVel(this.pos, 0, this.vel).addScaledVector(pose.n, 0.0004);
+    const wb = V().copy(d.track.omega).applyQuaternion(this.quat.clone().invert());
+    this.rates.set(wb.x, -wb.y, -wb.z);
+    this._docks.clear(); this._dockT = 3;                    // no re-latching while it drifts clear
+    if (!quiet) this._flash('undocked');
+  }
+
+  /** The physics without the page: frames, autopilot, jump, flight, contact, capture. */
+  tick(dt) {
+    this.time += dt;
+    this._syncFrames(dt);
+    if (this.dock) { this._dockStep(dt); this.contact.survey(); return; }
+    this.contact.sense(dt);
+    if (this.ap.on) this.ap.sense(dt);
+    if (this.jump) this._jumpStep(dt);
+    else { const n = Math.max(1, Math.ceil(dt / (1 / 120))); for (let k = 0; k < n; k++) this.step(dt / n); }
+    this._checkCapture(dt);
+    this.contact.survey();
+    if (this._lightsAuto) this.lights = this.legs > 0.5 && this.contact.agl < 3;
+    if (this.dust) this.dust.feed(dt, this);
+  }
+
+  onLanded() {
+    this._flash(`landed${this.contact.padUnder ? `: ${this.contact.padUnder.label || ''}` : ''}`);
+    if (this.ap.on && this.ap.port.kind === 'pad') this.ap.disengage();
+    this.lastLanding = { t: this.time, impact: this.contact.impact };
   }
 
   // --------------------------------------------------------------- jump --
@@ -327,10 +513,24 @@ export class ShipPilot {
     this._planJump();
   }
 
+  /** Jump to an exact world point (at(out) fills it; it may move while the bubble runs). */
+  jumpTo(label, at) {
+    if (this.jump) return false;
+    const start = this.worldPos(V());
+    this.jump = { name: label, t: { position: at, defaultDist: 0, minDist: 0 }, at, label, phase: 'spool', time: 0, start, bubble: 0, flow: 0, flash: 0, speed: 0 };
+    this._planJump();
+    return true;
+  }
+
   /** The destination point (world) for the jump's target, clear of every body. */
   _arrival(j) {
-    const sim = this.space.sim, t = j.t, Pt = t.position(V());
+    const sim = this.space.sim, t = j.t, Pt = j.at ? j.at(V()) : t.position(V());
     const bodies = [[V(), R_EARTH, 300], [sim.moonPos.clone(), R_MOON, 40], [sim.sunPos.clone(), 696000, 400000]];
+    if (j.at) {
+      // an exact standoff (the autopilot's): only kept clear of the bodies
+      for (const [c, R, m] of bodies) { const d = Pt.distanceTo(c); if (d < R + m) { const u = Pt.clone().sub(c).normalize(); Pt.copy(c).addScaledVector(u, R + m); } }
+      return Pt;
+    }
     const dir = V().copy(j.start).sub(Pt);
     // a target on a body's surface is reached from above it
     for (const [c, R] of bodies) { const d = Pt.distanceTo(c); if (d < R + 3000 && d > R * 0.5) dir.copy(Pt).sub(c); }
@@ -338,7 +538,8 @@ export class ShipPilot {
     dir.normalize();
     const stand = Math.max((t.defaultDist || 1) * 1.25, (t.minDist || 0) * 1.8, 0.6);
     const end = V().copy(Pt).addScaledVector(dir, stand);
-    for (const [c, R, m] of bodies) { const d = end.distanceTo(c); if (d < R + m) end.copy(c).addScaledVector(end.clone().sub(c).normalize(), R + m); }
+    // (the direction out of the body is taken before end is overwritten: copy-then-read gave the body's centre)
+    for (const [c, R, m] of bodies) { const d = end.distanceTo(c); if (d < R + m) { const u = end.clone().sub(c).normalize(); end.copy(c).addScaledVector(u, R + m); } }
     return end;
   }
 
@@ -444,10 +645,9 @@ export class ShipPilot {
   // ------------------------------------------------------------ per frame --
   /** Called by the space mode instead of the orbit rig while the pilot has the helm. */
   drive(dt, cam) {
-    this._syncFrames(dt);
     this._readInput(dt);
-    if (this.jump) this._jumpStep(dt);
-    else { const n = Math.max(1, Math.ceil(dt / (1 / 120))); for (let k = 0; k < n; k++) this.step(dt / n); }
+    if (this.dust === undefined) this.dust = new LandingDust(this.moonAnchor);
+    this.tick(dt);
     this._pose();
     this._camera(dt, cam);
     this._survey();
@@ -481,7 +681,8 @@ export class ShipPilot {
     const sunlit = along > 0 ? 1 : smooth(R_EARTH * 0.98, R_EARTH * 1.02, V().copy(Pw).addScaledVector(sd, -along).length());
     if (!this.active) { this.cmdAng.multiplyScalar(Math.exp(-dt * 8)); this.cmdLin.multiplyScalar(Math.exp(-dt * 8)); }
     this.ship.update(dt, { throttle: this.active ? Math.min(burn, 1) : 0, aux: this.active ? Math.min(1, burn) * 0.7 : 0, boost: burn > 1.1 ? 1 : 0, legs: this.legs, rcs, reverse: this.active ? (this.reverseOn || 0) : 0, reverseBoost: this.active ? (this.reverseBoost || 0) : 0,
-      ang: this.cmdAng, lin: this.cmdLin, sunlit, time: realTime });
+      ang: this.cmdAng, lin: this.cmdLin, sunlit, time: realTime,
+      gear: this.contact.gear, docked: this.dock ? (this.dock.hard ? 1 : 0.5) : 0, lights: this.lights ? 1 : 0 });
   }
 
   /** After the scene: re-image it through the warp bubble, then draw the ship in its flat interior. */
