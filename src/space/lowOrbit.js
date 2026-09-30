@@ -11,6 +11,8 @@ import {
   buildPower, POWER, buildTram, buildSkyhookHub, buildGrapple, SKYHOOK, buildSweeper, buildDebrisChunk, buildSatellites,
 } from './leoStations.js';
 import { Constellations } from './constellations.js';
+import { DockHardware } from './dockKit.js';
+import { ANANSI_DOCKS } from './portSites.js';
 import { droneGeo, DynLamps } from './lifeKit.js';
 import { createMirrorMaterial, bindMirror } from './lagrangeShaders.js';
 
@@ -406,6 +408,10 @@ void main() {
     s.fixed = craftMesh(hub.geo, {}, setCraftEnvelope(s.mat, hub.geo));
     lampSet(s.fixed, hub.lamps);
     s.root.add(s.fixed);
+    // the hub had no docking hardware: two collars on the ballast drum (src/space/portSites.js)
+    const dh = new DockHardware(s.fixed, 1);
+    for (const d of ANANSI_DOCKS) dh.collar(d.p, d.n, d.fwd);
+    s.docks = dh.build();
     s.tips = [1, -1].map((sy) => {
       const g = craftMesh(gr.geo, {}, s.mat);
       g.position.set(0, sy * L, 0);

@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import { DockHardware } from './dockKit.js';
+import { STORE_DOCK } from './portSites.js';
 import { CB, CK, sectionEllipse } from '../craft/craftGeometry.js';
 import { lathe, sphere, buildFreighter, buildTug } from '../craft/craftClasses.js';
 import { createGlowMesh } from '../craft/craftMaterial.js';
@@ -742,6 +744,8 @@ export class GeoRoads {
     sm.add(craftPart(sm, this.storeData.ships));
     addLamps(sm, this.storeData.lamps, { minPx: 1.2 });
     this.store.add(sm);
+    // a ship dock on the cage's free face (src/space/portSites.js)
+    this.storeDock = new DockHardware(this.store, 1000).collar(STORE_DOCK.p, STORE_DOCK.n, STORE_DOCK.fwd).build();
     // its plumbing, plant rooms, tank galleries and inspection drones (storeWorks.js)
     this.storeWorks = new StoreWorks(sm, this.storeData);
     const _c2 = new THREE.Vector3();

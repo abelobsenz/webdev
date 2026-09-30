@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import { DockHardware } from './dockKit.js';
+import { REFUGE_DOCK } from './portSites.js';
 import { FullscreenPass, FS_VERT } from '../core/fullscreen.js';
 import { U } from '../core/uniforms.js';
 import { SKY_UNIFORMS } from './sky.js';
@@ -217,6 +219,8 @@ export class Hearth {
     this.refuge=new THREE.Group();this.refuge.position.copy(this.refugePosition);
     this.refugeFixed=new THREE.Mesh(merge([this.refugeApproach.geo,this.refugeData.geo]),this.hullMat);
     this.refuge.add(this.refugeFixed);
+    // the Refuge's ship dock on its top pole, on the spin axis (src/space/portSites.js)
+    this.refugeDock = new DockHardware(this.refuge, 1000).collar(REFUGE_DOCK.p.clone().multiplyScalar(0.001), REFUGE_DOCK.n, REFUGE_DOCK.fwd).build();
     this.refugeRotors=this.refugeData.rotors.map(r=>{
       const mesh=new THREE.Mesh(r.geo,this.hullMat);mesh.position.y=r.y;mesh.userData={dir:r.dir,omega:r.omega};this.refuge.add(mesh);return mesh;
     });

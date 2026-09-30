@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import { DockHardware } from './dockKit.js';
+import { HELIANTH_DOCK, FOUNDRY_PAD } from './portSites.js';
 import { CB, CK, sectionEllipse } from '../craft/craftGeometry.js';
 import { buildTug } from '../craft/craftClasses.js';
 import { LAMP } from './lamps.js';
@@ -377,6 +379,8 @@ export class WorkingStations {
     stationFrame(up,this.foundry.quaternion);
     const f=craftMesh(this.foundryData.geo,{accent:[.5,1,.8],lit:.58});
     addLamps(f,this.foundryData.lamps,{minPx:1.2});this.foundry.add(f);
+    // the visitors' pad on the commons pier (src/space/portSites.js)
+    this.foundryPad=new DockHardware(this.foundry,1000).pad(FOUNDRY_PAD.p,FOUNDRY_PAD.n,FOUNDRY_PAD.fwd,FOUNDRY_PAD.r).build();
     // a tender unloading its relic in the middle hall (src/space/foundryUnload.js)
     this.unload=addFoundryUnload(this.foundry);
     space.earthFixed.add(this.foundry);
@@ -389,6 +393,8 @@ export class WorkingStations {
     // Helianth is close to Sol, far from the Earth-centred lighting reference.
     s.userData.sunDir=this.solarOffset.clone().normalize().negate();
     addLamps(s,this.solarData.lamps,{minPx:1.2});this.solar.add(s);space.scene.add(this.solar);
+    // the ship dock on the transfer core's tip, on the axis (src/space/portSites.js)
+    this.solarDock=new DockHardware(s,1).collar(HELIANTH_DOCK.p,HELIANTH_DOCK.n,HELIANTH_DOCK.fwd).build();
     // service tugs on their petal circuits and the relay beacons (src/space/helianthTraffic.js)
     this.helianth=new HelianthTraffic(this.solar,s.userData.sunDir);
     space.addBody('solarCollector',[this.solar],()=>this.solar.getWorldPosition(new THREE.Vector3()),19.8,{solid:true,hint:.9});

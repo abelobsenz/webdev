@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import { DockHardware } from './dockKit.js';
+import { PIER_DOCKS } from './portSites.js';
 import { CB, CK, sectionEllipse } from '../craft/craftGeometry.js';
 import { lathe, sphere, buildShuttle, buildTug } from '../craft/craftClasses.js';
 import { createCraftMaterial } from '../craft/craftMaterial.js';
@@ -394,6 +396,10 @@ export class HaloPorts {
       addLamps(m, st.lamps, { minPx: 1.3 });
       const life = new PortLife(m, st, { seed: (lon * 1000) | 0 });
       g.add(m);
+      // ship docks under the piers (src/space/portSites.js)
+      const pd = new DockHardware(g, 1000);
+      for (const d of PIER_DOCKS) pd.collar(d.p, d.n, d.fwd);
+      pd.build();
       space.earthFixed.add(g);
       const _p = new THREE.Vector3();
       space.addBody(`port-${p.name}`, [g], () => g.getWorldPosition(_p), 24, { solid: true, hint: 0.6 });

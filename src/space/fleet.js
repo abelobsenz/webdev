@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import { DockHardware } from './dockKit.js';
+import { SELENE_DOCK, TENDER_DOCK } from './portSites.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { buildLiner, buildTender, buildRefinery, CB, CK } from '../craft/craftGeometry.js';
 import { buildShuttle, buildTug, buildCourier, buildFreighter, lathe } from '../craft/craftClasses.js';
@@ -295,6 +297,8 @@ export class Fleet {
       this.tenderGroup.add(m);
       // (the group is laid out round the capture: tender 1's cradle, as the scene opens, sits at
       // the group's origin, the point the Tenders view orbits)
+      // tender 2 (the middle of the group) carries a dorsal collar for visiting ships (src/space/portSites.js)
+      if (i === 1) this.tenderDock = new DockHardware(m, 1).collar(TENDER_DOCK.p, TENDER_DOCK.n, TENDER_DOCK.fwd).build();
       this.tenders.push({ mesh: m, arms, phase: i * 2.1, offset: V((i - 1) * 1.25, 0.3 * Math.sin(i * 2.0), (i - 1) * 0.5 - Math.abs(i - 1) * 0.55).sub(TENDER_CAPTURE_AT), grip: i === 0, capture: captured });
       this.crafts.push(m);
     }
@@ -321,6 +325,8 @@ export class Fleet {
     rm.add(craftPart(rm, placeMerge(berthed)));
     this.tankerBerths = berthed.map((b) => b.m);
     this.refinery.add(rm);
+    // Selene's ship dock: a collar on the spindle's spire (src/space/portSites.js; the ports registry flies to it)
+    this.seleneDock = new DockHardware(this.refinery, 1000).collar(SELENE_DOCK.p.clone().multiplyScalar(KM), SELENE_DOCK.n, SELENE_DOCK.fwd).build();
     this.refineryMesh = rm;
     this.crafts.push(rm);
     space.scene.add(this.refinery);

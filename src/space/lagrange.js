@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import { DockHardware } from './dockKit.js';
+import { LAGRANGE_DOCK, FULCRUM_DOCKS } from './portSites.js';
 import { craftMesh, addLamps, KM, createDressedMaterial } from './craftMesh.js';
 import { LAMP, createLamps } from './lamps.js';
 import { DynLamps, smooth, instancedPart, spanMatrix } from './lifeKit.js';
@@ -268,6 +270,8 @@ export class LagrangeColonies {
       const stator = craftMesh(pt.stator.geo, { scale: 1 }, mat);
       stator.rotation.z = s > 0 ? 0 : Math.PI / COL.BERTHS;
       cyl.add(stator);
+      // the ship dock on the anti-sun spindle's cap, on the spin axis (src/space/portSites.js)
+      new DockHardware(cyl, 1).collar(LAGRANGE_DOCK.p, LAGRANGE_DOCK.n, LAGRANGE_DOCK.fwd).build();
       lampSets.push(addLamps(stator, pt.stator.lamps, { minPx: 1.2 }));
       const rotor = new THREE.Group();
       cyl.add(rotor);
@@ -365,6 +369,10 @@ export class LagrangeColonies {
     const mat = createDressedMaterial({ accent: [1.0, 0.8, 0.5], lit: 0.65, fill: 0.03, flood: 1, livery: [0.66, 0.64, 0.6], livery2: [0.56, 0.2, 0.14] });
     const hull = craftMesh(pt.gate.geo, { scale: 1 }, mat);
     m.add(hull);
+    // ship docks on both spine end caps (src/space/portSites.js)
+    const spineDocks = new DockHardware(m, 1);
+    for (const d of FULCRUM_DOCKS) spineDocks.collar(d.p, d.n, d.fwd);
+    spineDocks.build();
     addLamps(hull, pt.gate.lamps, { minPx: 1.2 });
     const liftGeo = buildLiftCar();
     const wheels = GATE.WHEELS.map((w, i) => {

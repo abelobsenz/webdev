@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import { DockHardware } from './dockKit.js';
+import { HEVELIUS_DOCK } from './portSites.js';
 import { CB } from '../craft/craftGeometry.js';
 import { LK, lunarMesh, lunarInstanced, createLunarMaterial, setFloods } from './lunarMaterial.js';
 import { LAMP, createLamps } from './lamps.js';
@@ -1037,6 +1039,8 @@ export class LunarOrbitals {
       this.podPaths = Array.from({ length: YARD.pods }, (_, i) => ({ z: -100 + (i % 5) * 100, a0: -Math.PI / 2 + ((i * 0.37) % 1 - 0.5) * 1.6, w: 0.03 + 0.01 * (i % 4), dr: 14 + (i % 4) * 5 }));
       g.visible = false;
       parent.add(g);
+      // the yard had no docking collar: one on the crew block's outer face (src/space/portSites.js)
+      this.yard_docks = new DockHardware(g, 1000).collar(HEVELIUS_DOCK.p.clone().multiplyScalar(0.001), HEVELIUS_DOCK.n, HEVELIUS_DOCK.fwd).build();
       this.yard = { group: g, orbit: o, gantries, pods, frames, carriers, dock: mesh, hullR: y.hullR, near: [mesh, frames, pods, carriers, ...gantries.map((q) => q.mesh)], hubR: 0.9 };
       this.stations.push(this.yard);
     }
