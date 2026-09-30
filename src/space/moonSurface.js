@@ -622,25 +622,24 @@ float horizonShadow(vec3 up, float h0, vec3 sun, float sinE) {
 
 // ---- the relief: one height function for the terrain mesh, the shading and the ship's ground
 ${RELIEF_GLSL}
-// the relief's own shadows under a low Sun: a march toward the Sun over the relief's coarse
-// octaves (the ones that cast shadows kilometres long), the receiver read at the same octaves so
-// the ground never shadows itself; 180 m to 3.5 km out, a penumbra from the Sun's disc; drawn
-// within ~100 km of the camera (the patch and just beyond) and only near the terminator
-float reliefShadow(vec3 up, vec3 sun, float sinE) {
-  if (sinE > 0.3 || sinE < -0.02) return 1.0;
-  float h0 = reliefH(up, 0.9);
-  vec3 ts = normalize(sun - up * sinE + 1e-6);
-  float tanE = sinE / max(sqrt(1.0 - sinE * sinE), 1e-3);
-  float vis = 1.0;
-  float dist = 0.18;
-  for (int i = 0; i < 5; i++) {
-    vec3 q = normalize(up + ts * (dist / RM));
-    float hq = reliefH(q, max(dist * 0.25, 0.9));
-    float rise = hq - h0 - dist * dist / (2.0 * RM);
-    vis = min(vis, clamp((dist * tanE - rise) / (dist * 0.0093 + 0.015 + dist * 0.03) + 0.5, 0.0, 1.0));
-    dist *= 2.1;
-  }
-  return vis;
+// the relief's own long shadows under a low Sun, baked (RSHADOW_GLSL in a pass of its own, over
+// ~80 km round the terrain patch, redone as the patch moves or the Sun turns): one texture read
+// here where the march cost six evaluations of the relief per pixel, most of a frame down low
+uniform sampler2D uRSh;
+uniform vec3 uSC;            // the bake's centre (unit, Moon frame) and its tangent axes
+uniform vec3 uSE1;
+uniform vec3 uSE2;
+uniform float uSL;           // the bake's half extent (km)
+uniform float uRShOn;
+float reliefShadowBaked(vec3 up) {
+  if (uRShOn < 0.5) return 1.0;
+  float c = dot(up, uSC);
+  if (c <= 0.5) return 1.0;
+  vec2 xy = vec2(dot(up, uSE1), dot(up, uSE2)) * (RM / c);      // gnomonic: the bake's own mapping
+  vec2 uv = xy / (2.0 * uSL) + 0.5;
+  float edge = max(abs(uv.x - 0.5), abs(uv.y - 0.5));
+  if (edge >= 0.5) return 1.0;
+  return mix(textureLod(uRSh, uv, 0.0).r, 1.0, smoothstep(0.42, 0.5, edge));
 }
 
 void main() {
@@ -893,7 +892,7 @@ void main() {
     // line and hollows fill with shade first, so the terminator breaks along the hills
     float vis = horizonShadow(up, hl + 0.5 * gf.h, sun, mu);
     // and the relief's own long shadows across the valleys, where the relief is resolved
-    if (fp < 0.1 && vis > 0.0) vis *= mix(reliefShadow(up, sun, mu), 1.0, smoothstep(0.05, 0.1, fp));
+    if (fp < 0.1 && vis > 0.0) vis *= mix(reliefShadowBaked(up), 1.0, smoothstep(0.05, 0.1, fp));
     // cloud shadow where the sun ray crosses the deck
     float csh = 1.0;
     if (mu > -0.05) {
@@ -1155,8 +1154,51 @@ function _blankMask() {
 // camera-relative from a centre offset computed in doubles, so the ground does not swim at 30 m.
 // Each octave drops out (smoothly) where the rings are too coarse for it, and the whole relief
 // eases to the sphere over the patch's outer fifth so the handover to the sphere is seamless.
+// ---- the relief-shadow bake: the march (six reliefs a texel) over a gnomonic square round the
+// patch, in bands of rows over a few frames, into the back of two targets that then swap
+const RSH_N = 1024, RSH_L = 40.0, RSH_BANDS = 4;
+const RSHADOW_GLSL = /* glsl */ `
+// the relief's own shadows under a low Sun: a march toward the Sun over the relief's coarse
+// octaves (the ones that cast shadows kilometres long), the receiver read at the same octaves so
+// the ground never shadows itself; 180 m to 3.5 km out, a penumbra from the Sun's disc; drawn
+// within ~100 km of the camera (the patch and just beyond) and only near the terminator
+float reliefShadow(vec3 up, vec3 sun, float sinE) {
+  if (sinE > 0.3 || sinE < -0.02) return 1.0;
+  float h0 = reliefH(up, 0.9);
+  vec3 ts = normalize(sun - up * sinE + 1e-6);
+  float tanE = sinE / max(sqrt(1.0 - sinE * sinE), 1e-3);
+  float vis = 1.0;
+  float dist = 0.18;
+  for (int i = 0; i < 5; i++) {
+    vec3 q = normalize(up + ts * (dist / RM));
+    float hq = reliefH(q, max(dist * 0.25, 0.9));
+    float rise = hq - h0 - dist * dist / (2.0 * RM);
+    vis = min(vis, clamp((dist * tanE - rise) / (dist * 0.0093 + 0.015 + dist * 0.03) + 0.5, 0.0, 1.0));
+    dist *= 2.1;
+  }
+  return vis;
+}
+`;
+export const RSH_FRAG = /* glsl */ `
+#define RM ${R_MOON.toFixed(1)}
+${SITE_GLSL}
+${RELIEF_GLSL}
+${RSHADOW_GLSL}
+uniform vec3 uSC;
+uniform vec3 uSE1;
+uniform vec3 uSE2;
+uniform vec3 uSunM;
+uniform float uSL;
+varying vec2 vUv;
+void main() {
+  vec2 xy = (vUv * 2.0 - 1.0) * uSL;
+  vec3 up = normalize(uSC * RM + uSE1 * xy.x + uSE2 * xy.y);
+  gl_FragColor = vec4(reliefShadow(up, uSunM, dot(up, uSunM)), 0.0, 0.0, 1.0);
+}
+`;
+
 export const PATCH_R = 120.0;             // km
-export const PATCH_NA = 768;               // vertices round each ring
+export const PATCH_NA = 512;               // vertices round each ring (768 cost the orbital view its frame rate low down)
 const PATCH_R0 = 0.004;                    // the first ring (km); the centre is a vertex too
 const VERT_PATCH = /* glsl */ `
 #define RM ${R_MOON.toFixed(1)}
@@ -1253,6 +1295,8 @@ export class MoonSurface {
       uPCrel: { value: new THREE.Vector3() }, uPR: { value: PATCH_R }, uPCos: { value: 2 },
       uPSp: { value: 2 * Math.PI / PATCH_NA },
       uSeaPh: { value: new Array(SEA_WAVES.length).fill(0) },
+      uRSh: { value: null }, uSC: { value: new THREE.Vector3(1, 0, 0) }, uSE1: { value: new THREE.Vector3(0, 0, 1) }, uSE2: { value: new THREE.Vector3(0, 1, 0) },
+      uSL: { value: RSH_L }, uRShOn: { value: 0 },
     };
     this.patchC = new THREE.Vector3(1, 0, 0);     // the patch centre (unit, Moon frame), doubles
     this.focus = null;                            // optional world point the patch centres on (the ship)
@@ -1263,6 +1307,7 @@ export class MoonSurface {
       blending: THREE.CustomBlending, blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor,
     });
     this.mesh = new THREE.Mesh(new THREE.SphereGeometry(PROXY, 160, 80), this.material);
+    this.mesh.name = 'Moon: surface sphere';
     this.mesh.renderOrder = 4;
     this.mesh.frustumCulled = false;
     this.mesh.onBeforeRender = (r, s, cam) => this._perView(cam);
@@ -1351,6 +1396,7 @@ export class MoonSurface {
     }
     this.patch.visible = on;
     u.uPatchOn.value = on ? 1 : 0;
+    if (on) this._stepReliefShadow(); else u.uRShOn.value = 0;
     // the trees: within a few kilometres of the ground, re-scattered as the centre moves on
     const alt = cam ? _v.copy(cam.position).sub(sim.moonPos).length() - R_MOON : 1e9;
     const trees = on && alt < 2.5;
@@ -1364,6 +1410,53 @@ export class MoonSurface {
 
   /** Centre the terrain patch on this world point (the ship) while it is near the camera; null: the camera. */
   setFocus(worldPos) { this.focus = worldPos ? (this.focus || new THREE.Vector3()).copy(worldPos) : null; }
+
+  /** Bake the relief's long shadows round the patch: restart when the patch has moved 8 km from
+   *  the bake's centre or the Sun has turned 0.15 degrees; one band of rows a frame. */
+  _stepReliefShadow() {
+    const u = this.uniforms, r = this.space.renderer;
+    if (!r) return;
+    if (!this._rs) {
+      const mk = () => {
+        const rt = new THREE.WebGLRenderTarget(RSH_N, RSH_N, { type: THREE.UnsignedByteType, format: THREE.RGBAFormat, depthBuffer: false, generateMipmaps: false, minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter });
+        rt.texture.colorSpace = THREE.NoColorSpace;
+        return rt;
+      };
+      const mat = new THREE.ShaderMaterial({
+        vertexShader: FS_VERT, fragmentShader: RSH_FRAG, depthTest: false, depthWrite: false,
+        uniforms: { uGMask: u.uGMask, uGMaskN: u.uGMaskN, uSC: { value: new THREE.Vector3() }, uSE1: { value: new THREE.Vector3() }, uSE2: { value: new THREE.Vector3() }, uSunM: { value: new THREE.Vector3() }, uSL: { value: RSH_L } },
+      });
+      this._rs = { front: mk(), back: mk(), mat, pass: new FullscreenPass(mat), band: -1, C: new THREE.Vector3(), sun: new THREE.Vector3(), E1: new THREE.Vector3(), E2: new THREE.Vector3() };
+    }
+    const S = this._rs, m = S.mat.uniforms;
+    if (S.band < 0) {
+      const moved = !S.done || S.C.distanceTo(this.patchC) * R_MOON > 8 || S.sun.angleTo(u.uSunM.value) > 0.0026;
+      if (!moved) return;
+      // a new bake: centred on the patch now, the Sun as it stands
+      S.bC = (S.bC || new THREE.Vector3()).copy(this.patchC);
+      S.bSun = (S.bSun || new THREE.Vector3()).copy(u.uSunM.value);
+      const e1 = m.uSE1.value.set(0, 1, 0).cross(S.bC);
+      if (e1.lengthSq() < 1e-6) e1.set(1, 0, 0).cross(S.bC);
+      e1.normalize();
+      m.uSE2.value.copy(S.bC).cross(e1).normalize();
+      m.uSC.value.copy(S.bC); m.uSunM.value.copy(S.bSun);
+      S.band = 0;
+    }
+    const prev = r.getRenderTarget(), rows = RSH_N / RSH_BANDS;
+    S.back.scissor.set(0, S.band * rows, RSH_N, rows);
+    S.back.scissorTest = true;
+    r.setRenderTarget(S.back);
+    r.render(S.pass.scene, S.pass.camera);
+    r.setRenderTarget(prev);
+    if (++S.band < RSH_BANDS) return;
+    // done: the back becomes the front, and the shading reads it in the bake's own frame
+    S.band = -1; S.done = true;
+    [S.front, S.back] = [S.back, S.front];
+    S.C.copy(S.bC); S.sun.copy(S.bSun);
+    u.uRSh.value = S.front.texture;
+    u.uSC.value.copy(m.uSC.value); u.uSE1.value.copy(m.uSE1.value); u.uSE2.value.copy(m.uSE2.value);
+    u.uSL.value = RSH_L; u.uRShOn.value = 1;
+  }
 
   // read the bake back into the relief's mask, one cube face a frame (moonTerrain.js)
   _stepGroundMask() {

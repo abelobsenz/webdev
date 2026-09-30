@@ -20,6 +20,8 @@ import { loaderProgress, nextPaint } from './ui/loader.js'; // [experience] load
 import { SpaceMode } from './space/index.js';
 import { Pilot } from './core/pilot.js';
 
+const SPACE_PIXEL_RATIO = 1.25;       // device pixels per CSS pixel in the orbital view (at most)
+
 const smooth = (a, b, x) => { const t = Math.min(Math.max((x - a) / (b - a), 0), 1); return t * t * (3 - 2 * t); };
 const params = new URLSearchParams(location.search);
 
@@ -143,7 +145,12 @@ class App {
     const w = window.innerWidth, h = window.innerHeight;
     // 'supersample' presets render above the display's native resolution (SSAA)
     const dpr = window.devicePixelRatio || 1;
-    const base = this.settings.supersample ? Math.max(dpr, this.settings.pixelRatio) : Math.min(dpr, this.settings.pixelRatio);
+    let base = this.settings.supersample ? Math.max(dpr, this.settings.pixelRatio) : Math.min(dpr, this.settings.pixelRatio);
+    // the orbital view is shading-bound (the Moon's ground, the Earth's atmosphere and seas are
+    // per-pixel ray casts behind 4x MSAA): at a retina display the top presets drew 5-6 million
+    // pixels a frame there. It renders at most SPACE_PIXEL_RATIO device pixels per CSS pixel,
+    // never supersampled, and the adaptive resolution may go lower (perf.js)
+    if (this._spaceRes) base = Math.min(base, dpr, SPACE_PIXEL_RATIO);
     const pr = base * this.dynScale;
     this.renderer.setPixelRatio(pr);
     this.renderer.setSize(w, h, false);
@@ -189,6 +196,9 @@ class App {
     U.uTime.value = this.elapsed;
     this.hours = (this.hours + this.timeSpeed * dt + 24) % 24;
 
+    // [space] the orbital view renders at its own resolution (see resize); switch it with the mode
+    const inSpace = !!(this.space && this.space.onlySpace);
+    if (inSpace !== !!this._spaceRes) { this._spaceRes = inSpace; this.resize(); }
     // [space] while the orbital view is up the city is not rendered at all
     if (this.space && this.space.onlySpace) { this.space.frame(dt); if (this.ui) this.ui.update(dt); this.adaptResolution(dt); return; }
     if (this.space && this.space.cityCam) this.space.driveCity(dt); // [space] ride up/down the tether

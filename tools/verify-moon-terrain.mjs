@@ -7,7 +7,7 @@
 // Run from the repo root: node tools/verify-moon-terrain.mjs
 import * as THREE from 'three';
 import { SpaceSim, R_MOON } from '../src/space/sim.js';
-import { MoonSurface, patchRings, PATCH_NA, PATCH_R } from '../src/space/moonSurface.js';
+import { MoonSurface, patchRings, PATCH_NA, PATCH_R, RSH_FRAG } from '../src/space/moonSurface.js';
 import { RELIEF, RELIEF_GLSL, GMASK_BAKE_FRAG, reliefH, setGroundMask, tNoise, faceUV, gmask } from '../src/space/moonTerrain.js';
 import { moonGround } from '../src/space/moonHeight.js';
 import { ALL_TOWNS, latLonDir } from '../src/space/lunarNetwork.js';
@@ -288,7 +288,10 @@ const rnd = () => { const v = new THREE.Vector3(Math.random() * 2 - 1, Math.rand
   }
   const vs = S.patchMaterial.vertexShader;
   hygiene('patch vertex', vs, ['void main() {']);
-  hygiene('surface', S.material.fragmentShader, ['float reliefHG(vec3 up', 'vec2 faceQ(vec3 d)', 'vec4 seaWaves(vec3 rel', 'float reliefShadow(vec3 up']);
+  hygiene('surface', S.material.fragmentShader, ['float reliefHG(vec3 up', 'vec2 faceQ(vec3 d)', 'vec4 seaWaves(vec3 rel', 'float reliefShadowBaked(vec3 up']);
+  // the relief's long shadows are marched in a bake pass of their own and read back as a texture
+  hygiene('shadow bake', RSH_FRAG, ['float reliefShadow(vec3 up', 'float reliefH(vec3 up', 'void main() {']);
+  ok(!/reliefShadow\(up, sun, mu\)/.test(S.material.fragmentShader), 'no per-pixel shadow march left in the surface shader');
   ok(S.material.fragmentShader.indexOf('vec2 faceQ(') < S.material.fragmentShader.indexOf('faceQ(up)'), 'faceQ defined before use');
   ok(S.material.fragmentShader.indexOf('float riverF') < S.material.fragmentShader.indexOf('(1.0 - riverF)'), 'riverF declared before use');
   ok(!/hillHeight|geoMask|vPosM/.test(S.material.fragmentShader + vs), 'the old Landing-only patch is gone');

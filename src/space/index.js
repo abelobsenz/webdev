@@ -512,9 +512,22 @@ export class SpaceMode {
     r.setClearColor(0x000000, 1);
     const prevAuto = r.autoClear;
     r.autoClear = false;
+    // Every render() into a multisampled target ends with a resolve of the whole buffer (three
+    // blits it into the texture), and the backdrop plus the depth slices are 6-8 of them a frame:
+    // with a retina 4x-MSAA HDR target that was most of the GPU's frame. With the target bound,
+    // its sample count reads 0 while each pass draws (three resolves only when it is above 0), and
+    // one empty render at the end resolves the finished image for the post chain.
+    const hdr = p.hdrRT, S = hdr.samples, deferResolve = S > 0 && !globalThis.__noDeferResolve;
+    const bindHdr = () => r.setRenderTarget(hdr);
+    const draw = (scene) => {
+      if (!deferResolve) { r.render(scene, cam); return; }
+      hdr.samples = 0;
+      try { r.render(scene, cam); } finally { hdr.samples = S; }
+    };
     // backdrop: stars, Sun, far swarm, and the Hearth's lensed image
-    r.render(this.skyScene, cam);
-    for (const m of this.modules) if (m.renderBackdrop) m.renderBackdrop(r, cam, this);
+    bindHdr();
+    draw(this.skyScene);
+    for (const m of this.modules) if (m.renderBackdrop) { m.renderBackdrop(r, cam, this); bindHdr(); }
     // depth slices: disjoint [near, far] ranges drawn far to near, depth cleared
     // between them, so kilometre-scale detail and million-km distances both keep
     // full depth precision without a logarithmic buffer.
@@ -533,8 +546,9 @@ export class SpaceMode {
       for (const e of sl.set) for (const o of e.b.objects) o.visible = true;
       cam.near = sl.near; cam.far = sl.far; cam.updateProjectionMatrix();
       cull.sliceBegin(sl.near, sl.far);
+      bindHdr();
       r.clearDepth();
-      r.render(this.scene, cam);
+      draw(this.scene);
       cull.sliceEnd();
       for (const e of sl.set) for (const o of e.b.objects) o.visible = false;
     }
@@ -542,7 +556,10 @@ export class SpaceMode {
     this.scene.matrixWorldAutoUpdate = autoMW;
     cam.near = slices.length ? slices[0].near : 1; cam.far = slices.length ? slices[slices.length - 1].far : 1e7;
     cam.updateProjectionMatrix();
+    bindHdr();
     for (const m of this.modules) if (m.renderOverlay) m.renderOverlay(r, cam, this);
+    // the one resolve: an empty draw into the target at level 0
+    if (deferResolve) { r.setRenderTarget(hdr); r.render(this._resolveScene || (this._resolveScene = new THREE.Scene()), cam); }
     r.autoClear = prevAuto;
     this._post(dt, target);
   }

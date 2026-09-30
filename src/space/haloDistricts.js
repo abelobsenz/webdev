@@ -51,6 +51,7 @@ export const BUILD_START_KM = 3000;          // district building starts this fa
 export const LAMP_DAY_DIM = 0.66;            // district lamps dim by this much under the Sun
 const BUILD_BUDGET_MS = 3;                   // per frame in the background (at least one piece)
 const BUILD_URGENT_MS = 24;                  // per frame within BUILD_START_KM of the band
+const BUILD_BG_KM = 60000;                    // no background building beyond this (at the Moon, the Sun...)
 const ROT_YM90 = new THREE.Matrix4().makeRotationY(-Math.PI / 2);
 
 export function mulberry(seed) {
@@ -821,6 +822,9 @@ export class HaloDistricts {
     // second while the rest comes in (the synchronous finish froze the first frame for ~14 s in
     // the browser, with the GPU upload and shader compile of everything at once)
     if (!this.built) {
+      // far from the Earth nothing of the districts can show: leave the CPU to the view at hand
+      // (the build resumes, urgently, on the way back)
+      if (off > BUILD_BG_KM) { this.anchor.visible = false; return; }
       this._queue();
       const budget = off < BUILD_START_KM ? BUILD_URGENT_MS : BUILD_BUDGET_MS;
       const t0 = performance.now();

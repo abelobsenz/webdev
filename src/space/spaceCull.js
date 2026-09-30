@@ -14,10 +14,85 @@ import * as THREE from 'three';
 const MIN_PX = 1.25;                   // projected diameter below which a mesh is skipped
 const PAD = 1.2;                       // bound radius margin (shader displacement, a frame's motion)
 const PIXEL_SIZED = /\b(uPixAng|uRes|uPx|uPxScale|uResolution|uResY|uMinPx|uPixel|gl_PointSize)\b/;
-const REFRESH = 30;                    // frames between rebuilds of the mesh list
+const REFRESH = 8;                     // frames between rebuilds of the mesh list (lazily built parts join quickly)
 
 const _s = new THREE.Sphere(), _m = new THREE.Matrix4(), _f = new THREE.Frustum(), _pm = new THREE.Matrix4();
 const _cam = new THREE.PerspectiveCamera(), _fw = new THREE.Vector3(), _dv = new THREE.Vector3();
+
+// ---- far stand-ins for instanced sets: once a set's single part would draw under a few pixels
+// even at the set's nearest point, its prototype is swapped for a vertex-clustered copy of a few
+// dozen triangles (made on first use, kept per geometry), and back again as the camera closes in
+const PROXY_MIN_TRIS = 30000;          // a set this heavy (instances x prototype) is worth a stand-in
+const PROXY_PX = 2.5, PROXY_PX_BACK = 3.5;
+const _proxies = new WeakMap();
+const _e = new THREE.Vector3(), _ms = new THREE.Vector3(), _mq = new THREE.Quaternion(), _mp = new THREE.Vector3(), _im = new THREE.Matrix4();
+
+function trisOf(g) { return (g.index ? g.index.count : g.attributes.position.count) / 3; }
+
+function proxyable(g) {
+  if (!g || g.groups.length > 1 || Object.keys(g.morphAttributes).length) return false;
+  if (g.drawRange.start !== 0 || g.drawRange.count !== Infinity) return false;
+  for (const k in g.attributes) { const at = g.attributes[k]; if (at.isInterleavedBufferAttribute || (!at.isInstancedBufferAttribute && !at.array)) return false; }
+  if (g.index && !g.index.array) return false;
+  return true;
+}
+
+/** Vertex clustering: snap the vertices to a coarse grid over the bounds, one survivor per cell. */
+function clusterProxy(g) {
+  if (_proxies.has(g)) return _proxies.get(g);
+  let out = null;
+  if (proxyable(g)) {
+    const pos = g.attributes.position, n = pos.count;
+    if (!g.boundingBox) g.computeBoundingBox();
+    const bb = g.boundingBox, ext = bb.getSize(_e), big = Math.max(ext.x, ext.y, ext.z, 1e-9);
+    const G = 4, cx = Math.max(1, Math.round((G * ext.x) / big)), cy = Math.max(1, Math.round((G * ext.y) / big)), cz = Math.max(1, Math.round((G * ext.z) / big));
+    const cellOf = new Int32Array(n), rep = new Map(), keep = [];
+    for (let i = 0; i < n; i++) {
+      const x = Math.min(cx - 1, Math.floor(((pos.getX(i) - bb.min.x) / Math.max(ext.x, 1e-9)) * cx));
+      const y = Math.min(cy - 1, Math.floor(((pos.getY(i) - bb.min.y) / Math.max(ext.y, 1e-9)) * cy));
+      const z = Math.min(cz - 1, Math.floor(((pos.getZ(i) - bb.min.z) / Math.max(ext.z, 1e-9)) * cz));
+      // cells also split by the vertex's facing, so a thin slab keeps both its faces
+      const nx = g.attributes.normal ? (g.attributes.normal.getX(i) > 0.5 ? 1 : g.attributes.normal.getX(i) < -0.5 ? 2 : 0) + 3 * (g.attributes.normal.getY(i) > 0.5 ? 1 : g.attributes.normal.getY(i) < -0.5 ? 2 : 0) + 9 * (g.attributes.normal.getZ(i) > 0.5 ? 1 : g.attributes.normal.getZ(i) < -0.5 ? 2 : 0) : 0;
+      const key = ((x * cy + y) * cz + z) * 27 + nx;
+      let r = rep.get(key);
+      if (r === undefined) { r = keep.length; rep.set(key, r); keep.push(i); }
+      cellOf[i] = r;
+    }
+    const tri = [], seen = new Set();
+    const T = trisOf(g), I = g.index;
+    for (let t = 0; t < T; t++) {
+      const a = cellOf[I ? I.getX(t * 3) : t * 3], b = cellOf[I ? I.getX(t * 3 + 1) : t * 3 + 1], c = cellOf[I ? I.getX(t * 3 + 2) : t * 3 + 2];
+      if (a === b || b === c || a === c) continue;
+      // one copy of each surviving triangle (rotations of the same winding)
+      const m = Math.min(a, b, c), k = m === a ? `${a},${b},${c}` : m === b ? `${b},${c},${a}` : `${c},${a},${b}`;
+      if (seen.has(k)) continue; seen.add(k); tri.push(a, b, c);
+    }
+    if (tri.length >= 3 && tri.length / 3 < T * 0.6) {
+      out = new THREE.BufferGeometry();
+      for (const k in g.attributes) {
+        const at = g.attributes[k];
+        if (at.isInstancedBufferAttribute) { out.setAttribute(k, at); continue; }   // per-instance data: shared
+        const src = at.array, w = at.itemSize, arr = new src.constructor(keep.length * w);
+        for (let j = 0; j < keep.length; j++) for (let q = 0; q < w; q++) arr[j * w + q] = src[keep[j] * w + q];
+        out.setAttribute(k, new THREE.BufferAttribute(arr, w, at.normalized));
+      }
+      out.setIndex(tri);
+      out.boundingSphere = (g.boundingSphere || (g.computeBoundingSphere(), g.boundingSphere)).clone();
+      out.boundingBox = bb.clone();
+      out.userData.cullProxy = true;
+    }
+  }
+  _proxies.set(g, out);
+  return out;
+}
+
+/** The largest scale any of the set's instances applies (sampled), times the mesh's own. */
+function instanceScale(o) {
+  const c = o.count, step = Math.max(1, Math.floor(c / 48));
+  let m = 0;
+  for (let i = 0; i < c; i += step) { o.getMatrixAt(i, _im); _im.decompose(_mp, _mq, _ms); m = Math.max(m, _ms.x, _ms.y, _ms.z); }
+  return m;
+}
 
 function pixelSized(mat) {
   if (!mat) return false;
@@ -103,9 +178,34 @@ export class SpaceCuller {
       if (d <= _s.radius) continue;                              // the camera is inside it
       if ((2 * _s.radius / d) * k < MIN_PX) { o.visible = false; this.hidden.push(o); this.stats.hiddenSmall++; continue; }
       if (!_f.intersectsSphere(_s)) { o.visible = false; this.hidden.push(o); this.stats.hiddenOut++; continue; }
+      if (o.isInstancedMesh) this._proxy(o, d, _s.radius / (PAD * (o.userData.__cullPad || 1)), k);
       const dz = _dv.copy(_s.center).sub(cp).dot(fwd), n = cand.length;
       this.zlo[n] = dz - _s.radius; this.zhi[n] = dz + _s.radius; cand.push(o);
     }
+  }
+
+  /** Swap an instanced set's prototype for its far stand-in (or back) by the size of one part. */
+  _proxy(o, d, R, k) {
+    const u = o.userData;
+    if (u.noProxy) return;
+    const full = u.__fullGeo || o.geometry;
+    if (u.__proxyTris === undefined) u.__proxyTris = trisOf(full);
+    if (u.__proxyTris * o.count < PROXY_MIN_TRIS && !u.__proxyOn) return;
+    if (u.__protoR === undefined || this.frame - (u.__protoF || 0) > 120) {
+      if (!full.boundingSphere) full.computeBoundingSphere();
+      u.__protoR = full.boundingSphere.radius * instanceScale(o) * o.matrixWorld.getMaxScaleOnAxis();
+      u.__protoF = this.frame;
+    }
+    const near = Math.max(d - R, u.__protoR, 1e-9);
+    const px = ((2 * u.__protoR) / near) * k;
+    const want = u.__proxyOn ? px < PROXY_PX_BACK : px < PROXY_PX;
+    if (want === !!u.__proxyOn) return;
+    if (want) {
+      const pg = clusterProxy(full);
+      if (!pg) { u.noProxy = true; return; }
+      u.__fullGeo = full; o.geometry = pg; u.__proxyOn = true;
+      this.stats.proxies = (this.stats.proxies || 0) + 1;
+    } else { o.geometry = full; u.__proxyOn = false; }
   }
 
   /** Before a depth slice draws: hide the visible meshes wholly nearer than near or beyond far. */
