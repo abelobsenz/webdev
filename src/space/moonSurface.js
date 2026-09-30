@@ -538,6 +538,16 @@ float shipLights(vec3 p, float fp, float t) {
 
 // fields, hedgerows and orchards around the Landing (site ortho coordinates, km): estates of
 // a few kilometres, each with its own field pattern and orientation, woods between them
+// a planar coordinate over the globe (km): the cube-face projection, for patterns laid out like
+// a map (fields, parcels); the seams at the face edges read as boundaries
+vec2 faceQ(vec3 d) {
+  vec3 a = abs(d);
+  vec2 q;
+  if (a.x >= a.y && a.x >= a.z) q = d.zy / a.x;
+  else if (a.y >= a.z) q = d.xz / a.y;
+  else q = d.xy / a.z;
+  return q * RM;
+}
 vec3 farmland(vec2 q, vec3 base, float fp, float gap, out float woodF) {
   // estates: jittered cells ~2.6 km across
   vec2 eg = q / 2.6;
@@ -760,6 +770,10 @@ void main() {
     }
     float depth = max(-h, 0.0015);
     float hl = max(h, 0.0) + rH * (1.0 - waterF);
+    // rivers: the valley floors' lowest line, where the relief lies flat at the floor, carries
+    // a stream of water tens of metres wide (drawn as the sea's water: shallow, clear, sky-lit)
+    float riverF = smoothstep(0.9925, 0.998, rVv) * (1.0 - rHi) * (1.0 - smoothstep(0.012, 0.03, rH)) * (1.0 - smoothstep(0.02, 0.06, fp)) * (1.0 - nearSite);
+    waterF = max(waterF, riverF);
     // ---- slope-, altitude- and shore-aware ground at close range ----
     // the bake's biome is read back from its colour (vegetation is the green excess over the
     // grey of rock and sand); within it the procedural field lays woods and glades, scree on
@@ -777,7 +791,7 @@ void main() {
       // steepness: the bake's slope and the procedural relief together
       float nuB = max(dot(nB, up), 0.2);
       float slope0 = length(nB - up * nuB) / nuB;
-      float slope = slope0 + length(gf.grad) * mix(0.12, 0.26, 1.0 - veg);
+      float slope = slope0 + length(gf.grad) * mix(0.12, 0.26, 1.0 - veg) + length(rG) * 1.2;
       float steep = smoothstep(0.26, 0.5, slope + 0.08 * gf.fine);
       rockF = clamp(max(steep, 1.0 - veg - snowF - 0.2), 0.0, 1.0) * (1.0 - snowF);
       roughK = mix(0.1, 0.34, rockF) * (1.0 - 0.5 * snowF);
@@ -792,8 +806,22 @@ void main() {
       turf = mix(turf, turf * vec3(1.25, 1.12, 0.8), smoothstep(0.35, 0.8, gf.fine) * 0.5);
       vec3 wood = alb * vec3(0.66, 0.74, 0.62) * (1.0 - 0.55 * crowns.w);
       vec3 vegC = mix(turf, wood, woods);
+      // valley floors run lush and damp: deeper green meadows, reeds and willow along the water
+      vegC = mix(vegC, vegC * vec3(0.82, 1.1, 0.78), rVv * 0.55);
       g = mix(g, vegC, veg);
       vegF = max(vegF, veg * woods);
+      // cultivated country beyond the Landing: estates of fields, hedgerows, orchards and farm
+      // woods on the flat, fertile lowlands (valley floors and coastal plains) in regions tens
+      // of kilometres across; the wild meadow, heath and forest keep the hills and the highlands
+      float farmG = veg * (1.0 - smoothstep(0.1, 0.26, rH)) * (1.0 - smoothstep(0.07, 0.18, length(rG) + slope0))
+                  * smoothstep(0.42, 0.6, snoise(up * (RM / 38.0) + 4.1) * 0.5 + 0.5 + 0.25 * rVv)
+                  * (1.0 - nearSite) * (1.0 - smoothstep(0.1, 0.25, fp)) * (1.0 - snowF);
+      if (farmG > 0.001) {
+        float fW;
+        vec3 fa = farmland(faceQ(up), g, fp, crowns.w, fW);
+        g = mix(g, fa, farmG);
+        vegF = max(vegF, fW * farmG);
+      }
       // rock and regolith: grey anorthosite mottled by the field, dark boulder-strewn hollows,
       // pale scree on the steep faces, and on the steepest the strata of the old lava flows
       // (bands ~7 m thick in height, drawn where a band spans a few pixels on the slope)
@@ -808,6 +836,11 @@ void main() {
       rockC *= 1.0 - 0.18 * smoothstep(0.1, 0.6, -gf.fine) * (1.0 - steep);
       g = mix(g, mix(alb * (0.86 + 0.2 * gf.broad + 0.24 * gf.fine), rockC, steep), rockF * (1.0 - veg));
       g = mix(g, rockC, steep * veg);                         // cliffs break through the woods
+      // the relief's high peaks carry snow of their own: above ~4 km (bake and relief together),
+      // lying on the benches and in the hollows, the steep faces and the crests bare
+      float snowR = smoothstep(3.8, 4.5, hBake + rH + 0.3 * gf.broad + 0.15 * gf.fine) * (1.0 - smoothstep(0.5, 0.9, slope)) * (1.0 - waterF);
+      g = mix(g, vec3(0.72, 0.75, 0.79) * (0.92 + 0.1 * gf.fine), snowR);
+      snowF = max(snowF, snowR);
       // snow: drifts in the hollows, scoured from the crests, wind-bared rock where it is steep
       g = mix(g, g * (0.94 + 0.08 * gf.fine), snowF);
       g = mix(g, rockC * 0.8, snowF * clamp(steep * 0.7 + smoothstep(0.3, 0.8, gf.fine) * 0.3, 0.0, 1.0));
@@ -990,7 +1023,7 @@ void main() {
       body += vec3(0.01, 0.05, 0.04) / PI * E * sss * 0.6;
       // surf: lines of breakers riding in toward the beach (sets of three, broken along their
       // length), the swash foaming at the waterline, all where resolved; a pale band from afar
-      float surfK = gf.dw * (1.0 - nearSite);
+      float surfK = gf.dw * (1.0 - nearSite) * (1.0 - riverF);
       if (surfK > 0.0) {
         float zone = 1.0 - smoothstep(0.03, 0.16, shoreKm);
         float ln = fract(shoreKm / 0.028 + uTime * 0.11 + 0.15 * gf.broad);

@@ -24,8 +24,8 @@ const instOk = (m) => {
   ok(m.count <= m.instanceMatrix.count, `${m.name}: count ${m.count} > capacity`);
   const a = m.instanceMatrix.array;
   for (let i = 0; i < m.count * 16; i++) if (!Number.isFinite(a[i])) { ok(false, `${m.name}: non-finite matrix`); break; }
-  // offsets from the anchor stay small (float32-safe): under a kilometre
-  for (let i = 0; i < m.count; i++) ok(Math.hypot(a[i * 16 + 12], a[i * 16 + 13], a[i * 16 + 14]) < 1.0, `${m.name}: instance offset small`);
+  // offsets from the anchor stay small (float32-safe): a few kilometres at most (the relief's height)
+  for (let i = 0; i < m.count; i++) ok(Math.hypot(a[i * 16 + 12], a[i * 16 + 13], a[i * 16 + 14]) < 3.0, `${m.name}: instance offset small`);
 };
 // ------------------------------------------------------------ shader hygiene --
 const body = (src, sig) => { const a = src.indexOf(sig); return a < 0 ? '' : src.slice(a, src.indexOf('\n}\n', a) + 2); };
@@ -135,11 +135,11 @@ const rnd = () => { const v = new THREE.Vector3(Math.random() * 2 - 1, Math.rand
     hMax = Math.max(hMax, g.h); hMin = Math.min(hMin, g.h);
     ok(Math.abs(g.normal.length() - 1) < 1e-9, 'normal is unit');
     if (g.water && g.h !== 0) waterBad++;
-    ok(g.normal.dot(d) > 0.5, `normal within 60 degrees of the vertical (${g.normal.dot(d).toFixed(3)})`);
+    ok(g.normal.dot(d) > 0.2, `normal within 78 degrees of the vertical (${g.normal.dot(d).toFixed(3)})`);
   }
   const us = (performance.now() - t0) * 1000 / n;
   ok(nonFinite === 0, `non-finite ground ${nonFinite}`);
-  ok(hMin >= 0 && hMax < 1.6, `ground range ${hMin}..${hMax} km`);
+  ok(hMin >= 0 && hMax < 2.2, `ground range ${hMin}..${hMax} km`);
   ok(hMax > 0.25, `the highlands stand up (max ${hMax.toFixed(3)} km)`);
   ok(waterBad === 0, 'water is at sea level');
   report.groundKm = [+hMin.toFixed(4), +hMax.toFixed(3)];
@@ -175,19 +175,27 @@ const rnd = () => { const v = new THREE.Vector3(Math.random() * 2 - 1, Math.rand
     }
   }
   ok(townMax * 1000 < 0.5, `the towns flat (${(townMax * 1000).toFixed(3)} m)`);
-  // smooth normals: neighbours 5 m apart never turn by more than ~35 degrees
-  let turn = 0;
+  // smooth normals: neighbours 5 m apart turn little almost everywhere (the mesas' scarps and the
+  // ridged crests are real creases, so the check is on the distribution, not the extreme)
+  const turns = [];
+  let steep = 0, landN = 0;
   const a = {}, b = {};
-  for (let i = 0; i < 1500; i++) {
+  for (let i = 0; i < 3000; i++) {
     const d = rnd();
     if (d.z < -0.5) continue;
     const e = new THREE.Vector3(0, 1, 0).cross(d).normalize();
     moonGround(d, a);
     moonGround(d.clone().addScaledVector(e, 0.005 / R).normalize(), b);
-    turn = Math.max(turn, a.normal.angleTo(b.normal));
+    turns.push(a.normal.angleTo(b.normal));
+    if (a.h > 0) { landN++; if (a.normal.dot(d) < Math.cos(35 / 57.3)) steep++; }
   }
-  ok(turn < 0.6, `normal turns ${(turn * 57.3).toFixed(1)} deg over 5 m`);
-  report.maxNormalTurn5m = +(turn * 57.3).toFixed(1);
+  turns.sort((x, y) => x - y);
+  const p99 = turns[Math.floor(turns.length * 0.99)] * 57.3, p50 = turns[Math.floor(turns.length * 0.5)] * 57.3;
+  ok(p99 < 25, `normal turn over 5 m, 99th percentile ${p99.toFixed(1)} deg`);
+  ok(turns[turns.length - 1] * 57.3 < 85, `normal turn over 5 m, worst ${(turns[turns.length - 1] * 57.3).toFixed(1)} deg`);
+  ok(steep / Math.max(landN, 1) < 0.08, `land steeper than 35 degrees: ${(100 * steep / landN).toFixed(1)}%`);
+  report.normalTurn5mDeg = { p50: +p50.toFixed(2), p99: +p99.toFixed(1), max: +(turns[turns.length - 1] * 57.3).toFixed(1) };
+  report.steepLandPct = +(100 * steep / Math.max(landN, 1)).toFixed(2);
   // seams of the mask's cube faces: the ground continuous across them
   let seam = 0;
   const fuv = [0, 0, 0];
@@ -225,6 +233,7 @@ const rnd = () => { const v = new THREE.Vector3(Math.random() * 2 - 1, Math.rand
   report.spacingAt1kmM = +(sp(1) * 1000).toFixed(1);
   // a patch centred somewhere hilly: the triangles vs the CPU ground, within 1 km of the centre
   let worst = 0, tested = 0;
+  const errs = [];
   for (let trial = 0; trial < 6 && tested < 1500; trial++) {
     const C = rnd();
     if (C.z < -0.5) continue;
@@ -247,14 +256,21 @@ const rnd = () => { const v = new THREE.Vector3(Math.random() * 2 - 1, Math.rand
       const p00 = vtx(ai, j), p10 = vtx(ai + 1, j), p01 = vtx(ai, j + 1), p11 = vtx(ai + 1, j + 1);
       const p = p00.multiplyScalar((1 - tA) * (1 - tR)).addScaledVector(p10, tA * (1 - tR)).addScaledVector(p01, (1 - tA) * tR).addScaledVector(p11, tA * tR);
       const d = p.clone().normalize();
-      const hMesh = p.length() - R, hCpu = moonGround(d, {}).h;
-      worst = Math.max(worst, Math.abs(hMesh - hCpu));
+      const gd = moonGround(d, {});
+      const hMesh = p.length() - R, hCpu = gd.h;
+      // the gap measured across the surface (on a scarp a height error is a sideways sliver)
+      const e = Math.abs(hMesh - hCpu) * Math.max(gd.normal.dot(d), 0);
+      worst = Math.max(worst, e);
+      errs.push(e);
       tested++;
     }
   }
   ok(tested > 300, `mesh probes ${tested}`);
-  ok(worst * 1000 < 1.0, `mesh vs moonGround within 1 km of the centre: ${(worst * 1000).toFixed(3)} m`);
-  report.meshVsGroundM = +(worst * 1000).toFixed(3);
+  errs.sort((x, y) => x - y);
+  const p99 = errs[Math.floor(errs.length * 0.99)] * 1000;
+  ok(p99 < 0.5, `mesh vs moonGround (across the surface) within 1 km of the centre, 99th percentile: ${p99.toFixed(3)} m`);
+  ok(worst * 1000 < 1.5, `mesh vs moonGround within 1 km of the centre, worst: ${(worst * 1000).toFixed(3)} m`);
+  report.meshVsGroundM = { p50: +(errs[errs.length >> 1] * 1000).toFixed(3), p99: +p99.toFixed(3), max: +(worst * 1000).toFixed(3) };
 }
 
 // ------------------------------------------------------ the surface itself --
@@ -270,7 +286,9 @@ const rnd = () => { const v = new THREE.Vector3(Math.random() * 2 - 1, Math.rand
   }
   const vs = S.patchMaterial.vertexShader;
   hygiene('patch vertex', vs, ['void main() {']);
-  hygiene('surface', S.material.fragmentShader, ['float reliefHG(vec3 up']);
+  hygiene('surface', S.material.fragmentShader, ['float reliefHG(vec3 up', 'vec2 faceQ(vec3 d)', 'vec4 seaWaves(vec3 rel']);
+  ok(S.material.fragmentShader.indexOf('vec2 faceQ(') < S.material.fragmentShader.indexOf('faceQ(up)'), 'faceQ defined before use');
+  ok(S.material.fragmentShader.indexOf('float riverF') < S.material.fragmentShader.indexOf('(1.0 - riverF)'), 'riverF declared before use');
   ok(!/hillHeight|geoMask|vPosM/.test(S.material.fragmentShader + vs), 'the old Landing-only patch is gone');
   ok(/if \(uPatchOn > 0\.5 && dot\(up, uPC\) > uPCos\) discard;/.test(S.material.fragmentShader), 'the sphere steps aside inside the patch');
   const idx = S.patch.geometry.index.array;

@@ -37,26 +37,27 @@ function rotMat(ax, ay, az, ang) {
   ].map((v) => +v.toFixed(7));
 }
 const OCT = [
-  // wavelength, amplitude (km), ridged share on the highlands
-  [30.0, 0.48, 0.55],
-  [13.5, 0.29, 0.7],
-  [6.1, 0.16, 0.8],
-  [2.75, 0.088, 0.75],
-  [1.24, 0.048, 0.6],
-  [0.56, 0.025, 0.45],
-  [0.25, 0.012, 0.3],
-  [0.115, 0.0045, 0.2],
-  [0.052, 0.0022, 0.1],
+  // wavelength, amplitude (km), ridged share on the highlands, extra height on the highlands
+  // (the mid scales: crags, spurs and gorges where the country is high; the plains stay gentle)
+  [30.0, 0.55, 0.55, 0.0],
+  [13.5, 0.36, 0.7, 0.3],
+  [6.1, 0.24, 0.8, 1.3],
+  [2.75, 0.14, 0.75, 1.6],
+  [1.24, 0.075, 0.6, 1.2],
+  [0.56, 0.034, 0.45, 0.6],
+  [0.25, 0.015, 0.3, 0.0],
+  [0.115, 0.0045, 0.2, 0.0],
+  [0.052, 0.0022, 0.1, 0.0],
 ];
 export const RELIEF = {
   warp: { lam: 36.0, amp: 3.8, rot: rotMat(1, 2, 3, 0.7), off: [31.7, 7.3, 13.1] },
   region: { lam: 160.0, lo: -0.3, hi: 0.5, rot: rotMat(3, 1, 2, 1.1), off: [5.3, 17.9, 2.2] },
   valley: { lam: 28.0, width: 0.075, depth: 0.28, rot: rotMat(2, 3, 1, 2.3), off: [11.1, 3.7, 23.3] },
-  mesa: { lam: 21.0, step: 0.085, lo: 0.2, hi: 0.5, k: 0.7, rot: rotMat(1, 3, 2, 0.4), off: [2.9, 29.3, 8.8] },
-  oct: OCT.map(([lam, amp, ridge], i) => ({ lam, amp, ridge, rot: rotMat(1 + i, 2 - i * 0.3, 3 + i * 0.7, 0.9 + i * 1.37), off: [+(i * 17.31 % 50).toFixed(2), +(i * 5.13 % 50).toFixed(2), +(i * 11.77 % 50).toFixed(2)] })),
+  mesa: { lam: 21.0, step: 0.085, lo: 0.2, hi: 0.5, k: 0.6, rot: rotMat(1, 3, 2, 0.4), off: [2.9, 29.3, 8.8] },
+  oct: OCT.map(([lam, amp, ridge, boost], i) => ({ lam, amp, ridge, boost, rot: rotMat(1 + i, 2 - i * 0.3, 3 + i * 0.7, 0.9 + i * 1.37), off: [+(i * 17.31 % 50).toFixed(2), +(i * 5.13 % 50).toFixed(2), +(i * 11.77 % 50).toFixed(2)] })),
   lift: 0.1,            // relief baseline over the land (scaled): most land stands a little proud
   ampLow: 0.28,         // relief scale on the low plains (1 on the highlands)
-  erosion: 5.0,         // octave damping by the slope already built (valleys smooth, ridges sharp)
+  erosion: 3.0,         // octave damping by the slope already built (valleys smooth, ridges sharp)
   floorK: 0.03,         // softness of the floor at sea level (km): the coastal and river flats
   bakeHiLo: 0.4, bakeHiHi: 2.8,   // bake height (km) over which the relief grows bold
   site: { flat0: 10.0, flat1: 14.0, drvW0: 0.6, drvW1: 1.4, town0: 1.5, town1: 3.0, bay0: 0.08, bay1: 0.4 },
@@ -180,9 +181,12 @@ ${RELIEF.oct.map((o, i) => `  {
       vec4 n = tNoise(${m3(o.rot)} * (Pw / ${f7(o.lam)}) + ${v3(o.off)});
       vec3 dn = (n.yzw * ${m3(o.rot)}) / ${f7(o.lam)};
       float rk = ${f7(o.ridge)} * hi;
-      float val = mix(n.x, 0.8 - 1.6 * abs(n.x), rk);
-      vec3 dval = mix(dn, -1.6 * sign(n.x) * dn, rk);
-      float a = ${f7(o.amp)} * S * w${i >= 2 ? ` / (1.0 + ${f7(RELIEF.erosion)} * dot(grad, grad))` : ''}${i >= 3 ? ' * (1.0 - 0.6 * vv)' : ''};
+      // ridged: a crest where the noise crosses zero, rounded over a few percent of the wavelength
+      // (a true crease would be a knife edge no mesh could follow)
+      float an = sqrt(n.x * n.x + 0.0064);
+      float val = mix(n.x, 0.8 - 1.6 * an, rk);
+      vec3 dval = mix(dn, -1.6 * (n.x / an) * dn, rk);
+      float a = ${f7(o.amp)} * S * w${o.boost > 0 ? ` * (1.0 + ${f7(o.boost)} * hi * hi)` : ''}${i >= 2 ? ` / (1.0 + ${f7(RELIEF.erosion)} * dot(grad, grad))` : ''}${i >= 3 ? ' * (1.0 - 0.6 * vv)' : ''};
       raw += a * val;
       grad += a * dval;
     }
@@ -193,10 +197,10 @@ ${RELIEF.oct.map((o, i) => `  {
   if (mk > 0.0 && raw > 0.0) {
     float t = raw / ${f7(RELIEF.mesa.step)};
     float fl = floor(t), fr = t - fl;
-    float st = clamp((fr - 0.55) / 0.3, 0.0, 1.0);
+    float st = clamp((fr - 0.5) / 0.45, 0.0, 1.0);
     float sm = st * st * (3.0 - 2.0 * st);
     float ter = (fl + sm) * ${f7(RELIEF.mesa.step)};
-    float dter = 6.0 * st * (1.0 - st) / 0.3;
+    float dter = 6.0 * st * (1.0 - st) / 0.45;
     raw = mix(raw, ter, mk);
     grad *= mix(1.0, dter, mk);
   }
@@ -362,9 +366,11 @@ export function reliefH(x, y, z, fade = 0, info = null) {
     mulR(o.rot, Pwx, Pwy, Pwz, o.lam, o.off, _q); tNoise(_q[0], _q[1], _q[2], _n);
     mulRT(o.rot, _n, o.lam, _d);
     const rk = o.ridge * hi;
-    const val = _n[0] + (0.8 - 1.6 * Math.abs(_n[0]) - _n[0]) * rk;
-    const sg = -1.6 * Math.sign(_n[0]);
+    const an = Math.sqrt(_n[0] * _n[0] + 0.0064);
+    const val = _n[0] + (0.8 - 1.6 * an - _n[0]) * rk;
+    const sg = -1.6 * (_n[0] / an);
     let a = o.amp * S * w;
+    if (o.boost > 0) a *= 1 + o.boost * hi * hi;
     if (i >= 2) a /= 1 + RELIEF.erosion * (gx * gx + gy * gy + gz * gz);
     if (i >= 3) a *= 1 - 0.6 * vv;
     raw += a * val;
@@ -377,7 +383,7 @@ export function reliefH(x, y, z, fade = 0, info = null) {
   const mk = smoothstep(Me.lo, Me.hi, _n[0]) * hi * Me.k;
   if (mk > 0 && raw > 0) {
     const t = raw / Me.step, fl = Math.floor(t), fr = t - fl;
-    const st = Math.min(Math.max((fr - 0.55) / 0.3, 0), 1);
+    const st = Math.min(Math.max((fr - 0.5) / 0.45, 0), 1);
     const ter = (fl + st * st * (3 - 2 * st)) * Me.step;
     raw = raw + (ter - raw) * mk;
   }
