@@ -122,8 +122,10 @@ function limbPts(p0, a, el, len, lift, n = 4) {
   return pts;
 }
 
-function buildHero(kind) {
-  const B = new CB(), r = rng(1301 + kind * 53), ck = LK.CANOPY + kind, BK = LK.BARK;
+function buildHero(kind, variant = 0) {
+  // (two variants a species, so neighbours differ in their build as well as their size and cast:
+  // the second taller and narrower, with five limbs climbing more steeply)
+  const B = new CB(), r = rng(1301 + kind * 53 + variant * 7919), ck = LK.CANOPY + kind, BK = LK.BARK;
   if (kind === 1) {
     // cypress: a straight trunk nearly to the top, whorls of short up-swept branches, and a
     // dense flame of foliage in many overlapping clusters
@@ -169,16 +171,16 @@ function buildHero(kind) {
   }
   // broadleaf (0) and flowering (3): a buttressed trunk forking into six limbs, three branches
   // off each, twigs off those, foliage on every twig's end and along the outer limbs
-  const th = kind === 3 ? 3.2 : 3.8;
+  const th = (kind === 3 ? 3.2 : 3.8) + variant * 0.6;
   trunk(B, [[0.78, -0.5, BK], [0.62, 0.1, BK], [0.46, 0.6, BK], [0.38, 1.8, BK], [0.32, th - 0.4, BK], [0.24, th + 0.4, BK], [0.02, th + 1.0, BK]], 14);
   // buttress roots
   for (let i = 0; i < 5; i++) {
     const a = (i / 5) * Math.PI * 2 + 0.3;
     B.tube([V(Math.cos(a) * 0.2, 0.9, Math.sin(a) * 0.2), V(Math.cos(a) * 0.6, 0.15, Math.sin(a) * 0.6), V(Math.cos(a) * 0.95, -0.25, Math.sin(a) * 0.95)], taper(0.16, 0.05), 5, BK);
   }
-  const nL = 6, cR = kind === 3 ? 0.95 : 1.1;
+  const nL = variant ? 5 : 6, cR = kind === 3 ? 0.95 : 1.1;
   for (let i = 0; i < nL; i++) {
-    const a = (i / nL) * Math.PI * 2 + 0.4 * r(), el = 0.62 + 0.3 * r();
+    const a = (i / nL) * Math.PI * 2 + 0.4 * r(), el = 0.62 + 0.3 * r() + variant * 0.18;
     const p0 = V(0, th - 0.5 + 0.35 * (i % 3), 0);
     const L1 = 2.6 + 0.8 * r();
     const pts = limbPts(p0, a, el, L1, 0.6, 4);
@@ -232,11 +234,15 @@ export class LandingTrees {
     this.sets = [];
     this.triangles = { near: 0, far: 0, hero: 0, now: 0 };
     SPECIES.forEach((name, kind) => {
-      const trees = by[kind];
-      if (!trees.length) return;
-      const geos = [buildHero(kind), buildDetailed(kind), buildSimple(kind)];
-      const set = new CellLod(`Medii Landing trees: ${name}`, geos, [HERO_R, DETAIL_R, 1e9], mat, { tint: true, cell: 150 });
-      const rr = rng(4001 + kind);
+      const all = by[kind];
+      if (!all.length) return;
+      const detailed = buildDetailed(kind), simple = buildSimple(kind);
+      for (let variant = 0; variant < 2; variant++) {
+      const trees = all.filter((t) => (Math.floor(Math.abs(t.phase) * 997) & 1) === variant);
+      if (!trees.length) continue;
+      const geos = [buildHero(kind, variant), detailed, simple];
+      const set = new CellLod(`Medii Landing trees: ${name} ${variant ? 'B' : 'A'}`, geos, [HERO_R, DETAIL_R, 1e9], mat, { tint: true, cell: 150 });
+      const rr = rng(4001 + kind + variant * 31);
       for (const t of trees) {
         // each tree its own cast: lighter or darker, a little warmer or cooler
         const l = 0.82 + 0.34 * rr(), w = (rr() - 0.5) * 0.18;
@@ -248,6 +254,7 @@ export class LandingTrees {
       this.triangles.near += tr[1] * trees.length;
       this.triangles.far += tr[2] * trees.length;
       this.sets.push(set);
+      }
     });
     this._far = null;
     this.update(1e9, new THREE.Vector3(0, 1e9, 0));
