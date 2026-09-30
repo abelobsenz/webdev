@@ -183,8 +183,11 @@ export function buildMediiLanding() {
   const lamps = [];
   const plan = [];                  // footprints (u, v rectangles, metres) for the overlap checks
   const courts = [];                // courtyard interiors (for their trees)
+  // what the instanced detail dresses (lunarLandingDetail.js, lunarLandingProps.js): every house
+  // with its frame and fronts, the lamp standards, quay edges, piers, the pads' rims
+  const houses = [], props = { lamps: [], quay: [], piers: [], boats: [], stairs: [], terraceEdges: [] };
   const foot = (kind, u, v, w, d, alongU = true) => plan.push(alongU ? { kind, u0: u - w / 2, u1: u + w / 2, v0: v - d / 2, v1: v + d / 2 } : { kind, u0: u - d / 2, u1: u + d / 2, v0: v - w / 2, v1: v + w / 2 });
-  const rnd = mulberry(4270);
+  const rnd = mulberry(4270), rndT = rnd;
   const at = (u, v, h) => { const [x, z] = UV(u, v); return new THREE.Vector3(x, gy(x, z) + h, z); };
   const lamp = (u, v, h, color, i = 1.2, r = 1.6, extra = {}) => lamps.push({ p: at(u, v, h), r, color, i, ...extra });
 
@@ -192,7 +195,7 @@ export function buildMediiLanding() {
   const V_LOW = 1550, V_STRAND = 2900, V_MID = 550, U_TOWN = 1700;
   const DOMES = [[-650, -1150, 210], [-1250, -1000, 150], [-150, -1050, 130], [-1250, -1450, 110], [-300, -1470, 95]];
   const S = {
-    B, UV, gy, at, lamp, lamps, plan, foot, courts, shoreV, rnd, prism, gable, ROT_UV, DOMES, PADS, U_TOWN,
+    B, UV, gy, at, lamp, lamps, plan, foot, courts, shoreV, rnd, prism, gable, ROT_UV, DOMES, PADS, U_TOWN, houses, props,
     T: { LIFT: T_LIFT, MID: T_MID, LOW: T_LOW, STRAND: T_STRAND }, V: { MID: V_MID, LOW: V_LOW, STRAND: V_STRAND },
   };
   // --- terraces ---
@@ -236,20 +239,24 @@ export function buildMediiLanding() {
       const h = v < V_LOW ? T_MID : T_LOW;
       for (const s of [-1, 1]) {
         const [x, z] = UV(s * 26, v);
-        B.at(x, gy(x, z) + h, z, 0, ROT_UV, 0);
-        B.box(0, 3.6, 0, 0.35, 8, 0.35, LK.BRONZE);
-        B.pop();
-        lamp(s * 26, v, h + 8.2, LAMP.AMBER, 1.1, 1.3);
+        props.lamps.push({ x, y: gy(x, z) + h, z, ry: ROT_UV + (s > 0 ? Math.PI : 0), kind: 'boulevard', h: 7.9 });
+        lamp(s * 26, v, h + 7.9, LAMP.AMBER, 1.1, 1.3);
       }
     }
   }
 
   // --- courtyard blocks either side of the Boulevard ---
+  // (the same house on a random stream of its own: the harbour's warehouses)
+  let rnd_ = null;
+  const houseR = (r, ...a) => { rnd_ = r; try { return house(...a); } finally { rnd_ = null; } };
   const house = (u, v, h0, w, d, storeys, alongU, roofKind) => {
+    const rnd = rnd_ || rndT;
     foot('house', u, v, w, d, alongU);
     const [x, z] = UV(u, v);
     B.at(x, gy(x, z) + h0, z, 0, ROT_UV + (alongU ? 0 : Math.PI / 2), 0);
     const H = storeys * 3.6 + 1.2, pal = Math.floor(rnd() * 4);
+    const rec = { x, y: gy(x, z) + h0, z, ry: ROT_UV + (alongU ? 0 : Math.PI / 2), w, d, H, storeys, pal, roof: roofKind, rh: 0, balc: [] };
+    houses.push(rec);
     B.box(0, H / 2 - 0.4, 0, w, H + 0.8, d, LK.HOUSE + pal);
     // balconies on the long fronts: a slab on brackets and a bronze rail, on a window bay
     for (const face of [-1, 1]) for (let s = 1; s < storeys; s++) {
@@ -257,6 +264,7 @@ export function buildMediiLanding() {
       const bays = Math.floor(w / 3), bay = Math.floor(rnd() * bays) - Math.floor(bays / 2), bxp = bay * 3, bw = rnd() < 0.3 ? 5.6 : 2.6;
       if (Math.abs(bxp) + bw / 2 > w / 2 - 0.5) continue;
       const y = s * 3.6 + 0.05, z = face * (d / 2 + 0.55);
+      rec.balc.push([face, s, bxp, bw]);
       B.box(bxp, y, z, bw, 0.18, 1.1, LK.WALL);
       B.box(bxp, y + 0.95, face * (d / 2 + 1.07), bw, 0.06, 0.06, LK.BRONZE);
       for (let q = 0; q <= Math.round(bw / 0.8); q++) B.box(bxp - bw / 2 + q * (bw / Math.round(bw / 0.8)), y + 0.5, face * (d / 2 + 1.07), 0.04, 0.9, 0.04, LK.BRONZE);
@@ -271,6 +279,7 @@ export function buildMediiLanding() {
     } else {
       // eaves over the long fronts only (row houses meet at their gables), a ridge cap and chimneys
       const rh = Math.min(d * 0.42, 6.5);
+      rec.rh = rh;
       gable(B, H, w, d + 1.1, rh, LK.TILE);
       B.box(0, H + rh + 0.08, 0, w, 0.24, 0.42, LK.TILE);
       for (let c = 0; c < (w > 20 ? 2 : 1); c++) {
@@ -351,9 +360,13 @@ export function buildMediiLanding() {
   for (let u = -1680; u <= 1680; u += 40) {
     if (!quayFree(u)) continue;
     const [x, z] = UV(u, shoreV(u) - 8);
-    B.at(x, gy(x, z) + T_STRAND, z, 0, ROT_UV, 0);
-    B.box(0, 3.0, 0, 0.3, 6.6, 0.3, LK.BRONZE);
-    B.pop();
+    props.lamps.push({ x, y: gy(x, z) + T_STRAND, z, ry: ROT_UV + Math.PI, kind: 'quay', h: 6.5 });
+  }
+  // the sea wall's edge, for its bollards, rings and stairs down to the water
+  for (let u = -1690; u <= 1690; u += 10) {
+    const v = shoreV(u) - 1.2, [x, z] = UV(u, v);
+    const t = (shoreV(u + 1) - shoreV(u - 1)) / 2;
+    props.quay.push({ u, v, x, y: gy(x, z) + T_STRAND, z, ry: ROT_UV - Math.atan(t), free: quayFree(u) });
   }
 
   // --- the harbour: two moles enclosing a basin, lighthouses, piers and boats ---
@@ -368,8 +381,54 @@ export function buildMediiLanding() {
       B.push(new THREE.Matrix4().makeRotationX(-Math.PI / 2));
       B.lathe([[9, -0.5, LK.WALL], [8, 16, LK.WALL], [6.5, 26, LK.STONE], [7.5, 26.5, LK.BRONZE], [5, 27, LK.LANTERN], [5, 31, LK.LANTERN], [5.8, 31.5, LK.BRONZE], [0, 35, LK.BRONZE]], 20);
       B.pop(); B.pop();
+      // the lighthouse dressed: a gallery railing on its posts, the lantern's glazing bars and a
+      // ball finial, a door with its steps, windows climbing the stair, and the keeper's store
+      {
+        B.at(x, gy(x, z) + 3.2, z);
+        const V3 = (a, rr, y) => new THREE.Vector3(Math.cos(a) * rr, y, Math.sin(a) * rr);
+        B.push(new THREE.Matrix4().makeRotationX(-Math.PI / 2));
+        B.push(new THREE.Matrix4().makeTranslation(0, 0, 27.6));
+        B.torus(7.3, 0.06, 64, 4, LK.IRON);
+        B.pop();
+        B.push(new THREE.Matrix4().makeTranslation(0, 0, 27.05));
+        B.torus(7.3, 0.03, 64, 3, LK.IRON);
+        B.pop();
+        B.pop();
+        for (let i = 0; i < 24; i++) { const a = (i / 24) * Math.PI * 2; B.tube([V3(a, 7.3, 26.5), V3(a, 7.3, 27.6)], 0.04, 3, LK.IRON); }
+        for (let i = 0; i < 12; i++) { const a = (i / 12) * Math.PI * 2 + 0.13; B.tube([V3(a, 5.08, 27.0), V3(a, 5.08, 31.0)], 0.07, 3, LK.BRONZE); }
+        for (const y of [28.3, 29.7]) { B.push(new THREE.Matrix4().makeRotationX(-Math.PI / 2)); B.push(new THREE.Matrix4().makeTranslation(0, 0, y)); B.torus(5.08, 0.05, 40, 3, LK.BRONZE); B.pop(); B.pop(); }
+        B.push(new THREE.Matrix4().makeRotationX(-Math.PI / 2));
+        B.lathe([[0, 34.6, LK.BRONZE], [0.5, 34.8, LK.BRONZE], [0.7, 35.4, LK.BRONZE], [0.5, 36.0, LK.BRONZE], [0, 36.2, LK.BRONZE]], 10);
+        B.pop();
+        const dA = -Math.PI / 2 - ROT_UV;         // the door faces up the mole, toward the town
+        B.push(new THREE.Matrix4().makeRotationY(-dA - Math.PI / 2));
+        B.box(0, 1.4, 8.95, 1.6, 2.8, 0.3, LK.FRAME);
+        B.box(0, 2.95, 9.1, 2.2, 0.3, 0.6, LK.MOULD);
+        B.box(0, 0.12, 9.6, 2.6, 0.24, 1.2, LK.WALL);
+        B.pop();
+        for (let i = 0; i < 5; i++) {
+          const a = dA + 0.9 + i * 1.3, y = 5 + i * 4.2, rr = (y < 16 ? 9 - (y + 0.5) / 16.5 : 8 - 1.5 * (y - 16) / 10) - 0.03;
+          B.push(new THREE.Matrix4().makeRotationY(-a - Math.PI / 2));
+          B.box(0, y, rr, 0.8, 1.3, 0.2, LK.GLASS);
+          B.box(0, y - 0.72, rr + 0.08, 1.1, 0.14, 0.3, LK.MOULD);
+          B.pop();
+        }
+        B.pop();
+        // the keeper's store at its foot, on the mole's axis
+        const [kx, kz] = UV(sgn * 150, s1);
+        B.at(kx, gy(kx, kz) + 3.2, kz, 0, ROT_UV, 0);
+        B.box(0, 2.2, 0, 16, 4.4, 9, LK.WALL);
+        B.box(0, 4.6, 0, 16.6, 0.4, 9.6, LK.MOULD);
+        for (const s of [-1, 1]) for (const xx of [-5, 0, 5]) B.box(xx, 2.4, s * 4.52, 1.2, 1.6, 0.06, LK.GLASS);
+        B.box(7.2, 0.3, 0, 0.1, 0.6, 1, LK.WALL);
+        B.pop();
+      }
       lamps.push({ p: new THREE.Vector3(x, gy(x, z) + 3.2 + 29, z), r: 3.2, color: sgn < 0 ? LAMP.RED : LAMP.GREEN, i: 3.0, breathe: 0.35 });
-      for (let v = s0 + 60; v < s1; v += 60) lamp(sgn * 620, v, 3.2 + 5, LAMP.WHITE, 0.6, 1.0);
+      for (let v = s0 + 60; v < s1; v += 60) {
+        lamp(sgn * 620, v, 3.2 + 5, LAMP.WHITE, 0.6, 1.0);
+        const [lx, lz] = UV(sgn * 620, v);
+        props.lamps.push({ x: lx, y: gy(lx, lz) + 3.2, z: lz, ry: ROT_UV, kind: 'mole', h: 5 });
+      }
     }
     // finger piers
     for (const u of [-330, 0, 330]) {
@@ -378,7 +437,12 @@ export function buildMediiLanding() {
       B.at(x, gy(x, z), z, 0, ROT_UV, 0);
       B.box(0, (2.2 - 8) / 2, 0, 16, 2.2 + 8, v1 - v0, LK.DECK);
       B.pop();
-      for (let v = v0 + 30; v < v1; v += 40) lamp(u, v, 2.2 + 4.5, LAMP.WHITE, 0.5, 0.9);
+      props.piers.push({ u, v0, v1, top: 2.2, w: 16 });
+      for (let v = v0 + 30; v < v1; v += 40) {
+        lamp(u, v, 2.2 + 4.5, LAMP.WHITE, 0.5, 0.9);
+        const [lx, lz] = UV(u, v);
+        props.lamps.push({ x: lx, y: gy(lx, lz) + 2.2, z: lz, ry: ROT_UV, kind: 'pier', h: 4.5 });
+      }
     }
     // boats moored along the piers (hulls sit in the water, decks above it)
     for (const [u, dv, L] of [[-330 + 22, 80, 34], [-330 - 20, 150, 26], [22, 60, 44], [-22, 170, 30], [330 + 20, 110, 38], [330 - 22, 60, 24]]) {
@@ -446,10 +510,20 @@ export function buildMediiLanding() {
   })();
   // civic halls at the corners of the Lift terrace: stone halls under glazed roofs
   for (const [u, v] of [[-500, -420], [500, -420], [-500, 330], [500, 330]]) {
-    foot('hall', u, v, 150, 96);
+    foot('hall', u, v, 150, 112);
     const [x, z] = UV(u, v);
     B.at(x, gy(x, z) + T_LIFT, z, 0, ROT_UV, 0);
     B.box(0, 9, 0, 150, 19, 96, LK.STONE);
+    // a stepped podium and, over the colonnade on each long front (lunarLandingDetail.js), an
+    // entablature: architrave, frieze and a dentilled cornice returning to the wall
+    for (const s of [-1, 1]) {
+      B.box(0, 0.15, s * 51.5, 146, 0.9, 7.0, LK.WALL);
+      B.box(0, 0.05, s * 51.5, 148, 0.7, 8.2, LK.WALL);
+      B.box(0, 18.1, s * 51.8, 144, 1.0, 6.0, LK.WALL);
+      B.box(0, 19.0, s * 51.9, 145, 0.8, 6.4, LK.STONE);
+      B.box(0, 19.65, s * 52.2, 147, 0.5, 7.4, LK.WALL);
+      for (let i = -70; i <= 70; i += 1.4) B.box(i, 19.3, s * 55.05, 0.5, 0.26, 0.3, LK.WALL);
+    }
     B.push(new THREE.Matrix4().makeTranslation(0, 18.5, 0));
     B.loft([{ z: -48, pts: [[-75, 0], [75, 0], [58, 16], [-58, 16]] }, { z: 48, pts: [[-75, 0], [75, 0], [58, 16], [-58, 16]] }], LK.ROOF);
     B.pop();
@@ -538,10 +612,37 @@ export function buildMediiLanding() {
       B.pop();
     }
     B.pop();
+    // the field's terminal beside its road: a stone hall with a glazed upper floor under a
+    // deep flat roof, a canopy over the kerb, and a control tower with a glazed cab
+    {
+      const tu = u + 80, tv = v + 312;
+      foot('terminal', tu, tv, 64, 44);
+      const [tx, tz] = UV(tu, tv);
+      B.at(tx, gy(tx, tz), tz, 0, ROT_UV, 0);
+      B.box(0, 2.6, 0, 64, 6.2, 40, LK.STONE);
+      B.box(0, 7.6, 0, 62, 3.8, 38, LK.GLASS);
+      for (let i = -30; i <= 30; i += 4) { B.box(i, 7.6, 19.1, 0.3, 3.8, 0.3, LK.BRONZE); B.box(i, 7.6, -19.1, 0.3, 3.8, 0.3, LK.BRONZE); }
+      B.box(0, 9.9, 0, 66, 0.8, 42, LK.WALL);
+      B.box(0, 10.5, 0, 60, 0.5, 36, LK.PANEL);
+      // the kerbside canopy on slender columns, facing the road (local -x)
+      B.box(-36.5, 4.6, 0, 9, 0.4, 30, LK.WALL);
+      for (const z of [-13, -4.5, 4.5, 13]) B.box(-40, 2.2, z, 0.35, 4.4, 0.35, LK.BRONZE);
+      B.box(-32.3, 3.2, 0, 0.3, 0.8, 14, LK.SIGN);
+      B.at(26, 10.3, 14);
+      B.push(new THREE.Matrix4().makeRotationX(-Math.PI / 2));
+      B.lathe([[4.2, 0, LK.WALL], [3.6, 22, LK.WALL], [5.6, 23, LK.BRONZE], [6.4, 24, LK.GLASS], [6.8, 27.5, LK.GLASS], [7.2, 28, LK.BRONZE], [5.5, 29, LK.PANEL], [0.6, 29.4, LK.BRONZE], [0.3, 34, LK.BRONZE], [0, 34.2, LK.BRONZE]], 24);
+      B.pop(); B.pop();
+      B.pop();
+      lamps.push({ p: at(tu + 26, tv + 14, 10.3 + 34.4), r: 1.6, color: LAMP.RED, i: 2.0, breathe: 0.4 });
+    }
     // road to the domes quarter (its top a little above the ground, its foot below)
     const vEnd = -1700 + 20;
     slabUV(B, u - 15, u + 15, v + 262, vEnd, 0.5, { bot: -2, step: 150 });
-    for (let vv = v + 300; vv < vEnd; vv += 50) for (const s of [-1, 1]) lamp(u + s * 17, vv, 0.5 + 5, LAMP.AMBER, 0.6, 1.0);
+    for (let vv = v + 300; vv < vEnd; vv += 50) for (const s of [-1, 1]) {
+      lamp(u + s * 17, vv, 0.5 + 5, LAMP.AMBER, 0.6, 1.0);
+      const [lx, lz] = UV(u + s * 17, vv);
+      props.lamps.push({ x: lx, y: gy(lx, lz) + 0.5, z: lz, ry: ROT_UV, kind: 'road', h: 5 });
+    }
     // ramp from the road up onto the pad plinth, and from the road up the quarter's wall
     const ramp = (vA, vB, hA, hB) => {
       const n = 8;
@@ -641,6 +742,34 @@ export function buildMediiLanding() {
   TREE_SINK.list = [];
   const life = buildLandingLife(S);
   const treeInstances = TREE_SINK.list; TREE_SINK.list = null;
+
+  // harbour warehouses along the moles' cross arms, gable-ended to the basin, with a crane on
+  // the quay between each pair (built last, on a random stream of their own, so the rest of
+  // the town is laid out as before)
+  {
+    const s1 = shoreV(0) + 420;
+    const hr = mulberry(8123), keep = rnd;
+    let i = 0;
+    for (const sgn of [-1, 1]) for (let u = 210; u + 20 < 570; u += 46) {
+      const w = 34 + Math.floor(hr() * 6), st = 2 + Math.floor(hr() * 2);
+      houseR(hr, sgn * u, s1 - 4, 3.2, w, 17, st, true, 1);
+      if (i++ % 2 === 0) {
+        // a portal crane on the basin side of the arm: legs astride a rail, a jib over the water
+        const [cx, cz] = UV(sgn * (u + 23), s1 - 16);
+        B.at(cx, gy(cx, cz) + 3.2, cz, 0, ROT_UV, 0);
+        for (const lx of [-2.5, 2.5]) for (const lz of [-2.2, 2.2]) B.box(lx, 5, lz, 0.5, 10, 0.5, LK.PAINT);
+        B.box(0, 10.4, 0, 6, 1.0, 5.4, LK.PAINT);
+        B.box(0, 12.2, 0, 3.4, 2.6, 3.4, LK.PAINT);
+        B.box(0, 12.6, 1.71, 2.4, 1.2, 0.04, LK.GLASS);
+        B.at(0, 13.6, 0, 0.35, 0, 0);
+        B.box(0, 0, -9, 0.8, 0.9, 20, LK.PAINT);
+        B.pop();
+        B.box(0, 14.5, 3.4, 1.6, 1.4, 2.8, LK.DARK);
+        B.pop();
+      }
+    }
+    void keep;
+  }
 
   const geo = B.geometry();
   // the mass driver's line, for the sleds that run on it (lunarTraffic.js)

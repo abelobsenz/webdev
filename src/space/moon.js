@@ -13,6 +13,7 @@ import { buildLunarServiceCourt } from './interfaces.js';
 import { MoonSurface } from './moonSurface.js';
 import { buildMediiLanding } from './lunarLanding.js';
 import { LandingTrees } from './lunarTrees.js';
+import { LandingDetail } from './lunarLandingProps.js';
 import { lunarMesh, LUNAR_FRAME, LK, createLunarMaterial } from './lunarMaterial.js';
 import { CB } from '../craft/craftGeometry.js';
 import { LunarTraffic } from './lunarTraffic.js';
@@ -435,6 +436,7 @@ export function buildBand(R, w, segs) {
 }
 
 const _lp = new THREE.Vector3();
+const _lcam = new THREE.Vector3();
 const _lq = new THREE.Quaternion();
 const _sunSite = new THREE.Vector3();
 const _sunM = new THREE.Vector3();
@@ -509,6 +511,10 @@ export class Moon {
     // the town's trees, instanced in detail (lunarTrees.js)
     this.landingTrees = new LandingTrees(this.landingData.treeInstances || [], this.landingMesh.material);
     this.landing.add(this.landingTrees.group);
+    // the street-range dress (house architecture, street furniture, the harbour's boats, ground
+    // cover and townspeople, instanced and sorted into distance tiers round the camera) is built
+    // on the first approach within 12 km, not at start-up
+    this.landingDetail = null;
     {
       const top = this.landingData.liftTop.clone().multiplyScalar(0.001);
       const end = 380 - 0.9;
@@ -557,6 +563,15 @@ export class Moon {
     this.ringDeck = new LunarRingDeck(this.group);    // the deck's plan stood up round the camera: terraces, vaults, portals, avenues, trams (lunarRingDeck.js)
     this.hops = new LunarHops(this.group);           // hoppers between Medii and the outposts (lunarHops.js)
     this.orbitals = new LunarOrbitals(this.group);    // Endymion Wheel, Aitken Depot, relays and ferries in lunar orbit (lunarOrbitals.js)
+  }
+
+  /** Build the Landing's street-range detail now (normally done on approach within 12 km). */
+  ensureLandingDetail() {
+    if (!this.landingDetail) {
+      this.landingDetail = new LandingDetail(this.landingData, this.landingMesh.material);
+      this.landing.add(this.landingDetail.group);
+    }
+    return this.landingDetail;
   }
 
   /** Build Medii Works and the Landing's traffic now (normally done on approach). */
@@ -614,7 +629,14 @@ export class Moon {
       const cam = this.space.camera;
       this.landing.getWorldPosition(_lp);
       this.landingMesh.visible = pixelRadius(cam, _lp, this.landingData.radius, this.space.size.y) > 1.5;
-      if (this.landingTrees) { this.landingTrees.group.visible = this.landingMesh.visible; this.landingTrees.update(_lp.distanceTo(cam.position)); }
+      if (this.landingTrees || this.landingDetail) {
+        // the camera in the Landing's site frame, metres (the detail's tiers are sorted on it)
+        _lcam.copy(cam.position); this.landing.worldToLocal(_lcam).multiplyScalar(1000);
+        const dKm = _lp.distanceTo(cam.position);
+        if (this.landingTrees) { this.landingTrees.group.visible = this.landingMesh.visible; this.landingTrees.update(dKm, _lcam); }
+        if (!this.landingDetail && dKm < 12 && this.landingMesh.visible) this.ensureLandingDetail();
+        if (this.landingDetail) { this.landingDetail.group.visible = this.landingMesh.visible && dKm < 9; if (this.landingDetail.group.visible) this.landingDetail.update(_lcam); }
+      }
       // the lift cars climb at ~0.4 km/s, a quarter of an hour from the Crown to the Exchange
       const [y0, y1] = this.carSpan;
       for (let i = 0; i < this.cars.length; i++) {
