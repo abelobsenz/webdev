@@ -208,6 +208,16 @@ export function buildLandingLife(S) {
     if (Math.abs(u) < 26 && v > 0) continue;                 // the Boulevard's axis
     addTree(u, v, T.LIFT, 11 + rnd() * 3, 4.5);
   }
+  // --- three avenues round the plaza beyond the grove, the Boulevard's and the cross axis kept open ---
+  for (const R of [380, 440, 500]) {
+    const n = Math.round((Math.PI * 2 * R) / 22);
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 2 + (R / 440) * 0.05;
+      const u = Math.cos(a) * R, v = Math.sin(a) * R;
+      if (Math.abs(u) < 30 || Math.abs(v) < 30 || Math.abs(u) > 730 || v < -630 || v > 530) continue;
+      addTree(u, v, T.LIFT, 10 + rnd() * 3, 4.0);
+    }
+  }
   // --- courtyard trees ---
   for (const c of courts) {
     if (c.garden) {

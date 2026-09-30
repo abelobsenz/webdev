@@ -18,7 +18,8 @@ import { R_MOON } from './sim.js';
 // (facade x = metres along the guideway).
 
 export const LK = { GLASS: 0, HULL: 1, LANTERN: 2, GARDEN: 3, CONDUIT: 4, PANEL: 7, BRONZE: 8, DECK: 9, DARK: 10, RADIATOR: 11, ROOF: 12, CONSERVATORY: 13, STONE: 20, ROOFG: 21, PAVE: 22, PAD: 23, COURT: 24, TILE: 25, POOL: 26, WALL: 27, COIL: 28,
-  REGOLITH: 29, SOLAR: 30, HAZARD: 31, SIGN: 32, PAINT: 33, GROUND: 34, LIGHT: 35, FOIL: 36, CANOPY: 37 };
+  REGOLITH: 29, SOLAR: 30, HAZARD: 31, SIGN: 32, PAINT: 33, GROUND: 34, LIGHT: 35, FOIL: 36, CANOPY: 37, HOUSE: 41 };
+// 41-44 Landing house facades by palette (limestone, ochre, grey render, cream): LK.HOUSE + palette
 // 37-40 tree canopies by species (broadleaf, cypress, stone pine, flowering): LK.CANOPY + species
 // 29 sintered regolith (berms, bagged shielding, spoil, boulders), 30 photovoltaic cells,
 // 31 hazard chevrons, 32 lit signage and concourse bands, 33 livery paint (the instance
@@ -258,10 +259,17 @@ void main() {
     alb = mix(alb, vec3(0.5, 0.47, 0.4), max(cLine(f.x, 11.0, 0.5, fw.x), cLine(f.y, 13.0, 0.5, fw.y)) * 0.6);
     rough = 0.9;
   } else if (k < 22.5) {
-    // paving: pale setts in a running bond, a darker gutter band every 20 m
-    float sett = max(gridLine(f.x, 1.2, 0.03, fw.x), gridLine(f.y + 0.6 * step(0.5, fract(f.x / 2.4)), 0.8, 0.03, fw.y)) * (1.0 - smoothstep(0.02, 0.06, px));
-    alb = vec3(0.3, 0.285, 0.255) * (1.0 - 0.18 * sett) * mix(1.0, 0.94 + 0.1 * vnoise(f * 0.05), 1.0 - smoothstep(3.0, 9.0, px));
-    rough = 0.75;
+    // paving: large flags (1.6 x 1.1 m, a running bond) each a shade of its own, dark granite
+    // bands framing 12 m panels, joints, and the wear and stains of foot traffic
+    vec2 fl = vec2(f.x, f.y + 0.55 * step(0.5, fract(f.x / 3.2)));
+    float joint = max(gridLine(fl.x, 1.6, 0.012, fw.x), gridLine(fl.y, 1.1, 0.012, fw.y)) * (1.0 - smoothstep(0.02, 0.06, px));
+    float flagH = hash12(floor(fl / vec2(1.6, 1.1)) + 3.0);
+    vec3 stone = mix(vec3(0.42, 0.4, 0.36), vec3(0.5, 0.47, 0.42), flagH) * mix(1.0, 0.94 + 0.12 * vnoise(f * 0.9), det);
+    float band = max(gridLine(f.x, 12.0, 0.3, fw.x), gridLine(f.y, 12.0, 0.3, fw.y));
+    stone = mix(stone, vec3(0.2, 0.2, 0.21) * (0.9 + 0.2 * vnoise(f * 1.7)), band * (1.0 - smoothstep(4.0, 12.0, px)));
+    float wear = smoothstep(0.55, 0.85, vnoise(f * 0.035)) * 0.12 + smoothstep(0.7, 0.95, vnoise(f * 0.4 + 11.0)) * 0.08 * det;
+    alb = stone * (1.0 - 0.3 * joint) * (1.0 - wear) * mix(1.0, 0.94 + 0.1 * vnoise(f * 0.05), 1.0 - smoothstep(3.0, 9.0, px));
+    rough = mix(0.72, 0.55, flagH * det);
   } else if (k < 23.5) {
     // landing pad: dark composite, a painted ring every 50 m, the central target
     float r = length(f);
@@ -272,13 +280,17 @@ void main() {
     rough = 0.6;
     em = vec3(1.0, 0.8, 0.5) * ring * 0.05 * night;
   } else if (k < 24.5) {
-    // courtyard: lawn, a gravel walk, trees as dark crowns
-    float g = vnoise(f * 0.12);
-    alb = mix(vec3(0.04, 0.09, 0.03), vec3(0.08, 0.14, 0.045), g);
-    vec2 tc = fract(f / 9.0) - 0.5;
-    float tree = (1.0 - smoothstep(0.28, 0.28 + fw.x / 9.0, length(tc))) * step(0.45, hash12(floor(f / 9.0))) * det;
-    alb = mix(alb, vec3(0.02, 0.05, 0.018), mix(0.25, tree, det));
-    rough = 0.9;
+    // lawn: grass in three scales of colour (drier and lusher patches, clover, blades), mown in
+    // alternate 3 m stripes, with worn earth where it is walked (the trees stand on it for real)
+    float g = vnoise(f * 0.12) * 0.55 + vnoise(f * 0.6 + 5.0) * 0.3 + vnoise(f * 3.1 + 9.0) * 0.15 * det;
+    alb = mix(vec3(0.05, 0.1, 0.03), vec3(0.11, 0.17, 0.05), g);
+    alb = mix(alb, vec3(0.12, 0.15, 0.06), smoothstep(0.7, 0.9, vnoise(f * 0.05 + 3.0)) * 0.6);
+    float stripe = step(0.5, fract(f.x / 6.0));
+    alb *= mix(1.0, 0.9 + 0.2 * stripe, detP);
+    float worn = smoothstep(0.78, 0.95, vnoise(f * 0.08 + 17.0));
+    alb = mix(alb, vec3(0.2, 0.17, 0.12), worn * 0.55);
+    N = normalize(N + (vec3(vnoise(f * 4.0), 0.0, vnoise(f * 4.0 + 7.0)) - 0.5) * 0.25 * det);
+    rough = 0.92;
   } else if (k < 25.5) {
     // tiled roof, each roof its own (the builder offsets facade x by 1000 m a roof): terracotta,
     // slate, bronze-grey shingle or verdigris copper, in courses, each tile a shade apart, the
@@ -366,6 +378,38 @@ void main() {
     float grit = vnoise(f * 0.35) * 0.5 + vnoise(f * 3.0) * 0.5 * detP;
     alb = mix(vec3(0.24, 0.23, 0.21), vec3(0.34, 0.325, 0.3), grit) * (1.0 - 0.3 * ruts);
     rough = 0.97;
+  } else if (k > 40.5) {
+    // a Landing house: render or dressed stone in its palette, storeys of 3.6 m with windows in
+    // 3 m bays (reveals, painted frames, glazing that takes the sky, shutters on the warm
+    // palettes, rooms lit at night), shopfronts and doors on the ground floor, a darker plinth,
+    // a string course at each floor and run-off streaks under the sills
+    float pal = k - 41.0;
+    vec3 wallC = pal < 0.5 ? vec3(0.74, 0.69, 0.6) : (pal < 1.5 ? vec3(0.8, 0.62, 0.44) : (pal < 2.5 ? vec3(0.62, 0.64, 0.63) : vec3(0.84, 0.78, 0.68)));
+    float st = floor(f.y / 3.6), fy = f.y - st * 3.6;
+    float bayC = floor(f.x / 3.0 + 0.5), bx = (f.x / 3.0 - bayC) * 3.0;          // metres from the bay's centre
+    float hw = hash12(vec2(bayC, st) + pal * 17.0);
+    float ground = 1.0 - step(0.5, st);
+    // openings: 1.3 x 1.9 m windows above a 0.95 m sill; on the ground floor a door or a 2.4 m shopfront
+    float halfW = mix(0.65, hw < 0.3 ? 0.55 : 1.2, ground), y0 = mix(0.95, hw < 0.3 ? 0.0 : 0.35, ground), y1 = mix(2.85, 2.6, ground);
+    float ox = 1.0 - smoothstep(halfW, halfW + fw.x, abs(bx)), oy = smoothstep(y0 - fw.y, y0, fy) * (1.0 - smoothstep(y1, y1 + fw.y, fy));
+    float open = ox * oy * step(0.0, f.y);
+    float frame = open * (1.0 - (1.0 - smoothstep(halfW - 0.09, halfW - 0.09 + fw.x, abs(bx))) * smoothstep(y0 + 0.09 - fw.y, y0 + 0.09, fy) * (1.0 - smoothstep(y1 - 0.09, y1 - 0.09 + fw.y, fy)));
+    float mullion = open * (1.0 - smoothstep(0.03, 0.03 + fw.x, abs(bx))) * (1.0 - ground);
+    float shutter = step(0.5, mod(pal, 2.0)) * (1.0 - ground) * (1.0 - ox) * (1.0 - smoothstep(halfW + 0.55, halfW + 0.55 + fw.x, abs(bx))) * oy;
+    vec3 stucco = wallC * (0.92 + 0.12 * vnoise(f * 0.35)) * (1.0 - 0.1 * smoothstep(0.5, 0.9, vnoise(vec2(f.x * 1.3, f.y * 0.12))) * detP);
+    stucco *= 1.0 - 0.28 * (1.0 - smoothstep(0.0, 0.7, f.y));                          // plinth
+    stucco *= 1.0 - 0.18 * cLine(f.y, 3.6, 0.1, fw.y) * step(1.0, st + 0.5);           // string courses
+    vec3 frameC = pal < 1.5 ? vec3(0.9, 0.88, 0.82) : vec3(0.22, 0.3, 0.26);
+    vec3 shutC = pal < 1.5 ? vec3(0.2, 0.34, 0.28) : vec3(0.44, 0.3, 0.2);
+    vec3 glass = vec3(0.03, 0.04, 0.05);
+    alb = mix(stucco, shutC, shutter * detP);
+    alb = mix(alb, glass, open * det);
+    alb = mix(alb, frameC, max(frame, mullion) * det);
+    rough = mix(0.86, 0.12, open * (1.0 - max(frame, mullion)) * det); metal = mix(0.0, 0.3, open * det);
+    // rooms lit from within after dark (and the shops lit longer)
+    float lit = step(mix(0.62, 0.35, ground), hash12(vec2(bayC, st) + pal * 5.0 + 3.0));
+    vec3 room = mix(vec3(1.0, 0.72, 0.46), vec3(1.0, 0.86, 0.66), hash12(vec2(st, bayC) + 9.0));
+    em += room * open * (1.0 - max(frame, mullion)) * lit * mix(uLit * 0.5, 1.0, det) * (0.15 + 0.85 * night) * 0.5;
   } else if (k > 36.5) {
     // tree canopy: leaf clumps (a noise of the crown's surface tilting the normal and shading the
     // hollows between clumps), darker undersides where the crown shades itself, a species colour

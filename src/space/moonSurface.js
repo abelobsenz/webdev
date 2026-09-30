@@ -54,7 +54,11 @@ uniform float uTexKm;       // one bake texel on the ground (km)
 uniform vec4 uTown[${ALL_TOWNS.length}];
 uniform vec4 uArcA[${ARCS.length}];
 uniform vec4 uArcB[${ARCS.length}];
+uniform float uPatchOn;
 varying vec3 vView;
+#ifdef PATCH
+varying vec3 vPosM;
+#endif
 ${NOISE_GLSL}
 ${SNOISE_GLSL}
 ${SITE_GLSL}
@@ -598,8 +602,53 @@ float horizonShadow(vec3 up, float h0, vec3 sun, float sinE) {
   return vis;
 }
 
+
+// ---- the hills round the Landing: shared by the ray-traced sphere (as shading) and the terrain
+// patch (as geometry), so the two agree wherever both are drawn
+const vec2 DRV_P0 = vec2(2.192, 1.061);          // the mass driver's breech (site km) and heading
+const vec2 DRV_D = vec2(0.9701, 0.2425);
+float hillMaskCore(vec3 up, vec3 loc, float coastM) {
+  float siteD = length(loc.xz);
+  float nearS = 1.0 - smoothstep(24.0, 32.0, siteD);
+  // the shore: near the Landing the Bay's exact coast; elsewhere the bake's coast mask
+  float shoreK = mix(1.0 - smoothstep(0.34, 0.48, coastM), smoothstep(0.08, 0.4, -bayDist(loc.xz)), nearS);
+  float mask = smoothstep(2.0, 3.2, siteD) * shoreK;
+  for (int i = 0; i < ${ALL_TOWNS.length}; i++) {
+    float dk = acos(clamp(dot(up, uTown[i].xyz), -1.0, 1.0)) * RM;
+    mask *= smoothstep(1.5, 3.0, dk);
+  }
+  return mask;
+}
+// where the hills stand as real relief: beyond the farm plain (the hamlets, roads, pads and the
+// Works stand on the sphere within 10 km), clear of the mass driver's 36 km line
+float geoMask(vec3 up, vec3 loc, float coastM) {
+  float siteD = length(loc.xz);
+  vec2 q = loc.xz - DRV_P0;
+  float t = clamp(dot(q, DRV_D), 0.0, 36.0);
+  float dp = length(q - DRV_D * t);
+  return hillMaskCore(up, loc, coastM) * smoothstep(10.0, 14.0, siteD) * (1.0 - smoothstep(28.0, 32.0, siteD)) * smoothstep(0.6, 1.4, dp);
+}
+float hillHeight(vec3 up) {
+  vec3 P = up * RM;
+  float h = 0.0, wl = 5.0, amp = 0.2;
+  for (int o = 0; o < 4; o++) { h += sdnoise(P / wl + float(o) * 7.31).x * amp; wl *= 0.36; amp *= 0.35; }
+  return h;
+}
+
 void main() {
   vec3 rdV = normalize(vView);
+#ifdef PATCH
+  // the terrain patch: the ground point is the mesh's own, displaced (the ray ends there)
+  vec3 dM = vPosM - uCamM;
+  float tG = length(dM);
+  vec3 rd = dM / max(tG, 1e-6);
+  float b = dot(uCamM, rd);
+  float dC = b * b - uC1;
+  bool hitG = true;
+  float sC = sqrt(max(dC, 0.0));
+  float tC = dC < 0.0 ? -1.0 : (uC1 > 0.0 ? (b < 0.0 ? uC1 / (-b + sC) : -1.0) : (-b + sC));
+  bool cloudFirst = tC > 0.0 && tC < tG;
+#else
   vec3 rd = normalize(uViewToM * rdV);
   float b = dot(uCamM, rd);
   float dC = b * b - uC1;
@@ -612,6 +661,7 @@ void main() {
   float tC = uC1 > 0.0 ? (b < 0.0 ? uC1 / (-b + sC) : -1.0) : (-b + sC);
   bool cloudFirst = tC > 0.0 && (!hitG || tC < tG);
   if (!hitG && !cloudFirst) discard;
+#endif
 
   vec3 sun = uSunM;
   vec3 col = vec3(0.0);
@@ -631,6 +681,7 @@ void main() {
       Nt = mix(Nt, Nb, magK);
     }
     float h = decodeH(A.a);
+    float hBake = h;
     vec3 alb = A.rgb * A.rgb;                       // land, or the sea bed under water
     vec3 nB = normalize(Nt.rgb * 2.0 - 1.0);
     Ground gf = groundField(up, fp);
@@ -647,6 +698,29 @@ void main() {
     vec3 loc = uCamS + toSite(rd) * tG;
     float siteD = length(loc.xz);
     float nearSite = 1.0 - smoothstep(24.0, 32.0, siteD);
+    // the bake lays snow where its heights (plus a noise) top ~4.6 km; round the Landing, whose
+    // ground is levelled far below that, and on any low ground it left soft white blotches that
+    // read as snow on farmland. There it is meadow; the high massifs and the poles keep theirs
+    {
+      float snowTone = smoothstep(0.3, 0.5, dot(alb, vec3(0.3, 0.5, 0.2))) * (1.0 - smoothstep(0.1, 0.3, abs(alb.r - alb.b)));
+      float polar = smoothstep(0.82, 0.92, abs(up.y));
+      float deSnow = snowTone * max(nearSite, 1.0 - smoothstep(3.6, 4.4, hBake)) * (1.0 - polar);
+      vec3 meadow = vec3(0.075, 0.12, 0.045) * (0.85 + 0.3 * gf.fine * gf.dw);
+      alb = mix(alb, meadow, deSnow);
+      // and the bake's bare grey patches in the green lowlands (little green excess, middling
+      // brightness) read from the air as fog or snow on the farmland: dry grass, heath and bare
+      // earth instead, still a shade apart from the fields round them
+      float bright0 = dot(alb, vec3(0.3, 0.5, 0.2));
+      float gex0 = (alb.g - 0.5 * (alb.r + alb.b)) / max(bright0, 1e-3);
+      float grey = (1.0 - smoothstep(0.04, 0.18, gex0)) * smoothstep(0.08, 0.2, bright0) * (1.0 - polar);
+      float lowland = max(nearSite, 1.0 - smoothstep(2.0, 3.5, hBake));
+      vec3 heath = mix(vec3(0.12, 0.12, 0.065), vec3(0.16, 0.145, 0.085), 0.5 + 0.5 * gf.fine * gf.dw);
+      alb = mix(alb, heath, grey * lowland * 0.85);
+    }
+#ifndef PATCH
+    // the terrain patch draws the ground here in relief (uPatchOn: it is in view this frame)
+    if (uPatchOn > 0.5 && geoMask(up, loc, coastM) > 0.0005) discard;
+#endif
     vec3 bed = alb;
     float wk = 0.0;                                 // Medii Works' worked ground (0..1)
     if (nearSite > 0.0) {
@@ -821,9 +895,39 @@ void main() {
       grad += mix(gf.grad, gf.rgrad, rockAll * rockAll) * max(roughK, 0.3 * cf.rock) * gf.dw * quiet;
       grad += crowns.xyz * 0.55 * vegF * quiet;
       grad *= 1.0 - nearSite * (1.0 - smoothstep(3.0, 9.0, siteD));
+      // rolling country: the land near the settlements was levelled for kilometres round them
+      // and read as a flat sheet. Four octaves of hills (5 km swells 200 m high down to 230 m
+      // knolls), each dropping out once it is under a few pixels; level only where a town
+      // stands and easing off toward the shore
+      float hillH = 0.0, hillS = 0.0;
+      {
+        // (shading only - nothing seated on the sphere meets it - so it can come right up to a town's
+        // edge; its slabs cover what lies under them)
+        float mask = hillMaskCore(up, loc, coastM);
+        if (mask > 0.001) {
+          vec3 P = up * RM;
+          vec3 hg = vec3(0.0);
+          float wl = 5.0, amp = 0.2;
+          for (int o = 0; o < 4; o++) {
+            float fade = 1.0 - smoothstep(wl * 0.12, wl * 0.4, fp);
+            vec4 sn = sdnoise(P / wl + float(o) * 7.31);
+            hg += sn.yzw / wl * amp * fade;
+            hillH += sn.x * amp;
+            wl *= 0.36; amp *= 0.35;
+          }
+          hg = (hg - up * dot(hg, up)) * mask;
+          grad += hg;
+          hillH *= mask;
+          hillS = length(hg);
+        }
+      }
       // the craters' own ground: fresh ejecta and rays pale, walls and rims bare grey rock,
       // old filled floors a deeper, damper green (and grey where the country is bare)
-      vec3 albC = alb * cf.alb;
+      // (fresh ejecta and rays are pale on bare regolith; under grass and woods they read as snow,
+      // so on green ground the crater tint only darkens, never bleaches)
+      float gexA = (alb.g - 0.5 * (alb.r + alb.b)) / max(dot(alb, vec3(0.3, 0.5, 0.2)), 1e-3);
+      float cfA = mix(cf.alb, min(cf.alb, 1.04), smoothstep(0.05, 0.3, gexA));
+      vec3 albC = alb * cfA;
       float bareRock = cf.rock * (1.0 - nearSite);
       albC = mix(albC, vec3(0.2, 0.194, 0.182) * (0.9 + 0.25 * gf.fine * gf.dw) * cf.alb, bareRock * 0.55);
       float gex0 = (alb.g - 0.5 * (alb.r + alb.b)) / max(dot(alb, vec3(0.3, 0.5, 0.2)), 1e-3);
@@ -832,6 +936,9 @@ void main() {
       // the lie of the land: hollows collect the darker fines, crests and rims are scoured
       float conc = dot(cf.grad, cf.grad);
       albC *= 1.0 - 0.06 * smoothstep(0.02, 0.2, conc) * (1.0 - cf.rock);
+      // the hills' own ground: drier, sun-bleached crests, lusher hollows, bare rock on the steep
+      albC *= mix(vec3(1.0), vec3(1.12, 1.06, 0.86), smoothstep(0.05, 0.22, hillH)) * mix(vec3(1.0), vec3(0.86, 0.96, 0.84), smoothstep(-0.04, -0.2, hillH));
+      albC = mix(albC, vec3(0.3, 0.28, 0.25) * (0.9 + 0.2 * gf.fine), smoothstep(0.18, 0.4, hillS) * 0.6);
       vec3 n = normalize(up - grad * 1.5);
       float ndl = max(dot(n, sun), 0.0);
       landCol = albC / PI * (E * ndl + sky * (0.6 + 0.4 * dot(n, up)) + earth * max(dot(n, uEarthM), 0.0));
@@ -884,6 +991,11 @@ void main() {
           }
           wl *= 0.33; amp *= 0.72;
         }
+        // wind slicks: calm lanes kilometres long where the chop dies and the water turns glassy
+        // (they read from far off as the sea's moving texture)
+        float slick = smoothstep(0.58, 0.82, snoise(vec3(P.x * 0.35, P.y * 0.35 + uTime * 0.0008, P.z * 1.3)) * 0.5 + 0.5);
+        gsum *= mix(1.0, 0.3, slick);
+        wind *= mix(1.0, 0.35, slick);
         nw = normalize(up + gsum - up * dot(gsum, up));
       }
       float al = mix(0.08, 0.14, wind);
@@ -912,6 +1024,16 @@ void main() {
       float rel = clamp(dot(Rr, up), 0.0, 1.0);
       vec3 skyR = uSunE * mix(vec3(0.055, 0.075, 0.105), vec3(0.012, 0.03, 0.085), smoothstep(0.0, 0.55, rel)) * smoothstep(-0.1, 0.3, mu);
       float cap = smoothstep(0.62, 0.9, crest) * smoothstep(0.55, 0.95, wind);
+      // at the Landing the Bay breaks along its own shore: a foam line a few tens of metres wide,
+      // pulsing with the sets, and a paler wash of shallow water behind it
+      if (nearSite > 0.0) {
+        float bdS = bayDist(loc.xz);
+        float fx = (bdS - 0.018) / 0.014;
+        float sets = 0.55 + 0.45 * sin(uTime * 0.45 - bdS * 90.0 + snoise(vec3(loc.xz * 0.6, 0.0)) * 2.0);
+        float foam = exp(-fx * fx) * sets * (0.6 + 0.4 * snoise(vec3(loc.xz * 40.0, uTime * 0.3)));
+        cap = max(cap, foam * nearSite * (1.0 - smoothstep(0.02, 0.08, fp)));
+        body += vec3(0.02, 0.05, 0.045) * (E * max(mu, 0.0) + sky) / PI * exp(-bdS / 0.06) * nearSite;
+      }
       body += vec3(0.7, 0.72, 0.72) / PI * (E * max(mu, 0.0) + sky) * cap * 0.25;
       seaCol = body * (1.0 - Fv) + Fv * skyR + spec;
       // at night: ships riding in the roads off the towns, the harbour lights mirrored near the
@@ -980,6 +1102,53 @@ void main() {
 
 const _m4 = new THREE.Matrix4(), _m4b = new THREE.Matrix4(), _q = new THREE.Quaternion(), _v = new THREE.Vector3(), _v2 = new THREE.Vector3();
 
+
+// ---- the terrain patch round the Landing: a polar grid (8-32 km, denser inward) displaced by the
+// same hills the sphere shades, drawn with the sphere's own shader (PATCH) so ground, water, fields,
+// light and air match exactly; the sphere steps aside where it stands in relief
+const SDNOISE_SRC = (() => { const a = FRAG.indexOf('vec4 sdnoise(vec3 v) {'); return FRAG.slice(a, FRAG.indexOf('\n}\n', a) + 3); })();
+const PATCH_FN_SRC = (() => { const a = FRAG.indexOf('// ---- the hills round the Landing'); return FRAG.slice(a, FRAG.indexOf('void main() {', a)); })();
+const VERT_PATCH = /* glsl */ `
+#define RM ${R_MOON.toFixed(1)}
+uniform vec3 uCamM;
+uniform mat3 uMToView;
+uniform samplerCube uMoonN;
+uniform vec4 uTown[${ALL_TOWNS.length}];
+varying vec3 vView;
+varying vec3 vPosM;
+${SNOISE_GLSL}
+${SITE_GLSL}
+${SDNOISE_SRC}
+${PATCH_FN_SRC}
+void main() {
+  float a = position.x, r = position.y;                       // polar: angle, radius (km)
+  vec3 loc0 = vec3(cos(a) * r, 0.0, sin(a) * r);               // site frame: x west, z north
+  vec3 up = normalize(SITE_UP * RM + SITE_WEST * loc0.x + SITE_NORTH * loc0.z);
+  vec3 loc = vec3(up.z * RM, up.x * RM - RM, up.y * RM);
+  float coastM = textureLod(uMoonN, up, 0.0).a;
+  float h = hillHeight(up) * geoMask(up, loc, coastM);
+  vec3 pM = up * (RM + h);
+  vPosM = pM;
+  vView = uMToView * (pM - uCamM);
+  gl_Position = projectionMatrix * vec4(vView, 1.0);
+}
+`;
+
+function patchGeometry(NA = 900, NR = 170) {
+  const pos = new Float32Array((NA + 1) * (NR + 1) * 3), idx = [];
+  let k = 0;
+  for (let j = 0; j <= NR; j++) {
+    const r = 8 + 24 * Math.pow(j / NR, 1.3);
+    for (let i = 0; i <= NA; i++) { pos[k++] = (i / NA) * Math.PI * 2; pos[k++] = r; pos[k++] = 0; }
+  }
+  const W = NA + 1;
+  for (let j = 0; j < NR; j++) for (let i = 0; i < NA; i++) { const a = j * W + i, b = a + 1, c = a + W, d = c + 1; idx.push(a, c, b, b, c, d); }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  g.setIndex(idx);
+  return g;
+}
+
 export class MoonSurface {
   constructor(space) {
     this.space = space;
@@ -1005,6 +1174,7 @@ export class MoonSurface {
       uTexKm: { value: (Math.PI / 2) / size * R_MOON },
       uTown: { value: townUniforms() },
       uArcA: { value: arcUniforms().A }, uArcB: { value: arcUniforms().B },
+      uPatchOn: { value: 0 }, uMToView: { value: new THREE.Matrix3() },
     };
     this.material = new THREE.ShaderMaterial({
       vertexShader: VERT, fragmentShader: FRAG, uniforms: this.uniforms,
@@ -1015,6 +1185,17 @@ export class MoonSurface {
     this.mesh.renderOrder = 4;
     this.mesh.frustumCulled = false;
     this.mesh.onBeforeRender = (r, s, cam) => this._perView(cam);
+    // the terrain patch round the Landing (drawn first, with real depth; see VERT_PATCH)
+    this.patchMaterial = new THREE.ShaderMaterial({
+      vertexShader: VERT_PATCH, fragmentShader: '#define PATCH\n' + FRAG, uniforms: this.uniforms,
+      depthWrite: true, depthTest: true, side: THREE.DoubleSide,
+    });
+    this.patch = new THREE.Mesh(patchGeometry(), this.patchMaterial);
+    this.patch.name = 'Moon: terrain round the Landing';
+    this.patch.renderOrder = 3;
+    this.patch.frustumCulled = false;
+    this.patch.visible = false;
+    this.patch.onBeforeRender = (r, s, cam) => this._perView(cam);
   }
 
   _perView(cam) {
@@ -1031,6 +1212,7 @@ export class MoonSurface {
     u.uCamS.value.set(camM.z, camM.x - R_MOON, camM.y);
     _m4.makeRotationFromQuaternion(_q).multiply(_m4b.extractRotation(cam.matrixWorld));
     u.uViewToM.value.setFromMatrix4(_m4);
+    u.uMToView.value.copy(u.uViewToM.value).transpose();
     u.uPixAng.value = 2 * Math.tan(THREE.MathUtils.degToRad(cam.fov) / 2) / Math.max(this.space.size.y, 1);
     this.material.side = Math.sqrt(d2) < PROXY + 1.5 ? THREE.BackSide : THREE.FrontSide;
   }
@@ -1048,5 +1230,15 @@ export class MoonSurface {
     u.uCloudRot.value = (days * 0.35) % (Math.PI * 2);
     u.uCloudPh.value = ((days / 4) % 1 + 1) % 1;
     if (!this.bake.ready) this.bake.step(6);
+    // the patch is in view when the camera is low (under the proxy shell) and within reach of the Landing
+    const cam = this.space.camera;
+    let on = false;
+    if (cam) {
+      const camM = _v.copy(cam.position).sub(sim.moonPos).applyQuaternion(_q.copy(sim.moonQuat).invert());
+      const alt = camM.length() - R_MOON, siteKm = Math.acos(Math.max(-1, Math.min(1, camM.x / camM.length()))) * R_MOON;
+      on = alt < PROXY - R_MOON - 0.5 && siteKm < 70;
+    }
+    this.patch.visible = on;
+    u.uPatchOn.value = on ? 1 : 0;
   }
 }

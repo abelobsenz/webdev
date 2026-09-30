@@ -176,6 +176,10 @@ function column(B, a, b, w0, w1, k) {
 export function buildMediiLanding() {
   roofN = 0;
   const B = new CB();
+  // round things turned to ~3 m facets (up to 96 sides): at the builder's default 16 the domes,
+  // halls, pads and towers read as polygons from the street
+  const lathe0 = B.lathe.bind(B);
+  B.lathe = (prof, seg = 16, ...rest) => { let R = 0; for (const p of prof) R = Math.max(R, Math.abs(p[0])); return lathe0(prof, Math.max(seg, Math.min(96, Math.ceil((Math.PI * 2 * R) / 3))), ...rest); };
   const lamps = [];
   const plan = [];                  // footprints (u, v rectangles, metres) for the overlap checks
   const courts = [];                // courtyard interiors (for their trees)
@@ -245,8 +249,19 @@ export function buildMediiLanding() {
     foot('house', u, v, w, d, alongU);
     const [x, z] = UV(u, v);
     B.at(x, gy(x, z) + h0, z, 0, ROT_UV + (alongU ? 0 : Math.PI / 2), 0);
-    const H = storeys * 3.6 + 1.2;
-    B.box(0, H / 2 - 0.4, 0, w, H + 0.8, d, LK.STONE);
+    const H = storeys * 3.6 + 1.2, pal = Math.floor(rnd() * 4);
+    B.box(0, H / 2 - 0.4, 0, w, H + 0.8, d, LK.HOUSE + pal);
+    // balconies on the long fronts: a slab on brackets and a bronze rail, on a window bay
+    for (const face of [-1, 1]) for (let s = 1; s < storeys; s++) {
+      if (rnd() > 0.28) continue;
+      const bays = Math.floor(w / 3), bay = Math.floor(rnd() * bays) - Math.floor(bays / 2), bxp = bay * 3, bw = rnd() < 0.3 ? 5.6 : 2.6;
+      if (Math.abs(bxp) + bw / 2 > w / 2 - 0.5) continue;
+      const y = s * 3.6 + 0.05, z = face * (d / 2 + 0.55);
+      B.box(bxp, y, z, bw, 0.18, 1.1, LK.WALL);
+      B.box(bxp, y + 0.95, face * (d / 2 + 1.07), bw, 0.06, 0.06, LK.BRONZE);
+      for (let q = 0; q <= Math.round(bw / 0.8); q++) B.box(bxp - bw / 2 + q * (bw / Math.round(bw / 0.8)), y + 0.5, face * (d / 2 + 1.07), 0.04, 0.9, 0.04, LK.BRONZE);
+      for (const e of [-1, 1]) B.box(bxp + e * bw / 2, y + 0.5, z + face * 0.05, 0.04, 0.9, 1.0, LK.BRONZE);
+    }
     if (roofKind === 0) {
       B.box(0, H + 0.35, 0, w - 1.2, 0.7, d - 1.2, LK.ROOFG);          // roof garden inside a parapet
       B.box(0, H + 0.6, -d / 2 + 0.3, w, 1.2, 0.6, LK.WALL);
@@ -254,7 +269,15 @@ export function buildMediiLanding() {
       B.box(-w / 2 + 0.3, H + 0.6, 0, 0.6, 1.2, d - 1.2, LK.WALL);
       B.box(w / 2 - 0.3, H + 0.6, 0, 0.6, 1.2, d - 1.2, LK.WALL);
     } else {
-      gable(B, H, w, d, Math.min(d * 0.42, 6.5), LK.TILE);
+      // eaves over the long fronts only (row houses meet at their gables), a ridge cap and chimneys
+      const rh = Math.min(d * 0.42, 6.5);
+      gable(B, H, w, d + 1.1, rh, LK.TILE);
+      B.box(0, H + rh + 0.08, 0, w, 0.24, 0.42, LK.TILE);
+      for (let c = 0; c < (w > 20 ? 2 : 1); c++) {
+        const cx = (c === 0 ? -1 : 1) * w * (0.18 + 0.12 * rnd()), cz = (rnd() - 0.5) * d * 0.3, ch = rh * (0.55 + 0.25 * rnd());
+        B.box(cx, H + ch / 2 + 0.6, cz, 0.8, ch + 1.6, 0.8, LK.HOUSE + pal);
+        B.box(cx, H + ch + 1.45, cz, 1.0, 0.14, 1.0, LK.DARK);
+      }
     }
     B.pop();
     return H;

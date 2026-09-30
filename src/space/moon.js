@@ -447,6 +447,7 @@ export class Moon {
     this.surface = space.renderer ? new MoonSurface(space) : null;
     this.mesh = this.surface ? this.surface.mesh : new THREE.Group();
     this.group.add(this.mesh);
+    if (this.surface) this.group.add(this.surface.patch);
     this.atmoU = { uSunDir: this.uniforms.uSunDir, uSunE: U.uSunIlluminance, uCenter: { value: new THREE.Vector3() } };
     this.atmo = new THREE.Mesh(new THREE.SphereGeometry(R_MOON + 230, 128, 64), new THREE.ShaderMaterial({
       vertexShader: ATMO_VERT, fragmentShader: ATMO_FRAG, uniforms: this.atmoU,
