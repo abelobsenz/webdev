@@ -340,6 +340,7 @@ export function buildHull() {
   }
 
   // ---- stern fins: canted radiator fins with ribs, a bronze leading-edge header
+  const finTips = [];
   for (const sg of [1, -1]) {
     const b0 = hullPt(0.76, Math.PI / 2 - sg * 0.55, -0.05), b1 = hullPt(0.97, Math.PI / 2 - sg * 0.55, -0.05);
     const dir = V3(sg * Math.sin(0.42), Math.cos(0.42), 0);
@@ -356,6 +357,7 @@ export function buildHull() {
     }
     // a fin-tip light housing
     detail.push(box(0.16, 0.2, 0.9, CK.DARK, t0.clone().lerp(t1, 0.2).addScaledVector(dir, 0.08)));
+    finTips.push(t0.clone().lerp(t1, 0.2).addScaledVector(dir, 0.22));
   }
 
   // ---- name plates on both bows: a dark plate in a bronze rim, the name and registration raised
@@ -454,7 +456,7 @@ export function buildHull() {
     }
   }
 
-  return { base, detail, navTips };
+  return { base, detail, navTips, finTips };
 }
 
 /** Place a geometry built along +Z (out of the surface) at p facing n. */

@@ -157,6 +157,17 @@ hull.updateMatrixWorld(true);
   ok(roof > 0.95 && belly > 0.95 && flank > 0.9, 'outward normals');
 }
 
+// ---- the drive: gimbals follow the pitch / yaw asked for, the docked lamps and latches switch
+{
+  settle({ throttle: 1, legs: 0, ang: new THREE.Vector3(1, 0, 0), docked: 1 }, 120);
+  const e = ship.engines[0].g;
+  ok(e.rotation.x < -0.08 && e.rotation.x > -0.11, `main engine gimbal pitch ${e.rotation.x.toFixed(3)}`);
+  ok(ship.ringLampsDocked.visible && !ship.ringLamps.visible, 'docked ring lamps');
+  ok(Math.abs(ship.movers.dock.latches[0].rotation.x + 0.05) < 0.02, 'latches closed when docked');
+  settle({ throttle: 0, legs: 0, docked: 0 }, 200);
+  ok(Math.abs(ship.engines[0].g.rotation.x) < 0.005, 'gimbal centres when cold');
+}
+
 // ---- timing
 {
   const n = 600;

@@ -46,7 +46,7 @@ export class Starship {
     this.root = new THREE.Group();            // km units: position and orientation of the ship
     this.root.name = 'Lodestar';
     this.movers = {};
-    this.state = { throttle: 0, aux: 0, boost: 0, legs: 0, rcs: 0, reverse: 0, gear: [0, 0, 0], docked: 0, lights: 0 };
+    this.state = { throttle: 0, aux: 0, boost: 0, legs: 0, rcs: 0, reverse: 0, gear: [0, 0, 0], docked: 0, lights: 0, gimbal: [0, 0] };
     this._camD = 1;
     this._t = 0;
     this._build();
@@ -128,12 +128,18 @@ export class Starship {
       { p: hullPt(0.62, Math.PI / 2, 0.3), r: 0.34, color: [1.0, 0.1, 0.05], i: 2.4, breathe: 1 },          // beacon, top
       { p: hullPt(0.5, -Math.PI / 2, 0.3), r: 0.34, color: [1.0, 0.1, 0.05], i: 2.4, breathe: 1, phase: 0.5 }, // beacon, belly
     ], { minPx: 1.2, gain: 1 });
-    const ring = [];
-    for (let k = 0; k < 8; k++) { const a = (k / 8) * Math.PI * 2 + Math.PI / 8; ring.push({ p: V3(Math.cos(a) * 1.1, LODESTAR_DOCK.pos.y - 0.12, DOCK_Z + Math.sin(a) * 1.1), r: 0.1, color: [1.0, 0.72, 0.3], i: 1.4, breathe: 1, phase: k / 8 }); }
-    this.ringLamps = addLamps(hull, ring, { minPx: 0.8, gain: 1 });
+    // the docking ring's lamps: amber and breathing while it is free, steady green once latched
+    const ring = (color, i, breathe) => {
+      const o = [];
+      for (let k = 0; k < 8; k++) { const a = (k / 8) * Math.PI * 2 + Math.PI / 8; o.push({ p: V3(Math.cos(a) * 1.1, LODESTAR_DOCK.pos.y - 0.12, DOCK_Z + Math.sin(a) * 1.1), r: 0.1, color, i, breathe, phase: k / 8 }); }
+      return o;
+    };
+    this.ringLamps = addLamps(hull, ring([1.0, 0.72, 0.3], 1.4, 1), { minPx: 0.8, gain: 1 });
+    this.ringLampsDocked = addLamps(hull, ring([0.25, 1.0, 0.45], 1.6, 0), { minPx: 0.8, gain: 1 });
+    this.ringLampsDocked.visible = false;
     this.landingLamps = addLamps(hull, G.lampSpots, { minPx: 1.0, gain: 1 });
     // strobes: wingtips and fin tips, a double flash every 1.4 s
-    const strobe = [...this.navTips.map((p) => ({ p: p.clone().add(V3(0, 0.12, 0.5)), r: 0.34, color: [1, 1, 1], i: 3.2 }))];
+    const strobe = [...this.navTips.map((p) => ({ p: p.clone().add(V3(0, 0.12, 0.5)), r: 0.34, color: [1, 1, 1], i: 3.2 })), ...H.finTips.map((p) => ({ p, r: 0.28, color: [1, 1, 1], i: 2.6 }))];
     this.strobes = addLamps(hull, strobe, { minPx: 1.3, gain: 1 });
   }
 
@@ -158,6 +164,13 @@ export class Starship {
     st.lights += ((lightsOn ? 1 : 0) - st.lights) * k(8);
     poseGear(this.gear, st.legs, st.gear, st.docked, st.lights);
     for (const e of this.engines) e.g.setThrust(e.main ? Math.min(1, st.throttle) : st.aux, dt, st.boost);
+    // gimbals: the bells swing (up to ~6 degrees) to help the pitch and yaw the thrusters are asked
+    // for, centring when the drive is cold. Pitch up (+x) tilts the exhaust up, yaw left (+y) tilts
+    // it to port, so the thrust at the stern turns the nose the right way.
+    const burning = st.throttle > 0.02 || st.aux > 0.02, G = 0.105;
+    const gx = burning && s.ang ? Math.max(-G, Math.min(G, -s.ang.x * 0.12)) : 0, gy = burning && s.ang ? Math.max(-G, Math.min(G, -s.ang.y * 0.12)) : 0;
+    st.gimbal[0] += (gx - st.gimbal[0]) * k(5); st.gimbal[1] += (gy - st.gimbal[1]) * k(5);
+    for (const e of this.engines) { e.g.rotation.order = 'YXZ'; e.g.rotation.x = st.gimbal[0]; e.g.rotation.y = st.gimbal[1]; }
     st.reverse += ((s.reverse || 0) - st.reverse) * k(8);
     if (this.reverse) for (const e of this.reverse) e.setThrust(st.reverse, dt, s.reverseBoost || 0);
     const ang = s.ang, lin = s.lin, sun = s.sunlit ?? 1, time = s.time ?? (this._t += dt);
@@ -169,6 +182,7 @@ export class Starship {
     }
     // switched and flashing lights, screens, the close-up switch
     if (this.landingLamps) this.landingLamps.visible = st.lights > 0.5;
+    if (this.ringLampsDocked) { this.ringLampsDocked.visible = st.docked > 0.5; this.ringLamps.visible = st.docked <= 0.5; }
     if (this.strobes) { const ph = time % 1.4; this.strobes.visible = ph < 0.05 || (ph > 0.16 && ph < 0.21); }
     this.screenU.uTime.value = time;
     const near = this._camD < DETAIL_KM;
