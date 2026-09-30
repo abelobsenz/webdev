@@ -286,7 +286,7 @@ const rnd = () => { const v = new THREE.Vector3(Math.random() * 2 - 1, Math.rand
   }
   const vs = S.patchMaterial.vertexShader;
   hygiene('patch vertex', vs, ['void main() {']);
-  hygiene('surface', S.material.fragmentShader, ['float reliefHG(vec3 up', 'vec2 faceQ(vec3 d)', 'vec4 seaWaves(vec3 rel']);
+  hygiene('surface', S.material.fragmentShader, ['float reliefHG(vec3 up', 'vec2 faceQ(vec3 d)', 'vec4 seaWaves(vec3 rel', 'float reliefShadow(vec3 up']);
   ok(S.material.fragmentShader.indexOf('vec2 faceQ(') < S.material.fragmentShader.indexOf('faceQ(up)'), 'faceQ defined before use');
   ok(S.material.fragmentShader.indexOf('float riverF') < S.material.fragmentShader.indexOf('(1.0 - riverF)'), 'riverF declared before use');
   ok(!/hillHeight|geoMask|vPosM/.test(S.material.fragmentShader + vs), 'the old Landing-only patch is gone');
