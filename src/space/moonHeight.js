@@ -16,6 +16,10 @@ import { reliefH, GMASK } from './moonTerrain.js';
 // out the mesh drops the octaves finer than its vertex spacing, and the ship is not there). Before
 // the bake has been read back (the first second or so) the ground is the bare sphere on both sides.
 // Extra fields: land (0..1, 0 at and near the coasts), wood (woodland density), hi (highland share).
+// The mesh is exact round the terrain patch's centre, which follows the camera; a flight view that
+// holds the camera far from the ship can centre it on the ship instead: moon.surface
+// .setFocus(shipWorldPos) each frame (used while within max(3 km, 2 x altitude) of the camera).
+// Over open water h is the still sea level; the drawn waves ride within +-0.9 m of it.
 
 const _info = { land: 0, water: 0, wood: 0, hi: 0, valley: 0, mask: 0 };
 const _e1 = new THREE.Vector3(), _e2 = new THREE.Vector3(), _p = new THREE.Vector3();

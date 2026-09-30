@@ -624,17 +624,18 @@ float horizonShadow(vec3 up, float h0, vec3 sun, float sinE) {
 ${RELIEF_GLSL}
 // the relief's own shadows under a low Sun: a march toward the Sun over the relief's coarse
 // octaves (the ones that cast shadows kilometres long), the receiver read at the same octaves so
-// the ground never shadows itself; 120 m to 5 km out, a penumbra from the Sun's disc
+// the ground never shadows itself; 180 m to 3.5 km out, a penumbra from the Sun's disc; drawn
+// within ~100 km of the camera (the patch and just beyond) and only near the terminator
 float reliefShadow(vec3 up, vec3 sun, float sinE) {
   if (sinE > 0.3 || sinE < -0.02) return 1.0;
-  float h0 = reliefH(up, 0.25);
+  float h0 = reliefH(up, 0.9);
   vec3 ts = normalize(sun - up * sinE + 1e-6);
   float tanE = sinE / max(sqrt(1.0 - sinE * sinE), 1e-3);
   float vis = 1.0;
-  float dist = 0.12;
-  for (int i = 0; i < 6; i++) {
+  float dist = 0.18;
+  for (int i = 0; i < 5; i++) {
     vec3 q = normalize(up + ts * (dist / RM));
-    float hq = reliefH(q, max(dist * 0.12, 0.25));
+    float hq = reliefH(q, max(dist * 0.25, 0.9));
     float rise = hq - h0 - dist * dist / (2.0 * RM);
     vis = min(vis, clamp((dist * tanE - rise) / (dist * 0.0093 + 0.015 + dist * 0.03) + 0.5, 0.0, 1.0));
     dist *= 2.1;
@@ -892,7 +893,7 @@ void main() {
     // line and hollows fill with shade first, so the terminator breaks along the hills
     float vis = horizonShadow(up, hl + 0.5 * gf.h, sun, mu);
     // and the relief's own long shadows across the valleys, where the relief is resolved
-    if (fp < 0.3 && vis > 0.0) vis *= mix(reliefShadow(up, sun, mu), 1.0, smoothstep(0.12, 0.3, fp));
+    if (fp < 0.1 && vis > 0.0) vis *= mix(reliefShadow(up, sun, mu), 1.0, smoothstep(0.05, 0.1, fp));
     // cloud shadow where the sun ray crosses the deck
     float csh = 1.0;
     if (mu > -0.05) {
