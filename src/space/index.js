@@ -556,10 +556,11 @@ export class SpaceMode {
     this.scene.matrixWorldAutoUpdate = autoMW;
     cam.near = slices.length ? slices[0].near : 1; cam.far = slices.length ? slices[slices.length - 1].far : 1e7;
     cam.updateProjectionMatrix();
+    // the one resolve (an empty draw with the samples restored), before the overlays: the warp
+    // bubble's lens re-images this frame's texture, so it must hold this frame and not the last
+    if (deferResolve) { r.setRenderTarget(hdr); r.render(this._resolveScene || (this._resolveScene = new THREE.Scene()), cam); }
     bindHdr();
     for (const m of this.modules) if (m.renderOverlay) m.renderOverlay(r, cam, this);
-    // the one resolve: an empty draw into the target at level 0
-    if (deferResolve) { r.setRenderTarget(hdr); r.render(this._resolveScene || (this._resolveScene = new THREE.Scene()), cam); }
     r.autoClear = prevAuto;
     this._post(dt, target);
   }
