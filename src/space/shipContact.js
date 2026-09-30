@@ -125,6 +125,7 @@ export class ShipContact {
     this.ground = moonGround;     // replaceable (the verification harness supplies its own)
     this._gnd = { normal: V() };
     this.slope = 0; this.agl = Infinity; this.groundN = V(0, 1, 0);
+    this.surfV = V(); this.surfPad = null;     // the surface under the feet: its velocity, and its pad
   }
 
   /** Once per frame: find the pads near the ship and follow them. */
@@ -204,11 +205,12 @@ export class ShipContact {
       Fn = Math.max(Fn, 0);
       if (!ft.touch) impact = Math.max(impact, -vn);
       ft.touch = true; ft.pen = pen; touch++;
+      this.surfV.copy(s.v); this.surfPad = s.pad;
       this.gear[i] = legsOK ? Math.min(pen / STROKE, 1) : 0;
       _F.copy(s.n).multiplyScalar(Fn);
       // friction: a static anchor spring up to mu_s N, sliding at mu_k N beyond it
       const vt = _vP.addScaledVector(s.n, -vn);
-      if (!ft.anchored) { ft.anchor.copy(_P); ft.anchored = true; }
+      if (!ft.anchored) { ft.anchor.copy(_P); ft.anchored = true; } else ft.anchor.addScaledVector(s.v, h);   // the anchor rides the surface
       const disp = V().copy(_P).sub(ft.anchor); disp.addScaledVector(s.n, -disp.dot(s.n));
       const Ft = V().copy(disp).multiplyScalar(-K_T).addScaledVector(vt, -C_T);
       const lim = MU_S * Fn;
@@ -251,7 +253,9 @@ export class ShipContact {
     if (hull > 0) { const k = Math.min(2.5 * hull, 12); ang.x -= k * p.rates.x; ang.y += k * p.rates.y; ang.z += k * p.rates.z; }
     if (impact > 0) this._impact(impact, hull > 0);
     // landed: all three feet down, the ship still relative to the ground
-    const still = touch >= 3 && legsOK && hull === 0 && p.vel.length() < 0.06 * KM && p.rates.length() < 0.01;
+    // (still relative to the surface: a pad on a station moves at orbital speed)
+    const still = touch >= 3 && legsOK && hull === 0 && _t.copy(p.vel).sub(this.surfV).length() < 0.06 * KM && p.rates.length() < 0.01;
+    if (!touch) { this.surfV.set(0, 0, 0); this.surfPad = null; }
     this._still = still ? this._still + h : 0;
     if (!this.landed && this._still > 0.6) { this.landed = true; if (p.onLanded) p.onLanded(); }
     if (this.landed && touch < 2) this.landed = false;

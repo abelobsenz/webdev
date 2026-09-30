@@ -76,6 +76,23 @@ function addLeo(space) {
   return { port, C, R: 0.1 };
 }
 
+// a landing deck on top of the low-orbit station (weightless, moving at orbital speed)
+function addLeoDeck(space, L) {
+  const port = {
+    id: 'leo:deck', target: 'leo', label: 'Low station - deck pad', kind: 'pad', clear: 0.03, approach: 0.2,
+    pose(sp, out) {
+      const P = L.C(V()), n = P.clone().normalize();
+      out.pos = (out.pos || V()).copy(P).addScaledVector(n, 0.06);
+      out.n = (out.n || V()).copy(n);
+      const along = L.C(V(), sp.sim.time + 1).sub(P); along.addScaledVector(n, -along.dot(n)).normalize();
+      out.fwd = (out.fwd || V()).copy(along);
+      return out;
+    },
+  };
+  space._ports.push(port);
+  return port;
+}
+
 // a pad on the Moon (body direction d, its deck `raise` km proud of the ground there)
 function addMoonPad(space, name, d, raise, ground) {
   d = d.clone().normalize();
@@ -274,6 +291,23 @@ scenario('land: pad on a 10-degree slope', () => {
   place(p, Pb.clone().applyQuaternion(sp.sim.moonQuat).add(sp.sim.moonPos), shipQuat(Pb.clone(), V(1, 0, 0)));
   const r = flyTo(sp, p, pad.port, { T: 900 });
   return padCheck(r, p, pad);
+});
+
+// ---- 4b. the deck pad on the orbiting station: touchdown in weightlessness, then clamped -------
+scenario('land: deck pad on the orbiting station', () => {
+  const sp = makeSpace(); const L = addLeo(sp); const port = addLeoDeck(sp, L); const p = makePilot(sp);
+  sp.advance(0);
+  const P0 = L.C(V(), -3);
+  place(p, P0, shipQuat(P0.clone().normalize(), L.C(V()).sub(P0)));
+  const r = flyTo(sp, p, port, { T: 900 });
+  if (r.bad) return { ok: false, why: r.bad, msgs: p.msgs };
+  if (!p.dock || !p.dock.pad) return { ok: false, why: `not clamped to the deck after ${r.t.toFixed(0)} s (${r.phases})`, msgs: p.msgs };
+  for (let t = 0; t < 30; t += 1 / 60) { sp.advance(1 / 60); p.tick(1 / 60); }
+  const pose = port.pose(sp, {}), fc = FEET_CENTRE.clone().applyQuaternion(p.worldQuat()).add(p.worldPos());
+  const h = fc.clone().sub(pose.pos).dot(pose.n), off = fc.clone().sub(pose.pos).addScaledVector(pose.n, -h).length();
+  const s = `clamped in ${r.t.toFixed(0)} s: touchdown ${(p.contact.impact / KM).toFixed(2)} m/s; after 30 s riding: feet ${(h / KM).toFixed(2)} m above the deck, ${(off / KM).toFixed(2)} m off-centre`;
+  if (Math.abs(h) > 0.001 || off > 0.02) return { ok: false, why: 'not on the deck', summary: s };
+  return { ok: true, summary: s };
 });
 
 // ---- 5. 400,000 km out: the jump drive, then a dock --------------------------------------------

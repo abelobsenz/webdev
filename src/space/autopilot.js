@@ -230,7 +230,10 @@ export class Autopilot {
       if (this.phase === 'touchdown') {
         // the feet are down: let the legs take the weight, the RCS only holds the attitude until
         // two feet are planted
+        // in weightlessness (a pad on a station) the RCS presses the feet onto the deck gently
+        const aApp = V().copy(g).sub(AR).dot(n);
         T.set(0, 0, 0);
+        if (aApp > -0.0008) T.copy(n).multiplyScalar(-(0.0008 + aApp));
         if (p.contact.footTouch >= 2) att = null;
         if (p.contact.footTouch === 0 && ax > 0.004) this.phase = 'final';
       }

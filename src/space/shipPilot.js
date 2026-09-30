@@ -456,6 +456,14 @@ export class ShipPilot {
     if (this.onDocked) this.onDocked(this.dock);
   }
 
+  _clampPad(port) {
+    const tr = this.contact._tracks.get(port);
+    if (!tr || !tr.ok) return;
+    const pose = tr.at(this.contact._s || 0, {}), qi = pose.q.clone().invert();   // (called mid-step: the pose at this substep)
+    const relQ = qi.clone().multiply(this.quat), relP = V().copy(this.pos).sub(pose.pos).applyQuaternion(qi);
+    this.dock = { port, track: tr, t: 0, hard: false, pad: true, label: port.label || port.id, v: 0, relQ0: relQ, relQ1: relQ.clone(), relP0: relP, relP1: relP.clone() };
+  }
+
   /** Docked: the ship's pose is the port's (drawn in over the soft-capture second). */
   _dockStep(dt) {
     const d = this.dock, tr = d.track;
@@ -470,7 +478,7 @@ export class ShipPilot {
     this.rates.set(0, 0, 0); this.burn = 0; this.accel = 0;
     this.cmdAng.multiplyScalar(0.8); this.cmdLin.multiplyScalar(0.8);
     this.input.fwd = 0; this.reverseOn = 0;
-    if (!d.hard && k >= 1) { d.hard = true; this._flash(`docked: ${d.label}`); }
+    if (!d.hard && k >= 1) { d.hard = true; if (!d.pad) this._flash(`docked: ${d.label}`); }
   }
 
   /** U: release the latches and push off gently along the port's axis. */
@@ -502,6 +510,10 @@ export class ShipPilot {
   }
 
   onLanded() {
+    const c = this.contact;
+    // a pad that moves (a deck on a station): the landing clamps hold the ship to it, and from
+    // then on it rides the pad exactly as a docked ship rides its port
+    if (c.surfPad && (this.frame !== 'moon' || c.surfV.length() > 0.0005)) this._clampPad(c.surfPad);
     this._flash(`landed${this.contact.padUnder ? `: ${this.contact.padUnder.label || ''}` : ''}`);
     if (this.ap.on && this.ap.port.kind === 'pad') this.ap.disengage();
     this.lastLanding = { t: this.time, impact: this.contact.impact };
@@ -825,7 +837,7 @@ export class ShipPilot {
       k.lvlU.textContent = `deg to ground · slope ${(c.slope * 180 / Math.PI).toFixed(0)}`;
       k.lvl.style.color = off > 12 ? '#ff9a7a' : '';
       k.vs.style.color = vs < -0.003 && alt < 0.05 ? '#ff9a7a' : '';
-      k.gear.textContent = this.dock ? (this.dock.hard ? 'DOCKED' : 'CAPTURE') : c.landed ? 'LANDED' : this.legs > 0.5 ? (this.legPos > 0.95 ? 'LEGS DOWN' : 'LEGS …') : 'LEGS UP';
+      k.gear.textContent = this.dock ? (this.dock.pad ? 'LANDED · CLAMPED' : this.dock.hard ? 'DOCKED' : 'CAPTURE') : c.landed ? 'LANDED' : this.legs > 0.5 ? (this.legPos > 0.95 ? 'LEGS DOWN' : 'LEGS …') : 'LEGS UP';
       k.gearU.textContent = `lights ${this.lights ? 'on' : 'off'}${c.footTouch ? ` · ${c.footTouch} feet down` : ''}${c.gear.some((x) => x > 0.01) ? ` · struts ${c.gear.map((x) => Math.round(x * 100)).join('/')}%` : ''}`;
     }
     // the autopilot
@@ -870,7 +882,7 @@ export class ShipPilot {
     if (this._msgT > 0) this._msgT -= 1 / 60;
     k.mode.textContent = this._msgT > 0 ? this._msg.toUpperCase()
       : j ? (j.phase === 'spool' ? 'JUMP · SPOOLING (J CANCELS)' : j.phase === 'transit' ? `JUMP · ${j.label.toUpperCase()}` : 'DROPPING OUT')
-      : this.dock ? (this.dock.hard ? 'DOCKED · U UNDOCKS' : 'SOFT CAPTURE') : this.contact.landed ? 'LANDED' : this.ap.on ? 'AUTOPILOT' : this.brake ? 'BRAKING' : this.burn > 0.001 ? (this.boost ? 'BURN · BOOST' : 'BURN') : this.vel.length() < 0.0005 ? 'HOLD' : 'COAST';
+      : this.dock ? (this.dock.pad ? 'LANDED · U LIFTS OFF' : this.dock.hard ? 'DOCKED · U UNDOCKS' : 'SOFT CAPTURE') : this.contact.landed ? 'LANDED' : this.ap.on ? 'AUTOPILOT' : this.brake ? 'BRAKING' : this.burn > 0.001 ? (this.boost ? 'BURN · BOOST' : 'BURN') : this.vel.length() < 0.0005 ? 'HOLD' : 'COAST';
     this._updateAids();
     const frame = this.frame === 'earth' ? 'Earth frame' : this.frame === 'moon' ? 'lunar frame' : 'free frame';
     k.sub.textContent = `${this.assist ? 'assist on' : 'ballistic'} · ${frame} · legs ${this.legs > 0.5 ? 'down' : 'up'}`;
