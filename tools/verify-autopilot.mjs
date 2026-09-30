@@ -82,9 +82,9 @@ function addLeoDeck(space, L) {
     id: 'leo:deck', target: 'leo', label: 'Low station - deck pad', kind: 'pad', clear: 0.03, approach: 0.2,
     pose(sp, out) {
       const P = L.C(V()), n = P.clone().normalize();
-      out.pos = (out.pos || V()).copy(P).addScaledVector(n, 0.06);
-      out.n = (out.n || V()).copy(n);
       const along = L.C(V(), sp.sim.time + 1).sub(P); along.addScaledVector(n, -along.dot(n)).normalize();
+      out.pos = (out.pos || V()).copy(P).addScaledVector(n, 0.06).addScaledVector(along, 0.14);   // a deck ahead of the zenith dock
+      out.n = (out.n || V()).copy(n);
       out.fwd = (out.fwd || V()).copy(along);
       return out;
     },
@@ -321,7 +321,11 @@ scenario('land: deck pad on the orbiting station', () => {
   const h = fc.clone().sub(pose.pos).dot(pose.n), off = fc.clone().sub(pose.pos).addScaledVector(pose.n, -h).length();
   const s = `clamped in ${r.t.toFixed(0)} s: touchdown ${(p.contact.impact / KM).toFixed(2)} m/s; after 30 s riding: feet ${(h / KM).toFixed(2)} m above the deck, ${(off / KM).toFixed(2)} m off-centre`;
   if (Math.abs(h) > 0.001 || off > 0.02) return { ok: false, why: 'not on the deck', summary: s };
-  return { ok: true, summary: s };
+  // then off the deck (at orbital speed) and round to the zenith dock beside it
+  const r2 = flyTo(sp, p, L.port, { T: 600 });
+  const b = dockCheck(r2, p, `, ${r2.phases}`);
+  if (!b.ok || !r2.phases.startsWith('depart')) return { ok: false, why: `deck to dock: ${b.why || r2.phases}`, summary: s, msgs: p.msgs };
+  return { ok: true, summary: `${s}; then ${b.summary}` };
 });
 
 // ---- 4b'. hills: a pad among kilometres of relief, from 300 km out and from low behind a ridge ---
