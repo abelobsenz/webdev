@@ -187,7 +187,7 @@ export function buildMediiLanding() {
   // with its frame and fronts, the lamp standards, quay edges, piers, the pads' rims
   const houses = [], props = { lamps: [], quay: [], piers: [], boats: [], stairs: [], terraceEdges: [] };
   const foot = (kind, u, v, w, d, alongU = true) => plan.push(alongU ? { kind, u0: u - w / 2, u1: u + w / 2, v0: v - d / 2, v1: v + d / 2 } : { kind, u0: u - d / 2, u1: u + d / 2, v0: v - w / 2, v1: v + w / 2 });
-  const rnd = mulberry(4270);
+  const rnd = mulberry(4270), rndT = rnd;
   const at = (u, v, h) => { const [x, z] = UV(u, v); return new THREE.Vector3(x, gy(x, z) + h, z); };
   const lamp = (u, v, h, color, i = 1.2, r = 1.6, extra = {}) => lamps.push({ p: at(u, v, h), r, color, i, ...extra });
 
@@ -246,7 +246,11 @@ export function buildMediiLanding() {
   }
 
   // --- courtyard blocks either side of the Boulevard ---
+  // (the same house on a random stream of its own: the harbour's warehouses)
+  let rnd_ = null;
+  const houseR = (r, ...a) => { rnd_ = r; try { return house(...a); } finally { rnd_ = null; } };
   const house = (u, v, h0, w, d, storeys, alongU, roofKind) => {
+    const rnd = rnd_ || rndT;
     foot('house', u, v, w, d, alongU);
     const [x, z] = UV(u, v);
     B.at(x, gy(x, z) + h0, z, 0, ROT_UV + (alongU ? 0 : Math.PI / 2), 0);
@@ -684,6 +688,34 @@ export function buildMediiLanding() {
   TREE_SINK.list = [];
   const life = buildLandingLife(S);
   const treeInstances = TREE_SINK.list; TREE_SINK.list = null;
+
+  // harbour warehouses along the moles' cross arms, gable-ended to the basin, with a crane on
+  // the quay between each pair (built last, on a random stream of their own, so the rest of
+  // the town is laid out as before)
+  {
+    const s1 = shoreV(0) + 420;
+    const hr = mulberry(8123), keep = rnd;
+    let i = 0;
+    for (const sgn of [-1, 1]) for (let u = 210; u + 20 < 570; u += 46) {
+      const w = 34 + Math.floor(hr() * 6), st = 2 + Math.floor(hr() * 2);
+      houseR(hr, sgn * u, s1 - 4, 3.2, w, 17, st, true, 1);
+      if (i++ % 2 === 0) {
+        // a portal crane on the basin side of the arm: legs astride a rail, a jib over the water
+        const [cx, cz] = UV(sgn * (u + 23), s1 - 16);
+        B.at(cx, gy(cx, cz) + 3.2, cz, 0, ROT_UV, 0);
+        for (const lx of [-2.5, 2.5]) for (const lz of [-2.2, 2.2]) B.box(lx, 5, lz, 0.5, 10, 0.5, LK.PAINT);
+        B.box(0, 10.4, 0, 6, 1.0, 5.4, LK.PAINT);
+        B.box(0, 12.2, 0, 3.4, 2.6, 3.4, LK.PAINT);
+        B.box(0, 12.6, 1.71, 2.4, 1.2, 0.04, LK.GLASS);
+        B.at(0, 13.6, 0, 0.35, 0, 0);
+        B.box(0, 0, -9, 0.8, 0.9, 20, LK.PAINT);
+        B.pop();
+        B.box(0, 14.5, 3.4, 1.6, 1.4, 2.8, LK.DARK);
+        B.pop();
+      }
+    }
+    void keep;
+  }
 
   const geo = B.geometry();
   // the mass driver's line, for the sleds that run on it (lunarTraffic.js)
