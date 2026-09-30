@@ -141,6 +141,14 @@ function tube(pts, r, k, n = 12) {
 
 // ------------------------------------------------------------------ the hull --
 export const SHIP = { Z0: -20, L: 36 };
+
+// Ship-local points other systems rely on (metres; nose -Z, up +Y, starboard +X). The landing
+// physics stands the ship on LODESTAR_FEET and the autopilot mates LODESTAR_DOCK to station ports;
+// keep these names (and their accuracy) whenever the model changes.
+/** The soles of the foot pads with the legs fully down. */
+export const LODESTAR_FEET = [V3(0, -6.97, -7.3), V3(2.4, -6.96, 9.5), V3(-2.4, -6.96, 9.5)];
+/** The dorsal docking ring's mating face centre and its outward axis. */
+export const LODESTAR_DOCK = { pos: V3(0, 3.1, -6.3), axis: V3(0, 1, 0) };
 const zOf = (t) => SHIP.Z0 + SHIP.L * t, tOf = (z) => (z - SHIP.Z0) / SHIP.L;
 const C = (t) => Math.min(Math.max(t, 0), 1);
 /** Section of the hull at station t: half-width, top and bottom heights, exponents. */
