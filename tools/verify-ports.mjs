@@ -178,6 +178,9 @@ function collect(sim, space, mods, g) {
   for (const m of [space.elevator, space.rings, space.ports, space.hearth, space.sunSwarm]) m.update(sim, t, 0.016, space);
   space.moon.update(sim, t);
   for (const m of mods) if (m.update) m.update(sim, t, 0.016, space);
+  // the belt lets its stations go when the camera is far (the headless camera sits at the
+  // Earth's centre): build them back for the test
+  space.geoBelt.buildAll();
   space.scene.updateMatrixWorld(true);
   // candidate meshes: solid, indexed or not, with CPU positions; world bounding spheres
   const meshes = g.meshes = [];
@@ -235,7 +238,7 @@ function boxTest(g, space, p) {
       // the port's own mating hardware (guides and petals round the ring, under 2.5 m proud of the face) interlocks with the ship's ring
       if (Math.max(va.y, vb.y, vc.y) < 2.5 * km && Math.max(Math.hypot(va.x, va.z), Math.hypot(vb.x, vb.z), Math.hypot(vc.x, vc.z)) < ringR) continue;
       if (env.intersectsTriangle(tri)) { envelope++; what.add(m.name); firstY = Math.min(firstY, va.y, vb.y, vc.y); }
-      else if (cor.intersectsTriangle(tri)) { corridor++; what.add(m.name); firstY = Math.min(firstY, va.y, vb.y, vc.y); }
+      else if (cor.intersectsTriangle(tri)) { corridor++; what.add(m.name); firstY = Math.min(firstY, va.y, vb.y, vc.y); if (process.env.DEBUG_PORT === p.id && corridor < 6) console.log("hit", m.name, m.o.parent?.name, [va, vb, vc].map((v) => `(${(v.x * 1000).toFixed(0)},${(v.y * 1000).toFixed(0)},${(v.z * 1000).toFixed(0)})`).join(" ")); }
     }
   }
   return { corridor, envelope, contact, what: [...what].slice(0, 3).join(', ') + (firstY < Infinity ? `, from ${(Math.max(firstY, 0) * 1000).toFixed(0)} m out` : '') };

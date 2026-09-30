@@ -336,7 +336,7 @@ for (const d of PIER_DOCKS) {
 // the Meridian itself lies under the atmosphere (the ship keeps R_EARTH + 95 km): it docks at the
 // Halo junction straight overhead, where the tether passes through the ring
 earthFixed('meridian', 'junctionPier', `Meridian - via the Halo junction overhead, ${PIER_DOCKS[0].label}`, 'dock', JUNCTION_M, PIER_DOCKS[0].p, PIER_DOCKS[0].n, PIER_DOCKS[0].fwd);
-for (const d of HARBOUR_DOCKS) earthFixed('geo', d.key, d.label, 'dock', HARBOUR_M, d.p, d.n, d.fwd, { clear: 0.06, ringR: 250 });   // (a freighter collar, r 235 m)
+for (const d of HARBOUR_DOCKS) earthFixed('geo', d.key, d.label, 'dock', HARBOUR_M, d.p, d.n, d.fwd, { clear: 0.06, approach: 0.35, ringR: 250 });   // (a freighter collar, r 235 m; the solar wings sweep the line further out)
 earthFixed('waterStore', STORE_DOCK.key, STORE_DOCK.label, 'dock', new THREE.Matrix4().copy(HARBOUR_M).multiply(new THREE.Matrix4().makeTranslation(STORE_POS.x, STORE_POS.y, STORE_POS.z)), STORE_DOCK.p, STORE_DOCK.n, STORE_DOCK.fwd, { clear: 0.04, approach: 0.65 });
 earthFixed('counter', COUNTER_DOCK.key, COUNTER_DOCK.label, 'dock', COUNTER_M, COUNTER_DOCK.p, COUNTER_DOCK.n, COUNTER_DOCK.fwd, { clear: 0.06 });
 earthFixed('releaseYard', COUNTER_DOCK.key, `${COUNTER_DOCK.label} (the release yard's station, 31 km west)`, 'dock', COUNTER_M, COUNTER_DOCK.p, COUNTER_DOCK.n, COUNTER_DOCK.fwd, { clear: 0.06 });
