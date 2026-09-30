@@ -6,6 +6,8 @@ import { R_MOON } from './sim.js';
 import { MoonBake } from './moonBake.js';
 import { ALL_TOWNS, ARCS, arcUniforms, townUniforms } from './lunarNetwork.js';
 import { SITE_GLSL, SITE_UP } from './lunarSite.js';
+import { RELIEF_GLSL, GMASK_N, GMASK_BAKE_FRAG, setGroundMask } from './moonTerrain.js';
+import { FullscreenPass, FS_VERT } from '../core/fullscreen.js';
 
 // The terraformed Moon's surface, ray-traced on a proxy sphere so the ground is the exact
 // sphere everything on it is seated on (Medii Landing's quays, terraces and pylons).
@@ -56,8 +58,10 @@ uniform vec4 uArcA[${ARCS.length}];
 uniform vec4 uArcB[${ARCS.length}];
 uniform float uPatchOn;
 varying vec3 vView;
+uniform vec3 uPC;           // the terrain patch's centre (unit, Moon frame)
+uniform float uPCos;        // cos of the patch's angular radius: the sphere steps aside inside it
 #ifdef PATCH
-varying vec3 vPosM;
+varying vec3 vRel;          // the displaced ground point relative to the camera (km, Moon frame)
 #endif
 ${NOISE_GLSL}
 ${SNOISE_GLSL}
@@ -603,43 +607,14 @@ float horizonShadow(vec3 up, float h0, vec3 sun, float sinE) {
 }
 
 
-// ---- the hills round the Landing: shared by the ray-traced sphere (as shading) and the terrain
-// patch (as geometry), so the two agree wherever both are drawn
-const vec2 DRV_P0 = vec2(2.192, 1.061);          // the mass driver's breech (site km) and heading
-const vec2 DRV_D = vec2(0.9701, 0.2425);
-float hillMaskCore(vec3 up, vec3 loc, float coastM) {
-  float siteD = length(loc.xz);
-  float nearS = 1.0 - smoothstep(24.0, 32.0, siteD);
-  // the shore: near the Landing the Bay's exact coast; elsewhere the bake's coast mask
-  float shoreK = mix(1.0 - smoothstep(0.34, 0.48, coastM), smoothstep(0.08, 0.4, -bayDist(loc.xz)), nearS);
-  float mask = smoothstep(2.0, 3.2, siteD) * shoreK;
-  for (int i = 0; i < ${ALL_TOWNS.length}; i++) {
-    float dk = acos(clamp(dot(up, uTown[i].xyz), -1.0, 1.0)) * RM;
-    mask *= smoothstep(1.5, 3.0, dk);
-  }
-  return mask;
-}
-// where the hills stand as real relief: beyond the farm plain (the hamlets, roads, pads and the
-// Works stand on the sphere within 10 km), clear of the mass driver's 36 km line
-float geoMask(vec3 up, vec3 loc, float coastM) {
-  float siteD = length(loc.xz);
-  vec2 q = loc.xz - DRV_P0;
-  float t = clamp(dot(q, DRV_D), 0.0, 36.0);
-  float dp = length(q - DRV_D * t);
-  return hillMaskCore(up, loc, coastM) * smoothstep(10.0, 14.0, siteD) * (1.0 - smoothstep(28.0, 32.0, siteD)) * smoothstep(0.6, 1.4, dp);
-}
-float hillHeight(vec3 up) {
-  vec3 P = up * RM;
-  float h = 0.0, wl = 5.0, amp = 0.2;
-  for (int o = 0; o < 4; o++) { h += sdnoise(P / wl + float(o) * 7.31).x * amp; wl *= 0.36; amp *= 0.35; }
-  return h;
-}
+// ---- the relief: one height function for the terrain mesh, the shading and the ship's ground
+${RELIEF_GLSL}
 
 void main() {
   vec3 rdV = normalize(vView);
 #ifdef PATCH
   // the terrain patch: the ground point is the mesh's own, displaced (the ray ends there)
-  vec3 dM = vPosM - uCamM;
+  vec3 dM = vRel;
   float tG = length(dM);
   vec3 rd = dM / max(tG, 1e-6);
   float b = dot(uCamM, rd);
@@ -669,6 +644,10 @@ void main() {
   if (hitG) {
     vec3 pG = uCamM + rd * tG;
     vec3 up = normalize(pG);
+#ifndef PATCH
+    // the terrain patch draws the ground in relief round the camera (uPatchOn: it is in view)
+    if (uPatchOn > 0.5 && dot(up, uPC) > uPCos) discard;
+#endif
     float fp = max(tG * uPixAng, 1e-4);           // km per pixel
     vec4 A = texture(uMoonA, up);
     vec4 Nt = texture(uMoonN, up);
@@ -685,6 +664,9 @@ void main() {
     vec3 alb = A.rgb * A.rgb;                       // land, or the sea bed under water
     vec3 nB = normalize(Nt.rgb * 2.0 - 1.0);
     Ground gf = groundField(up, fp);
+    // the relief (moonTerrain.js), its octaves fading as they shrink under a pixel or two
+    vec3 rG; float rHi, rVv;
+    float rH = reliefHG(up, fp * 1.5, rG, rHi, rVv);
     // tree crowns ~14 m apart wherever there are woods (resolved only close in)
     vec4 crowns = canopy(up, 0.014, fp, 3.0);
     float vegF = 0.0;
@@ -717,10 +699,6 @@ void main() {
       vec3 heath = mix(vec3(0.12, 0.12, 0.065), vec3(0.16, 0.145, 0.085), 0.5 + 0.5 * gf.fine * gf.dw);
       alb = mix(alb, heath, grey * lowland * 0.85);
     }
-#ifndef PATCH
-    // the terrain patch draws the ground here in relief (uPatchOn: it is in view this frame)
-    if (uPatchOn > 0.5 && geoMask(up, loc, coastM) > 0.0005) discard;
-#endif
     vec3 bed = alb;
     float wk = 0.0;                                 // Medii Works' worked ground (0..1)
     if (nearSite > 0.0) {
@@ -778,7 +756,7 @@ void main() {
       alb *= 1.0 + 0.16 * mn * (1.0 - smoothstep(0.012, 0.05, fp)) * (1.0 - waterF) * (1.0 - nearSite * (1.0 - wk));
     }
     float depth = max(-h, 0.0015);
-    float hl = max(h, 0.0);
+    float hl = max(h, 0.0) + rH * (1.0 - waterF);
     // ---- slope-, altitude- and shore-aware ground at close range ----
     // the bake's biome is read back from its colour (vegetation is the green excess over the
     // grey of rock and sand); within it the procedural field lays woods and glades, scree on
@@ -899,28 +877,10 @@ void main() {
       // and read as a flat sheet. Four octaves of hills (5 km swells 200 m high down to 230 m
       // knolls), each dropping out once it is under a few pixels; level only where a town
       // stands and easing off toward the shore
-      float hillH = 0.0, hillS = 0.0;
-      {
-        // (shading only - nothing seated on the sphere meets it - so it can come right up to a town's
-        // edge; its slabs cover what lies under them)
-        float mask = hillMaskCore(up, loc, coastM);
-        if (mask > 0.001) {
-          vec3 P = up * RM;
-          vec3 hg = vec3(0.0);
-          float wl = 5.0, amp = 0.2;
-          for (int o = 0; o < 4; o++) {
-            float fade = 1.0 - smoothstep(wl * 0.12, wl * 0.4, fp);
-            vec4 sn = sdnoise(P / wl + float(o) * 7.31);
-            hg += sn.yzw / wl * amp * fade;
-            hillH += sn.x * amp;
-            wl *= 0.36; amp *= 0.35;
-          }
-          hg = (hg - up * dot(hg, up)) * mask;
-          grad += hg;
-          hillH *= mask;
-          hillS = length(hg);
-        }
-      }
+      // the relief: highlands, valleys, mesas and knolls (moonTerrain.js) - the same function the
+      // terrain mesh is displaced by, so the far sphere's light and the near mesh's shape agree
+      float hillH = rH, hillS = length(rG);
+      grad += rG;
       // the craters' own ground: fresh ejecta and rays pale, walls and rims bare grey rock,
       // old filled floors a deeper, damper green (and grey where the country is bare)
       // (fresh ejecta and rays are pale on bare regolith; under grass and woods they read as snow,
@@ -1102,53 +1062,79 @@ void main() {
 }
 `;
 
-const _m4 = new THREE.Matrix4(), _m4b = new THREE.Matrix4(), _q = new THREE.Quaternion(), _v = new THREE.Vector3(), _v2 = new THREE.Vector3();
+const _m4 = new THREE.Matrix4(), _m4b = new THREE.Matrix4(), _q = new THREE.Quaternion(), _v = new THREE.Vector3(), _v2 = new THREE.Vector3(), _v3 = new THREE.Vector3();
+function _blankMask() {
+  const t = new THREE.DataTexture(new Uint8Array(4), 1, 1, THREE.RGBAFormat, THREE.UnsignedByteType);
+  t.minFilter = t.magFilter = THREE.NearestFilter; t.needsUpdate = true;
+  return t;
+}
 
 
-// ---- the terrain patch round the Landing: a polar grid (8-32 km, denser inward) displaced by the
-// same hills the sphere shades, drawn with the sphere's own shader (PATCH) so ground, water, fields,
-// light and air match exactly; the sphere steps aside where it stands in relief
-const SDNOISE_SRC = (() => { const a = FRAG.indexOf('vec4 sdnoise(vec3 v) {'); return FRAG.slice(a, FRAG.indexOf('\n}\n', a) + 3); })();
-const PATCH_FN_SRC = (() => { const a = FRAG.indexOf('// ---- the hills round the Landing'); return FRAG.slice(a, FRAG.indexOf('void main() {', a)); })();
+// ---- the terrain round the camera: a polar grid re-centred under the camera (geometric rings, a
+// few metres apart underfoot, a kilometre at the rim 120 km out) displaced by the relief
+// (moonTerrain.js), drawn with the sphere's own shader (PATCH) so ground, water, fields, light and
+// air match exactly; the sphere steps aside inside the patch's disc. Vertex positions are built
+// camera-relative from a centre offset computed in doubles, so the ground does not swim at 30 m.
+// Each octave drops out (smoothly) where the rings are too coarse for it, and the whole relief
+// eases to the sphere over the patch's outer fifth so the handover to the sphere is seamless.
+export const PATCH_R = 120.0;             // km
+export const PATCH_NA = 512;               // vertices round each ring
+const PATCH_R0 = 0.004;                    // the first ring (km); the centre is a vertex too
 const VERT_PATCH = /* glsl */ `
 #define RM ${R_MOON.toFixed(1)}
-uniform vec3 uCamM;
 uniform mat3 uMToView;
-uniform samplerCube uMoonN;
-uniform vec4 uTown[${ALL_TOWNS.length}];
+uniform vec3 uPC;
+uniform vec3 uPE1;
+uniform vec3 uPE2;
+uniform vec3 uPCrel;       // the patch centre on the sphere, relative to the camera (km)
+uniform float uPR;
+uniform float uPSp;        // ring spacing as a fraction of the radius
+uniform float uPixAng;
 varying vec3 vView;
-varying vec3 vPosM;
-${SNOISE_GLSL}
-${SITE_GLSL}
-${SDNOISE_SRC}
-${PATCH_FN_SRC}
+varying vec3 vRel;
+${RELIEF_GLSL}
 void main() {
   float a = position.x, r = position.y;                       // polar: angle, radius (km)
-  vec3 loc0 = vec3(cos(a) * r, 0.0, sin(a) * r);               // site frame: x west, z north
-  vec3 up = normalize(SITE_UP * RM + SITE_WEST * loc0.x + SITE_NORTH * loc0.z);
-  vec3 loc = vec3(up.z * RM, up.x * RM - RM, up.y * RM);
-  float coastM = textureLod(uMoonN, up, 0.0).a;
-  float h = hillHeight(up) * geoMask(up, loc, coastM);
-  vec3 pM = up * (RM + h);
-  vPosM = pM;
-  vView = uMToView * (pM - uCamM);
+  vec3 E = uPE1 * cos(a) + uPE2 * sin(a);
+  float q = (r / RM) * (r / RM);
+  float sq1 = sqrt(1.0 + q);
+  float km1 = -q / (sq1 * (1.0 + sq1));                         // 1 / sqrt(1 + q) - 1, without cancellation
+  vec3 up = normalize(uPC * RM + E * r);
+  vec3 base = uPCrel + uPC * (RM * km1) + E * (r / sq1);        // the sphere point, camera-relative
+  float fade = max(max(r, ${PATCH_R0.toFixed(4)}) * uPSp * 1.3, length(base) * uPixAng * 2.0);
+  float morph = 1.0 - smoothstep(uPR * 0.72, uPR * 0.95, r);
+  float h = morph > 0.0 ? reliefH(up, fade) * morph : 0.0;
+  vec3 rel = base + up * h;
+  vRel = rel;
+  vView = uMToView * rel;
   gl_Position = projectionMatrix * vec4(vView, 1.0);
 }
 `;
 
-function patchGeometry(NA = 900, NR = 170) {
-  const pos = new Float32Array((NA + 1) * (NR + 1) * 3), idx = [];
+export function patchRings(NA = PATCH_NA, R = PATCH_R) {
+  const g = 1 + (2 * Math.PI / NA);
+  const rings = [0];
+  for (let r = PATCH_R0; r < R; r *= g) rings.push(r);
+  rings.push(R);
+  return rings;
+}
+function patchGeometry(NA = PATCH_NA) {
+  const rings = patchRings(NA);
+  const NR = rings.length - 1;
+  const pos = new Float32Array((NA + 1) * (NR + 1) * 3);
   let k = 0;
-  for (let j = 0; j <= NR; j++) {
-    const r = 8 + 24 * Math.pow(j / NR, 1.3);
-    for (let i = 0; i <= NA; i++) { pos[k++] = (i / NA) * Math.PI * 2; pos[k++] = r; pos[k++] = 0; }
-  }
+  for (let j = 0; j <= NR; j++) for (let i = 0; i <= NA; i++) { pos[k++] = (i / NA) * Math.PI * 2; pos[k++] = rings[j]; pos[k++] = 0; }
   const W = NA + 1;
-  for (let j = 0; j < NR; j++) for (let i = 0; i < NA; i++) { const a = j * W + i, b = a + 1, c = a + W, d = c + 1; idx.push(a, c, b, b, c, d); }
-  const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-  g.setIndex(idx);
-  return g;
+  const idx = new Uint32Array(NR * NA * 6);
+  let m = 0;
+  for (let j = 0; j < NR; j++) for (let i = 0; i < NA; i++) {
+    const a = j * W + i, b = a + 1, c = a + W, d = c + 1;
+    idx[m++] = a; idx[m++] = c; idx[m++] = b; idx[m++] = b; idx[m++] = c; idx[m++] = d;
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.setIndex(new THREE.BufferAttribute(idx, 1));
+  return geo;
 }
 
 export class MoonSurface {
@@ -1177,7 +1163,15 @@ export class MoonSurface {
       uTown: { value: townUniforms() },
       uArcA: { value: arcUniforms().A }, uArcB: { value: arcUniforms().B },
       uPatchOn: { value: 0 }, uMToView: { value: new THREE.Matrix3() },
+      // the relief's read-back bake (moonTerrain.js) and the terrain patch round the camera
+      uGMask: { value: _blankMask() }, uGMaskN: { value: 0 },
+      uPC: { value: new THREE.Vector3(1, 0, 0) }, uPE1: { value: new THREE.Vector3(0, 0, 1) }, uPE2: { value: new THREE.Vector3(0, 1, 0) },
+      uPCrel: { value: new THREE.Vector3() }, uPR: { value: PATCH_R }, uPCos: { value: 2 },
+      uPSp: { value: 2 * Math.PI / PATCH_NA },
     };
+    this.patchC = new THREE.Vector3(1, 0, 0);     // the patch centre (unit, Moon frame), doubles
+    this.focus = null;                            // optional world point the patch centres on (the ship)
+    this._gm = null;                              // the mask read-back in progress
     this.material = new THREE.ShaderMaterial({
       vertexShader: VERT, fragmentShader: FRAG, uniforms: this.uniforms,
       transparent: true, depthWrite: true, depthTest: true,
@@ -1193,7 +1187,7 @@ export class MoonSurface {
       depthWrite: true, depthTest: true, side: THREE.DoubleSide,
     });
     this.patch = new THREE.Mesh(patchGeometry(), this.patchMaterial);
-    this.patch.name = 'Moon: terrain round the Landing';
+    this.patch.name = 'Moon: terrain round the camera';
     this.patch.renderOrder = 3;
     this.patch.frustumCulled = false;
     this.patch.visible = false;
@@ -1215,6 +1209,8 @@ export class MoonSurface {
     _m4.makeRotationFromQuaternion(_q).multiply(_m4b.extractRotation(cam.matrixWorld));
     u.uViewToM.value.setFromMatrix4(_m4);
     u.uMToView.value.copy(u.uViewToM.value).transpose();
+    // the patch centre on the sphere, camera-relative, from doubles
+    u.uPCrel.value.copy(this.patchC).multiplyScalar(R_MOON).sub(camM);
     u.uPixAng.value = 2 * Math.tan(THREE.MathUtils.degToRad(cam.fov) / 2) / Math.max(this.space.size.y, 1);
     this.material.side = Math.sqrt(d2) < PROXY + 1.5 ? THREE.BackSide : THREE.FrontSide;
   }
@@ -1232,15 +1228,70 @@ export class MoonSurface {
     u.uCloudRot.value = (days * 0.35) % (Math.PI * 2);
     u.uCloudPh.value = ((days / 4) % 1 + 1) % 1;
     if (!this.bake.ready) this.bake.step(6);
-    // the patch is in view when the camera is low (under the proxy shell) and within reach of the Landing
+    if (this.bake.ready && !(u.uGMaskN.value > 0)) this._stepGroundMask();
+    // the terrain patch is in view when the camera is low; it centres under the camera (or under
+    // the focus, the ship, when one is set and near), and moves only once the camera has strayed
+    // a fraction of its height from the centre, so a hovering or landing view never swims
     const cam = this.space.camera;
     let on = false;
     if (cam) {
-      const camM = _v.copy(cam.position).sub(sim.moonPos).applyQuaternion(_q.copy(sim.moonQuat).invert());
-      const alt = camM.length() - R_MOON, siteKm = Math.acos(Math.max(-1, Math.min(1, camM.x / camM.length()))) * R_MOON;
-      on = alt < PROXY - R_MOON - 0.5 && siteKm < 70;
+      _q.copy(sim.moonQuat).invert();
+      const camM = _v.copy(cam.position).sub(sim.moonPos).applyQuaternion(_q);
+      const alt = camM.length() - R_MOON;
+      on = alt < 45 && u.uGMaskN.value > 0;
+      if (on) {
+        let c = camM;
+        if (this.focus) {
+          const fM = _v2.copy(this.focus).sub(sim.moonPos).applyQuaternion(_q);
+          if (fM.distanceTo(camM) < Math.max(3, alt * 2)) c = fM;
+        }
+        const cu = _v3.copy(c).normalize();
+        const stray = cu.distanceTo(this.patchC) * R_MOON;
+        if (!this._patchSet || stray > Math.min(3, Math.max(0.03, 0.15 * Math.max(alt, 0)))) {
+          this.patchC.copy(cu);
+          this._patchSet = true;
+          const e1 = u.uPE1.value.set(0, 1, 0).cross(cu);
+          if (e1.lengthSq() < 1e-6) e1.set(1, 0, 0).cross(cu);
+          e1.normalize();
+          u.uPE2.value.copy(cu).cross(e1).normalize();
+          u.uPC.value.copy(cu);
+        }
+        u.uPCos.value = Math.cos(Math.atan(PATCH_R * 0.999 / R_MOON));
+      }
     }
     this.patch.visible = on;
     u.uPatchOn.value = on ? 1 : 0;
+  }
+
+  /** Centre the terrain patch on this world point (the ship) while it is near the camera; null: the camera. */
+  setFocus(worldPos) { this.focus = worldPos ? (this.focus || new THREE.Vector3()).copy(worldPos) : null; }
+
+  // read the bake back into the relief's mask, one cube face a frame (moonTerrain.js)
+  _stepGroundMask() {
+    const r = this.space.renderer, N = GMASK_N;
+    if (!this._gm) {
+      const rt = new THREE.WebGLRenderTarget(N, N, { type: THREE.UnsignedByteType, format: THREE.RGBAFormat, depthBuffer: false, generateMipmaps: false, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter });
+      rt.texture.colorSpace = THREE.NoColorSpace;
+      const mat = new THREE.ShaderMaterial({
+        vertexShader: FS_VERT, fragmentShader: GMASK_BAKE_FRAG,
+        uniforms: { uMoonA: { value: this.bake.moonA.texture }, uMoonN: { value: this.bake.moonN.texture }, uFace: { value: 0 }, uN: { value: N } },
+        depthTest: false, depthWrite: false,
+      });
+      this._gm = { rt, mat, pass: new FullscreenPass(mat), face: 0, data: new Uint8Array(N * N * 6 * 4), buf: new Uint8Array(N * N * 4) };
+    }
+    const g = this._gm;
+    const prev = r.getRenderTarget();
+    g.mat.uniforms.uFace.value = g.face;
+    r.setRenderTarget(g.rt);
+    r.render(g.pass.scene, g.pass.camera);
+    r.readRenderTargetPixels(g.rt, 0, 0, N, N, g.buf);
+    r.setRenderTarget(prev);
+    g.data.set(g.buf, g.face * N * N * 4);
+    if (++g.face === 6) {
+      this.uniforms.uGMask.value = setGroundMask(g.data, N);
+      this.uniforms.uGMaskN.value = N;
+      g.rt.dispose(); g.mat.dispose();
+      this._gm = null;
+    }
   }
 }
