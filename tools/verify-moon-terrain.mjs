@@ -8,7 +8,7 @@
 import * as THREE from 'three';
 import { SpaceSim, R_MOON } from '../src/space/sim.js';
 import { MoonSurface, patchRings, PATCH_NA, PATCH_R } from '../src/space/moonSurface.js';
-import { RELIEF, RELIEF_GLSL, GMASK_BAKE_FRAG, reliefH, setGroundMask, tNoise, faceUV } from '../src/space/moonTerrain.js';
+import { RELIEF, RELIEF_GLSL, GMASK_BAKE_FRAG, reliefH, setGroundMask, tNoise, faceUV, gmask } from '../src/space/moonTerrain.js';
 import { moonGround } from '../src/space/moonHeight.js';
 import { ALL_TOWNS, latLonDir } from '../src/space/lunarNetwork.js';
 let WaterWaves = null, MoonForest = null;
@@ -20,6 +20,13 @@ const ok = (cond, msg) => { if (!cond) { fails++; console.log('FAIL', msg); } };
 const report = {};
 const R = R_MOON;
 
+const instOk = (m) => {
+  ok(m.count <= m.instanceMatrix.count, `${m.name}: count ${m.count} > capacity`);
+  const a = m.instanceMatrix.array;
+  for (let i = 0; i < m.count * 16; i++) if (!Number.isFinite(a[i])) { ok(false, `${m.name}: non-finite matrix`); break; }
+  // offsets from the anchor stay small (float32-safe): under a kilometre
+  for (let i = 0; i < m.count; i++) ok(Math.hypot(a[i * 16 + 12], a[i * 16 + 13], a[i * 16 + 14]) < 1.0, `${m.name}: instance offset small`);
+};
 // ------------------------------------------------------------ shader hygiene --
 const body = (src, sig) => { const a = src.indexOf(sig); return a < 0 ? '' : src.slice(a, src.indexOf('\n}\n', a) + 2); };
 const RESERVED = ['cast', 'input', 'output', 'filter', 'sample', 'active', 'common', 'partition', 'packed', 'union', 'template', 'external', 'interface', 'long', 'short', 'half', 'fixed', 'unsigned', 'superp', 'namespace', 'using', 'goto', 'inline', 'noinline', 'volatile', 'public', 'static', 'extern', 'row_major', 'resource'];
@@ -286,8 +293,14 @@ if (WaterWaves) {
 }
 if (MoonForest) {
   const F = new MoonForest();
-  const c = rnd(); c.set(Math.abs(c.x) + 0.3, c.y, Math.abs(c.z)).normalize();
-  const n = F.scatter(c, 0.5);
+  let c = rnd();
+  for (let k = 0; k < 500 && gmask(c.x, c.y, c.z, [0, 0, 0, 0])[3] < 0.7; k++) c = rnd();
+  const t0 = performance.now();
+  const n = F.scatter(c, 0.45);
+  report.forestScatterMs = +(performance.now() - t0).toFixed(1);
+  const ids = new Set(F.positions.map((p) => `${p.x.toFixed(6)},${p.y.toFixed(6)},${p.z.toFixed(6)}`));
+  ok(ids.size === F.positions.length, 'no two trees on one site');
+  for (const m of F.meshes) instOk(m);
   ok(n <= F.capacity, `forest ${n} trees within capacity ${F.capacity}`);
   ok(n > 0, 'trees stand in the woods');
   let worst = 0;
@@ -298,6 +311,11 @@ if (MoonForest) {
   }
   ok(worst * 1000 < 0.05, `trees seated on the ground (${(worst * 1000).toFixed(3)} m)`);
   report.trees = n;
+  report.treeTris = F.meshes.reduce((t, m) => t + m.count * m.geometry.getAttribute('position').count / 3, 0);
+  for (const [nm, src] of [['tree vertex', F.material.vertexShader], ['tree fragment', F.material.fragmentShader]]) {
+    hygiene(nm, src, ['void main() {']);
+    for (const m of src.matchAll(/^\s*uniform\s+\w+\s+(\w+)/gm)) ok(m[1] in F.uniforms, `${nm}: uniform ${m[1]} supplied`);
+  }
 }
 
 console.log(JSON.stringify(report));

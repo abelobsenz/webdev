@@ -8,6 +8,7 @@ import { ALL_TOWNS, ARCS, arcUniforms, townUniforms } from './lunarNetwork.js';
 import { SITE_GLSL, SITE_UP } from './lunarSite.js';
 import { RELIEF_GLSL, GMASK_N, GMASK_BAKE_FRAG, setGroundMask } from './moonTerrain.js';
 import { SEA_GLSL, SEA_WAVES, seaPhases } from './moonWater.js';
+import { MoonForest } from './moonForest.js';
 import { FullscreenPass, FS_VERT } from '../core/fullscreen.js';
 
 // The terraformed Moon's surface, ray-traced on a proxy sphere so the ground is the exact
@@ -1217,6 +1218,10 @@ export class MoonSurface {
     this.patch.frustumCulled = false;
     this.patch.visible = false;
     this.patch.onBeforeRender = (r, s, cam) => this._perView(cam);
+    // real trees on the woods round the patch's centre (children of the patch: shown with it)
+    this.forest = new MoonForest();
+    this.forest.group.visible = false;
+    this.patch.add(this.forest.group);
   }
 
   _perView(cam) {
@@ -1287,6 +1292,15 @@ export class MoonSurface {
     }
     this.patch.visible = on;
     u.uPatchOn.value = on ? 1 : 0;
+    // the trees: within a few kilometres of the ground, re-scattered as the centre moves on
+    const alt = cam ? _v.copy(cam.position).sub(sim.moonPos).length() - R_MOON : 1e9;
+    const trees = on && alt < 2.5;
+    this.forest.group.visible = trees;
+    if (trees) {
+      if (this.forest.centre.lengthSq() === 0 || this.forest.centre.distanceTo(this.patchC) * R_MOON > 0.1) this.forest.scatter(this.patchC, 0.45);
+      cam.updateMatrixWorld();
+      this.forest.light(_v.copy(sim.sunDir).transformDirection(cam.matrixWorldInverse), u.uSunM.value);
+    }
   }
 
   /** Centre the terrain patch on this world point (the ship) while it is near the camera; null: the camera. */
