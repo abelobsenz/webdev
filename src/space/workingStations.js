@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import { DockHardware } from './dockKit.js';
+import { HELIANTH_DOCK } from './portSites.js';
 import { CB, CK, sectionEllipse } from '../craft/craftGeometry.js';
 import { buildTug } from '../craft/craftClasses.js';
 import { LAMP } from './lamps.js';
@@ -389,6 +391,8 @@ export class WorkingStations {
     // Helianth is close to Sol, far from the Earth-centred lighting reference.
     s.userData.sunDir=this.solarOffset.clone().normalize().negate();
     addLamps(s,this.solarData.lamps,{minPx:1.2});this.solar.add(s);space.scene.add(this.solar);
+    // the ship dock on the transfer core's tip, on the axis (src/space/portSites.js)
+    this.solarDock=new DockHardware(s,1).collar(HELIANTH_DOCK.p,HELIANTH_DOCK.n,HELIANTH_DOCK.fwd).build();
     // service tugs on their petal circuits and the relay beacons (src/space/helianthTraffic.js)
     this.helianth=new HelianthTraffic(this.solar,s.userData.sunDir);
     space.addBody('solarCollector',[this.solar],()=>this.solar.getWorldPosition(new THREE.Vector3()),19.8,{solid:true,hint:.9});

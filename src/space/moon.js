@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import { DockHardware } from './dockKit.js';
+import { EXCHANGE_DOCKS, COURT_PAD } from './portSites.js';
 import { NOISE_GLSL } from '../shaders/noise.glsl.js';
 import { U } from '../core/uniforms.js';
 import { SNOISE_GLSL } from './glsl.js';
@@ -482,12 +484,17 @@ export class Moon {
     addLamps(portMesh,this.portData.lamps,{minPx:1.2});
     this.port.add(portMesh);
     this.group.add(this.port);
+    // ship docks on the pier-end domes (src/space/portSites.js: the ports registry flies to them)
+    const portDocks=new DockHardware(this.port,1000);
+    for(const d of EXCHANGE_DOCKS)portDocks.collar(d.p.clone().multiplyScalar(.001),d.n,d.fwd);
+    this.portDocks=portDocks.build();
     this.courtData=buildLunarServiceCourt();
     this.court=lunarMesh(this.courtData.geo,{accent:[.7,.85,1],lit:.6,side:THREE.DoubleSide});
     const courtAngle=8.35/(R_MOON+380),courtUp=new THREE.Vector3(Math.cos(courtAngle),0,Math.sin(courtAngle));
     this.court.position.copy(courtUp).multiplyScalar(R_MOON+380).setY(2.75);
     stationFrame(courtUp,this.court.quaternion);
     addLamps(this.court,this.courtData.lamps,{minPx:.65});
+    this.courtPad=new DockHardware(this.court,1).pad(COURT_PAD.p,COURT_PAD.n,COURT_PAD.fwd,COURT_PAD.r).build();
     this.group.add(this.court);
     // Medii Landing on the shore below the Exchange, and the Lift's tether between them
     this.landing = new THREE.Group();
