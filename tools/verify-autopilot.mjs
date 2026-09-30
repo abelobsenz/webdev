@@ -310,6 +310,38 @@ scenario('land: deck pad on the orbiting station', () => {
   return { ok: true, summary: s };
 });
 
+// ---- 4c. a hop: land on one Moon pad, then the autopilot lifts off and flies to another -------
+scenario('land: hop between two Moon pads', () => {
+  const sp = makeSpace(); const p = makePilot(sp, flatGround);
+  const A = addMoonPad(sp, 'padA', V(-1, 0.1, 0.05), 1.2 * KM, flatGround);
+  const B = addMoonPad(sp, 'padB', V(-1, 0.1, 0.05).normalize().applyAxisAngle(V(0, 1, 0), 0.03), 1.2 * KM, flatGround);
+  sp.advance(0);
+  const Pb = A.Pb.clone().addScaledVector(A.nb, 2);
+  place(p, Pb.clone().add(sp.sim.moonPos), shipQuat(A.nb.clone(), V(0, 0, 1)));
+  const r1 = flyTo(sp, p, A.port, { T: 400 });
+  const a = padCheck(r1, p, A);
+  if (!a.ok) return { ok: false, why: `first landing: ${a.why}`, summary: a.summary, msgs: p.msgs };
+  for (let t = 0; t < 5; t += 1 / 60) { sp.advance(1 / 60); p.tick(1 / 60); }
+  const r2 = flyTo(sp, p, B.port, { T: 600 });
+  const b = padCheck(r2, p, B);
+  if (b.ok && !r2.phases.startsWith('liftoff')) return { ok: false, why: `no lift-off phase (${r2.phases})`, summary: b.summary };
+  return { ok: b.ok, why: b.why, summary: `A in ${r1.t.toFixed(0)} s, then ${r2.phases}: ${b.summary}`, msgs: p.msgs };
+});
+
+// ---- 4d. dock at the wheel's hub, undock, then fly to the low-orbit station and dock there -----
+scenario('dock: wheel hub, then the low station', () => {
+  const sp = makeSpace(); const W = addWheel(sp); const L = addLeo(sp); const p = makePilot(sp);
+  sp.advance(0);
+  const C = W.C(V()), n = W.n();
+  place(p, C.clone().addScaledVector(n, 1.2), shipQuat(V(0, 1, 0), n.clone().negate()));
+  const r1 = flyTo(sp, p, W.port, { T: 600 });
+  const a = dockCheck(r1, p);
+  if (!a.ok) return { ok: false, why: `hub: ${a.why}`, summary: a.summary, msgs: p.msgs };
+  const r2 = flyTo(sp, p, L.port, { T: 1200 });
+  const b = dockCheck(r2, p, `, ${r2.phases}`);
+  return { ok: b.ok, why: b.why, summary: `hub in ${r1.t.toFixed(0)} s; ${b.summary}`, msgs: p.msgs };
+});
+
 // ---- 5. 400,000 km out: the jump drive, then a dock --------------------------------------------
 scenario('dock: jump from 400,000 km', () => {
   const sp = makeSpace(); const L = addLeo(sp); const p = makePilot(sp);

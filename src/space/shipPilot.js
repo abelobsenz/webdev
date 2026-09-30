@@ -515,7 +515,7 @@ export class ShipPilot {
     // then on it rides the pad exactly as a docked ship rides its port
     if (c.surfPad && (this.frame !== 'moon' || c.surfV.length() > 0.0005)) this._clampPad(c.surfPad);
     this._flash(`landed${this.contact.padUnder ? `: ${this.contact.padUnder.label || ''}` : ''}`);
-    if (this.ap.on && this.ap.port.kind === 'pad') this.ap.disengage();
+    if (this.ap.on && this.ap.port.kind === 'pad' && this.ap.phase === 'touchdown') this.ap.disengage();
     this.lastLanding = { t: this.time, impact: this.contact.impact };
   }
 

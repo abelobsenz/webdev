@@ -56,12 +56,15 @@ export class Autopilot {
     if (!port) return false;
     this.port = port; this.track = new PortTrack(port);
     this.on = true; this.t = 0; this.jumps = 0; this._coarse = false;
-    this.phase = 'transfer';
+    // on the ground (or just off it): climb clear on the thrusters, level, before anything else
+    this.phase = p.contact && (p.contact.footTouch || p.contact.hullTouch || p.contact.agl < 0.12) ? 'liftoff' : 'transfer';
+    this._liftN = null;
     this._lowFor = null; this._fallFor = null; this._recover = 0; this._lockT = 0;
     this.info.label = port.label || port.id;
     p.brake = false;
     if (p.dock) p.undock(true);
-    if (p.contact && p.contact.landed) p.contact.landed = false;
+    if (p.contact) { p.contact.landed = false; p.contact._still = 0; }
+    this._farChecked = false;
     this._frameFlag = null;
     p._flash(`autopilot: ${this.info.label}`);
     return true;
@@ -87,6 +90,7 @@ export class Autopilot {
     this.track.sense(p, dt);
     this._s = -dt;                 // the ship integrates from the last frame up to this one: poses are extrapolated back by dt
     if (this.phase === 'transfer' && !this._farChecked) this._checkFar();
+    if (this.phase === 'liftoff') this._farChecked = false;
   }
 
   /** Is the gate out of reach of a burn (or in another body's sphere)? Then jump to a standoff. */
@@ -179,7 +183,19 @@ export class Autopilot {
     let att = null, wAtt = tr.omega, allowCoarse = false, boostOK = false;
     const rel = V(), vrel = V();
     if (pad && p.legs < 0.5 && (this.phase !== 'transfer' || p.pos.distanceTo(H) < 30)) p.legs = 1;
-    if (this.phase === 'transfer') {
+    if (this.phase === 'liftoff') {
+      // straight up the ground's normal at 12 m/s on the RCS, the ship level, the legs left down
+      // until clear; a moving deck's own velocity is matched first (its surface velocity)
+      const c = p.contact;
+      if (!this._liftN) { this._liftN = V().copy(c.agl < Infinity ? c.groundN : V().copy(p.pos).normalize()); this._liftV = V().copy(c.surfV); this._liftT = 0; }
+      this._liftT += h;
+      const up = this._liftN, vdes = V().copy(up).multiplyScalar(0.012).add(this._liftV);
+      T.copy(g).negate().addScaledVector(vdes.sub(p.vel), 1.2);
+      const f0 = V().set(0, 0, -1).applyQuaternion(p.quat); f0.addScaledVector(up, -f0.dot(up));
+      att = f0.lengthSq() > 1e-9 ? matedQuat('pad', up, f0.normalize(), new THREE.Quaternion()) : null;
+      this.info.d = Math.max(0, 0.15 - c.agl); this.info.vc = V().copy(p.vel).sub(this._liftV).dot(up);
+      if ((c.agl > 0.15 && c.agl < Infinity) || (c.agl === Infinity && this._liftT > 8) || this._liftT > 40) { this.phase = 'transfer'; this._farChecked = false; }
+    } else if (this.phase === 'transfer') {
       const VG = tr.pointVel(gate, s, V()), AG = this._accAt(gate, V());
       rel.copy(gate).sub(p.pos); vrel.copy(p.vel).sub(VG);
       const d = rel.length();
@@ -365,6 +381,6 @@ export class Autopilot {
   }
 
   phaseLabel() {
-    return { jump: 'jump', transfer: this._routing ? `transfer · round the ${this._routing === 'body' ? 'body' : 'station'}` : 'transfer', approach: 'approach', final: this.port && this.port.kind === 'pad' ? 'final · descent' : 'final · closing', touchdown: 'touchdown' }[this.phase] || this.phase;
+    return { liftoff: 'lift-off', jump: 'jump', transfer: this._routing ? `transfer · round the ${this._routing === 'body' ? 'body' : 'station'}` : 'transfer', approach: 'approach', final: this.port && this.port.kind === 'pad' ? 'final · descent' : 'final · closing', touchdown: 'touchdown' }[this.phase] || this.phase;
   }
 }
