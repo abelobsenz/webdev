@@ -1035,9 +1035,11 @@ void main() {
       // the water itself scatters a blue-green glow that stands in for the bed where it is deep
       float shoreKm = (coastM - 0.5) * uTexKm;                      // distance offshore, roughly
       float dzM = max(depth * mix(0.25, 1.0, smoothstep(0.0, 1.2, shoreKm)), 0.0008) * 1000.0;
+      dzM = mix(dzM, 2.5, riverF);                                  // a river runs a few metres deep
       float pathM = dzM * (1.0 + 1.0 / max(nv, 0.25));
       vec3 Tw = exp(-vec3(0.36, 0.064, 0.036) * pathM);
       vec3 sandBed = mix(vec3(0.36, 0.33, 0.25), bed, 0.35) * (0.92 + 0.16 * gf.fine * gf.dw);
+      sandBed = mix(sandBed, vec3(0.07, 0.075, 0.055), riverF);    // over a bed of dark gravel and weed
       vec3 scatW = vec3(0.0035, 0.021, 0.03);
       vec3 body = (sandBed * Tw + scatW * (1.0 - Tw.g)) / PI * (E * max(mu, 0.0) + sky + earth);
       // subsurface: light through the backs of the waves, a green glow on the crests facing away
