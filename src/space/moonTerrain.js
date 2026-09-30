@@ -55,6 +55,10 @@ export const RELIEF = {
   valley: { lam: 28.0, width: 0.075, depth: 0.28, rot: rotMat(2, 3, 1, 2.3), off: [11.1, 3.7, 23.3] },
   mesa: { lam: 21.0, step: 0.085, lo: 0.2, hi: 0.5, k: 0.6, rot: rotMat(1, 3, 2, 0.4), off: [2.9, 29.3, 8.8] },
   oct: OCT.map(([lam, amp, ridge, boost], i) => ({ lam, amp, ridge, boost, rot: rotMat(1 + i, 2 - i * 0.3, 3 + i * 0.7, 0.9 + i * 1.37), off: [+(i * 17.31 % 50).toFixed(2), +(i * 5.13 % 50).toFixed(2), +(i * 11.77 % 50).toFixed(2)] })),
+  // old craters worn soft: [cell km, seed, density, hash offset]; radius 0.12..0.42 cell (a steep
+  // power law of sizes), a bowl under a rounded rim, depth and rim falling with age
+  craters: [[9.0, 0.0, 0.3, 101], [3.2, 17.0, 0.34, 211]],
+  crDepth: 0.16, crRim: 0.045, crRimW: 0.32, crAge: 0.65,
   lift: 0.1,            // relief baseline over the land (scaled): most land stands a little proud
   ampLow: 0.28,         // relief scale on the low plains (1 on the highlands)
   erosion: 3.0,         // octave damping by the slope already built (valleys smooth, ridges sharp)
@@ -150,6 +154,39 @@ float reliefMask(vec3 up, vec4 gm) {
   }
   return m;
 }
+// old craters: in a 3D lattice of cells, some hold a crater (a ball whose cut through the ground is
+// the crater's outline, so the sizes vary further); bowl -depth (1 - x^2)^2, rim a rounded lip
+float craterRelief(vec3 P, float cell, float seed, float dens, int ho, float fade, inout vec3 grad) {
+  float w = 1.0 - smoothstep(cell * 0.06, cell * 0.16, fade);
+  if (w <= 0.0) return 0.0;
+  vec3 q = P / cell + seed;
+  ivec3 b = ivec3(floor(q - 0.5));
+  float h = 0.0;
+  for (int k = 0; k < 8; k++) {
+    ivec3 c = b + ivec3(k & 1, (k >> 1) & 1, (k >> 2) & 1);
+    uint n = tHash(c + ivec3(ho, 0, 0));
+    if (float(n & 255u) * (1.0 / 256.0) > dens) continue;
+    uint n2 = tHash(c + ivec3(0, ho, 7));
+    vec3 cen = vec3(c) + 0.25 + vec3(float((n >> 8u) & 255u), float((n >> 16u) & 255u), float((n >> 24u) & 255u)) * (0.5 / 256.0);
+    float sz = float(n2 & 255u) * (1.0 / 256.0);
+    float age = float((n2 >> 8u) & 255u) * (1.0 / 256.0);
+    float r = 0.12 + 0.3 * sz * sz * sz;
+    vec3 dq = q - cen;
+    float dl = max(length(dq), 1e-6);
+    float x = dl / r;
+    if (x > 2.2) continue;
+    float rk = r * cell;
+    float depth = ${f7(RELIEF.crDepth)} * rk * (1.0 - ${f7(RELIEF.crAge)} * age);
+    float rimH = ${f7(RELIEF.crRim)} * rk * (1.0 - 0.5 * age);
+    float gx = (x - 1.0) / ${f7(RELIEF.crRimW)};
+    float rim = rimH * exp(-gx * gx);
+    float bowl = 0.0, dh = rim * (-2.0 * gx / ${f7(RELIEF.crRimW)});
+    if (x < 1.0) { float u1 = 1.0 - x * x; bowl = -depth * u1 * u1; dh += 4.0 * depth * x * u1; }
+    h += (bowl + rim) * w;
+    grad += dq / dl * (dh * w / rk);
+  }
+  return h;
+}
 // the relief (km above the sphere) and its gradient (tangent plane, km/km). fade: the size below
 // which an octave drops out (a vertex spacing or a pixel footprint; 0 = every octave, which is what
 // the ship stands on). hiOut: the highland share (0 plains .. 1 mountains); vOut: the valley floor.
@@ -191,6 +228,8 @@ ${RELIEF.oct.map((o, i) => `  {
       grad += a * dval;
     }
   }`).join('\n')}
+  // old craters, worn soft
+${RELIEF.craters.map(([cell, seed, dens, ho]) => `  raw += craterRelief(P, ${f7(cell)}, ${f7(seed)}, ${f7(dens)}, ${ho}, fade, grad);`).join('\n')}
   // mesas and scarps: in patches of the highlands the land steps in benches and cliffs
   vec4 mn = tNoise(${m3(RELIEF.mesa.rot)} * (P / ${f7(RELIEF.mesa.lam)}) + ${v3(RELIEF.mesa.off)});
   float mk = smoothstep(${f7(RELIEF.mesa.lo)}, ${f7(RELIEF.mesa.hi)}, mn.x) * hi * ${f7(RELIEF.mesa.k)};
@@ -328,6 +367,35 @@ const mulRT = (R, g, s, out) => {               // out = (g * R) / s  (R transpo
 };
 const _q = [0, 0, 0], _d = [0, 0, 0];
 
+function craterRelief(Px, Py, Pz, cell, seed, dens, ho, fade) {
+  const w = 1 - smoothstep(cell * 0.06, cell * 0.16, fade);
+  if (w <= 0) return 0;
+  const qx = Px / cell + seed, qy = Py / cell + seed, qz = Pz / cell + seed;
+  const bx = Math.floor(qx - 0.5), by = Math.floor(qy - 0.5), bz = Math.floor(qz - 0.5);
+  let h = 0;
+  for (let k = 0; k < 8; k++) {
+    const cx = bx + (k & 1), cy = by + ((k >> 1) & 1), cz = bz + ((k >> 2) & 1);
+    const n = tHash(cx + ho, cy, cz);
+    if ((n & 255) * (1 / 256) > dens) continue;
+    const n2 = tHash(cx, cy + ho, cz + 7);
+    const ex = cx + 0.25 + ((n >>> 8) & 255) * (0.5 / 256), ey = cy + 0.25 + ((n >>> 16) & 255) * (0.5 / 256), ez = cz + 0.25 + ((n >>> 24) & 255) * (0.5 / 256);
+    const sz = (n2 & 255) * (1 / 256), age = ((n2 >>> 8) & 255) * (1 / 256);
+    const r = 0.12 + 0.3 * sz * sz * sz;
+    const dl = Math.max(Math.hypot(qx - ex, qy - ey, qz - ez), 1e-6);
+    const x = dl / r;
+    if (x > 2.2) continue;
+    const rk = r * cell;
+    const depth = RELIEF.crDepth * rk * (1 - RELIEF.crAge * age);
+    const rimH = RELIEF.crRim * rk * (1 - 0.5 * age);
+    const gx = (x - 1) / RELIEF.crRimW;
+    const rim = rimH * Math.exp(-gx * gx);
+    let bowl = 0;
+    if (x < 1) { const u1 = 1 - x * x; bowl = -depth * u1 * u1; }
+    h += (bowl + rim) * w;
+  }
+  return h;
+}
+
 /**
  * The relief (km above R_MOON) at unit direction (x, y, z), every octave (fade 0) unless a fade
  * size (km) is given; info (optional) receives { hi, valley, wood, land, water } from the mask.
@@ -378,6 +446,7 @@ export function reliefH(x, y, z, fade = 0, info = null) {
     gy += a * (_d[1] + (sg * _d[1] - _d[1]) * rk);
     gz += a * (_d[2] + (sg * _d[2] - _d[2]) * rk);
   }
+  for (const [cell, seed, dens, ho] of RELIEF.craters) raw += craterRelief(Px, Py, Pz, cell, seed, dens, ho, fade);
   const Me = RELIEF.mesa;
   mulR(Me.rot, Px, Py, Pz, Me.lam, Me.off, _q); tNoise(_q[0], _q[1], _q[2], _n);
   const mk = smoothstep(Me.lo, Me.hi, _n[0]) * hi * Me.k;

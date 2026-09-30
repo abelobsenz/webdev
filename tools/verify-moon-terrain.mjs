@@ -55,7 +55,9 @@ function hygiene(name, src, fns) {
   ok(cnt('{') === cnt('}'), `${name}: braces balanced`);
   ok(cnt('(') === cnt(')'), `${name}: parentheses balanced`);
 }
-hygiene('relief', RELIEF_GLSL, ['uint tHash(ivec3 c)', 'vec3 tGrad(ivec3 c)', 'vec4 tNoise(vec3 x)', 'vec4 gmask(vec3 d)', 'float reliefMask(vec3 up', 'float reliefHG(vec3 up']);
+hygiene('relief', RELIEF_GLSL, ['uint tHash(ivec3 c)', 'vec3 tGrad(ivec3 c)', 'vec4 tNoise(vec3 x)', 'vec4 gmask(vec3 d)', 'float reliefMask(vec3 up', 'float craterRelief(vec3 P', 'float reliefHG(vec3 up']);
+for (const [cell, seed, dens, ho] of RELIEF.craters) ok(RELIEF_GLSL.includes(`craterRelief(P, ${cell.toFixed(1)}, ${Number.isInteger(seed) ? seed.toFixed(1) : seed}, ${dens}, ${ho}, fade, grad)`), `crater octave ${cell} km in the GLSL`);
+ok(RELIEF_GLSL.includes(`${RELIEF.crDepth} * rk`) && RELIEF_GLSL.includes(`${RELIEF.crRim} * rk`) && RELIEF_GLSL.includes(`/ ${RELIEF.crRimW}`), 'crater profile constants in the GLSL');
 hygiene('mask bake', GMASK_BAKE_FRAG, ['vec3 faceDirG(int f', 'void main() {']);
 // uint literals: every hash constant carries its u suffix and fits 32 bits
 for (const m of RELIEF_GLSL.matchAll(/(?<![.\d])(\d{6,})(u?)/g)) { ok(m[2] === 'u', `relief: literal ${m[1]} lacks its u suffix`); ok(+m[1] < 2 ** 32, `relief: literal ${m[1]} exceeds 32 bits`); }
