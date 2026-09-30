@@ -58,11 +58,11 @@ export const PIER_DOCKS = [
 /**
  * The GEO Harbour (harbour group, km): the arm-head docking collars (geoRoads.js: face at
  * d * tipR, clear out along d; the MOVEMENTS freighters use each head 40% of their cycle), the
- * upper arm 0 and the lower arm 4. Existing hardware: nothing is added.
+ * upper arm 0 and the lower arm 6 (arm 4 carries the liner berth and the terrace). Existing hardware.
  */
 export const HARBOUR_DOCKS = [
   { key: 'arm1head', label: 'GEO Harbour - arm 1 head collar', p: V(5.634, 1.26, 8.500), n: V(0.553, 0, 0.833), fwd: V(0, 1, 0), existing: true },
-  { key: 'arm5head', label: 'GEO Harbour - arm 5 head collar', p: V(10.488, -1.26, 2.126), n: V(0.980, 0, 0.199), fwd: V(0, 1, 0), existing: true },
+  { key: 'arm7head', label: 'GEO Harbour - arm 7 head collar', p: V(-10.077, -1.26, -2.043), n: V(-0.980, 0, -0.199), fwd: V(0, 1, 0), existing: true },
 ];
 
 /** The Water Store (store group, km): a collar on the cage's free -z face, level with the tanker collars. */

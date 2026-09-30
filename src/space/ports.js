@@ -317,10 +317,10 @@ for (const d of FULCRUM_DOCKS) {
 // ------------------------------------------------------------ Earth-fixed structures --
 // (the Halo ports, the elevator's Harbour, junction and counterweight, the GEO roads and belt:
 // children of space.earthFixed, which turns with sim.earthQuat)
-function earthFixed(target, key, label, kind, efM, p, n, fwd, { clear = 0.05, approach = 2.0 } = {}) {
+function earthFixed(target, key, label, kind, efM, p, n, fwd, { clear = 0.05, approach = 2.0, ringR = undefined } = {}) {
   const L = new THREE.Matrix4().copy(efM).multiply(basis(p, n, fwd));
   return add({
-    id: `${target}:${key}`, target, label, kind, clear, approach,
+    id: `${target}:${key}`, target, label, kind, clear, approach, ...(ringR ? { ringR } : {}),
     pose(space, out) { return readPose(_M.makeRotationFromQuaternion(space.sim.earthQuat).multiply(L), out); },
   });
 }
@@ -336,7 +336,7 @@ for (const d of PIER_DOCKS) {
 // the Meridian itself lies under the atmosphere (the ship keeps R_EARTH + 95 km): it docks at the
 // Halo junction straight overhead, where the tether passes through the ring
 earthFixed('meridian', 'junctionPier', `Meridian - via the Halo junction overhead, ${PIER_DOCKS[0].label}`, 'dock', JUNCTION_M, PIER_DOCKS[0].p, PIER_DOCKS[0].n, PIER_DOCKS[0].fwd);
-for (const d of HARBOUR_DOCKS) earthFixed('geo', d.key, d.label, 'dock', HARBOUR_M, d.p, d.n, d.fwd, { clear: 0.06 });
+for (const d of HARBOUR_DOCKS) earthFixed('geo', d.key, d.label, 'dock', HARBOUR_M, d.p, d.n, d.fwd, { clear: 0.06, ringR: 250 });   // (a freighter collar, r 235 m)
 earthFixed('waterStore', STORE_DOCK.key, STORE_DOCK.label, 'dock', new THREE.Matrix4().copy(HARBOUR_M).multiply(new THREE.Matrix4().makeTranslation(STORE_POS.x, STORE_POS.y, STORE_POS.z)), STORE_DOCK.p, STORE_DOCK.n, STORE_DOCK.fwd, { clear: 0.04, approach: 0.65 });
 earthFixed('counter', COUNTER_DOCK.key, COUNTER_DOCK.label, 'dock', COUNTER_M, COUNTER_DOCK.p, COUNTER_DOCK.n, COUNTER_DOCK.fwd, { clear: 0.06 });
 earthFixed('releaseYard', COUNTER_DOCK.key, `${COUNTER_DOCK.label} (the release yard's station, 31 km west)`, 'dock', COUNTER_M, COUNTER_DOCK.p, COUNTER_DOCK.n, COUNTER_DOCK.fwd, { clear: 0.06 });
@@ -345,7 +345,7 @@ earthFixed('releaseYard', COUNTER_DOCK.key, `${COUNTER_DOCK.label} (the release 
 framePort({ target: 'harbourTerrace', key: 'courierPad', label: 'Embarkation Terrace - courier pad', kind: 'pad', clear: 0.02, approach: 0.4,
   p: X(0.323, 0.0114, 0.120), n: X(0, 1, 0), fwd: X(0, 0, 1) });
 // Nauru Works: the commons pier's deck, sunward of the berthed tug (foundryCommons.js)
-framePort({ target: 'foundry', key: 'commonsPier', label: 'Nauru Works - commons pier', kind: 'pad', clear: 0.04, approach: 1.5,
+framePort({ target: 'foundry', key: 'commonsPier', label: 'Nauru Works - commons pier', kind: 'pad', clear: 0.04, approach: 0.25,
   p: X(0.25, -1.48, 16.4), n: X(0, 1, 0), fwd: X(0, 0, 1) });
 // Concord Yard: the yard house's hub tip on the hull axis, astern of the crew wheel
 framePort({ target: 'concordYard', key: 'hubTip', label: 'Concord Yard - yard house hub dock (hull axis)', clear: 0.04, approach: 2.0,
