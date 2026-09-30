@@ -269,13 +269,21 @@ export class ShipPilot {
     this._setFrame(want, P, cam.quaternion.clone(), V());
     this.vel.set(0, 0, 0);                  // at rest in the local frame
     this.rates.set(0, 0, 0); this.burn = 0;
+    this.dock = null; this.contact.landed = false;
     this._keepOut(this.pos);
+    if (this.frame === 'moon') {
+      // never inside the ground: at least 40 m clear of the relief under the spawn point
+      const L = this.pos.length(), g = this.contact.ground(V().copy(this.pos).divideScalar(L), {});
+      const min = R_MOON + g.h + 0.04;
+      if (L < min) this.pos.multiplyScalar(min / L);
+    }
   }
 
   exit() {
     if (!this.active) return;
     const sp = this.space;
     this.active = false;
+    this.ap.disengage();
     this.keys.clear();
     this.hud.hidden = true;
     document.body.classList.remove('piloting');
@@ -661,10 +669,13 @@ export class ShipPilot {
     ENGINE_FRAME.sunDir.copy(sim.sunDir);
     if (!this.active) {
       this._syncFrames(dt);
-      // parked: the flight computer holds station in the local frame
-      this.vel.multiplyScalar(Math.exp(-dt * 1.5));
-      this.pos.addScaledVector(this.vel, dt);
-      this.rates.multiplyScalar(Math.exp(-dt * 3));
+      if (this.dock) this._dockStep(dt);                    // docked: still riding the port
+      else if (!this.contact.landed) {
+        // parked: the flight computer holds station in the local frame (a landed ship just stands)
+        this.vel.multiplyScalar(Math.exp(-dt * 1.5));
+        this.pos.addScaledVector(this.vel, dt);
+        this.rates.multiplyScalar(Math.exp(-dt * 3));
+      }
       this._pose();
     }
     if (this.body) this.body.radius = 0.08;                 // the hull and its plumes
@@ -769,11 +780,72 @@ export class ShipPilot {
         <div class="ph-cell ph-thr"><span class="ph-unit" data-k="thrL">drive</span><span class="ph-bar"><i data-k="thr"></i></span></div>
         <div class="ph-cell"><span class="ph-mode" data-k="mode">HOLD</span><span class="ph-unit" data-k="sub">assist on</span></div>
       </div>
-      <div class="ph-keys"><kbd>W</kbd> drive · <kbd>S</kbd> reverse (Shift: 300 g) · <kbd>A</kbd><kbd>D</kbd> roll · <kbd>↑</kbd><kbd>↓</kbd> pitch · <kbd>Q</kbd><kbd>E</kbd> yaw · <kbd>Space</kbd><kbd>C</kbd> thrusters · <kbd>B</kbd> brake · <kbd>Z</kbd> assist · <kbd>J</kbd> jump to selection · <kbd>G</kbd> legs · <kbd>X</kbd> view · <kbd>V</kbd> leave</div>`;
+      <div class="ph-row ph-land" data-k="land" hidden>
+        <div class="ph-cell"><span class="ph-val" data-k="ralt">0</span><span class="ph-unit" data-k="raltU">m radar alt</span></div>
+        <div class="ph-cell"><span class="ph-val" data-k="vs">0.0</span><span class="ph-unit">m/s vertical</span></div>
+        <div class="ph-cell"><span class="ph-val" data-k="hs">0.0</span><span class="ph-unit">m/s across</span></div>
+        <div class="ph-cell"><span class="ph-val" data-k="lvl">0.0</span><span class="ph-unit" data-k="lvlU">deg off level</span></div>
+        <div class="ph-cell"><span class="ph-mode" data-k="gear">LEGS UP</span><span class="ph-unit" data-k="gearU">lights off</span></div>
+      </div>
+      <div class="ph-row ph-ap" data-k="apRow" hidden>
+        <div class="ph-cell" style="min-width:150px;justify-items:start"><span class="ph-mode" data-k="apPhase">AUTOPILOT</span><span class="ph-unit" data-k="apLabel">-</span></div>
+        <div class="ph-cell"><span class="ph-val" data-k="apD">0</span><span class="ph-unit" data-k="apDU">m to go</span></div>
+        <div class="ph-cell"><span class="ph-val" data-k="apV">0.0</span><span class="ph-unit" data-k="apVU">m/s closing</span></div>
+        <div class="ph-cell"><span class="ph-val" data-k="apEta">-</span><span class="ph-unit">eta</span></div>
+      </div>
+      <button type="button" data-k="apBtn" style="pointer-events:auto;cursor:pointer;font:inherit;font-size:10.5px;letter-spacing:0.16em;color:var(--gold);background:rgba(8,12,20,0.5);border:1px solid rgba(233,198,143,0.35);border-radius:8px;padding:5px 12px">AUTO-NAV TO SELECTION (N)</button>
+      <div class="ph-keys"><kbd>W</kbd> drive · <kbd>S</kbd> reverse (Shift: 300 g) · <kbd>A</kbd><kbd>D</kbd> roll · <kbd>↑</kbd><kbd>↓</kbd> pitch · <kbd>Q</kbd><kbd>E</kbd> yaw · <kbd>Space</kbd><kbd>C</kbd> thrusters · <kbd>B</kbd> brake · <kbd>Z</kbd> assist · <kbd>J</kbd> jump to selection · <kbd>N</kbd> auto-nav · <kbd>M</kbd> next port · <kbd>U</kbd> undock · <kbd>G</kbd> legs · <kbd>L</kbd> lights · <kbd>X</kbd> view · <kbd>V</kbd> leave</div>`;
     document.body.appendChild(el);
     this.hud = el;
     this._hk = {};
     for (const n of el.querySelectorAll('[data-k]')) this._hk[n.dataset.k] = n;
+    this._hk.apBtn.addEventListener('click', (e) => { e.preventDefault(); e.currentTarget.blur(); if (this.active) this.navKey(); });
+    this._hk.apBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
+  }
+
+  /** The landing aids and the autopilot panel. */
+  _updateAids() {
+    const k = this._hk, c = this.contact, ap = this.ap;
+    const show = (el, on) => { if (el.hidden === on) el.hidden = !on; };
+    // landing aids near the ground, a pad or a port
+    const near = !this.jump && (c.agl < 3 || this.dock || c.landed || (ap.on && (ap.phase === 'final' || ap.phase === 'touchdown' || ap.phase === 'approach')));
+    show(k.land, !!near);
+    if (near) {
+      const up = c.agl < Infinity ? c.groundN : V().copy(this.pos).normalize();
+      const vr = V().copy(this.vel);
+      if (this.dock) vr.set(0, 0, 0);
+      const vs = vr.dot(up), hs = V().copy(vr).addScaledVector(up, -vs).length();
+      const alt = this.dock ? 0 : Math.max(c.agl, 0);
+      if (alt < 1) { k.ralt.textContent = (alt * 1000).toFixed(alt < 0.1 ? 1 : 0); k.raltU.textContent = 'm radar alt'; } else { k.ralt.textContent = alt.toFixed(2); k.raltU.textContent = 'km radar alt'; }
+      k.vs.textContent = `${vs >= 0 ? '+' : ''}${(vs * 1000).toFixed(1)}`;
+      k.hs.textContent = (hs * 1000).toFixed(1);
+      const sUp = V().set(0, 1, 0).applyQuaternion(this.quat);
+      const off = Math.acos(clamp(sUp.dot(up), -1, 1)) * 180 / Math.PI;
+      k.lvl.textContent = off.toFixed(1);
+      k.lvlU.textContent = `deg to ground · slope ${(c.slope * 180 / Math.PI).toFixed(0)}`;
+      k.lvl.style.color = off > 12 ? '#ff9a7a' : '';
+      k.vs.style.color = vs < -0.003 && alt < 0.05 ? '#ff9a7a' : '';
+      k.gear.textContent = this.dock ? (this.dock.hard ? 'DOCKED' : 'CAPTURE') : c.landed ? 'LANDED' : this.legs > 0.5 ? (this.legPos > 0.95 ? 'LEGS DOWN' : 'LEGS …') : 'LEGS UP';
+      k.gearU.textContent = `lights ${this.lights ? 'on' : 'off'}${c.footTouch ? ` · ${c.footTouch} feet down` : ''}${c.gear.some((x) => x > 0.01) ? ` · struts ${c.gear.map((x) => Math.round(x * 100)).join('/')}%` : ''}`;
+    }
+    // the autopilot
+    const picked = !ap.on && this._navPick;
+    show(k.apRow, ap.on || !!picked);
+    k.apBtn.textContent = ap.on ? 'AUTOPILOT OFF (N)' : this.dock ? 'UNDOCK (U) · AUTO-NAV (N)' : 'AUTO-NAV TO SELECTION (N)';
+    if (ap.on) {
+      const i = ap.info;
+      k.apPhase.textContent = `AUTO · ${ap.phaseLabel().toUpperCase()}`;
+      k.apLabel.textContent = i.label;
+      const d = ap.phase === 'jump' ? (this.jump ? this.jump.dist || 0 : 0) : i.d;
+      if (d < 1) { k.apD.textContent = Math.round(d * 1000); k.apDU.textContent = 'm to go'; } else { k.apD.textContent = d < 100 ? d.toFixed(1) : Math.round(d).toLocaleString('en-GB'); k.apDU.textContent = 'km to go'; }
+      const v = i.vc;
+      if (Math.abs(v) < 1) { k.apV.textContent = (v * 1000).toFixed(Math.abs(v) < 0.01 ? 2 : 0); k.apVU.textContent = 'm/s closing'; } else { k.apV.textContent = v.toFixed(2); k.apVU.textContent = 'km/s closing'; }
+      const e = i.eta;
+      k.apEta.textContent = !Number.isFinite(e) || e > 36000 ? '-' : e < 90 ? `${Math.round(e)} s` : `${Math.floor(e / 60)}:${String(Math.round(e % 60)).padStart(2, '0')}`;
+    } else if (picked) {
+      k.apPhase.textContent = 'PORT SELECTED'; k.apLabel.textContent = picked.label || picked.id;
+      k.apD.textContent = '-'; k.apV.textContent = '-'; k.apEta.textContent = 'N to go';
+    }
   }
 
   _updateHud() {
@@ -798,7 +870,8 @@ export class ShipPilot {
     if (this._msgT > 0) this._msgT -= 1 / 60;
     k.mode.textContent = this._msgT > 0 ? this._msg.toUpperCase()
       : j ? (j.phase === 'spool' ? 'JUMP · SPOOLING (J CANCELS)' : j.phase === 'transit' ? `JUMP · ${j.label.toUpperCase()}` : 'DROPPING OUT')
-      : this.brake ? 'BRAKING' : this.burn > 0.001 ? (this.boost ? 'BURN · BOOST' : 'BURN') : this.vel.length() < 0.0005 ? 'HOLD' : 'COAST';
+      : this.dock ? (this.dock.hard ? 'DOCKED · U UNDOCKS' : 'SOFT CAPTURE') : this.contact.landed ? 'LANDED' : this.ap.on ? 'AUTOPILOT' : this.brake ? 'BRAKING' : this.burn > 0.001 ? (this.boost ? 'BURN · BOOST' : 'BURN') : this.vel.length() < 0.0005 ? 'HOLD' : 'COAST';
+    this._updateAids();
     const frame = this.frame === 'earth' ? 'Earth frame' : this.frame === 'moon' ? 'lunar frame' : 'free frame';
     k.sub.textContent = `${this.assist ? 'assist on' : 'ballistic'} · ${frame} · legs ${this.legs > 0.5 ? 'down' : 'up'}`;
   }
