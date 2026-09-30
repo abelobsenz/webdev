@@ -49,7 +49,7 @@ function podSurface(z0, z1, th0, th1, nz, nt, kind, keep = () => true, off = 0) 
     const zm = lerp(z0, z1, (j + 0.5) / nz), tm = lerp(th0, th1, (i + 0.5) / nt);
     if (!keep(zm, tm)) continue;
     const a = j * W + i, b = a + 1, c = a + W + 1, d = a + W;
-    idx.push(a, d, c, a, c, b);
+    idx.push(a, b, c, a, c, d);                                   // outward: round (+th) x along (+z)
   }
   const g = finish(pos, fac, idx, { noOrient: true, noWeld: false });
   return g;

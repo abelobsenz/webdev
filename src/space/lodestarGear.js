@@ -231,7 +231,7 @@ export function buildGear(hull, part, { dockZ = -9.5 } = {}) {
   const lampSpots = [];
   const bU = { uOn: { value: 0 } };
   const beamMat = new THREE.ShaderMaterial({ vertexShader: BEAM_VERT, fragmentShader: BEAM_FRAG, uniforms: bU, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide });
-  for (const [z, x, tilt] of [[-14.2, 0.9, -0.25], [-14.2, -0.9, -0.25], [4.2, 3.9, 0.15], [4.2, -3.9, 0.15]]) {
+  for (const [z, x, tilt] of [[-14.2, 0.9, 0.3], [-14.2, -0.9, 0.3], [4.2, 3.9, 0.08], [4.2, -3.9, 0.08]]) {   // tilt > 0 aims forward
     const t = tOf(z), aF = (() => { let a = 3 * Math.PI / 2, best = 1e9; for (let q = Math.PI + 0.1; q < TAU - 0.1; q += 0.002) { const d = Math.abs(hullPt(t, q).x - x); if (d < best) { best = d; a = q; } } return a; })();
     const p = hullPt(t, aF, 0.02);
     staticGeo.push(revolve([[0.0, 0.0, CK.GLASS], [0.2, 0.0, CK.GLASS], [0.2, 0.0, CK.BRONZE], [0.26, 0.06, CK.BRONZE], [0.24, 0.14, CK.DARK], [0.0, 0.14, CK.DARK]], 16).rotateX(Math.PI / 2).translate(p.x, p.y + 0.04, p.z));

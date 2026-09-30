@@ -142,6 +142,21 @@ hull.updateMatrixWorld(true);
   }
 }
 
+// ---- normals face out: the pod's roof, the belly tiles, the hull's flanks
+{
+  const frac = (mesh, sel, want) => {
+    const p = mesh.geometry.attributes.position, n = mesh.geometry.attributes.normal, v = new THREE.Vector3(), q = new THREE.Vector3();
+    let good = 0, all = 0;
+    for (let i = 0; i < p.count; i++) { v.fromBufferAttribute(p, i); if (!sel(v)) continue; q.fromBufferAttribute(n, i); all++; if (want(v, q)) good++; }
+    return all ? good / all : 1;
+  };
+  const roof = frac(hull, (v) => v.y > 5.4 && Math.abs(v.x) < 0.5 && v.z > 0.15 && v.z < 0.35, (v, q) => q.y > 0.5);
+  const belly = frac(ship.detail, (v) => v.y < -1.2 && Math.abs(v.x) < 1.5, (v, q) => q.y < -0.3 || Math.abs(q.y) < 0.3);
+  const flank = frac(hull, (v) => v.y > 0.4 && v.y < 1.0 && Math.abs(v.x) > 3 && v.z > -5 && v.z < 5, (v, q) => q.x * Math.sign(v.x) > 0);
+  console.log(`normals out: pod roof ${(roof * 100).toFixed(0)}%, belly tiles ${(belly * 100).toFixed(0)}%, flanks ${(flank * 100).toFixed(0)}%`);
+  ok(roof > 0.95 && belly > 0.95 && flank > 0.9, 'outward normals');
+}
+
 // ---- timing
 {
   const n = 600;

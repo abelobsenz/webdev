@@ -150,7 +150,7 @@ function tiles() {
     for (const f of faces) {
       for (const p of f) { pos.push(p.x, p.y, p.z); }
       fac.push(fu, 1.5, k, fu + 0.8, 1.5, k, fu + 0.8, 2.3, k, fu, 2.3, k);
-      idx.push(vi, vi + 1, vi + 2, vi, vi + 2, vi + 3);
+      idx.push(vi, vi + 2, vi + 1, vi, vi + 3, vi + 2);            // wound to face out of the belly
       vi += 4;
     }
   };
