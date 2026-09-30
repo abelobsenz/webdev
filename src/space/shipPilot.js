@@ -7,7 +7,7 @@ import { TARGET_INFO } from './targets.js';
 import { EngineVoice } from '../core/engineAudio.js';
 import { ShipContact, PortTrack, matedQuat, DOCK_POS, CAPTURE } from './shipContact.js';
 import { Autopilot } from './autopilot.js';
-import { getPorts } from './ports.js';
+import { getPorts, portsFor } from './ports.js';
 import { LandingDust } from './landingDust.js';
 
 // Flying the Lodestar in the orbital view (km, seconds). Newtonian: the drive and thrusters push
@@ -162,6 +162,15 @@ export class ShipPilot {
     } else if (this._navPick && this._navPick.target === name) port = this._navPick;
     if (this.jump) this._endJump(true);
     this.ap.engage(port);
+  }
+
+  /** The destination list clicked at the helm: select it (the autopilot and the jump fly there). */
+  pickDestination(name) {
+    const sp = this.space;
+    if (sp.hud && sp.hud.select) sp.hud.select(name, false);
+    this._navPick = null;
+    const n = portsFor(sp, name).length, label = (TARGET_INFO[name] && TARGET_INFO[name].name) || name;
+    this._flash(n ? `${label}: N auto-nav (${n} port${n > 1 ? 's' : ''}, M picks) · J jump` : `${label}: J jump`);
   }
 
   /** Engage the autopilot on a given port (the harness, and the HUD button). */
