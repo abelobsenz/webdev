@@ -7,7 +7,8 @@ import * as THREE from 'three';
 //   - lies wholly outside the view (a sphere test against the camera's side planes), or
 //   - projects smaller than MIN_PX across (it could colour at most a pixel or two),
 // and restores them after the frame. Meshes whose vertex shaders size themselves in pixels (lamps,
-// markers, the Earth's pixel-scaled layers) are left alone, as is anything flagged
+// markers, the Earth's pixel-scaled layers) or place themselves without the model matrix are left
+// alone, as is anything flagged
 // userData.noCull. Bounds are the geometry's (an instanced mesh's: over its instances, refreshed as
 // they move), padded for vertex-shader displacement.
 
@@ -99,7 +100,9 @@ function pixelSized(mat) {
   if (Array.isArray(mat)) return mat.some(pixelSized);
   if (mat.__pixelSized !== undefined) return mat.__pixelSized;
   const src = (mat.vertexShader || '') + (mat.userData && mat.userData.pixelSized ? ' uPx ' : '');
-  mat.__pixelSized = PIXEL_SIZED.test(src);
+  // (and shaders that place their vertices without the model matrix - the terrain patch's polar
+  // grid, shells drawn from uniforms: their geometry's bounds say nothing about where they draw)
+  mat.__pixelSized = PIXEL_SIZED.test(src) || (!!mat.vertexShader && !/\bmodel(View)?Matrix\b/.test(mat.vertexShader));
   return mat.__pixelSized;
 }
 
