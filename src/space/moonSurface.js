@@ -1183,6 +1183,8 @@ void main() {
   float h = morph > 0.0 ? reliefH(up, fade) * morph : 0.0;
   // the sea near the camera: its waves as geometry (under a metre: the ground contract holds)
   float wk = (1.0 - smoothstep(1.5, 4.0, r)) * smoothstep(0.6, 0.95, gmask(up).b) * (1.0 - smoothstep(0.0, 0.002, h));
+  // (the Landing's harbour lies calm inside its moles: no swell against the quays and the moored)
+  if (up.x > 0.5) wk *= smoothstep(4.0, 8.0, length(vec2(up.z, up.y)) * RM);
   if (wk > 0.0) h += seaWaves(base, up, fade).w * wk;
   vec3 rel = base + up * h;
   vRel = rel;
