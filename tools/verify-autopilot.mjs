@@ -373,6 +373,29 @@ scenario('dock: wheel hub, then the low station', () => {
   return { ok: b.ok, why: b.why, summary: `hub in ${r1.t.toFixed(0)} s; ${b.summary}`, msgs: p.msgs };
 });
 
+// ---- 2b. the low station's nadir port (facing the Earth), starting 200 km ahead and above -------
+scenario('dock: low station nadir port', () => {
+  const sp = makeSpace(); const L = addLeo(sp); const p = makePilot(sp);
+  const nadir = {
+    id: 'leo:nadir', target: 'leo', label: 'Low station - nadir dock', kind: 'dock', clear: 0.03, approach: 0.25,
+    pose(s2, out) {
+      const P = L.C(V()), n = P.clone().normalize().negate();
+      out.pos = (out.pos || V()).copy(P).addScaledVector(n, 0.05);
+      out.n = (out.n || V()).copy(n);
+      const along = L.C(V(), s2.sim.time + 1).sub(P); along.addScaledVector(n, -along.dot(n)).normalize();
+      out.fwd = (out.fwd || V()).copy(along).negate();
+      return out;
+    },
+  };
+  sp._ports.push(nadir);
+  sp.advance(0);
+  const P0 = L.C(V(), 26); P0.multiplyScalar(1.02);
+  place(p, P0, shipQuat(P0.clone().normalize(), L.C(V()).sub(P0)));
+  const keep = (pp) => { const d = pp.worldPos().distanceTo(L.C(V())); const pose = nadir.pose(sp, {}); const ax = pp.worldPos().sub(pose.pos).dot(pose.n); return d < 0.1 && ax < 0; };
+  const r = flyTo(sp, p, nadir, { T: 900, keep });
+  return dockCheck(r, p, `, lowest ${r.minEarth.toFixed(0)} km`);
+});
+
 // ---- 5. 400,000 km out: the jump drive, then a dock --------------------------------------------
 scenario('dock: jump from 400,000 km', () => {
   const sp = makeSpace(); const L = addLeo(sp); const p = makePilot(sp);
