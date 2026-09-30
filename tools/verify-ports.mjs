@@ -13,7 +13,7 @@
 import * as THREE from 'three';
 import { SpaceMode } from '../src/space/index.js';
 import { SpaceSim, R_EARTH, R_MOON } from '../src/space/sim.js';
-import { getPorts, portsFor } from '../src/space/ports.js';
+import { getPorts, portsFor, matedPose, holdPoint, nearestPort } from '../src/space/ports.js';
 
 let fails = 0;
 const ok = (c, msg) => { if (!c) { fails++; console.log('FAIL', msg); } else if (process.env.VERBOSE) console.log('ok  ', msg); return c; };
@@ -68,6 +68,31 @@ for (const p of ports) {
     ok(up.dot(a.n) > 0.95, `${p.id} pad faces out of the Moon (${up.dot(a.n).toFixed(3)})`);
   }
 }
+// the mated ship: its docking ring (or its feet) exactly on the port, oriented per the contract
+{
+  const { LODESTAR_DOCK, LODESTAR_FEET } = await import('../src/space/starship.js');
+  let worst = 0;
+  for (const p of ports) {
+    const a = pose(p), m = matedPose(space, p, {});
+    const toWorld = (v) => v.clone().multiplyScalar(0.001).applyQuaternion(m.quat).add(m.pos);
+    const up = new THREE.Vector3(0, 1, 0).applyQuaternion(m.quat), nose = new THREE.Vector3(0, 0, -1).applyQuaternion(m.quat);
+    if (p.kind === 'dock') {
+      const e = toWorld(LODESTAR_DOCK.pos).distanceTo(a.pos);
+      worst = Math.max(worst, e);
+      ok(e < 1e-6 && up.dot(a.n) < -0.999999 && nose.dot(a.fwd) > 0.999999, `${p.id} mated: ring on the face, dorsal against n, nose along fwd`);
+    } else {
+      const h = LODESTAR_FEET.map((f) => toWorld(f).sub(a.pos).dot(a.n));
+      worst = Math.max(worst, ...h.map(Math.abs).map((x) => Math.max(x - 0.00002, 0)));
+      ok(h.every((x) => Math.abs(x) < 3e-5) && up.dot(a.n) > 0.999999 && nose.dot(a.fwd) > 0.999999, `${p.id} landed: feet on the pad (${h.map((x) => (x * 1000).toFixed(3)).join(', ')} m), up along n`);
+    }
+    const hold = holdPoint(space, p);
+    ok(Math.abs(hold.distanceTo(a.pos) - p.approach) < 1e-6, `${p.id} hold point ${p.approach} km out`);
+  }
+  console.log(`mated poses: largest ring/feet error ${(worst * 1e6).toFixed(3)} mm`);
+  const np = nearestPort(space, 'halcyon', new THREE.Vector3());
+  ok(np && np.target === 'halcyon', 'nearestPort picks one of the target ports');
+}
+
 // continuity: step the whole world one frame at a time
 {
   const prev = new Map(), prevT = new Map();

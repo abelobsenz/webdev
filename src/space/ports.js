@@ -3,6 +3,7 @@ import { R_EARTH, R_MOON, GEO_ALT, COUNTERWEIGHT_ALT, MERIDIAN_LON, bodyDir } fr
 import { NAURU_LON } from './fleet.js';
 import { STORE_POS } from './geoRoads.js';
 import { linerF } from './linerHull.js';
+import { LODESTAR_DOCK, LODESTAR_FEET } from './starship.js';
 import { PADS as LANDING_PADS } from './lunarLanding.js';
 import { surfaceY, surfaceUp } from './lunarSite.js';
 import { stationFrame } from './stations.js';
@@ -396,3 +397,42 @@ export function getPorts(space) {
 
 /** The ports of one target (possibly empty). */
 export function portsFor(space, target) { return getPorts(space).filter((p) => p.target === target); }
+
+// ------------------------------------------------------------------ helpers for the flight --
+const _pose = {}, _bx = V(), _by = V(), _bz = V(), _bm = new THREE.Matrix4(), _off = V();
+const FEET_CENTRE = LODESTAR_FEET.reduce((a, f) => a.add(f), V()).multiplyScalar(1 / LODESTAR_FEET.length);
+
+/**
+ * The Lodestar's pose when mated to (or standing on) a port at the current instant: out.pos the
+ * ship's origin (world km), out.quat its orientation. A dock puts LODESTAR_DOCK's face centre on
+ * the port face, the ship's dorsal axis along -n and its nose (-Z) along fwd; a pad stands the
+ * centre of LODESTAR_FEET on the pad, the ship's up along n, nose along fwd.
+ */
+export function matedPose(space, port, out = {}) {
+  const p = port.pose(space, _pose);
+  const dock = port.kind === 'dock';
+  _by.copy(p.n).multiplyScalar(dock ? -1 : 1);
+  _bz.copy(p.fwd).negate();
+  _bx.crossVectors(_by, _bz);
+  _bm.makeBasis(_bx, _by, _bz);
+  out.quat = (out.quat || new THREE.Quaternion()).setFromRotationMatrix(_bm);
+  _off.copy(dock ? LODESTAR_DOCK.pos : FEET_CENTRE).multiplyScalar(KM).applyQuaternion(out.quat);
+  out.pos = (out.pos || V()).copy(p.pos).sub(_off);
+  return out;
+}
+
+/** The start of a port's final approach: `approach` km out along n from the mating point (world km). */
+export function holdPoint(space, port, out = V()) {
+  const p = port.pose(space, _pose);
+  return out.copy(p.pos).addScaledVector(p.n, port.approach);
+}
+
+/** The port of a target nearest a world position (km), or null: the one the autopilot picks by default. */
+export function nearestPort(space, target, from) {
+  let best = null, bd = Infinity;
+  for (const port of portsFor(space, target)) {
+    const d = port.pose(space, _pose).pos.distanceTo(from);
+    if (d < bd) { bd = d; best = port; }
+  }
+  return best;
+}
