@@ -68,11 +68,12 @@ export class CellLod {
     }
     // each cell's matrices (and colours) contiguous, so a tier is filled by block copies
     this.cells = [...cells.values()].map((c) => {
-      const m = new Float32Array(c.idx.length * 8), col = Cl ? new Float32Array(c.idx.length * 3) : null;
+      // (tints kept as bytes, 0-2 in steps of 1/127.5: casts over 1 brighten a tree or a coat)
+      const m = new Float32Array(c.idx.length * 8), col = Cl ? new Uint8Array(c.idx.length * 3) : null;
       const ex = Ex ? new Float32Array(c.idx.length * 3) : null;
       c.idx.forEach((i, j) => {
         m.set(M.subarray(i * 8, i * 8 + 8), j * 8);
-        if (col) col.set(Cl.subarray(i * 3, i * 3 + 3), j * 3);
+        if (col) for (let k = 0; k < 3; k++) col[j * 3 + k] = Math.max(0, Math.min(255, Math.round(Cl[i * 3 + k] * 127.5)));
         if (ex) ex.set(Ex.subarray(i * 3, i * 3 + 3), j * 3);
       });
       // the cell's own vertical centre, for the 3-D distance to the camera
@@ -136,7 +137,10 @@ export class CellLod {
         A[o + 8] = si * sz; A[o + 9] = 0; A[o + 10] = co * sz; A[o + 11] = 0;
         A[o + 12] = m[q]; A[o + 13] = m[q + 1]; A[o + 14] = m[q + 2]; A[o + 15] = 1;
       }
-      if (c.col && mesh.instanceColor) mesh.instanceColor.array.set(c.col, counts[t] * 3);
+      if (c.col && mesh.instanceColor) {
+        const Ca = mesh.instanceColor.array, cc = c.col, o3 = counts[t] * 3;
+        for (let j = 0; j < c.n * 3; j++) Ca[o3 + j] = cc[j] / 127.5;
+      }
       if (c.ex) mesh.geometry.getAttribute(this.extra).array.set(c.ex, counts[t] * 3);
       counts[t] += c.n;
     }

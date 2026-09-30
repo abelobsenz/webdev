@@ -504,10 +504,10 @@ export class Moon {
     // the town's trees, instanced in detail (lunarTrees.js)
     this.landingTrees = new LandingTrees(this.landingData.treeInstances || [], this.landingMesh.material);
     this.landing.add(this.landingTrees.group);
-    // the street-range dress: house architecture, street furniture, the harbour's boats, ground
-    // cover and townspeople, instanced and sorted into distance tiers round the camera
-    this.landingDetail = new LandingDetail(this.landingData, this.landingMesh.material);
-    this.landing.add(this.landingDetail.group);
+    // the street-range dress (house architecture, street furniture, the harbour's boats, ground
+    // cover and townspeople, instanced and sorted into distance tiers round the camera) is built
+    // on the first approach within 12 km, not at start-up
+    this.landingDetail = null;
     {
       const top = this.landingData.liftTop.clone().multiplyScalar(0.001);
       const end = 380 - 0.9;
@@ -556,6 +556,15 @@ export class Moon {
     this.ringDeck = new LunarRingDeck(this.group);    // the deck's plan stood up round the camera: terraces, vaults, portals, avenues, trams (lunarRingDeck.js)
     this.hops = new LunarHops(this.group);           // hoppers between Medii and the outposts (lunarHops.js)
     this.orbitals = new LunarOrbitals(this.group);    // Endymion Wheel, Aitken Depot, relays and ferries in lunar orbit (lunarOrbitals.js)
+  }
+
+  /** Build the Landing's street-range detail now (normally done on approach within 12 km). */
+  ensureLandingDetail() {
+    if (!this.landingDetail) {
+      this.landingDetail = new LandingDetail(this.landingData, this.landingMesh.material);
+      this.landing.add(this.landingDetail.group);
+    }
+    return this.landingDetail;
   }
 
   /** Build Medii Works and the Landing's traffic now (normally done on approach). */
@@ -618,6 +627,7 @@ export class Moon {
         _lcam.copy(cam.position); this.landing.worldToLocal(_lcam).multiplyScalar(1000);
         const dKm = _lp.distanceTo(cam.position);
         if (this.landingTrees) { this.landingTrees.group.visible = this.landingMesh.visible; this.landingTrees.update(dKm, _lcam); }
+        if (!this.landingDetail && dKm < 12 && this.landingMesh.visible) this.ensureLandingDetail();
         if (this.landingDetail) { this.landingDetail.group.visible = this.landingMesh.visible && dKm < 9; if (this.landingDetail.group.visible) this.landingDetail.update(_lcam); }
       }
       // the lift cars climb at ~0.4 km/s, a quarter of an hour from the Crown to the Exchange
