@@ -410,6 +410,34 @@ export function buildHull() {
     }
   }
 
+  // ---- doubler plates: proud reinforcing plates between the seams, each outlined by a fastener
+  // rim; EVA handrails along the upper flanks; blade antennas on the belly and flanks
+  {
+    const R = rng(53);
+    const tS = SEAM_T, aBand = [[Math.PI / 2 + 0.36, Math.PI / 2 + 0.8], [Math.PI / 2 - 0.8 + TAU, Math.PI / 2 - 0.36 + TAU], [Math.PI / 2 + 0.84, Math.PI - 0.32], [0.32 + TAU, Math.PI / 2 - 0.84 + TAU]];
+    for (let i = 0; i < tS.length - 1; i++) for (const [a0, a1] of aBand) {
+      if (R() < 0.45) continue;
+      const t0 = tS[i] + 0.004 + R() * 0.01, t1 = tS[i + 1] - 0.004 - R() * 0.01;
+      const b0 = lerp(a0, a1, 0.08 + R() * 0.2), b1 = lerp(a0, a1, 0.72 + R() * 0.2);
+      const pm = hullPt((t0 + t1) / 2, (b0 + b1) / 2);
+      if ((Math.abs(pm.x) < 2.7 && pm.z > -12.5 && pm.z < 4.6) || (Math.abs(pm.x) < 2.2 && pm.z > 4.3 && pm.z < 11.8)) continue;
+      detail.push(hullStrip(t0, t1, b0, b1, CK.HULL, { o: 0.014, i: 0.01, nt: 4, na: 4 }));
+      detail.push(hullStrip(t0 - 0.0008, t1 + 0.0008, b0 - 0.004, b1 + 0.004, CK.DARK, { o: 0.007, i: 0.01, nt: 4, na: 4 }));
+    }
+    for (const side of [1, -1]) {
+      const a = side > 0 ? Math.PI / 2 - 1.12 + TAU : Math.PI / 2 + 1.12;
+      for (const [tA, tB] of [[0.15, 0.36], [0.5, 0.74]]) {
+        const pts = []; for (let k = 0; k <= 10; k++) pts.push(hullPt(lerp(tA, tB, k / 10), a, 0.13));
+        detail.push(tube(pts, 0.022, CK.BRONZE, 6, 2));
+        for (let k = 0; k <= 5; k++) { const t = lerp(tA, tB, k / 5); detail.push(rod(hullPt(t, a, 0.0), hullPt(t, a, 0.14), 0.018, CK.BRONZE, 6)); }
+      }
+    }
+    for (const [t, a, h] of [[0.47, 3 * Math.PI / 2, 0.55], [0.62, 3 * Math.PI / 2 + 0.12, 0.4], [0.62, 3 * Math.PI / 2 - 0.12, 0.4], [0.45, 0.62 + TAU, 0.35], [0.45, Math.PI - 0.62, 0.35]]) {
+      const blade = loft([[V3(-0.02, 0, -0.25), V3(0.02, 0, -0.25), V3(0.02, 0, 0.25), V3(-0.02, 0, 0.25)], [V3(-0.012, h, 0.05), V3(0.012, h, 0.05), V3(0.012, h, 0.25), V3(-0.012, h, 0.25)]], CK.DARK, { capStart: true, capEnd: true });
+      detail.push(onHull(blade, t, a, 0.04));
+    }
+  }
+
   // ---- sensors: a probe on the nose, a chin turret, and blisters on the flanks
   {
     const tip = hullPt(0.0, 0);
