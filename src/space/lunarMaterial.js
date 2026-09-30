@@ -300,14 +300,32 @@ void main() {
     alb = stone * (1.0 - 0.3 * joint) * (1.0 - wear) * mix(1.0, 0.94 + 0.1 * vnoise(f * 0.05), 1.0 - smoothstep(3.0, 9.0, px));
     rough = mix(0.72, 0.55, flagH * det);
   } else if (k < 23.5) {
-    // landing pad: dark composite, a painted ring every 50 m, the central target
+    // landing pad: cast composite slabs 6 m square, each a shade apart, scorched round the
+    // centre by the landings; a touchdown ring at 40 m with a dashed yellow ring inside it, the
+    // centre cross, a guide ring every 50 m, dashed approach lines on the diagonals, and a
+    // band of hazard chevrons inside the rim (the facade is the pad's own plane, metres)
     float r = length(f);
-    float ring = cLine(r, 50.0, 1.2, px);
-    float centre = 1.0 - smoothstep(18.0, 18.0 + px, abs(r - 40.0));
-    alb = vec3(0.2, 0.2, 0.21) * (0.92 + 0.08 * vnoise(f * 0.02));
-    alb = mix(alb, vec3(0.75, 0.72, 0.6), max(ring * 0.7, centre * 0.6));
+    float ang = atan(f.y, f.x + 1e-4);
+    float hsP = hash12(floor(f / 6.0) + 7.0);
+    float jointP = max(gridLine(f.x, 6.0, 0.03, fw.x), gridLine(f.y, 6.0, 0.03, fw.y)) * (1.0 - smoothstep(0.05, 0.2, px));
+    alb = vec3(0.21, 0.21, 0.22) * (0.9 + 0.12 * mix(0.5, hsP, detP)) * (1.0 - 0.3 * jointP) * (0.92 + 0.08 * vnoise(f * 0.02));
+    float scorch = (1.0 - smoothstep(20.0, 110.0, r)) * (0.7 + 0.3 * vnoise(vec2(ang * 12.0, r * 0.05)));
+    alb *= 1.0 - 0.45 * scorch;
+    float aaP = max(px, 0.05);
+    float tdR = 1.0 - smoothstep(0.6, 0.6 + aaP, abs(r - 40.0));
+    float inR = (1.0 - smoothstep(0.4, 0.4 + aaP, abs(r - 36.0))) * step(0.5, fract(ang * 36.0 / 6.2832));
+    float ring = cLine(r, 50.0, 0.6, px) * step(55.0, r) * (1.0 - step(232.0, r));
+    float crossM = (1.0 - smoothstep(1.0, 1.0 + aaP, min(abs(f.x), abs(f.y)))) * (1.0 - step(14.0, r));
+    float diagP = min(abs(f.x - f.y), abs(f.x + f.y)) * 0.7071;
+    float spoke = (1.0 - smoothstep(0.5, 0.5 + aaP, diagP)) * step(60.0, r) * (1.0 - step(228.0, r)) * step(0.4, fract(r / 12.0));
+    float haz = step(236.0, r) * (1.0 - step(246.0, r));
+    float chev = step(0.5, fract(ang * 96.0 / 6.2832 + r * 0.05));
+    vec3 paintW = vec3(0.78, 0.76, 0.7), paintY = vec3(0.8, 0.6, 0.12);
+    alb = mix(alb, paintW, max(max(tdR, crossM), max(ring * 0.8, spoke)) * 0.85);
+    alb = mix(alb, paintY, inR * 0.85);
+    alb = mix(alb, mix(vec3(0.05), paintY, chev), haz * mix(0.5, 1.0, detP));
     rough = 0.6;
-    em = vec3(1.0, 0.8, 0.5) * ring * 0.05 * night;
+    em = vec3(1.0, 0.8, 0.5) * (tdR + ring) * 0.04 * night;
   } else if (k < 24.5) {
     // lawn: grass in three scales of colour (drier and lusher patches, clover, blades), mown in
     // alternate 3 m stripes, with worn earth where it is walked (the trees stand on it for real)

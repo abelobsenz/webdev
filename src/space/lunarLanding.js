@@ -558,6 +558,29 @@ export function buildMediiLanding() {
       B.pop();
     }
     B.pop();
+    // the field's terminal beside its road: a stone hall with a glazed upper floor under a
+    // deep flat roof, a canopy over the kerb, and a control tower with a glazed cab
+    {
+      const tu = u + 80, tv = v + 312;
+      foot('terminal', tu, tv, 64, 44);
+      const [tx, tz] = UV(tu, tv);
+      B.at(tx, gy(tx, tz), tz, 0, ROT_UV, 0);
+      B.box(0, 2.6, 0, 64, 6.2, 40, LK.STONE);
+      B.box(0, 7.6, 0, 62, 3.8, 38, LK.GLASS);
+      for (let i = -30; i <= 30; i += 4) { B.box(i, 7.6, 19.1, 0.3, 3.8, 0.3, LK.BRONZE); B.box(i, 7.6, -19.1, 0.3, 3.8, 0.3, LK.BRONZE); }
+      B.box(0, 9.9, 0, 66, 0.8, 42, LK.WALL);
+      B.box(0, 10.5, 0, 60, 0.5, 36, LK.PANEL);
+      // the kerbside canopy on slender columns, facing the road (local -x)
+      B.box(-36.5, 4.6, 0, 9, 0.4, 30, LK.WALL);
+      for (const z of [-13, -4.5, 4.5, 13]) B.box(-40, 2.2, z, 0.35, 4.4, 0.35, LK.BRONZE);
+      B.box(-32.3, 3.2, 0, 0.3, 0.8, 14, LK.SIGN);
+      B.at(26, 10.3, 14);
+      B.push(new THREE.Matrix4().makeRotationX(-Math.PI / 2));
+      B.lathe([[4.2, 0, LK.WALL], [3.6, 22, LK.WALL], [5.6, 23, LK.BRONZE], [6.4, 24, LK.GLASS], [6.8, 27.5, LK.GLASS], [7.2, 28, LK.BRONZE], [5.5, 29, LK.PANEL], [0.6, 29.4, LK.BRONZE], [0.3, 34, LK.BRONZE], [0, 34.2, LK.BRONZE]], 24);
+      B.pop(); B.pop();
+      B.pop();
+      lamps.push({ p: at(tu + 26, tv + 14, 10.3 + 34.4), r: 1.6, color: LAMP.RED, i: 2.0, breathe: 0.4 });
+    }
     // road to the domes quarter (its top a little above the ground, its foot below)
     const vEnd = -1700 + 20;
     slabUV(B, u - 15, u + 15, v + 262, vEnd, 0.5, { bot: -2, step: 150 });
