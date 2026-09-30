@@ -440,7 +440,7 @@ void main() {
       // timber boards 0.15 m wide, their grain, the joints, weathered toward silver
       float board = gridLine(f.y, 0.15, 0.006, fw.y) * detP;
       float grain = vnoise(vec2(f.x * 2.0, f.y * 40.0)) * 0.5 + vnoise(vec2(f.x * 0.3, f.y * 7.0)) * 0.5;
-      alb = mix(vec3(0.3, 0.22, 0.15), vec3(0.46, 0.38, 0.29), grain) * (1.0 - 0.35 * board) * vTint;
+      alb = mix(vec3(0.3, 0.22, 0.15), vec3(0.46, 0.38, 0.29), grain) * (1.0 - 0.35 * board) * mix(vec3(1.0), vTint, 0.3);
       rough = 0.75;
     } else if (k < 46.5) {
       // painted joinery: gloss paint in the house's colour, a little dirt in the corners
@@ -460,7 +460,9 @@ void main() {
       em += alb * sunL * max(dot(-N, uSunView), 0.0) * 0.06;
     } else if (k < 49.5) {
       // mouldings: the house's stone a shade lighter, weathered along its length
-      alb = vTint * (0.92 + 0.08 * vnoise(f * 1.3)) * (1.0 - 0.1 * smoothstep(0.6, 0.9, vnoise(vec2(f.x * 2.0, f.y * 0.4))));
+      // (the tint only colours it part way: painted cases on doors and shops, stone elsewhere)
+      vec3 mt = mix(vec3(0.66, 0.63, 0.57), vTint, 0.45);
+      alb = mt * (0.92 + 0.08 * vnoise(f * 1.3)) * (1.0 - 0.1 * smoothstep(0.6, 0.9, vnoise(vec2(f.x * 2.0, f.y * 0.4))));
       rough = 0.78;
     } else if (k < 50.5) {
       // bark: vertical furrows round the trunk (facade x runs round, y along), lichen patches
@@ -473,7 +475,7 @@ void main() {
     } else if (k < 51.5) {
       // sailcloth: cream panels with seams, a little light through it
       float seam = gridLine(f.y, 1.1, 0.02, fw.y) * detP;
-      alb = vec3(0.84, 0.82, 0.76) * vTint * (1.0 - 0.15 * seam);
+      alb = vec3(0.84, 0.82, 0.76) * (1.0 - 0.15 * seam);
       rough = 0.8;
       em += alb * sunL * max(dot(-N, uSunView), 0.0) * 0.12;
     } else if (k < 52.5) {
@@ -490,7 +492,7 @@ void main() {
     } else if (k < 54.5) {
       // clipped hedge and shrub: small leaves in clumps, darker in the hollows
       float lv = vnoise(f * 3.0) * 0.6 + vnoise(f * 11.0) * 0.4 * det;
-      alb = mix(vec3(0.025, 0.06, 0.02), vec3(0.09, 0.15, 0.045), lv) * vTint;
+      alb = mix(vec3(0.025, 0.06, 0.02), vec3(0.09, 0.15, 0.045), lv) * mix(vec3(1.0), vTint, 0.35);
       N = normalize(N + (vec3(vnoise(f * 5.0 + 1.0), vnoise(f * 5.0 + 9.0), vnoise(f * 5.0 + 3.0)) - 0.5) * 0.8 * detP);
       rough = 0.9;
       em += alb * sunL * max(dot(-N, uSunView), 0.0) * 0.05;

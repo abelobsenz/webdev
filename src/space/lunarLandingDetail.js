@@ -195,6 +195,34 @@ function protoColumn() {
   return B.geometry();
 }
 
+/** A timber pergola, 5 x 3.5 m, 2.6 m high, for a roof garden. */
+function protoPergola() {
+  const B = new CB();
+  for (const x of [-2.4, 2.4]) for (const z of [-1.6, 1.6]) B.box(x, 1.3, z, 0.16, 2.6, 0.16, LK.WOOD);
+  for (const z of [-1.6, 1.6]) B.box(0, 2.52, z, 5.4, 0.2, 0.12, LK.WOOD);
+  for (let i = 0; i < 9; i++) B.box(-2.4 + i * 0.6, 2.68, 0, 0.08, 0.12, 3.9, LK.WOOD);
+  // a vine grown over one end, planters at the posts
+  B.box(-1.6, 2.8, 0, 1.8, 0.2, 3.6, LK.HEDGE);
+  for (const z of [-1.6, 1.6]) B.box(-2.4, 0.3, z, 0.7, 0.6, 0.7, LK.MOULD);
+  B.box(1.2, 0.25, 0, 1.6, 0.5, 0.8, LK.WOOD);                         // a table
+  return B.geometry();
+}
+
+/** A roof light and a water tank on its stand. */
+function protoRoofKit() {
+  const B = new CB();
+  B.box(0, 0.25, 0, 2.4, 0.5, 1.6, LK.MOULD);
+  B.at(0, 0.5, 0, 0, 0, 0);
+  B.loft([{ z: -0.8, pts: [[-1.2, 0], [1.2, 0], [0, 0.7]] }, { z: 0.8, pts: [[-1.2, 0], [1.2, 0], [0, 0.7]] }], () => LK.GLASS);
+  B.pop();
+  for (const x of [3.2, 4.4]) for (const z of [-0.5, 0.5]) B.box(x, 0.6, z, 0.1, 1.2, 0.1, LK.IRON);
+  B.at(3.8, 1.2, 0);
+  B.push(new THREE.Matrix4().makeRotationX(-Math.PI / 2));
+  B.lathe([[0, 0, LK.HULL], [0.75, 0, LK.HULL], [0.75, 1.5, LK.HULL], [0.5, 1.75, LK.HULL], [0, 1.8, LK.HULL]], 12);
+  B.pop(); B.pop();
+  return B.geometry();
+}
+
 // ------------------------------------------------------------------ the sets --
 
 /**
@@ -216,6 +244,8 @@ export function landingArchitecture(S, mat, { near = 800 } = {}) {
   const quoin = new CellLod('Landing quoins', [protoQuoins()], [near * 0.5], mat, { tint: true, cell: 120 });
   const dorm = new CellLod('Landing dormers', [protoDormer()], [near * 1.2], mat, { tint: true, cell: 160 });
   const cols = new CellLod('Landing civic colonnades', [protoColumn()], [near * 1.6], mat, { tint: true, cell: 200 });
+  const perg = new CellLod('Landing roof pergolas', [protoPergola()], [near * 0.75], mat, { tint: true, cell: 140 });
+  const rkit = new CellLod('Landing roof lights and tanks', [protoRoofKit()], [near * 0.75], mat, { tint: true, cell: 140 });
 
   for (const h of S.houses) {
     const c = Math.cos(h.ry), s = Math.sin(h.ry);
@@ -250,6 +280,12 @@ export function landingArchitecture(S, mat, { near = 800 } = {}) {
       corn.add(cx, h.y + h.H - (h.roof ? 0.42 : 0.55), cz, ry, h.w, 1, 1, mould);
       for (let st = 1; st < h.storeys; st++) course.add(cx, h.y + st * 3.6 - 0.07, cz, ry, h.w - 0.02, 1, 1, mould);
     }
+    // on the flat roofs' gardens: a pergola in one half, a roof light and a tank in the other
+    if (!h.roof && h.w > 12 && h.d > 9) {
+      const top = h.y + h.H + 0.7, s0 = r() < 0.5 ? -1 : 1;
+      if (r() < 0.7) { const [px, pz] = P(s0 * (h.w / 4), (r() - 0.5) * (h.d - 6)); perg.add(px, top, pz, h.ry + (r() < 0.5 ? 0 : Math.PI), 1, 1, 1, mould); }
+      if (r() < 0.6) { const [kx, kz] = P(-s0 * (h.w / 4 + 1.2), (r() - 0.5) * (h.d - 5)); rkit.add(kx, top, kz, h.ry + (r() < 0.5 ? 0 : Math.PI), 1, 1, 1, mould); }
+    }
     // quoins up the corners of the stone-coloured houses
     if (h.pal === 0 || h.pal === 2) {
       for (const [sx, sz] of [[1, 1], [-1, 1], [1, -1], [-1, -1]]) {
@@ -280,5 +316,5 @@ export function landingArchitecture(S, mat, { near = 800 } = {}) {
       cols.add(x, S.gy(x, z) + S.T.LIFT + 0.6, z, S.ROT_UV, 1, 1, 1, [0.62, 0.6, 0.55]);
     }
   }
-  return { sets: [win, winS, boxes, shop, door, corn, course, quoin, dorm, cols] };
+  return { sets: [win, winS, boxes, shop, door, corn, course, quoin, dorm, cols, perg, rkit] };
 }

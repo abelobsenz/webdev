@@ -70,6 +70,14 @@ function protoMooringBollard() {
   return B.geometry();
 }
 
+/** A granite kerb, 1 m along x (scaled to its run), 0.3 m wide, 0.15 m up with a gutter of setts. */
+function protoKerb() {
+  const B = new CB();
+  B.box(0, -0.05, 0, 1, 0.4, 0.3, LK.KERB);
+  B.box(0, -0.12, 0.3, 1, 0.26, 0.3, LK.KERB);
+  return B.geometry();
+}
+
 function protoStoneBollard() {
   const B = new CB();
   lathe(B, [[0, 0, LK.KERB], [0.2, 0, LK.KERB], [0.18, 0.7, LK.KERB], [0.14, 0.86, LK.KERB], [0.06, 0.92, LK.KERB], [0, 0.93, LK.KERB]], 10);
@@ -278,6 +286,19 @@ export class LandingDetail {
       }
     }
     add(moor); add(stair);
+
+    // --- granite kerbs down both sides of the Boulevard's carriageway, and round its median ---
+    const kerb = new CellLod('Kerbs', [protoKerb()], [900], mat, { cell: 200 });
+    for (const [v0, v1, h] of [[S.V.MID + 3, S.V.LOW - 3, S.T.MID], [S.V.LOW + 3, S.V.STRAND - 3, S.T.LOW]]) {
+      for (let v = v0; v < v1 - 1; v += 12) {
+        const L = Math.min(12, v1 - v);
+        for (const uu of [-25.2, 25.2, -6.15, 6.15]) {
+          const [x, z] = S.UV(uu, v + L / 2);
+          kerb.add(x, g(x, z) + h, z, S.ROT_UV + Math.PI / 2, L - 0.02, 1, 1);
+        }
+      }
+    }
+    add(kerb);
 
     // --- stone bollards where the cross streets meet the Boulevard ---
     const stoneB = new CellLod('Stone bollards', [protoStoneBollard()], [700], mat, { cell: 160 });
