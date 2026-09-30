@@ -269,5 +269,71 @@ function boxTest(g, space, p) {
   return { corridor, envelope, contact, what: [...what].slice(0, 3).join(', ') + (firstY < Infinity ? `, from ${(Math.max(firstY, 0) * 1000).toFixed(0)} m out` : '') };
 }
 
+// ---- FLY=1: the real autopilot flies to every real port in the headless scene (FLY_ONLY=id,
+// FLY_SHARD=i/n to split the list), from a start off the approach axis
+if (process.env.FLY && G) {
+  const { ShipPilot } = await import('../src/space/shipPilot.js');
+  const KM = 0.001, V = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z);
+  space.hud = { selected: null }; space.app = {}; space.mode = 'space';
+  const mods = ['fleet', 'works', 'geoRoads', 'releaseYard', 'lowOrbit', 'lagrange', 'geoBelt'].map((k) => space[k]);
+  const advance = (dt) => {
+    sim.step(dt); space.realTime += dt;
+    const t = space.realTime;
+    space.earthFixed.quaternion.copy(sim.earthQuat);
+    for (const m of [space.elevator, space.rings, space.ports, space.hearth, space.sunSwarm]) m.update(sim, t, dt, space);
+    space.moon.update(sim, t);
+    for (const m of mods) if (m.update) m.update(sim, t, dt, space);
+    space.scene.updateMatrixWorld(true);
+  };
+  let list = ports;
+  if (process.env.FLY_ONLY) { const want = process.env.FLY_ONLY.split(','); list = list.filter((p) => want.includes(p.id)); }
+  if (process.env.FLY_SHARD) { const [i, n] = process.env.FLY_SHARD.split('/').map(Number); list = list.filter((_, k) => k % n === i); }
+  const T = +(process.env.FLY_T || 900), dt = 1 / 30;
+  let flown = 0, reached = 0;
+  for (const port of list) {
+    const p = new ShipPilot(space);
+    p.ship = { root: new THREE.Group(), state: { legs: 0 }, update() {} };
+    space.scene.add(p.ship.root);
+    p.msgs = []; p._flash = (m) => { p.msgs.push(`${p.time.toFixed(0)}s ${m}`); };
+    p._syncFrames(0);
+    advance(0);
+    const o = port.pose(space, {});
+    // start 6 km out, 70 degrees off the approach axis, nose toward the port
+    const side = V().crossVectors(o.n, o.fwd).normalize();
+    const dir = o.n.clone().multiplyScalar(Math.cos(1.22)).addScaledVector(side, Math.sin(1.22)).normalize();
+    const start = o.pos.clone().addScaledVector(dir, 6);
+    const dm = start.distanceTo(sim.moonPos);
+    if (dm < R_MOON + 3) { const u = start.clone().sub(sim.moonPos).normalize(); start.copy(sim.moonPos).addScaledVector(u, R_MOON + 3); }
+    const q = new THREE.Quaternion().setFromUnitVectors(V(0, 0, -1), o.pos.clone().sub(start).normalize());
+    space.scene.attach(p.ship.root); p.frame = 'world';
+    p._setFrame(p._frameFor(start), start, q, V());
+    p.vel.set(0, 0, 0); p.rates.set(0, 0, 0);
+    p.navigate(port);
+    if (process.env.FLYDBG) { console.log('start alt', (start.distanceTo(sim.moonPos) - R_MOON).toFixed(3), 'port alt', (o.pos.distanceTo(sim.moonPos) - R_MOON).toFixed(5), 'frame', p.frame, 'pos', p.pos.toArray().map((x) => x.toFixed(3)).join(','), 'Lpos', (p.pos.length() - R_MOON).toFixed(3)); p.contact.sense && p.contact.sense(p, 1 / 30); console.log('pads', (p.contact.pads || []).map((pd) => pd.tr.port.id + ' d ' + pd.tr.pos.distanceTo(p.pos).toFixed(3) + ' r ' + pd.r + ' h ' + p.pos.clone().sub(pd.tr.pos).dot(pd.tr.n).toFixed(3)).join(' | ')); }
+    const t0 = performance.now(); let t = 0, bad = '', phases = new Set();
+    for (; t < T; t += dt) {
+      advance(dt); p.tick(dt);
+      if (process.env.FLYTRACE && Math.abs(t / +process.env.FLYTRACE - Math.round(t / +process.env.FLYTRACE)) < dt / 2 / +process.env.FLYTRACE) { const a = p.ap; console.log(`  t ${t.toFixed(0)} ${a.phase} d ${a.info && a.info.d != null ? (a.info.d * 1000).toFixed(2) : '-'}m vc ${a.info && a.info.vc != null ? (a.info.vc * 1000).toFixed(3) : '-'}m/s att ${((a.attErr || 0) * 57.3).toFixed(2)} frame ${p.frame} ${p.contact.hullTouch ? 'HULL' : ''}`); }
+      if (process.env.FLYDBG && t < +process.env.FLYDBG) console.log(t.toFixed(2), p.frame, 'alt', (p.pos.length() - R_MOON).toFixed(4), 'v', p.vel.length().toFixed(5), 'agl', p.contact.agl, 'feet', p.contact.footTouch, 'hull', p.contact.hullTouch, 'pad', p.contact.surfPad && p.contact.surfPad.id, 'ph', p.ap.phase);
+      phases.add(p.ap.phase || (p.dock ? 'docked' : p.contact.landed ? 'landed' : '-'));
+      if (!Number.isFinite(p.pos.x + p.vel.x + p.quat.w)) { bad = 'NaN'; break; }
+      if ((p.dock && p.dock.hard) || (p.contact.landed && !p.ap.on)) break;
+      if (!p.ap.on && !p.dock && !p.contact.landed) { bad = 'autopilot dropped out'; break; }
+    }
+    flown++;
+    const P = p.worldPos(V()), m = port.pose(space, {});
+    const done = (p.dock && p.dock.hard) || p.contact.landed;
+    if (done && !bad) reached++;
+    const c = p.lastCapture;
+    console.log(`${done && !bad ? 'FLY ok  ' : 'FLY FAIL'} ${port.id.padEnd(28)} ${done ? (p.dock ? 'docked' : 'landed') : 'not there'} in ${t.toFixed(0)} s` +
+      `${c && p.dock ? ` (${(c.v / KM).toFixed(2)} m/s, axis ${(c.axisErr * 57.3).toFixed(1)} deg)` : ''}; ship ${(P.distanceTo(m.pos) / KM).toFixed(1)} m from the port; ${[...phases].join('>')}${bad ? ' ' + bad : ''} [${((performance.now() - t0) / 1000).toFixed(0)} s wall]` +
+      (done && !bad ? '' : `\n     ${p.msgs.slice(-4).join(' | ')}`));
+    if (!(done && !bad)) fails++;
+    space.scene.remove(p.ship.root);
+    if (p.moonAnchor) space.scene.remove(p.moonAnchor);
+  }
+  console.log(`flights: ${reached}/${flown} reached their port`);
+}
+
 console.log(fails ? `${fails} FAILED` : 'all ports ok');
 process.exit(fails ? 1 : 0);

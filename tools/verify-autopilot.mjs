@@ -12,7 +12,7 @@ import * as THREE from 'three';
 import { ShipPilot } from '../src/space/shipPilot.js';
 import { R_EARTH, R_MOON } from '../src/space/sim.js';
 import { FEET_CENTRE, STROKE } from '../src/space/shipContact.js';
-import { LODESTAR_FEET } from '../src/space/starship.js';
+import { LODESTAR_FEET, LODESTAR_DOCK } from '../src/space/starship.js';
 
 const V = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z);
 const OMEGA_E = 7.2921159e-5, GM_E = 398600.4, DEG = Math.PI / 180, KM = 0.001;
@@ -261,7 +261,7 @@ scenario('dock: wheel hub from behind', () => {
   // then ride the spinning hub for 20 s: the ship must stay mated
   if (res.ok) {
     for (let t = 0; t < 20; t += 1 / 60) { sp.advance(1 / 60); p.tick(1 / 60); }
-    const pose = W.port.pose(sp, {}), ring = V(0, 3.1, -6.3).multiplyScalar(KM).applyQuaternion(p.worldQuat()).add(p.worldPos());
+    const pose = W.port.pose(sp, {}), ring = LODESTAR_DOCK.pos.clone().multiplyScalar(KM).applyQuaternion(p.worldQuat()).add(p.worldPos());
     if (ring.distanceTo(pose.pos) > 0.05 * KM) return { ok: false, why: `drifted off the port while docked (${(ring.distanceTo(pose.pos) / KM).toFixed(2)} m)`, summary: res.summary };
     // undock and check it pushes off along the axis
     p.undock();

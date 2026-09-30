@@ -155,14 +155,20 @@ export class Autopilot {
   }
 
   _centreW(out) {
-    const t = this.pilot.space.targets[this.port.target];
-    return t && t.position ? t.position(out) : null;
+    // a port reached through another structure (the Meridian's dock is on the Halo junction
+    // overhead) keeps clear of that structure; a centre far below the port (the target itself on
+    // a body's surface) is no structure to route round
+    const t = this.pilot.space.targets[this.port.via || this.port.target];
+    if (!t || !t.position) return null;
+    t.position(out);
+    const w = this.port.pose(this.pilot.space, this._cw || (this._cw = {}));
+    return w.pos.distanceTo(out) > 100 ? null : out;
   }
 
   /** Keep-out radius round the port's structure (km). */
   _keepR(w, C) {
     if (!C || this._isBodyPad(w)) return 0;
-    const t = this.pilot.space.targets[this.port.target];
+    const t = this.pilot.space.targets[this.port.via || this.port.target];
     return Math.max(w.pos.distanceTo(C) + (this.port.clear || 0.02), (t && t.minDist) ? t.minDist : 0);
   }
 
@@ -232,7 +238,10 @@ export class Autopilot {
       const VH = tr.pointVel(H, s, V()), AH = this._accAt(H, V());
       rel.copy(H).sub(p.pos); vrel.copy(p.vel).sub(VH);
       const d = rel.length(), ab = 0.35 * c.A_RCS;
-      const vd = Math.min(pad ? 0.25 : 0.05, Math.sqrt(2 * ab * d), 0.6 * d);
+      // down the corridor: quick while the hold point is far (a big structure's gate can be tens of
+      // km out), braking on the thrusters' own authority, slow for the last few hundred metres
+      const vcap = pad ? 0.25 : clamp(0.05 + 0.12 * (d - 0.5), 0.05, 0.4);
+      const vd = Math.min(vcap, Math.sqrt(2 * ab * d), 0.6 * d);
       const vdes = V().copy(rel).multiplyScalar(d > 1e-9 ? vd / d : 0).add(VH);
       T.copy(AH).sub(g).addScaledVector(vdes.sub(p.vel), 1.3);
       att = Qt;
