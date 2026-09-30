@@ -131,6 +131,20 @@ function slopeGround(d1, deg) {
   };
 }
 
+// hills: a few kilometres of relief everywhere (normals by finite differences, like the real one)
+function hillyGround() {
+  const H = (d) => 1.6 * Math.sin(38 * d.x + 0.5) * Math.cos(33 * d.y) + 0.9 * Math.sin(71 * d.z + 1.3) * Math.cos(57 * d.x) + 0.35 * Math.sin(160 * d.y + 2.1);
+  const t1 = V(), t2 = V(), q = V();
+  return (dir, out = {}) => {
+    const h = H(dir);
+    t1.set(0, 1, 0).cross(dir); if (t1.lengthSq() < 1e-8) t1.set(1, 0, 0).cross(dir); t1.normalize(); t2.crossVectors(dir, t1);
+    const e = 2e-5, d1 = (H(q.copy(dir).addScaledVector(t1, e).normalize()) - h) / (R_MOON * e), d2 = (H(q.copy(dir).addScaledVector(t2, e).normalize()) - h) / (R_MOON * e);
+    out.h = h; out.water = false;
+    out.normal = (out.normal || V()).copy(dir).addScaledVector(t1, -d1).addScaledVector(t2, -d2).normalize();
+    return out;
+  };
+}
+
 // ------------------------------------------------------------------------ the pilot --
 function makePilot(space, ground) {
   const p = new ShipPilot(space);
@@ -309,6 +323,23 @@ scenario('land: deck pad on the orbiting station', () => {
   if (Math.abs(h) > 0.001 || off > 0.02) return { ok: false, why: 'not on the deck', summary: s };
   return { ok: true, summary: s };
 });
+
+// ---- 4b'. hills: a pad among kilometres of relief, from 300 km out and from low behind a ridge ---
+for (const [name, start] of [['from 300 km', { ang: 0.17, alt: 25 }], ['low, behind the relief', { ang: 0.004, alt: 1.2 }]]) {
+  scenario(`land: hilly Moon, ${name}`, () => {
+    const sp = makeSpace(); const G0 = hillyGround(); let calls = 0; const G = (d, o) => { calls++; return G0(d, o); }; const p = makePilot(sp, G);
+    const d0 = V(-0.9, 0.3, 0.3).normalize();
+    const pad = addMoonPad(sp, 'hills', d0, 1.2 * KM, (d, o) => { const g = G(d, o); o.normal.copy(d); return o; });
+    sp.advance(0);
+    const ds = d0.clone().applyAxisAngle(V(0, 1, 0), start.ang), gs = G(ds, {});
+    const Pb = ds.clone().multiplyScalar(R_MOON + Math.max(gs.h, pad.Pb.length() - R_MOON) + start.alt);
+    place(p, Pb.clone().add(sp.sim.moonPos), shipQuat(ds.clone(), V(0, 1, 0)));
+    const r = flyTo(sp, p, pad.port, { T: 900 });
+    const res = padCheck(r, p, pad, `, ${r.phases}, low gate ${p.ap._low ? p.ap._low.toFixed(1) + ' km' : 'no'}, moonGround ${Math.round(calls / r.t)} calls/s (harness checks included)`);
+    if (res.ok && r.minHull < 0.005) return { ok: false, why: `skimmed the relief (${(r.minHull / KM).toFixed(1)} m)`, summary: res.summary };
+    return res;
+  });
+}
 
 // ---- 4c. a hop: land on one Moon pad, then the autopilot lifts off and flies to another -------
 scenario('land: hop between two Moon pads', () => {
