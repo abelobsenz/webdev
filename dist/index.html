@@ -18439,8 +18439,10 @@ void main() {
       float conc = dot(cf.grad, cf.grad);
       albC *= 1.0 - 0.06 * smoothstep(0.02, 0.2, conc) * (1.0 - cf.rock);
       // the hills' own ground: drier, sun-bleached crests, lusher hollows, bare rock on the steep
-      albC *= mix(vec3(1.0), vec3(1.12, 1.06, 0.86), smoothstep(0.05, 0.22, hillH)) * mix(vec3(1.0), vec3(0.86, 0.96, 0.84), smoothstep(-0.04, -0.2, hillH));
-      albC = mix(albC, vec3(0.3, 0.28, 0.25) * (0.9 + 0.2 * gf.fine), smoothstep(0.18, 0.4, hillS) * 0.6);
+      albC *= mix(vec3(1.0), vec3(1.06, 1.03, 0.92), smoothstep(0.05, 0.22, hillH)) * mix(vec3(1.0), vec3(0.88, 0.96, 0.86), smoothstep(-0.04, -0.2, hillH));
+      // bare rock only where the ground is really steep (the knolls' gentle slopes stayed pale
+      // grey: the "blotches" on the farmland), and a natural grey-brown, not a pale grey
+      albC = mix(albC, vec3(0.15, 0.14, 0.12) * (0.9 + 0.2 * gf.fine), smoothstep(0.45, 0.8, hillS) * 0.5);
       vec3 n = normalize(up - grad * 1.5);
       float ndl = max(dot(n, sun), 0.0);
       landCol = albC / PI * (E * ndl + sky * (0.6 + 0.4 * dot(n, up)) + earth * max(dot(n, uEarthM), 0.0));
