@@ -161,8 +161,7 @@ export class PerfManager {
   }
 
   _minLevel() {
-    // the orbital view may always scale down (the top presets pin the city at full resolution)
-    const min = this.app._spaceRes ? Math.min(0.5, this.app.settings.minScale ?? 0.5) : (this.app.settings.minScale ?? 0.5);
+    const min = this.app.settings.minScale ?? 0.5;
     let l = 0;
     while (l < LADDER.length - 1 && LADDER[l] < min - 1e-6) l++;
     return l;
