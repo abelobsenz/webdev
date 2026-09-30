@@ -152,9 +152,10 @@ export class Starship {
    */
   update(dt, s) {
     const st = this.state, k = (r) => 1 - Math.exp(-dt * r);
-    st.throttle += (s.throttle - st.throttle) * k(6);
-    st.aux += ((s.aux ?? s.throttle) - st.aux) * k(6);
-    st.boost += (s.boost - st.boost) * k(3);
+    const thr = s.throttle || 0;
+    st.throttle += (thr - st.throttle) * k(6);
+    st.aux += ((s.aux ?? thr) - st.aux) * k(6);
+    st.boost += ((s.boost || 0) - st.boost) * k(3);
     st.legs += ((s.legs || 0) - st.legs) * k(1.2);
     st.rcs += ((s.rcs || 0) - st.rcs) * k(12);
     const gin = s.gear;
