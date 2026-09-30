@@ -440,6 +440,38 @@ export function buildHull() {
     }
   }
 
+  // ---- the foredeck, the view from the flight deck: a walkway from the pod to the docking ring with
+  // handrails, fastener rows along the seams, two floodlights on short masts aimed at the ring,
+  // and a flush sensor dome ahead of it
+  {
+    const aC = Math.PI / 2, tA = tOf(-8.45), tB = tOf(-4.3);
+    detail.push(hullStrip(tA, tB, aC - 0.1, aC + 0.1, CK.DECK, { o: 0.03, i: 0.02, nt: 8, na: 2 }));
+    for (const s of [1, -1]) {
+      const a = aC - s * 0.13, pts = [];
+      for (let k = 0; k <= 8; k++) pts.push(hullPt(lerp(tA, tB, k / 8), a, 0.55));
+      detail.push(tube(pts, 0.025, CK.BRONZE, 6, 2));
+      for (let k = 0; k <= 4; k++) { const t = lerp(tA, tB, k / 4); detail.push(rod(hullPt(t, a, 0.0), hullPt(t, a, 0.56), 0.02, CK.BRONZE, 6)); }
+    }
+    for (const t of SEAM_T) {
+      if (t > 0.45) continue;
+      for (let a = aC - 0.7; a <= aC + 0.7; a += 0.035) {
+        const p = hullPt(t + 0.0011, a);
+        if (Math.abs(p.x) < 1.35 && p.z > -10.7 && p.z < -8.3) continue;          // the ring's collar
+        detail.push(onHull(stock(new THREE.CylinderGeometry(0.018, 0.022, 0.02, 6), CK.BRONZE), t + 0.0011, a, 0.008));
+      }
+    }
+    for (const s of [1, -1]) {
+      const t = tOf(-6.2), a = aC - s * 0.42, base = hullPt(t, a);
+      detail.push(onHull(stock(new THREE.CylinderGeometry(0.05, 0.07, 0.6, 8), CK.DARK).translate(0, 0.3, 0), t, a, 0.0));
+      const head = base.clone().add(V3(0, 0.62, 0)), aimAt = V3(0, base.y + 0.7, -9.5);
+      const q = new THREE.Quaternion().setFromUnitVectors(V3(0, 0, 1), aimAt.clone().sub(head).normalize());
+      detail.push(revolve([[0.0, -0.12, CK.DARK], [0.12, -0.1, CK.DARK], [0.14, 0.1, CK.BRONZE], [0.12, 0.12, CK.GLASS], [0.0, 0.12, CK.GLASS]], 12).applyMatrix4(new THREE.Matrix4().compose(head, q, V3(1, 1, 1))));
+    }
+    const d = hullPt(tOf(-13.2), aC);
+    detail.push(stock(new THREE.SphereGeometry(0.42, 20, 8, 0, TAU, 0, Math.PI / 2), CK.HULL).scale(1, 0.4, 1).translate(d.x, d.y - 0.02, d.z));
+    detail.push(stock(new THREE.TorusGeometry(0.43, 0.03, 6, 24), CK.BRONZE).rotateX(Math.PI / 2).translate(d.x, d.y, d.z));
+  }
+
   // ---- sensors: a probe on the nose, a chin turret, and blisters on the flanks
   {
     const tip = hullPt(0.0, 0);
