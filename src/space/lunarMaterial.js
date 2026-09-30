@@ -18,7 +18,13 @@ import { R_MOON } from './sim.js';
 // (facade x = metres along the guideway).
 
 export const LK = { GLASS: 0, HULL: 1, LANTERN: 2, GARDEN: 3, CONDUIT: 4, PANEL: 7, BRONZE: 8, DECK: 9, DARK: 10, RADIATOR: 11, ROOF: 12, CONSERVATORY: 13, STONE: 20, ROOFG: 21, PAVE: 22, PAD: 23, COURT: 24, TILE: 25, POOL: 26, WALL: 27, COIL: 28,
-  REGOLITH: 29, SOLAR: 30, HAZARD: 31, SIGN: 32, PAINT: 33, GROUND: 34, LIGHT: 35, FOIL: 36, CANOPY: 37, HOUSE: 41 };
+  REGOLITH: 29, SOLAR: 30, HAZARD: 31, SIGN: 32, PAINT: 33, GROUND: 34, LIGHT: 35, FOIL: 36, CANOPY: 37, HOUSE: 41,
+  WOOD: 45, FRAME: 46, SHUTTER: 47, AWNING: 48, MOULD: 49, BARK: 50, SAIL: 51, IRON: 52, BLOOM: 53, HEDGE: 54, SKIN: 55, GRASS: 56, TARMAC: 57, KERB: 58 };
+// 45-58 Medii Landing's street detail (instanced, the instance colour carrying each piece's
+// paint where it has one): 45 timber decking and boards, 46 painted joinery, 47 louvred
+// shutters, 48 striped awning canvas, 49 stone mouldings in the house's colour, 50 bark,
+// 51 sailcloth, 52 painted cast iron, 53 flowers among leaves, 54 clipped hedge and shrub
+// leaves, 55 skin, 56 grass and meadow tufts, 57 asphalt with lane paint, 58 granite kerbs and setts
 // 41-44 Landing house facades by palette (limestone, ochre, grey render, cream): LK.HOUSE + palette
 // 37-40 tree canopies by species (broadleaf, cypress, stone pine, flowering): LK.CANOPY + species
 // 29 sintered regolith (berms, bagged shielding, spoil, boulders), 30 photovoltaic cells,
@@ -32,6 +38,11 @@ export const FLOODS = 8;
 
 const VERT = /* glsl */ `
 attribute vec3 aFacade;
+#ifdef WALK
+// pedestrians (lunarLandingPeople.js): phase, speed m/s, half the length of the beat (m)
+attribute vec3 aWalk;
+uniform float uTime;
+#endif
 varying vec3 vFac;
 varying vec3 vView;
 varying vec3 vN;
@@ -40,6 +51,24 @@ void main() {
   vFac = aFacade;
   vec4 lp = vec4(position, 1.0);
   vec3 ln = normal;
+#ifdef WALK
+  // a pedestrian pacing its beat out and back along its local z, turning at each end, the legs
+  // and arms swinging with the stride (the figure stands 1.75 m on its origin, facing +z)
+  float halfL = max(aWalk.z, 0.5);
+  float cycW = halfL * 4.0 / max(aWalk.y, 0.1);
+  float phW = fract(uTime / cycW + aWalk.x);
+  float dirW = phW < 0.5 ? 1.0 : -1.0;
+  float sW = (phW < 0.5 ? phW * 4.0 - 1.0 : 3.0 - phW * 4.0) * halfL;
+  float strideW = uTime * aWalk.y * 2.6 + aWalk.x * 40.0;
+  float sideW = lp.x < 0.0 ? 1.0 : -1.0;
+  float legW = step(lp.y, 0.92) * (0.92 - lp.y);
+  float armW = step(0.95, lp.y) * step(lp.y, 1.45) * step(0.2, abs(lp.x)) * (1.45 - lp.y);
+  lp.z += sin(strideW) * sideW * (legW * 0.5 - armW * 0.45);
+  lp.y += abs(cos(strideW)) * 0.035;
+  lp.xz *= dirW;
+  ln.xz *= dirW;
+  lp.z += sW;
+#endif
 #ifdef USE_INSTANCING
   lp = instanceMatrix * lp;
   ln = mat3(instanceMatrix) * ln;
@@ -316,6 +345,15 @@ void main() {
     float fxW = 1.0 - clamp(dot(N, V), 0.0, 1.0), fx2W = fxW * fxW;
     float frW = 0.02 + 0.98 * fx2W * fx2W * fxW;
     em += skyW * frW * level;
+    // looking down into it: a teal body over a pale floor, seen through where the surface
+    // reflects little, with the floor's caustic net shimmering under the ripples
+    float caus = vnoise(f * 1.9 + rip.xy * 2.0 + uTime * 0.3);
+    vec3 body = mix(vec3(0.03, 0.09, 0.1), vec3(0.08, 0.17, 0.17), smoothstep(0.55, 0.85, caus) * detP);
+    alb = mix(body, alb, frW) * mix(1.0, 0.4, 1.0 - level);
+    // the Sun's glint off the wavelets: a sharp lobe riding on the ripple normals
+    float gW = max(dot(Rw, uSunView), 0.0);
+    float g2W = gW * gW, g4W = g2W * g2W, g8W = g4W * g4W, g16W = g8W * g8W;
+    em += sunL * (g16W * g16W * g16W * g16W) * 0.35 * level * frW * 6.0;
   } else if (k < 27.5) {
     // dressed stone: ashlar courses of 0.6 m, blocks 1.4 m, weathered a shade apart
     float crs = gridLine(f.y, 0.6, 0.03, fw.y) * det;
@@ -378,6 +416,91 @@ void main() {
     float grit = vnoise(f * 0.35) * 0.5 + vnoise(f * 3.0) * 0.5 * detP;
     alb = mix(vec3(0.24, 0.23, 0.21), vec3(0.34, 0.325, 0.3), grit) * (1.0 - 0.3 * ruts);
     rough = 0.97;
+  } else if (k > 44.5) {
+    // Medii Landing's street detail (instanced pieces; vTint carries each piece's paint)
+    if (k < 45.5) {
+      // timber boards 0.15 m wide, their grain, the joints, weathered toward silver
+      float board = gridLine(f.y, 0.15, 0.006, fw.y) * detP;
+      float grain = vnoise(vec2(f.x * 2.0, f.y * 40.0)) * 0.5 + vnoise(vec2(f.x * 0.3, f.y * 7.0)) * 0.5;
+      alb = mix(vec3(0.3, 0.22, 0.15), vec3(0.46, 0.38, 0.29), grain) * (1.0 - 0.35 * board) * vTint;
+      rough = 0.75;
+    } else if (k < 46.5) {
+      // painted joinery: gloss paint in the house's colour, a little dirt in the corners
+      alb = vTint * (0.9 + 0.1 * vnoise(f * 3.0));
+      rough = 0.3;
+    } else if (k < 47.5) {
+      // louvred shutters: 0.1 m slats, each shading the one below, sun-faded paint
+      float slat = fract(f.y / 0.1);
+      float sh = mix(0.8, mix(0.6, 1.0, smoothstep(0.0, 0.7, slat)), detP);
+      alb = vTint * sh * (0.9 + 0.12 * vnoise(f * 0.8));
+      rough = 0.5;
+    } else if (k < 48.5) {
+      // striped awning canvas: 0.3 m stripes of the instance colour and cream
+      float band = mix(0.5, step(0.5, fract(f.x / 0.6)), 1.0 - smoothstep(0.1, 0.3, px));
+      alb = mix(vTint, vec3(0.84, 0.8, 0.7), band) * (0.9 + 0.1 * vnoise(f * 2.0));
+      rough = 0.8;
+      em += alb * sunL * max(dot(-N, uSunView), 0.0) * 0.06;
+    } else if (k < 49.5) {
+      // mouldings: the house's stone a shade lighter, weathered along its length
+      alb = vTint * (0.92 + 0.08 * vnoise(f * 1.3)) * (1.0 - 0.1 * smoothstep(0.6, 0.9, vnoise(vec2(f.x * 2.0, f.y * 0.4))));
+      rough = 0.78;
+    } else if (k < 50.5) {
+      // bark: vertical furrows round the trunk (facade x runs round, y along), lichen patches
+      float furrow = vnoise(vec2(f.x * 7.0, f.y * 1.2)) * 0.6 + vnoise(vec2(f.x * 19.0, f.y * 3.0)) * 0.4 * det;
+      alb = mix(vec3(0.1, 0.08, 0.06), vec3(0.3, 0.27, 0.22), furrow);
+      alb = mix(alb, vec3(0.3, 0.34, 0.24), smoothstep(0.7, 0.9, vnoise(f * 0.9 + 4.0)) * 0.5);
+      alb *= vTint;
+      N = normalize(N + (vec3(vnoise(f * 6.0), 0.0, vnoise(f * 6.0 + 3.0)) - 0.5) * 0.4 * detP);
+      rough = 0.92;
+    } else if (k < 51.5) {
+      // sailcloth: cream panels with seams, a little light through it
+      float seam = gridLine(f.y, 1.1, 0.02, fw.y) * detP;
+      alb = vec3(0.84, 0.82, 0.76) * vTint * (1.0 - 0.15 * seam);
+      rough = 0.8;
+      em += alb * sunL * max(dot(-N, uSunView), 0.0) * 0.12;
+    } else if (k < 52.5) {
+      // painted cast iron: deep green-black gloss
+      alb = vec3(0.04, 0.06, 0.05) * (0.8 + 0.4 * vnoise(f * 4.0));
+      rough = 0.35; metal = 0.3;
+    } else if (k < 53.5) {
+      // flowers among their leaves: blooms in the instance colour, dark foliage between
+      float bl = vnoise(f * 9.0);
+      float bloom = mix(0.45, step(0.5, bl), detP);
+      alb = mix(vec3(0.04, 0.1, 0.03), vTint, bloom);
+      N = normalize(N + (vec3(vnoise(f * 7.0), 0.0, vnoise(f * 7.0 + 5.0)) - 0.5) * 0.6 * detP);
+      rough = 0.8;
+    } else if (k < 54.5) {
+      // clipped hedge and shrub: small leaves in clumps, darker in the hollows
+      float lv = vnoise(f * 3.0) * 0.6 + vnoise(f * 11.0) * 0.4 * det;
+      alb = mix(vec3(0.025, 0.06, 0.02), vec3(0.09, 0.15, 0.045), lv) * vTint;
+      N = normalize(N + (vec3(vnoise(f * 5.0 + 1.0), vnoise(f * 5.0 + 9.0), vnoise(f * 5.0 + 3.0)) - 0.5) * 0.8 * detP);
+      rough = 0.9;
+      em += alb * sunL * max(dot(-N, uSunView), 0.0) * 0.05;
+    } else if (k < 55.5) {
+      // skin
+      alb = vec3(0.5, 0.35, 0.26) * vTint;
+      rough = 0.6;
+    } else if (k < 56.5) {
+      // grass and meadow tufts: greener at the base, sun-bleached at the tips
+      float tipG = clamp(f.y * 1.6, 0.0, 1.0);
+      alb = mix(vec3(0.04, 0.09, 0.025), vec3(0.18, 0.21, 0.08), tipG) * (0.85 + 0.3 * vnoise(f * 6.0)) * vTint;
+      rough = 0.9;
+      em += alb * sunL * max(dot(-N, uSunView), 0.0) * 0.08;
+    } else if (k < 57.5) {
+      // asphalt: dark aggregate, a dashed centre line along facade x
+      float agg = vnoise(f * 2.0) * 0.5 + vnoise(f * 13.0) * 0.5 * det;
+      alb = mix(vec3(0.07, 0.07, 0.075), vec3(0.14, 0.14, 0.14), agg);
+      float dash = cLine(f.y, 1000.0, 0.07, fw.y) * step(0.5, fract(f.x / 6.0));
+      alb = mix(alb, vec3(0.7, 0.68, 0.6), dash * detP);
+      rough = 0.9;
+    } else {
+      // granite kerbs and setts: 0.25 x 0.12 m setts in a running bond, joints and a polish
+      vec2 sf = vec2(f.x + 0.125 * step(0.5, fract(f.y / 0.24)), f.y);
+      float jt = max(gridLine(sf.x, 0.25, 0.012, fw.x), gridLine(sf.y, 0.12, 0.012, fw.y)) * det;
+      float hs = hash12(floor(sf / vec2(0.25, 0.12)));
+      alb = mix(vec3(0.3, 0.29, 0.28), vec3(0.42, 0.4, 0.38), hs) * (1.0 - 0.4 * jt) * (0.92 + 0.12 * vnoise(f * 0.4));
+      rough = mix(0.7, 0.45, hs);
+    }
   } else if (k > 40.5) {
     // a Landing house: render or dressed stone in its palette, storeys of 3.6 m with windows in
     // 3 m bays (reveals, painted frames, glazing that takes the sky, shutters on the warm
@@ -503,9 +626,10 @@ void main() {
 
 const _m = new THREE.Matrix4();
 
-export function createLunarMaterial({ accent = [0.6, 0.85, 1.0], lit = 0.55, side = THREE.FrontSide, fill = 0 } = {}) {
+export function createLunarMaterial({ accent = [0.6, 0.85, 1.0], lit = 0.55, side = THREE.FrontSide, fill = 0, walk = false } = {}) {
   return new THREE.ShaderMaterial({
     vertexShader: VERT, fragmentShader: FRAG,
+    defines: walk ? { WALK: 1 } : {},
     uniforms: {
       uSunE: U.uSunIlluminance,
       uSunView: { value: new THREE.Vector3(1, 0, 0) },

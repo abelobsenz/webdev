@@ -16,6 +16,8 @@ import { LunarHops } from '../src/space/lunarHops.js';
 import { LunarRingTrains, RING_R, RAIL_Z, RAIL_TOP } from '../src/space/lunarRing.js';
 import { buildLunarPort } from '../src/space/lunarPort.js';
 import { stationFrame } from '../src/space/stations.js';
+import { LandingDetail } from '../src/space/lunarLandingProps.js';
+import { LandingTrees } from '../src/space/lunarTrees.js';
 
 let fails = 0;
 const ok = (cond, msg) => { if (!cond) { fails++; console.log('FAIL', msg); } };
@@ -382,6 +384,57 @@ report.landingTris = tris(L.geo); report.worksTris = tris(W.geo);
     for (const sg of [1, -1]) if (y1 > RAIL_TOP - 2 && y0 < RAIL_TOP + 18 && z1 > sg * RAIL_Z - 8 && z0 < sg * RAIL_Z + 8) hits++;
   }
   ok(hits === 0, `the Exchange clears the expresses' corridor (${hits} triangles)`);
+}
+
+// ------------------------------------------------------------------ street-range detail --
+// Medii Landing's instanced dress (architecture, furniture, boats, gardens, people) and its
+// trees, sorted round cameras at street level in the thick of the town, over the harbour and
+// on a landing field, and from 8 km out: triangle budgets, finite and seated placements.
+{
+  const mat = createLunarMaterial();
+  let t1 = performance.now();
+  const D = new LandingDetail(L, mat);
+  report.detailMs = Math.round(performance.now() - t1);
+  t1 = performance.now();
+  const TR = new LandingTrees(L.treeInstances, mat);
+  report.treesMs = Math.round(performance.now() - t1);
+  const UVx = (u, v) => [(u - v) * S2, (u + v) * S2];
+  const camAt = (u, v, h) => { const [x, z] = UVx(u, v); return new THREE.Vector3(x, surfaceY(x, z) + h, z); };
+  const cams = { boulevard: camAt(0, 1500, 12), harbour: camAt(0, shoreV(0) - 40, 30), lift: camAt(250, 250, 20), pad: camAt(-500, -2600, 40), far: camAt(0, 1200, 8000) };
+  let worst = 0;
+  for (const [name, c] of Object.entries(cams)) {
+    t1 = performance.now();
+    D.update(c, true); TR.update(c.length() / 1000, c);
+    const ms = performance.now() - t1;
+    const tri = D.triangles() + TR.triangles.now;
+    report[`detailTris_${name}`] = tri;
+    ok(ms < 60, `detail re-sort at ${name} ${ms.toFixed(1)} ms`);
+    if (name !== 'far') worst = Math.max(worst, tri);
+    else ok(tri < 1.5e6, `detail from 8 km out ${tri} triangles`);
+  }
+  ok(worst < 16e6, `street-range detail ${worst} triangles`);
+  // small moves re-sort nothing (the per-frame cost)
+  t1 = performance.now();
+  for (let i = 0; i < 200; i++) D.update(cams.boulevard.clone().add(new THREE.Vector3(i * 0.05, 0, 0)));
+  report.detailUpdateMs = +((performance.now() - t1) / 200).toFixed(4);
+  ok(report.detailUpdateMs < 0.5, `detail update ${report.detailUpdateMs} ms`);
+  // every placement finite, and within a few metres of the ground it stands on (boats float,
+  // quay stairs hang down the sea wall, dormers sit on the roofs, so the band is wide)
+  let bad = 0, n = 0;
+  for (const set of D.lod.sets) set.each((m, o) => {
+    n++;
+    for (let i = 0; i < 16; i++) if (!Number.isFinite(m[o + i])) { bad++; return; }
+    const x = m[o + 12], y = m[o + 13], z = m[o + 14];
+    const h = y - surfaceY(x, z);
+    if (h < -3 || h > 60) bad++;
+  });
+  report.detailInstances = n;
+  ok(bad === 0, `${bad} detail placements unseated or not finite`);
+  // the walkers' beats carry sane parameters
+  for (const set of D.lod.sets) if (set.extra) for (const c of set.cells) for (let j = 0; j < c.n; j++) {
+    const ph = c.ex[j * 3], sp = c.ex[j * 3 + 1], hl = c.ex[j * 3 + 2];
+    if (!(ph >= 0 && ph <= 1 && sp > 0.5 && sp < 2.5 && hl > 0.4 && hl < 40)) { ok(false, `walker beat ${ph} ${sp} ${hl}`); break; }
+  }
 }
 
 // ------------------------------------------------------------------ budgets --

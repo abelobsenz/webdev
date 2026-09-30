@@ -183,6 +183,9 @@ export function buildMediiLanding() {
   const lamps = [];
   const plan = [];                  // footprints (u, v rectangles, metres) for the overlap checks
   const courts = [];                // courtyard interiors (for their trees)
+  // what the instanced detail dresses (lunarLandingDetail.js, lunarLandingProps.js): every house
+  // with its frame and fronts, the lamp standards, quay edges, piers, the pads' rims
+  const houses = [], props = { lamps: [], quay: [], piers: [], boats: [], stairs: [], terraceEdges: [] };
   const foot = (kind, u, v, w, d, alongU = true) => plan.push(alongU ? { kind, u0: u - w / 2, u1: u + w / 2, v0: v - d / 2, v1: v + d / 2 } : { kind, u0: u - d / 2, u1: u + d / 2, v0: v - w / 2, v1: v + w / 2 });
   const rnd = mulberry(4270);
   const at = (u, v, h) => { const [x, z] = UV(u, v); return new THREE.Vector3(x, gy(x, z) + h, z); };
@@ -192,7 +195,7 @@ export function buildMediiLanding() {
   const V_LOW = 1550, V_STRAND = 2900, V_MID = 550, U_TOWN = 1700;
   const DOMES = [[-650, -1150, 210], [-1250, -1000, 150], [-150, -1050, 130], [-1250, -1450, 110], [-300, -1470, 95]];
   const S = {
-    B, UV, gy, at, lamp, lamps, plan, foot, courts, shoreV, rnd, prism, gable, ROT_UV, DOMES, PADS, U_TOWN,
+    B, UV, gy, at, lamp, lamps, plan, foot, courts, shoreV, rnd, prism, gable, ROT_UV, DOMES, PADS, U_TOWN, houses, props,
     T: { LIFT: T_LIFT, MID: T_MID, LOW: T_LOW, STRAND: T_STRAND }, V: { MID: V_MID, LOW: V_LOW, STRAND: V_STRAND },
   };
   // --- terraces ---
@@ -236,10 +239,8 @@ export function buildMediiLanding() {
       const h = v < V_LOW ? T_MID : T_LOW;
       for (const s of [-1, 1]) {
         const [x, z] = UV(s * 26, v);
-        B.at(x, gy(x, z) + h, z, 0, ROT_UV, 0);
-        B.box(0, 3.6, 0, 0.35, 8, 0.35, LK.BRONZE);
-        B.pop();
-        lamp(s * 26, v, h + 8.2, LAMP.AMBER, 1.1, 1.3);
+        props.lamps.push({ x, y: gy(x, z) + h, z, ry: ROT_UV + (s > 0 ? Math.PI : 0), kind: 'boulevard' });
+        lamp(s * 26, v, h + 7.9, LAMP.AMBER, 1.1, 1.3);
       }
     }
   }
@@ -250,6 +251,8 @@ export function buildMediiLanding() {
     const [x, z] = UV(u, v);
     B.at(x, gy(x, z) + h0, z, 0, ROT_UV + (alongU ? 0 : Math.PI / 2), 0);
     const H = storeys * 3.6 + 1.2, pal = Math.floor(rnd() * 4);
+    const rec = { x, y: gy(x, z) + h0, z, ry: ROT_UV + (alongU ? 0 : Math.PI / 2), w, d, H, storeys, pal, roof: roofKind, rh: 0, balc: [] };
+    houses.push(rec);
     B.box(0, H / 2 - 0.4, 0, w, H + 0.8, d, LK.HOUSE + pal);
     // balconies on the long fronts: a slab on brackets and a bronze rail, on a window bay
     for (const face of [-1, 1]) for (let s = 1; s < storeys; s++) {
@@ -257,6 +260,7 @@ export function buildMediiLanding() {
       const bays = Math.floor(w / 3), bay = Math.floor(rnd() * bays) - Math.floor(bays / 2), bxp = bay * 3, bw = rnd() < 0.3 ? 5.6 : 2.6;
       if (Math.abs(bxp) + bw / 2 > w / 2 - 0.5) continue;
       const y = s * 3.6 + 0.05, z = face * (d / 2 + 0.55);
+      rec.balc.push([face, s, bxp, bw]);
       B.box(bxp, y, z, bw, 0.18, 1.1, LK.WALL);
       B.box(bxp, y + 0.95, face * (d / 2 + 1.07), bw, 0.06, 0.06, LK.BRONZE);
       for (let q = 0; q <= Math.round(bw / 0.8); q++) B.box(bxp - bw / 2 + q * (bw / Math.round(bw / 0.8)), y + 0.5, face * (d / 2 + 1.07), 0.04, 0.9, 0.04, LK.BRONZE);
@@ -271,6 +275,7 @@ export function buildMediiLanding() {
     } else {
       // eaves over the long fronts only (row houses meet at their gables), a ridge cap and chimneys
       const rh = Math.min(d * 0.42, 6.5);
+      rec.rh = rh;
       gable(B, H, w, d + 1.1, rh, LK.TILE);
       B.box(0, H + rh + 0.08, 0, w, 0.24, 0.42, LK.TILE);
       for (let c = 0; c < (w > 20 ? 2 : 1); c++) {
@@ -351,9 +356,13 @@ export function buildMediiLanding() {
   for (let u = -1680; u <= 1680; u += 40) {
     if (!quayFree(u)) continue;
     const [x, z] = UV(u, shoreV(u) - 8);
-    B.at(x, gy(x, z) + T_STRAND, z, 0, ROT_UV, 0);
-    B.box(0, 3.0, 0, 0.3, 6.6, 0.3, LK.BRONZE);
-    B.pop();
+    props.lamps.push({ x, y: gy(x, z) + T_STRAND, z, ry: ROT_UV + Math.PI, kind: 'quay' });
+  }
+  // the sea wall's edge, for its bollards, rings and stairs down to the water
+  for (let u = -1690; u <= 1690; u += 10) {
+    const v = shoreV(u) - 1.2, [x, z] = UV(u, v);
+    const t = (shoreV(u + 1) - shoreV(u - 1)) / 2;
+    props.quay.push({ u, v, x, y: gy(x, z) + T_STRAND, z, ry: ROT_UV - Math.atan(t), free: quayFree(u) });
   }
 
   // --- the harbour: two moles enclosing a basin, lighthouses, piers and boats ---
@@ -378,6 +387,7 @@ export function buildMediiLanding() {
       B.at(x, gy(x, z), z, 0, ROT_UV, 0);
       B.box(0, (2.2 - 8) / 2, 0, 16, 2.2 + 8, v1 - v0, LK.DECK);
       B.pop();
+      props.piers.push({ u, v0, v1, top: 2.2, w: 16 });
       for (let v = v0 + 30; v < v1; v += 40) lamp(u, v, 2.2 + 4.5, LAMP.WHITE, 0.5, 0.9);
     }
     // boats moored along the piers (hulls sit in the water, decks above it)
@@ -446,10 +456,20 @@ export function buildMediiLanding() {
   })();
   // civic halls at the corners of the Lift terrace: stone halls under glazed roofs
   for (const [u, v] of [[-500, -420], [500, -420], [-500, 330], [500, 330]]) {
-    foot('hall', u, v, 150, 96);
+    foot('hall', u, v, 150, 112);
     const [x, z] = UV(u, v);
     B.at(x, gy(x, z) + T_LIFT, z, 0, ROT_UV, 0);
     B.box(0, 9, 0, 150, 19, 96, LK.STONE);
+    // a stepped podium and, over the colonnade on each long front (lunarLandingDetail.js), an
+    // entablature: architrave, frieze and a dentilled cornice returning to the wall
+    for (const s of [-1, 1]) {
+      B.box(0, 0.15, s * 51.5, 146, 0.9, 7.0, LK.WALL);
+      B.box(0, 0.05, s * 51.5, 148, 0.7, 8.2, LK.WALL);
+      B.box(0, 18.1, s * 51.8, 144, 1.0, 6.0, LK.WALL);
+      B.box(0, 19.0, s * 51.9, 145, 0.8, 6.4, LK.STONE);
+      B.box(0, 19.65, s * 52.2, 147, 0.5, 7.4, LK.WALL);
+      for (let i = -70; i <= 70; i += 1.4) B.box(i, 19.3, s * 55.05, 0.5, 0.26, 0.3, LK.WALL);
+    }
     B.push(new THREE.Matrix4().makeTranslation(0, 18.5, 0));
     B.loft([{ z: -48, pts: [[-75, 0], [75, 0], [58, 16], [-58, 16]] }, { z: 48, pts: [[-75, 0], [75, 0], [58, 16], [-58, 16]] }], LK.ROOF);
     B.pop();
