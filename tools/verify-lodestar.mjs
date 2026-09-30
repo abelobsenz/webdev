@@ -112,6 +112,8 @@ hull.updateMatrixWorld(true);
   const doorsLow = Math.min(...ship.gear.doors.map((d) => lowest(d.g).y));
   console.log(`stowed: lowest leg point y ${lowLeg.toFixed(2)}, lowest door point ${doorsLow.toFixed(2)}`);
   ok(lowLeg > -1.52, `a stowed leg pokes out of the belly (${lowLeg.toFixed(2)})`);
+  const lowAct = Math.min(...ship.gear.doors.flatMap((d) => [lowest(d.aBody).y, lowest(d.aRod).y]));
+  ok(lowAct > -1.52, `a door actuator pokes out of the belly with the doors shut (${lowAct.toFixed(2)})`);
 }
 
 // ---- the bridge: clear space ahead of the eye (the near plane), eye inside the pod

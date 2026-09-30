@@ -177,7 +177,14 @@ export function buildGear(hull, part, { dockZ = -9.5 } = {}) {
       const free = hullPt((b.t0 + b.t1) / 2, aF).sub(pivot);
       const test = free.clone().applyAxisAngle(axis, 0.3);
       const sign = test.y < free.y ? 1 : -1;
-      rig.doors.push({ g, axis, sign, open: 1.72 });
+      // its actuator: a cylinder on the bay wall by the hinge, the rod to a lug on the leaf
+      const tm = (b.t0 + b.t1) / 2, anchor = hullPt(tm, aH + (aF - aH) * 0.06, -0.72);
+      const lugLocal = hullPt(tm, aH + (aF - aH) * 0.32, -0.05).sub(pivot);
+      const aBody = part(merge([stock(new THREE.CylinderGeometry(0.05, 0.05, 0.5, 10), CK.DARK).translate(0, 0.25, 0), stock(new THREE.SphereGeometry(0.07, 10, 6), CK.BRONZE)]));
+      const aRod = part(merge([stock(new THREE.CylinderGeometry(0.025, 0.025, 0.5, 8), CK.BRONZE).translate(0, 0.25, 0), stock(new THREE.SphereGeometry(0.045, 8, 6), CK.DARK)]));
+      hull.add(aBody); hull.add(aRod);
+      g.add(part(bbox(0.1, 0.08, 0.14, 0.02, CK.DARK, lugLocal.clone())));
+      rig.doors.push({ g, axis, sign, open: 1.72, anchor, lugLocal, aBody, aRod });
     }
     // the leg: hinge group (splay, then deploy about X), strut, piston, torque links, pad
     const hinge = new THREE.Group();
@@ -264,7 +271,12 @@ function aim(o, a, b) {
 export function poseGear(rig, legs, gear, docked, lights) {
   // doors lead the legs out and trail them in
   const door = smooth(0.0, 0.3, legs), dep = smooth(0.18, 1.0, legs);
-  for (const d of rig.doors) d.g.quaternion.setFromAxisAngle(d.axis, d.sign * d.open * door);
+  for (const d of rig.doors) {
+    d.g.quaternion.setFromAxisAngle(d.axis, d.sign * d.open * door);
+    const lug = d.lugLocal.clone().applyQuaternion(d.g.quaternion).add(d.g.position);
+    aim(d.aBody, d.anchor, lug);
+    aim(d.aRod, lug, d.anchor);
+  }
   rig.legs.forEach((l, i) => {
     const L = l.L, c = clamp01(gear ? gear[i] || 0 : 0);
     l.hinge.rotation.x = lerp(L.stow, L.dep, dep);
