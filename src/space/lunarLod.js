@@ -35,24 +35,20 @@ export class CellLod {
     this.last = null;
   }
 
-  /** Add one placement (x, y, z metres; ry about up; scales; optional tint r, g, b). */
+  /**
+   * Add one placement (x, y, z metres; ry about up; scales; optional tint r, g, b). Kept
+   * compact (position, the turn's cosine and sine, the scales: 8 floats, half a matrix) and
+   * expanded into the instance matrix only when its cell is drawn: the town files ~650,000.
+   */
   add(x, y, z, ry = 0, sx = 1, sy = 1, sz = 1, col = null, rx = 0, rz = 0, ex = null) {
     if (![x, y, z, ry, sx, sy, sz].every(Number.isFinite)) return;
-    place(this._buf, 0, x, y, z, ry, sx, sy, sz, rx, rz);
-    for (let i = 0; i < 16; i++) this.mats.push(this._buf[i]);
+    void rx; void rz;
+    this.mats.push(x, y, z, Math.cos(ry), Math.sin(ry), sx, sy, sz);
     if (this.tint) this.cols.push(col ? col[0] : 1, col ? col[1] : 1, col ? col[2] : 1);
     if (this.extra) this.exs.push(ex ? ex[0] : 0, ex ? ex[1] : 0, ex ? ex[2] : 0);
     this.n++;
   }
 
-  /** Add a ready matrix (THREE.Matrix4). */
-  addMatrix(m, col = null) {
-    const e = m.elements;
-    if (!e.every(Number.isFinite)) return;
-    for (let i = 0; i < 16; i++) this.mats.push(e[i]);
-    if (this.tint) this.cols.push(col ? col[0] : 1, col ? col[1] : 1, col ? col[2] : 1);
-    this.n++;
-  }
 
   /** File the placements into cells and make the tier meshes. Returns the THREE.Group. */
   build() {
@@ -64,7 +60,7 @@ export class CellLod {
     this.mats = null; this.cols = null; this.exs = null;
     const cells = new Map();
     for (let i = 0; i < n; i++) {
-      const cx = Math.floor(M[i * 16 + 12] / C), cz = Math.floor(M[i * 16 + 14] / C);
+      const cx = Math.floor(M[i * 8] / C), cz = Math.floor(M[i * 8 + 2] / C);
       const key = cx * 65536 + cz;
       let c = cells.get(key);
       if (!c) { c = { cx: (cx + 0.5) * C, cz: (cz + 0.5) * C, idx: [] }; cells.set(key, c); }
@@ -72,26 +68,39 @@ export class CellLod {
     }
     // each cell's matrices (and colours) contiguous, so a tier is filled by block copies
     this.cells = [...cells.values()].map((c) => {
-      const m = new Float32Array(c.idx.length * 16), col = Cl ? new Float32Array(c.idx.length * 3) : null;
+      const m = new Float32Array(c.idx.length * 8), col = Cl ? new Float32Array(c.idx.length * 3) : null;
       const ex = Ex ? new Float32Array(c.idx.length * 3) : null;
       c.idx.forEach((i, j) => {
-        m.set(M.subarray(i * 16, i * 16 + 16), j * 16);
+        m.set(M.subarray(i * 8, i * 8 + 8), j * 8);
         if (col) col.set(Cl.subarray(i * 3, i * 3 + 3), j * 3);
         if (ex) ex.set(Ex.subarray(i * 3, i * 3 + 3), j * 3);
       });
       // the cell's own vertical centre, for the 3-D distance to the camera
-      let y = 0; for (let j = 0; j < c.idx.length; j++) y += m[j * 16 + 13];
+      let y = 0; for (let j = 0; j < c.idx.length; j++) y += m[j * 8 + 1];
       return { cx: c.cx, cy: y / c.idx.length, cz: c.cz, n: c.idx.length, m, col, ex };
     });
+    // each tier's capacity: the most placements any camera on the ground could gather within
+    // its radius (cell centres as the candidate cameras, a cell's slack added), not all of them
+    const caps = this.radii.map((Rt) => {
+      if (Rt >= 1e8) return n;
+      const reach = Rt + C * 1.5;
+      let best = 0;
+      for (const a of this.cells) {
+        let s = 0;
+        for (const b of this.cells) if (Math.abs(a.cx - b.cx) < reach && Math.abs(a.cz - b.cz) < reach && Math.hypot(a.cx - b.cx, a.cz - b.cz) < reach) s += b.n;
+        if (s > best) best = s;
+      }
+      return Math.min(n, Math.ceil(best * 1.05) + 16);
+    });
+    this.caps = caps;
     this.meshes = this.geos.map((g, t) => {
       if (!g) return null;
-      // capacity: every placement could fall in this tier (the matrices are small beside the town)
-      const mesh = lunarInstanced(g, n, {}, this.mat, { tint: this.tint });
+      const mesh = lunarInstanced(g, caps[t], {}, this.mat, { tint: this.tint });
       mesh.name = `${this.name} (tier ${t})`;
       mesh.count = 0;
       mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
       if (this.extra) {
-        const a = new THREE.InstancedBufferAttribute(new Float32Array(Math.max(1, n) * 3), 3);
+        const a = new THREE.InstancedBufferAttribute(new Float32Array(Math.max(1, caps[t]) * 3), 3);
         a.setUsage(THREE.DynamicDrawUsage);
         g.setAttribute(this.extra, a);
       }
@@ -117,8 +126,16 @@ export class CellLod {
       while (t < R.length && d > R[t]) t++;
       if (t >= R.length) continue;
       const mesh = this.meshes[t];
-      if (!mesh) continue;
-      mesh.instanceMatrix.array.set(c.m, counts[t] * 16);
+      if (!mesh || counts[t] + c.n > this.caps[t]) continue;
+      // expand the compact placements into matrices (a turn about up, then the scales)
+      const A = mesh.instanceMatrix.array, m = c.m;
+      for (let j = 0, o = counts[t] * 16; j < c.n; j++, o += 16) {
+        const q = j * 8, co = m[q + 3], si = m[q + 4], sx = m[q + 5], sy = m[q + 6], sz = m[q + 7];
+        A[o] = co * sx; A[o + 1] = 0; A[o + 2] = -si * sx; A[o + 3] = 0;
+        A[o + 4] = 0; A[o + 5] = sy; A[o + 6] = 0; A[o + 7] = 0;
+        A[o + 8] = si * sz; A[o + 9] = 0; A[o + 10] = co * sz; A[o + 11] = 0;
+        A[o + 12] = m[q]; A[o + 13] = m[q + 1]; A[o + 14] = m[q + 2]; A[o + 15] = 1;
+      }
       if (c.col && mesh.instanceColor) mesh.instanceColor.array.set(c.col, counts[t] * 3);
       if (c.ex) mesh.geometry.getAttribute(this.extra).array.set(c.ex, counts[t] * 3);
       counts[t] += c.n;
@@ -140,8 +157,8 @@ export class CellLod {
   /** All placements (for the checks). */
   get total() { return this.cells ? this.cells.reduce((s, c) => s + c.n, 0) : this.n; }
 
-  /** Every placement's matrix, for the checks: fn(elements16, offset). */
-  each(fn) { for (const c of this.cells || []) for (let j = 0; j < c.n; j++) fn(c.m, j * 16); }
+  /** Every placement, for the checks: fn(compact8, offset) (x, y, z, cos, sin, sx, sy, sz). */
+  each(fn) { for (const c of this.cells || []) for (let j = 0; j < c.n; j++) fn(c.m, j * 8); }
 }
 
 /** A set of CellLods sharing one camera; update() takes the camera in site metres. */

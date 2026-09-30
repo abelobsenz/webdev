@@ -211,7 +211,7 @@ function buildHero(kind) {
   return B.geometry();
 }
 
-const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _p = new THREE.Vector3(), _s = new THREE.Vector3();
+const _p = new THREE.Vector3();
 
 /**
  * The instanced trees of one settlement. `list` holds the placements { x, y, z, H, r, phase }
@@ -238,11 +238,9 @@ export class LandingTrees {
       const set = new CellLod(`Medii Landing trees: ${name}`, geos, [HERO_R, DETAIL_R, 1e9], mat, { tint: true, cell: 150 });
       const rr = rng(4001 + kind);
       for (const t of trees) {
-        _q.setFromAxisAngle(_s.set(0, 1, 0), t.phase);
-        _m.compose(_p.set(t.x, t.y, t.z), _q, _s.set(t.r / 4, t.H / 10, t.r / 4));
         // each tree its own cast: lighter or darker, a little warmer or cooler
         const l = 0.82 + 0.34 * rr(), w = (rr() - 0.5) * 0.18;
-        set.addMatrix(_m, [l * (1 + w), l, l * (1 - w)]);
+        set.add(t.x, t.y, t.z, t.phase, t.r / 4, t.H / 10, t.r / 4, [l * (1 + w), l, l * (1 - w)]);
       }
       this.group.add(set.build());
       const tr = set.tris;

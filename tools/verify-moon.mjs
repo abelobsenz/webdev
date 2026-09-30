@@ -423,8 +423,8 @@ report.landingTris = tris(L.geo); report.worksTris = tris(W.geo);
   let bad = 0, n = 0;
   for (const set of D.lod.sets) set.each((m, o) => {
     n++;
-    for (let i = 0; i < 16; i++) if (!Number.isFinite(m[o + i])) { bad++; return; }
-    const x = m[o + 12], y = m[o + 13], z = m[o + 14];
+    for (let i = 0; i < 8; i++) if (!Number.isFinite(m[o + i])) { bad++; return; }
+    const x = m[o], y = m[o + 1], z = m[o + 2];
     const h = y - surfaceY(x, z);
     if (h < -3 || h > 60) bad++;
   });
